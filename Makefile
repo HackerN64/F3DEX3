@@ -17,8 +17,6 @@ VERSION ?= 2.08
 
 ARMIPS ?= armips
 
-COMPARE_DIR ?= C:\m64\sm64_f3dzex\lib\PR\f3dex2
-
 # List of all microcodes buildable with this codebase
 UCODES := F3DEX2_2.08 F3DEX2_2.04H \
           F3DEX2_NoN_2.08 F3DEX2_NoN_2.04H \
