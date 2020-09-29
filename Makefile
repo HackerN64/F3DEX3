@@ -121,9 +121,13 @@ define ucode_rule
 
   endif
 
-  $(FULL_OUTPUT_DIR): $(OUTPUT_DIR)
+  $(FULL_OUTPUT_DIR): | $(OUTPUT_DIR)
 	@printf "$(INFO)Creating directory: $(FULL_OUTPUT_DIR)$(NO_COL)\n"
+ifeq ($(OS),Windows_NT)
 	@mkdir $(FULL_OUTPUT_DIR)
+else
+	@mkdir -p $(FULL_OUTPUT_DIR)
+endif
 
   FULL_OUTPUT_DIRS += $(FULL_OUTPUT_DIR)
   CODE_FILES += $(CODE_FILE)
@@ -136,6 +140,9 @@ else
 endif
 INPUT_UCODE := $(UCODE)$(SUFFIX)_$(VERSION)
 FULL_OUTPUT_DIR := $(OUTPUT_DIR)/$(INPUT_UCODE)
+ifeq ($(OS),Windows_NT)
+  FULL_OUTPUT_DIR := $(subst /,\,$(FULL_OUTPUT_DIR))
+endif
 CODE_FILE := $(FULL_OUTPUT_DIR)/$(INPUT_UCODE).code
 DATA_FILE := $(FULL_OUTPUT_DIR)/$(INPUT_UCODE).data
 
