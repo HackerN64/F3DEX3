@@ -17,6 +17,8 @@ VERSION ?= 2.08
 
 ARMIPS ?= armips
 
+OUTPUT_DIR ?= ./
+
 # List of all microcodes buildable with this codebase
 UCODES := F3DEX2_2.08 F3DEX2_2.04H \
           F3DEX2_NoN_2.08 F3DEX2_NoN_2.04H \
@@ -82,11 +84,14 @@ define set_vars
   CUR_UCODE_WITHOUT_NON := $(subst _NoN,,$(1))
   CUR_VERSION := $$(subst F3DZEX_,,$$(subst F3DEX2_,,$$(CUR_UCODE_WITHOUT_NON)))
   CUR_UCODE := $$(patsubst %_$$(CUR_VERSION),%,$$(CUR_UCODE_WITHOUT_NON))
-  OUTPUT_DIR := $(1)
-  CODE_FILE := $$(OUTPUT_DIR)/$(1).code
-  DATA_FILE := $$(OUTPUT_DIR)/$(1).data
-  SYM_FILE  := $$(OUTPUT_DIR)/$(1).sym
-  TEMP_FILE := $$(OUTPUT_DIR)/$(1).tmp.s
+  FULL_OUTPUT_DIR := $$(OUTPUT_DIR)/$(1)
+ifeq ($(OS),Windows_NT)
+  FULL_OUTPUT_DIR := $$(subst /,\,$$(FULL_OUTPUT_DIR))
+endif
+  CODE_FILE := $$(FULL_OUTPUT_DIR)/$(1).code
+  DATA_FILE := $$(FULL_OUTPUT_DIR)/$(1).data
+  SYM_FILE  := $$(FULL_OUTPUT_DIR)/$(1).sym
+  TEMP_FILE := $$(FULL_OUTPUT_DIR)/$(1).tmp.s
 
   ifeq ($(findstring _NoN,$(1)),)
     CUR_NoN := 0
@@ -105,7 +110,7 @@ endef
 define ucode_rule
   $(eval $(call set_vars,$(1)))
 
-  $(CODE_FILE) $(DATA_FILE) $(SYM_FILE) $(SYM2_FILE) $(TEMP_FILE): ./f3dex2.s ./rsp/* $(OUTPUT_DIR)
+  $(CODE_FILE) $(DATA_FILE) $(SYM_FILE) $(SYM2_FILE) $(TEMP_FILE): ./f3dex2.s ./rsp/* $(FULL_OUTPUT_DIR)
 	@printf "$(INFO)Building microcode: $(FULL_UCODE)$(NO_COL)\n"
 	@$(ARMIPS) -strequ DATA_FILE $(DATA_FILE) -strequ CODE_FILE $(CODE_FILE) -strequ NAME "$(NAME)" -equ UCODE_TYPE $(TYPE) -equ UCODE_ID $(ID) -equ NoN $(CUR_NoN) f3dex2.s -sym2 $(SYM_FILE) -temp $(TEMP_FILE)
   ifeq ($(CODE_MD5),)
@@ -116,11 +121,11 @@ define ucode_rule
 
   endif
 
-  $(OUTPUT_DIR):
-	@printf "$(INFO)Creating directory: ./$(OUTPUT_DIR)$(NO_COL)\n"
-	@mkdir $(OUTPUT_DIR)
+  $(FULL_OUTPUT_DIR): $(OUTPUT_DIR)
+	@printf "$(INFO)Creating directory: $(FULL_OUTPUT_DIR)$(NO_COL)\n"
+	@mkdir $(FULL_OUTPUT_DIR)
 
-  OUTPUT_DIRS += $(OUTPUT_DIR)
+  FULL_OUTPUT_DIRS += $(FULL_OUTPUT_DIR)
   CODE_FILES += $(CODE_FILE)
 endef
 
@@ -130,9 +135,9 @@ else
   SUFFIX := 
 endif
 INPUT_UCODE := $(UCODE)$(SUFFIX)_$(VERSION)
-OUTPUT_DIR := $(INPUT_UCODE)
-CODE_FILE := $(OUTPUT_DIR)/$(INPUT_UCODE).code
-DATA_FILE := $(OUTPUT_DIR)/$(INPUT_UCODE).data
+FULL_OUTPUT_DIR := $(OUTPUT_DIR)/$(INPUT_UCODE)
+CODE_FILE := $(FULL_OUTPUT_DIR)/$(INPUT_UCODE).code
+DATA_FILE := $(FULL_OUTPUT_DIR)/$(INPUT_UCODE).data
 
 default: $(CODE_FILE) $(DATA_FILE)
 
@@ -140,8 +145,16 @@ $(foreach ucode,$(UCODES),$(eval $(call ucode_rule,$(ucode))))
 
 all: $(CODE_FILES)
 
+$(OUTPUT_DIR):
+	@printf "$(INFO)Creating output directory$(NO_COL)\n"
+ifeq ($(OS),Windows_NT)
+	@mkdir $@
+else
+	@mkdir -p $@
+endif
+
 clean:
 	@printf "$(WARNING)Deleting all built microcode files$(NO_COL)\n"
-	@rm -rf $(OUTPUT_DIRS)
+	@rm -rf $(FULL_OUTPUT_DIRS)
 
 .PHONY: default check all clean
