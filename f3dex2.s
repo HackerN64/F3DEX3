@@ -312,8 +312,10 @@ vertexTableEntries 32
 
 ; 0x03C4-0x040F: ??
 .dh 0xFFFF
-.dw 0x80000000
-.dw 0x00008000
+.dh 0x8000
+.dh 0x0000
+.dh 0x0000
+.dh 0x8000
 
 .if NoN == 1
 .dw 0x30304080 ; No Nearclipping
@@ -755,10 +757,10 @@ Overlay3End:
 G_VTX_handler:
     lhu s4, vtxTableAddress(t9) ; Load the address of the provided vertex array
     jal segmented_to_virtual ; Convert the vertex array's segmented address (in t8) to a virtual one
-     lhu at, (inputBufferEnd - 0x07)(k1) ; Load the  (second byte of the command word) into at
-    sub s4, s4, at
+     lhu at, (inputBufferEnd - 0x07)(k1) ; Load the size of the vertex array to copy into reg at
+    sub s4, s4, at ; Calculate the address to DMA the provided vertices into
     jal dma_read_write ; DMA read the vertices from DRAM
-     addi s3, at, -0x0001
+     addi s3, at, -0x0001 ; Set up the DMA length
     lhui a1, geometryModeAddress ; Load the geometry mode into a1
     srl at, at, 3
     sub t7, t9, at
@@ -1045,9 +1047,9 @@ f3dzex_00001A7C:
     vmudh $v16, $v6, $v8[0]
     llv $v13[12], 0x0020(v1)
     vmadh $v16, $v8, $v11[0]
-    sll t3, a2, 10
+    sll t3, a2, 10 ; Moves the value of G_SHADE_SMOOTH into the sign bit
     vsar $v17, $v17, $v17[0]
-    bgez t3, f3dzex_00001B94
+    bgez t3, f3dzex_00001B94 ; Branch if G_SHADE_SMOOTH isn't set
     vsar $v16, $v16, $v16[1]
     lpv $v18[0], 0x0010(at)
     vmov $v15[2], $v6[0]
@@ -1505,7 +1507,7 @@ G_MTX_handler:
     ;   push type (nopush/push)
     ; In F3DEX2 (and by extension F3DZEX), G_MTX_PUSH is inverted, so 1 is nopush and 0 is push
     andi t3, t9, G_MTX_P_MV | G_MTX_NOPUSH_PUSH ; Read the matrix type and push type flags into t3
-    bnez t3, load_mtx                           ; If the matrix type is projection or this is a load, skip pushing the matrix
+    bnez t3, load_mtx                           ; If the matrix type is projection or this is not a push, skip pushing the matrix
      andi v0, t9, G_MTX_MUL_LOAD                ; Read the matrix load type into v0 (0 is multiply, 2 is load)
     lwi t8, lo(matrixStackLength) ; Load the matrix stack length into t8
     li s4, -0x2000      ; 
@@ -1523,7 +1525,7 @@ do_movemem:
      andi at, t9, 0x00FE                ; Move the movemem table index into at (bits 1-7 of the first command word)
     lbu s3, (inputBufferEnd - 0x07)(k1) ; Move the second byte of the first command word into s3
     lhu s4, lo(movememTable)(at)        ; Load the address of the memory location for the given movemem index
-    srl v0, t9, 5                       ; 
+    srl v0, t9, 5                       ; Left shifts the index by 5 (which is then added to the value read from the movemem table)
     lhu ra, 0x0336(t4)
     j dma_read_write
 G_SETOTHERMODE_H_handler:
@@ -1855,7 +1857,7 @@ f3dzex_ovl2_00001708:
     vmudh $v22, $v1, $v31[5]
     vmacf $v22, $v3, $v21[0h]
     beqz t4, f3dzex_00001870
-    vmacf $v22, $v4, $v28[0h]
+     vmacf $v22, $v4, $v28[0h]
     vmadh $v22, $v1, $v2[0]
     vmulf $v4, $v22, $v22
     vmulf $v3, $v22, $v31[7]
@@ -1868,7 +1870,7 @@ f3dzex_ovl2_00001708:
     vmudh $vec3, $v1, $v31[5]
     vmacf $v22, $v22, $v2[1]
     j f3dzex_00001870
-    vmacf $v22, $v4, $v3
+     vmacf $v22, $v4, $v3
 f3dzex_ovl2_00001758:
     vmrg $v29, $v29, $v27
     vmrg $v4, $v4, $v0[0]
