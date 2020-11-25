@@ -18,27 +18,6 @@
     addiu reg, r0, imm
 .endmacro
 
-; Load/store word/half/byte/vector immediate
-.macro lwi, reg, imm
-    lw reg, imm(r0)
-.endmacro
-
-.macro swi, reg, imm
-    sw reg, imm(r0)
-.endmacro
-
-.macro lhui, reg, imm
-    lhu reg, imm(r0)
-.endmacro
-
-.macro lbui, reg, imm
-    lbu reg, imm(r0)
-.endmacro
-
-.macro sbi, reg, imm
-    sb reg, imm(r0)
-.endmacro
-
 .macro move, dst, src
     ori dst, src, 0x0000
 .endmacro
@@ -392,26 +371,26 @@ start:
 .endif
     li s6, 0x0D00
     vsub $v1, $v0, $v31[0]
-    lwi t3, 0x00F0
-    lwi t4, lo(OSTask) + OSTask_flags
+    lw t3, 0x00F0
+    lw t4, lo(OSTask) + OSTask_flags
     li at, 0x2800
     beqz t3, f3dzex_000010C4
      mtc0 at, SP_STATUS
     andi t4, t4, 0x0001
     beqz t4, f3dzex_00001130
-     swi r0, lo(OSTask) + OSTask_flags
+     sw r0, lo(OSTask) + OSTask_flags
     j load_overlay1_init ; Skip the initialization and go straight to loading overlay 1
-     lwi k0, 0x0BF8
+     lw k0, 0x0BF8
 f3dzex_000010C4:
     mfc0 t3, DPC_STATUS
     andi t3, t3, 0x0001
     bnez t3, f3dzex_000010FC
      mfc0 v0, DPC_END
-    lwi v1, lo(OSTask) + OSTask_output_buff
+    lw v1, lo(OSTask) + OSTask_output_buff
     sub t3, v1, v0
     bgtz t3, f3dzex_000010FC
      mfc0 at, DPC_CURRENT
-    lwi a0, lo(OSTask) + OSTask_output_buff_size
+    lw a0, lo(OSTask) + OSTask_output_buff_size
     beqz at, f3dzex_000010FC
      sub t3, at, a0
     bgez t3, f3dzex_000010FC
@@ -423,30 +402,30 @@ f3dzex_000010FC:
     bnez t3, f3dzex_000010FC
      li t3, 0x0001
     mtc0 t3, DPC_STATUS
-    lwi v0, lo(OSTask) + OSTask_output_buff_size
+    lw v0, lo(OSTask) + OSTask_output_buff_size
     mtc0 v0, DPC_START
     mtc0 v0, DPC_END
 f3dzex_0000111C:
-    swi v0, 0x00F0
-    lwi t3, lo(matrixStackLength)
+    sw v0, 0x00F0
+    lw t3, lo(matrixStackLength)
     bnez t3, f3dzex_00001130
-     lwi t3, lo(OSTask) + OSTask_dram_stack
-    swi t3, lo(matrixStackLength)
+     lw t3, lo(OSTask) + OSTask_dram_stack
+    sw t3, lo(matrixStackLength)
 f3dzex_00001130:
-    lwi at, lo(OSTask) + OSTask_ucode
-    lwi v0, lo(overlayInfo0)
-    lwi v1, lo(overlayInfo1)
-    lwi a0, lo(overlayInfo2)
-    lwi a1, lo(overlayInfo3)
+    lw at, lo(OSTask) + OSTask_ucode
+    lw v0, lo(overlayInfo0)
+    lw v1, lo(overlayInfo1)
+    lw a0, lo(overlayInfo2)
+    lw a1, lo(overlayInfo3)
     add v0, v0, at
     add v1, v1, at
-    swi v0, lo(overlayInfo0)
-    swi v1, lo(overlayInfo1)
+    sw v0, lo(overlayInfo0)
+    sw v1, lo(overlayInfo1)
     add a0, a0, at
     add a1, a1, at
-    swi a0, lo(overlayInfo2)
-    swi a1, lo(overlayInfo3)
-    lwi k0, lo(OSTask) + OSTask_data_ptr
+    sw a0, lo(overlayInfo2)
+    sw a1, lo(overlayInfo3)
+    lw k0, lo(OSTask) + OSTask_data_ptr
 load_overlay1_init:
     li t3, overlayInfo1 ; set up loading of overlay 1
 .if !(UCODE_IS_206_OR_OLDER)
@@ -491,7 +470,7 @@ G_SPECIAL_1_handler: ; Seems to be a manual trigger for mvp recalculation
     li s4, lo(mvMatrix)
     li s3, lo(mvpMatrix)
     j calculate_mvp_matrix
-    sbi t9, lo(mvpValid)
+    sb t9, lo(mvpValid)
 .endif
 
 G_DMA_IO_handler:
@@ -504,20 +483,20 @@ G_DMA_IO_handler:
     j dma_read_write ; Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of s4)
      li ra, wait_for_dma_and_run_next_command ; Setup the return address for running the next DL command
 G_GEOMETRYMODE_handler:
-    lwi t3, geometryModeAddress ; load the geometry mode value
+    lw t3, geometryModeAddress ; load the geometry mode value
     and t3, t3, t9 ; clears the flags in t9 (set in g*SPClearGeometryMode)
     or t3, t3, t8 ; sets the flags in t8 (set in g*SPSetGeometryMode)
     j run_next_DL_command ; run the next DL command
-     swi t3, geometryModeAddress ; update the geometry mode value
+     sw t3, geometryModeAddress ; update the geometry mode value
 G_ENDDL_handler:
-    lbui at, lo(displayListStackLength) ; Load the DL stack index into at
+    lbu at, lo(displayListStackLength) ; Load the DL stack index into at
     beqz at, load_overlay_0_and_enter ; Load overlay 0 if there is no DL return address, probably to output the image
      addi at, at, -0x0004 ; Decrement the DL stack index
     j f3dzex_ovl0_00001020 ; has a different version in ovl1
      lw k0, lo(displayListStack)(at) ; Load the address of the DL to return to into the k0 (the current DL address)
 G_RDPHALF_2_handler:
     ldv $v29[0], 0x00D0(r0)
-    lwi t9, 0x00D8
+    lw t9, 0x00D8
     addi s7, s7, 0x0008
     sdv $v29[0], 0x03F8(s7)
 G_RDP_handler:
@@ -538,13 +517,13 @@ segmented_to_virtual:
     jr ra
      add t8, t8, t3 ; Add the segment's address to the masked input address, resulting in the virtual address
 G_RDPSETOTHERMODE_handler:
-    swi t9, lo(otherMode0)  ; Record the local otherMode0 copy
+    sw t9, lo(otherMode0)  ; Record the local otherMode0 copy
     j G_RDP_handler         ; Send the command to the RDP
-     swi t8, lo(otherMode1) ; Record the local otherMode1 copy
+     sw t8, lo(otherMode1) ; Record the local otherMode1 copy
 G_SETSCISSOR_handler:
-    swi t9, lo(scissorUpLeft)       ; Record the local scissorUpleft copy
+    sw t9, lo(scissorUpLeft)       ; Record the local scissorUpleft copy
     j G_RDP_handler                 ; Send the command to the RDP
-     swi t8, lo(scissorBottomRight) ; Record the local scissorBottomRight copy
+     sw t8, lo(scissorBottomRight) ; Record the local scissorBottomRight copy
 f3dzex_00001258:
     li ra, run_next_DL_command      ; Set up the running the next DL command as the return address
 f3dzex_0000125C:
@@ -552,10 +531,10 @@ f3dzex_0000125C:
     blez t3, return_routine         ; Return if s6 >= s7
 f3dzex_00001264:
      mfc0 t4, SP_DMA_BUSY
-    lwi t8, 0x00F0
+    lw t8, 0x00F0
     addiu s3, t3, 0x0158
     bnez t4, f3dzex_00001264
-     lwi t4, lo(OSTask) + OSTask_output_buff_size
+     lw t4, lo(OSTask) + OSTask_output_buff_size
     mtc0 t8, DPC_END
     add t3, t8, s3
     sub t4, t4, t3
@@ -564,7 +543,7 @@ f3dzex_00001288:
      mfc0 t3, DPC_STATUS
     andi t3, t3, DPC_STATUS_START_VALID
     bnez t3, f3dzex_00001288
-     lwi t8, lo(OSTask) + OSTask_output_buff
+     lw t8, lo(OSTask) + OSTask_output_buff
 f3dzex_00001298:
     mfc0 t3, DPC_CURRENT
     beq t3, t8, f3dzex_00001298
@@ -578,7 +557,7 @@ f3dzex_000012A8:
     blez t3, f3dzex_000012A8
 f3dzex_000012BC:
      add t3, t8, s3
-    swi t3, 0x00F0
+    sw t3, 0x00F0
     addi s3, s3, -0x0001
     addi s4, s6, -0x2158
     xori s6, s6, 0x0208
@@ -600,7 +579,7 @@ f3dzex_ov3_000012E8:
     sh v0, 0x03CC(s2)
     sh v1, 0x03CE(s2)
     sh r0, 0x03D0(s2)
-    lwi sp, 0x03CC
+    lw sp, 0x03CC
 f3dzex_00001308:
     lw t1, 0x03F8(a1)
     lw s0, 0x0024(v1)
@@ -731,7 +710,7 @@ f3dzex_000014A8:
     lhu v1, 0x03CE(s5)
     bnez a1, f3dzex_00001308
      addi a1, a1, -0x0004
-    swi r0, 0x03CC
+    sw r0, 0x03CC
 f3dzex_000014C4:
 .if (UCODE_IS_F3DEX2_204H) ; In F3DEX2, s5 counts down instead of s2 counting up
     reg1 equ s5
@@ -752,7 +731,7 @@ f3dzex_000014C4:
      addi reg1, reg1, val1
 f3dzex_000014EC:
     jr s8
-     swi sp, 0x03CC
+     sw sp, 0x03CC
     nop
 
 ; Leave room for loading overlay 2 if it is larger than overlay 3 (true for f3dzex)
@@ -766,12 +745,12 @@ G_VTX_handler:
     sub s4, s4, at ; Calculate the address to DMA the provided vertices into
     jal dma_read_write ; DMA read the vertices from DRAM
      addi s3, at, -0x0001 ; Set up the DMA length
-    lhui a1, geometryModeAddress ; Load the geometry mode into a1
+    lhu a1, geometryModeAddress ; Load the geometry mode into a1
     srl at, at, 3
     sub t7, t9, at
     lhu t7, vtxTableAddress(t7)
     move t6, s4
-    lbui t0, lo(mvpValid)
+    lbu t0, lo(mvpValid)
     andi a2, a1, hi(G_LIGHTING)
     bnez a2, Overlay23LoadAddress ; This will always end up in overlay 2, as the start of overlay 3 loads and enters overlay 2
      andi a3, a1, hi(G_FOG)
@@ -1016,9 +995,9 @@ f3dzex_00001A7C:
     vlt $v13, $v2, $v4[1]
     vmrg $v14, $v6, $v4
     bnez t3, return_routine
-     lbui t3, 0x01EE
+     lbu t3, 0x01EE
     vmudh $v29, $v10, $v12[1]
-    lwi t4, 0x03CC
+    lw t4, 0x03CC
     vmadh $v29, $v12, $v11[1]
     or a1, a1, a2
     vge $v2, $v2, $v4[1]
@@ -1044,7 +1023,7 @@ f3dzex_00001A7C:
     vsub $v8, $v10, $v14
     mfc2  $3, $v10[12]
     vsub $v11, $v14, $v2
-    lwi a2, geometryModeAddress
+    lw a2, geometryModeAddress
     vsub $v12, $v14, $v10
     llv $v13[0], 0x0020(at)
     vsub $v15, $v10, $v2
@@ -1105,7 +1084,7 @@ f3dzex_00001BC0:
     vrcph $v22[3], $v8[1]
     lw t0, 0x0020(v1)
     vmudl $v18, $v18, $v30[i1]
-    lbui t1, 0x01E7
+    lbu t1, 0x01E7
     vmudl $v19, $v19, $v30[i1]
     sub t3, a1, a3
     vmudl $v21, $v21, $v30[i1]
@@ -1129,7 +1108,7 @@ f3dzex_00001BC0:
     vmudm $v29, $v25, $v20
     mfc2  $5, $v17[1]
     vmadl $v29, $v15, $v20
-    lbui a3, 0x01E6
+    lbu a3, 0x01E6
     vmadn $v20, $v15, $v22
     lsv $v19[14], 0x001C(v0)
     vmadh $v15, $v25, $v22
@@ -1320,7 +1299,7 @@ G_BRANCH_WZ_handler:
 .endif
     sub v0, t9, t8 ; subtract the w/z value being tested
     bgez v0, run_next_DL_command ; if vtx.w/z > w/z, continue running this DL
-     lwi t8, 0x00D8 ; 
+     lw t8, 0x00D8 ; 
     j f3dzex_ovl1_00001008
 G_MODIFYVTX_handler:
      lbu at, (inputBufferEnd - 0x07)(k1)
@@ -1378,20 +1357,20 @@ f3dzex_ovl0_00001008:
     bgezal t4, f3dzex_00001264
     nop
     jal while_wait_dma_busy
-     lwi t8, 0x00F0
+     lw t8, 0x00F0
     bltz at, f3dzex_ovl0_00001084
      mtc0 t8, DPC_END ; Set the end pointer of the RDP so that it starts the task
 f3dzex_ovl0_00001020:
     bnez at, f3dzex_ovl0_00001060
      add k0, k0, k1
     lw t8, 0x09C4(k1) ; Should this be (inputBufferEnd - 0x04)?
-    swi k0, lo(OSTask) + OSTask_data_ptr
-    swi t8, lo(OSTask) + OSTask_ucode
+    sw k0, lo(OSTask) + OSTask_data_ptr
+    sw t8, lo(OSTask) + OSTask_ucode
     la s4, lo(start) ; DMA address
     jal dma_read_write ; initiate DMA read
      li s3, 0x0F47
 f3dzex_ovl0_00001040:
-    lwi t8, 0x00D8
+    lw t8, 0x00D8
     la s4, 0x0180 ; DMA address
     andi s3, t9, 0x0FFF
     add t8, t8, s4
@@ -1404,11 +1383,11 @@ f3dzex_ovl0_00001040:
      li ra, f3dzex_ovl0_00001084
 .endif
 f3dzex_ovl0_00001060:
-    lwi t3, lo(OSTask) + OSTask_ucode
-    swi k0, 0x0BF8
-    swi t3, 0x0BFC
+    lw t3, lo(OSTask) + OSTask_ucode
+    sw k0, 0x0BF8
+    sw t3, 0x0BFC
     li t4, 0x5000
-    lwi t8, lo(OSTask) + OSTask_yield_data_ptr
+    lw t8, lo(OSTask) + OSTask_yield_data_ptr
     li s4, -0x8000
     li s3, 0x0BFF
     j dma_read_write
@@ -1429,7 +1408,7 @@ Overlay0End:
 .headersize Overlay0Address - orga()
 Overlay1Address:
 G_DL_handler:
-    lbui at, lo(displayListStackLength) ; Get the DL stack length
+    lbu at, lo(displayListStackLength) ; Get the DL stack length
     sll v0, t9, 15 ; Shifts the push/nopush value to the highest bit in v0
 f3dzex_ovl1_00001008:
     jal segmented_to_virtual
@@ -1457,8 +1436,8 @@ do_moveword:
     j run_next_DL_command ; process the next command
      sw t8, 0x0000(at)    ; moves the specified value (in t8) into the word (offset + moveword_table[index])
 G_POPMTX_handler:
-    lwi t3, lo(matrixStackLength)  ; Get the current matrix stack length
-    lwi v0, 0x0FE0                 ; todo what is stored here? minimum stack length value? is this always 0?
+    lw t3, lo(matrixStackLength)  ; Get the current matrix stack length
+    lw v0, 0x0FE0                 ; todo what is stored here? minimum stack length value? is this always 0?
     sub t8, t3, t8                 ; Decrease the matrix stack length by the amount passed in the second command word
     sub at, t8, v0                 ; Subtraction to check if the new length is greater than or equal to v0
     bgez at, do_popmtx             ; If the new matrix stack length is greater than or equal to v0, then use the new length as is
@@ -1466,9 +1445,9 @@ G_POPMTX_handler:
     move t8, v0                    ; If the new matrix stack length is less than v0, then use v0 as the length instead
 do_popmtx:
     beq t8, t3, run_next_DL_command ; If no bytes were popped, then we don't need to make the mvp matrix as being out of date and can run the next command
-     swi t8, lo(matrixStackLength)  ; Update the matrix stack length with the new value
+     sw t8, lo(matrixStackLength)  ; Update the matrix stack length with the new value
     j do_movemem
-     swi r0, lo(mvpValid)           ; Mark the MVP matrix as being out of date
+     sw r0, lo(mvpValid)           ; Mark the MVP matrix as being out of date
 G_D1_handler: ; unknown D1 command?
     lhu s3, 0x02F2(at)
     jal while_wait_dma_busy
@@ -1514,16 +1493,16 @@ G_MTX_handler:
     andi t3, t9, G_MTX_P_MV | G_MTX_NOPUSH_PUSH ; Read the matrix type and push type flags into t3
     bnez t3, load_mtx                           ; If the matrix type is projection or this is not a push, skip pushing the matrix
      andi v0, t9, G_MTX_MUL_LOAD                ; Read the matrix load type into v0 (0 is multiply, 2 is load)
-    lwi t8, lo(matrixStackLength) ; Load the matrix stack length into t8
+    lw t8, lo(matrixStackLength) ; Load the matrix stack length into t8
     li s4, -0x2000      ; 
     jal dma_read_write  ; DMA read the matrix into memory
      li s3, 0x003F      ; Set the DMA length to the size of a matrix (minus 1 because DMA is inclusive)
     addi t8, t8, 0x0040 ; Increase the matrix stack length by the size of one matrix
-    swi t8, lo(matrixStackLength) ; Update the matrix stack length
+    sw t8, lo(matrixStackLength) ; Update the matrix stack length
     lw t8, (inputBufferEnd - 0x04)(k1)
 load_mtx:
     add t4, t4, v0       ; Shift the... todo what is going on here exactly?
-    swi r0, lo(mvpValid) ; Mark the mvp matrix as out-of-date
+    sw r0, lo(mvpValid) ; Mark the mvp matrix as out-of-date
 G_MOVEMEM_handler:
     jal segmented_to_virtual ; convert the memory address (in t8) to a virtual one
 do_movemem:
@@ -1545,16 +1524,16 @@ G_SETOTHERMODE_L_handler:
     and v1, v1, v0
     or v1, v1, t8
     sw v1, -0x1074(t3)
-    lwi t9, lo(otherMode0)
+    lw t9, lo(otherMode0)
     j G_RDP_handler
-    lwi t8, lo(otherMode1)
+    lw t8, lo(otherMode1)
 Overlay1End:
 
 .headersize Overlay23LoadAddress - orga()
 Overlay2Address:
-    lbui t3, 0x01DC
+    lbu t3, 0x01DC
     j f3dzex_ov2_000012F4
-     lbui a2, 0x01DD
+     lbu a2, 0x01DD
 f3dzex_ov2_000012E4:
     move s8, ra
     li t3, overlayInfo3 ; set up a load of overlay 3
