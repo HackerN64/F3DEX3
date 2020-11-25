@@ -3,11 +3,23 @@
 // OSTask placed at end of DMEM (IMEM_START - sizeof(OSTask))
 .definelabel OSTask_addr, 0xFC0
 // OSTask data member offsets
-OSTask_flags           equ 0x04
-OSTask_ucode           equ 0x10
-OSTask_ucode_size      equ 0x14 // ucode_size is ignored
-OSTask_ucode_data      equ 0x18
-OSTask_ucode_data_size equ 0x1C
+OSTask_type             equ 0x0000
+OSTask_flags            equ 0x0004
+OSTask_ucode_boot       equ 0x0008
+OSTask_ucode_boot_size  equ 0x000C
+OSTask_ucode            equ 0x0010
+OSTask_ucode_size       equ 0x0014
+OSTask_ucode_data       equ 0x0018
+OSTask_ucode_data_size  equ 0x001C
+OSTask_dram_stack       equ 0x0020
+OSTask_dram_stack_size  equ 0x0024
+OSTask_output_buff      equ 0x0028
+OSTask_output_buff_size equ 0x002C
+OSTask_data_ptr         equ 0x0030
+OSTask_data_size        equ 0x0034
+OSTask_yield_data_ptr   equ 0x0038
+OSTask_yield_data_size  equ 0x003C
+
 // flags
 OS_TASK_DP_WAIT equ 0x0002
 

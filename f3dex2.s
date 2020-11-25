@@ -364,6 +364,11 @@ inputBufferLength equ 0xA8
 .skip inputBufferLength
 inputBufferEnd:
 
+; 0x0FC0-0x0FFF: OSTask
+.orga 0x0FC0
+OSTask:
+.skip 0x40
+
 .close ; DATA_FILE
 
 geometryModeAddress equ lo(geometryModeLabel)
@@ -388,13 +393,13 @@ start:
     li s6, 0x0D00
     vsub $v1, $v0, $v31[0]
     lwi t3, 0x00F0
-    lwi t4, 0x0FC4
+    lwi t4, lo(OSTask) + OSTask_flags
     li at, 0x2800
     beqz t3, f3dzex_000010C4
      mtc0 at, SP_STATUS
     andi t4, t4, 0x0001
     beqz t4, f3dzex_00001130
-     swi r0, 0x0FC4
+     swi r0, lo(OSTask) + OSTask_flags
     j load_overlay1_init ; Skip the initialization and go straight to loading overlay 1
      lwi k0, 0x0BF8
 f3dzex_000010C4:
@@ -402,11 +407,11 @@ f3dzex_000010C4:
     andi t3, t3, 0x0001
     bnez t3, f3dzex_000010FC
      mfc0 v0, DPC_END
-    lwi v1, 0x0FE8
+    lwi v1, lo(OSTask) + OSTask_output_buff
     sub t3, v1, v0
     bgtz t3, f3dzex_000010FC
      mfc0 at, DPC_CURRENT
-    lwi a0, 0x0FEC
+    lwi a0, lo(OSTask) + OSTask_output_buff_size
     beqz at, f3dzex_000010FC
      sub t3, at, a0
     bgez t3, f3dzex_000010FC
@@ -418,17 +423,17 @@ f3dzex_000010FC:
     bnez t3, f3dzex_000010FC
      li t3, 0x0001
     mtc0 t3, DPC_STATUS
-    lwi v0, 0x0FEC
+    lwi v0, lo(OSTask) + OSTask_output_buff_size
     mtc0 v0, DPC_START
     mtc0 v0, DPC_END
 f3dzex_0000111C:
     swi v0, 0x00F0
     lwi t3, lo(matrixStackLength)
     bnez t3, f3dzex_00001130
-     lwi t3, 0x0FE0
+     lwi t3, lo(OSTask) + OSTask_dram_stack
     swi t3, lo(matrixStackLength)
 f3dzex_00001130:
-    lwi at, 0x0FD0
+    lwi at, lo(OSTask) + OSTask_ucode
     lwi v0, lo(overlayInfo0)
     lwi v1, lo(overlayInfo1)
     lwi a0, lo(overlayInfo2)
@@ -441,7 +446,7 @@ f3dzex_00001130:
     add a1, a1, at
     swi a0, lo(overlayInfo2)
     swi a1, lo(overlayInfo3)
-    lwi k0, 0x0FF0
+    lwi k0, lo(OSTask) + OSTask_data_ptr
 load_overlay1_init:
     li t3, overlayInfo1 ; set up loading of overlay 1
 .if !(UCODE_IS_206_OR_OLDER)
@@ -550,7 +555,7 @@ f3dzex_00001264:
     lwi t8, 0x00F0
     addiu s3, t3, 0x0158
     bnez t4, f3dzex_00001264
-     lwi t4, 0x0FEC
+     lwi t4, lo(OSTask) + OSTask_output_buff_size
     mtc0 t8, DPC_END
     add t3, t8, s3
     sub t4, t4, t3
@@ -559,7 +564,7 @@ f3dzex_00001288:
      mfc0 t3, DPC_STATUS
     andi t3, t3, DPC_STATUS_START_VALID
     bnez t3, f3dzex_00001288
-     lwi t8, 0x0FE8
+     lwi t8, lo(OSTask) + OSTask_output_buff
 f3dzex_00001298:
     mfc0 t3, DPC_CURRENT
     beq t3, t8, f3dzex_00001298
@@ -1380,8 +1385,8 @@ f3dzex_ovl0_00001020:
     bnez at, f3dzex_ovl0_00001060
      add k0, k0, k1
     lw t8, 0x09C4(k1) ; Should this be (inputBufferEnd - 0x04)?
-    swi k0, 0x0FF0
-    swi t8, 0x0FD0
+    swi k0, lo(OSTask) + OSTask_data_ptr
+    swi t8, lo(OSTask) + OSTask_ucode
     la s4, lo(start) ; DMA address
     jal dma_read_write ; initiate DMA read
      li s3, 0x0F47
@@ -1399,11 +1404,11 @@ f3dzex_ovl0_00001040:
      li ra, f3dzex_ovl0_00001084
 .endif
 f3dzex_ovl0_00001060:
-    lwi t3, 0x0FD0
+    lwi t3, lo(OSTask) + OSTask_ucode
     swi k0, 0x0BF8
     swi t3, 0x0BFC
     li t4, 0x5000
-    lwi t8, 0x0FF8
+    lwi t8, lo(OSTask) + OSTask_yield_data_ptr
     li s4, -0x8000
     li s3, 0x0BFF
     j dma_read_write
