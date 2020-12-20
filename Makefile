@@ -7,6 +7,7 @@ NoN ?= 0
 # Selects which version of a given microcode to build:
 # F3DEX2:
 #  2.08  (Banjo-Tooie, the best game on the N64)
+#  2.07  (Rocket: Robot on Wheels)
 #  2.04H (Kirby 64, Smash 64)
 #  
 # F3DZEX:
@@ -20,14 +21,16 @@ ARMIPS ?= armips
 OUTPUT_DIR ?= ./
 
 # List of all microcodes buildable with this codebase
-UCODES := F3DEX2_2.08 F3DEX2_2.04H \
-          F3DEX2_NoN_2.08 F3DEX2_NoN_2.04H \
+UCODES := F3DEX2_2.08 F3DEX2_2.07 F3DEX2_2.04H \
+          F3DEX2_NoN_2.08 F3DEX2_NoN_2.07 F3DEX2_NoN_2.04H \
           F3DZEX_2.08J F3DZEX_2.08I F3DZEX_2.06H \
-		  F3DZEX_NoN_2.08J F3DZEX_NoN_2.08I F3DZEX_NoN_2.06H
+		      F3DZEX_NoN_2.08J F3DZEX_NoN_2.08I F3DZEX_NoN_2.06H
 
 # F3DEX2
 MD5_CODE_F3DEX2_2.08      := 6ccf5fc392e440fb23bc7d7f7d71047c
 MD5_DATA_F3DEX2_2.08      := 3a3a406acb4295d33fa6e918dd3a7ae4
+MD5_CODE_F3DEX2_2.07      := 1523b8e38a9eae698b48909a0c0c0279
+MD5_DATA_F3DEX2_2.07      := 25be72ec04e2e6a23dfa7666645f0662
 MD5_CODE_F3DEX2_NoN_2.08  := b5c366b55a032f232aa309cda21be3d7
 MD5_DATA_F3DEX2_NoN_2.08  := 2c8dedc1b1e2fe6405c9895c4290cf2b
 MD5_CODE_F3DEX2_2.04H     := d3a58568fa7cf042de370912a47c3b5f
@@ -43,8 +46,10 @@ MD5_DATA_F3DZEX_NoN_2.06H := e48c7679f1224b7c0947dcd5a4d0c713
 # Microcode strings
 # F3DEX2
 NAME_F3DEX2_2.08      := RSP Gfx ucode F3DEX       fifo 2.08  Yoshitaka Yasumoto 1999 Nintendo.
+NAME_F3DEX2_2.07      := RSP Gfx ucode F3DEX       fifo 2.07  Yoshitaka Yasumoto 1998 Nintendo.
 NAME_F3DEX2_2.04H     := RSP Gfx ucode F3DEX       fifo 2.04H Yoshitaka Yasumoto 1998 Nintendo.
 NAME_F3DEX2_NoN_2.08  := RSP Gfx ucode F3DEX.NoN   fifo 2.08  Yoshitaka Yasumoto 1999 Nintendo.
+NAME_F3DEX2_NoN_2.07  := RSP Gfx ucode F3DEX.NoN   fifo 2.07  Yoshitaka Yasumoto 1998 Nintendo.
 NAME_F3DEX2_NoN_2.04H := RSP Gfx ucode F3DEX.NoN   fifo 2.04H Yoshitaka Yasumoto 1998 Nintendo.
 # F3DZEX
 NAME_F3DZEX_2.08J     := RSP Gfx ucode F3DZEX.NoN  fifo 2.08J Yoshitaka Yasumoto/Kawasedo 1999.
@@ -56,7 +61,8 @@ NAME_F3DZEX_NoN_2.08I := RSP Gfx ucode F3DZEX.NoN  fifo 2.08I Yoshitaka Yasumoto
 NAME_F3DZEX_NoN_2.06H := RSP Gfx ucode F3DZEX.NoN  fifo 2.06H Yoshitaka Yasumoto 1998 Nintendo.
 
 ID_F3DEX2_2.04H := 0
-ID_F3DEX2_2.08  := 1
+ID_F3DEX2_2.07  := 1
+ID_F3DEX2_2.08  := 2
 
 ID_F3DZEX_2.06H := 0
 ID_F3DZEX_2.08I := 1

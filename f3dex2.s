@@ -161,6 +161,7 @@ numLights:
 .dw 0x01000BA8
 fogFactor:
 .dw 0x00000000
+textureSettings:
 .dw 0x00000000
 .dw 0x00000000
 geometryModeLabel:
@@ -366,7 +367,7 @@ start:
     lqv $v31[0], 0x01B0(r0)
     lqv $v30[0], 0x01C0(r0)
     li s7, 0x0BA8
-.if !(UCODE_IS_206_OR_OLDER)
+.if !(UCODE_IS_207_OR_OLDER)
     vadd $v1, $v0, $v0
 .endif
     li s6, 0x0D00
@@ -428,9 +429,8 @@ f3dzex_00001130:
     lw k0, lo(OSTask) + OSTask_data_ptr
 load_overlay1_init:
     li t3, overlayInfo1 ; set up loading of overlay 1
-.if !(UCODE_IS_206_OR_OLDER)
-    nop
-.endif
+.align 8
+
     jal load_overlay_and_enter ; load overlay 1 and enter
      move t4, ra ; set up the return address, since load_overlay_and_enter returns to t4
 displaylist_dma: ; loads inputBufferLength bytes worth of displaylist data via DMA into inputBuffer
@@ -474,7 +474,7 @@ G_SPECIAL_1_handler: ; Seems to be a manual trigger for mvp recalculation
 .endif
 
 G_DMA_IO_handler:
-    jal segmented_to_virtual ; Convert the provided segmented address (in t8) to a virtual one
+    jal segmented_to_physical ; Convert the provided segmented address (in t8) to a virtual one
      lh s4, (inputBufferEnd - 0x07)(k1) ; Get the 16 bits in the middle of the command word (since k1 was already incremented for the next command)
     andi s3, t9, 0x0FF8 ; Mask out any bits in the DRAM address to ensure 8-byte alignment
     ; At this point, s4's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
@@ -508,7 +508,7 @@ G_NOOP_handler:
      addi s7, s7, 0x0008        ; Increment the next RDP command pointer by 2 words
 G_SETxIMG_handler:
     li ra, G_RDP_handler        ; Load the RDP command handler into the return address, then fall through to convert the address to virtual
-segmented_to_virtual:
+segmented_to_physical:
     srl t3, t8, 22              ; Copy (segment index << 2) into t3
     andi t3, t3, 0x003C         ; Clear the bottom 2 bits that remained during the shift
     lw t3, lo(segmentTable)(t3) ; Get the current address of the segment
@@ -732,15 +732,15 @@ f3dzex_000014C4:
 f3dzex_000014EC:
     jr s8
      sw sp, 0x03CC
-    nop
 
+.align 8
 ; Leave room for loading overlay 2 if it is larger than overlay 3 (true for f3dzex)
 .orga max(Overlay2End - Overlay2Address + orga(Overlay3Address), orga())
 Overlay3End:
 
 G_VTX_handler:
     lhu s4, vtxTableAddress(t9) ; Load the address of the provided vertex array
-    jal segmented_to_virtual ; Convert the vertex array's segmented address (in t8) to a virtual one
+    jal segmented_to_physical ; Convert the vertex array's segmented address (in t8) to a virtual one
      lhu at, (inputBufferEnd - 0x07)(k1) ; Load the size of the vertex array to copy into reg at
     sub s4, s4, at ; Calculate the address to DMA the provided vertices into
     jal dma_read_write ; DMA read the vertices from DRAM
@@ -1398,8 +1398,8 @@ f3dzex_ovl0_00001084:
 break:
     mtc0 t4, SP_STATUS
     break 0
-    nop
-    nop
+     nop
+.align 8
 Overlay0End:
 
 ; end overlay 0
@@ -1411,7 +1411,7 @@ G_DL_handler:
     lbu at, lo(displayListStackLength) ; Get the DL stack length
     sll v0, t9, 15 ; Shifts the push/nopush value to the highest bit in v0
 f3dzex_ovl1_00001008:
-    jal segmented_to_virtual
+    jal segmented_to_physical
      add v1, k0, k1
     bltz v0, displaylist_dma ; If the operation is nopush (branch) then simply DMA the new displaylist
      move k0, t8 ; Set the
@@ -1421,7 +1421,7 @@ f3dzex_ovl1_00001020:
     j displaylist_dma
      sb at, lo(displayListStackLength)
 G_TEXTURE_handler:
-    li t3, 0x1140
+    li t3, textureSettings + 0xF5C
 G_TEXRECT_handler:
 G_TEXRECTFLIP_handler:
     sw t9, -0x0F5C(t3)
@@ -1504,7 +1504,7 @@ load_mtx:
     add t4, t4, v0       ; Shift the... todo what is going on here exactly?
     sw r0, lo(mvpValid) ; Mark the mvp matrix as out-of-date
 G_MOVEMEM_handler:
-    jal segmented_to_virtual ; convert the memory address (in t8) to a virtual one
+    jal segmented_to_physical ; convert the memory address (in t8) to a virtual one
 do_movemem:
      andi at, t9, 0x00FE                ; Move the movemem table index into at (bits 1-7 of the first command word)
     lbu s3, (inputBufferEnd - 0x07)(k1) ; Move the second byte of the first command word into s3
