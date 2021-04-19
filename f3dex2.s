@@ -72,8 +72,11 @@ otherMode1:
     .dw 0x00000000
 
 ; 0x00D0-0x00D9: ??
-.dw 0x00000000
-.dw 0x00000000
+texrectWord1:
+.fill 4 ; first word, has command byte, xh and yh
+texrectWord2:
+.fill 4 ; second word, has tile, xl, yl
+rdpHalf1Val:
 .dh 0x0000
 
 ; 0x00DA-0x00DD: perspective norm
@@ -94,7 +97,7 @@ viewport:
 
 ; 0x00F4-0x00F7: 
 .orga 0x00F4
-matrixStackLength:
+matrixStackPtr:
 .dw 0x00000000
 
 ; 0x00F8-0x0137: segment table 
@@ -136,34 +139,53 @@ G_MWO_CLIP_RPY:
 .else
 .dw 0x00010001 ; Nearclipping
 .endif
-.dw 0xFFFF0004
-.dw 0x00087F00
-.dw 0xFFFC4000
-.dw 0x04207FFF
-.dw 0x7FFC1400
+v31Value:
+.dh 0xFFFF
+.dh 0x0004
+.dh 0x0008
+.dh 0x7F00
+.dh 0xFFFC
+.dh 0x4000
+.dh 0x0420
+.dh 0x7FFF
+v30Value:
+.dh 0x7FFC
+.dh 0x1400
 .if (UCODE_IS_206_OR_OLDER)
-.dw 0x01CC0200
-.dw 0xFFF00010
-.dw 0x00200100
+.dh 0x01CC
+.dh 0x0200
+.dh 0xFFF0
+.dh 0x0010
+.dh 0x0020
+.dh 0x0100
 .else
-.dw 0x10000100
-.dw 0xFFF0FFF8
-.dw 0x00100020
+.dh 0x1000
+.dh 0x0100
+.dh 0xFFF0
+.dh 0xFFF8
+.dh 0x0010
+.dh 0x0020
 .endif
-.dw 0xC00044D3
-.dw 0x6CB30002
+linearGenerateCoefficients:
+.dh 0xC000
+.dh 0x44D3
+.dh 0x6CB3
+.dh 0x0002
 forceMatrix:
 .db 0x00
 mvpValid:
 .db 0x01
 numLights:
 .dh 0000
-.dw 0x01000BA8
+.db 0x01
+.db 0x00
+.dh 0x0BA8
 fogFactor:
 .dw 0x00000000
-textureSettings:
-.dw 0x00000000
-.dw 0x00000000
+textureSettings1:
+.dw 0x00000000 ; first word, has command byte, bowtie val, level, tile, and on
+textureSettings2:
+.dw 0x00000000 ; second word, has s and t scale
 geometryModeLabel:
 .dw G_CLIPPING
 
@@ -227,7 +249,6 @@ jumpTableEntry G_SPNOOP_handler
 jumpTableEntry G_RDPHALF_1_handler
 jumpTableEntry G_SETOTHERMODE_L_handler
 jumpTableEntry G_SETOTHERMODE_H_handler
-addr0336:
 jumpTableEntry G_TEXRECT_handler
 jumpTableEntry G_TEXRECTFLIP_handler
 jumpTableEntry G_SYNC_handler    ; G_RDPLOADSYNC
@@ -364,8 +385,8 @@ start:
 .else
     vxor $v0, $v0, $v0 ; Sets $v0 to all 0
 .endif
-    lqv $v31[0], 0x01B0(r0)
-    lqv $v30[0], 0x01C0(r0)
+    lqv $v31[0], lo(v31Value)(r0)
+    lqv $v30[0], lo(v30Value)(r0)
     li s7, 0x0BA8
 .if !(UCODE_IS_207_OR_OLDER)
     vadd $v1, $v0, $v0
@@ -374,17 +395,17 @@ start:
     vsub $v1, $v0, $v31[0]
     lw t3, 0x00F0
     lw t4, lo(OSTask) + OSTask_flags
-    li at, 0x2800
+    li at, SPSTATUS_SIGNAL6_SET | SPSTATUS_SIGNAL4_SET
     beqz t3, f3dzex_000010C4
      mtc0 at, SP_STATUS
-    andi t4, t4, 0x0001
-    beqz t4, f3dzex_00001130
+    andi t4, t4, OS_TASK_YIELDED
+    beqz t4, calculate_overlay_addrs
      sw r0, lo(OSTask) + OSTask_flags
     j load_overlay1_init ; Skip the initialization and go straight to loading overlay 1
      lw k0, 0x0BF8
 f3dzex_000010C4:
     mfc0 t3, DPC_STATUS
-    andi t3, t3, 0x0001
+    andi t3, t3, DPC_STATUS_XBUS_DMA
     bnez t3, f3dzex_000010FC
      mfc0 v0, DPC_END
     lw v1, lo(OSTask) + OSTask_output_buff
@@ -399,33 +420,33 @@ f3dzex_000010C4:
     bne at, v0, f3dzex_0000111C
 f3dzex_000010FC:
      mfc0 t3, DPC_STATUS
-    andi t3, t3, 0x0400
+    andi t3, t3, DPC_STATUS_START_VALID
     bnez t3, f3dzex_000010FC
-     li t3, 0x0001
+     li t3, DPC_STATUS_CLR_XBUS
     mtc0 t3, DPC_STATUS
     lw v0, lo(OSTask) + OSTask_output_buff_size
     mtc0 v0, DPC_START
     mtc0 v0, DPC_END
 f3dzex_0000111C:
     sw v0, 0x00F0
-    lw t3, lo(matrixStackLength)
-    bnez t3, f3dzex_00001130
+    lw t3, lo(matrixStackPtr)
+    bnez t3, calculate_overlay_addrs
      lw t3, lo(OSTask) + OSTask_dram_stack
-    sw t3, lo(matrixStackLength)
-f3dzex_00001130:
+    sw t3, lo(matrixStackPtr)
+calculate_overlay_addrs:
     lw at, lo(OSTask) + OSTask_ucode
-    lw v0, lo(overlayInfo0)
-    lw v1, lo(overlayInfo1)
-    lw a0, lo(overlayInfo2)
-    lw a1, lo(overlayInfo3)
+    lw v0, lo(overlayInfo0) + overlay_load
+    lw v1, lo(overlayInfo1) + overlay_load
+    lw a0, lo(overlayInfo2) + overlay_load
+    lw a1, lo(overlayInfo3) + overlay_load
     add v0, v0, at
     add v1, v1, at
-    sw v0, lo(overlayInfo0)
-    sw v1, lo(overlayInfo1)
+    sw v0, lo(overlayInfo0) + overlay_load
+    sw v1, lo(overlayInfo1) + overlay_load
     add a0, a0, at
     add a1, a1, at
-    sw a0, lo(overlayInfo2)
-    sw a1, lo(overlayInfo3)
+    sw a0, lo(overlayInfo2) + overlay_load
+    sw a1, lo(overlayInfo3) + overlay_load
     lw k0, lo(OSTask) + OSTask_data_ptr
 load_overlay1_init:
     li t3, overlayInfo1 ; set up loading of overlay 1
@@ -612,7 +633,7 @@ f3dzex_0000134C:
     vmadn $v10, $v6, $v3
     vmadh $v11, $v7, $v3
     vaddc $v8, $v8, $v8[0q]
-    lqv $v25[0], 0x01D0(r0)
+    lqv $v25[0], lo(linearGenerateCoefficients)(r0)
     vadd $v9, $v9, $v9[0q]
     vaddc $v10, $v10, $v10[0q]
     vadd $v11, $v11, $v11[0q]
@@ -1058,21 +1079,21 @@ f3dzex_00001B94:
     lbv $v21[6], 0x0013(v1)
 f3dzex_00001BC0:
 .if (UCODE_IS_206_OR_OLDER)
-    i1 equ 7
-    i2 equ 2
-    i3 equ 5
-    i4 equ 2
-    i5 equ 5
-    i6 equ 6
+    i1 equ 7 ; v30[7] is 0x0100
+    i2 equ 2 ; v31[2] is 0x0008
+    i3 equ 5 ; v31[5] is 0x4000
+    i4 equ 2 ; v30[2] is 0x01CC
+    i5 equ 5 ; v30[5] is 0x0010
+    i6 equ 6 ; v30[6] is 0x0020
     vec1 equ v31
     vec2 equ v20
 .else
-    i1 equ 3
-    i2 equ 7
-    i3 equ 2
-    i4 equ 3
-    i5 equ 6
-    i6 equ 7
+    i1 equ 3 ; v30[3] is 0x0100
+    i2 equ 7 ; v30[7] is 0x0020
+    i3 equ 2 ; v30[2] is 0x1000
+    i4 equ 3 ; v30[3] is 0x0100
+    i5 equ 6 ; v30[6] is 0x0010
+    i6 equ 7 ; v30[7] is 0x0020
     vec1 equ v30
     vec2 equ v22
 .endif
@@ -1083,11 +1104,11 @@ f3dzex_00001BC0:
     lw a3, 0x0020(v0)
     vrcph $v22[3], $v8[1]
     lw t0, 0x0020(v1)
-    vmudl $v18, $v18, $v30[i1]
+    vmudl $v18, $v18, $v30[i1] ; v30[i1] is 0x0100
     lbu t1, 0x01E7
-    vmudl $v19, $v19, $v30[i1]
+    vmudl $v19, $v19, $v30[i1] ; v30[i1] is 0x0100
     sub t3, a1, a3
-    vmudl $v21, $v21, $v30[i1]
+    vmudl $v21, $v21, $v30[i1] ; v30[i1] is 0x0100
     sra t4, t3, 31
     vmov $v15[3], $v8[0]
     and t3, t3, t4
@@ -1128,9 +1149,9 @@ f3dzex_00001BC0:
     sb t3, 0x0000(s7)
     vmudh $v29, $v1, $v30[i5]
     ssv $v10[2], 0x0002(s7)
-    vmadn $v16, $v16, $v30[4]
+    vmadn $v16, $v16, $v30[4] ; v30[4] is 0xFFF0
     ssv $v2[2], 0x0004(s7)
-    vmadh $v17, $v17, $v30[4]
+    vmadh $v17, $v17, $v30[4] ; v30[4] is 0xFFF0
     ssv $v14[2], 0x0006(s7)
     vmudn $v29, $v3, $v14[0]
     andi t4, a1, 0x0080
@@ -1246,22 +1267,22 @@ f3dzex_00001D2C:
     sdv $v9[8], 0x0020(at)
     vmudn $v10, $v8, $v4[1]
     beqz a2, f3dzex_00001EB4
-    vmudn $v8, $v8, $v30[i6]
-    vmadh $v9, $v9, $v30[i6]
+    vmudn $v8, $v8, $v30[i6] ; v30[i6] is 0x0020
+    vmadh $v9, $v9, $v30[i6] ; v30[i6] is 0x0020
     sdv $v5[0], 0x0010(v0)
-    vmudn $v2, $v2, $v30[i6]
+    vmudn $v2, $v2, $v30[i6] ; v30[i6] is 0x0020
     sdv $v18[0], 0x0000(v0)
-    vmadh $v3, $v3, $v30[i6]
+    vmadh $v3, $v3, $v30[i6] ; v30[i6] is 0x0020
     sdv $v5[8], 0x0010(at)
-    vmudn $v6, $v6, $v30[i6]
+    vmudn $v6, $v6, $v30[i6] ; v30[i6] is 0x0020
     sdv $v18[8], 0x0000(at)
-    vmadh $v7, $v7, $v30[i6]
+    vmadh $v7, $v7, $v30[i6] ; v30[i6] is 0x0020
     ssv $v8[14], 0x00FA(s7)
-    vmudl $v29, $v10, $v30[i6]
+    vmudl $v29, $v10, $v30[i6] ; v30[i6] is 0x0020
     ssv $v9[14], 0x00F8(s7)
-    vmadn $v5, $v5, $v30[i6]
+    vmadn $v5, $v5, $v30[i6] ; v30[i6] is 0x0020
     ssv $v2[14], 0x00F6(s7)
-    vmadh $v18, $v18, $v30[i6]
+    vmadh $v18, $v18, $v30[i6] ; v30[i6] is 0x0020
     ssv $v3[14], 0x00F4(s7)
     ssv $v6[14], 0x00FE(s7)
     ssv $v7[14], 0x00FC(s7)
@@ -1421,13 +1442,13 @@ f3dzex_ovl1_00001020:
     j displaylist_dma
      sb at, lo(displayListStackLength)
 G_TEXTURE_handler:
-    li t3, textureSettings + 0xF5C
+    li t3, textureSettings1 - (texrectWord1 - lo(G_TEXRECTFLIP_handler)) ; Calculate the offset from texrectWord1 and t3 for saving to textureSettings
 G_TEXRECT_handler:
 G_TEXRECTFLIP_handler:
-    sw t9, -0x0F5C(t3)
+    sw t9, (texrectWord1 - lo(G_TEXRECTFLIP_handler))(t3) ; Stores first command word into textureSettings for gSPTexture, 0x00D0 for gSPTextureRectangle/Flip
 G_RDPHALF_1_handler:
     j run_next_DL_command
-     sw t8, -0x0F58(t3)
+     sw t8, (texrectWord2 - lo(G_TEXRECTFLIP_handler))(t3) ; Stores second command word into textureSettings for gSPTexture, 0x00D4 for gSPTextureRectangle/Flip, 0x00D8 for G_RDPHALF_1
 G_MOVEWORD_handler:
     srl v0, t9, 16 ; load the moveword command and word index into v0 (e.g. 0xDB06 for G_MW_SEGMENT)
     lhu at, (movewordTable - (G_MOVEWORD << 8))(v0) ; subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
@@ -1436,16 +1457,16 @@ do_moveword:
     j run_next_DL_command ; process the next command
      sw t8, 0x0000(at)    ; moves the specified value (in t8) into the word (offset + moveword_table[index])
 G_POPMTX_handler:
-    lw t3, lo(matrixStackLength)  ; Get the current matrix stack length
-    lw v0, 0x0FE0                 ; todo what is stored here? minimum stack length value? is this always 0?
-    sub t8, t3, t8                 ; Decrease the matrix stack length by the amount passed in the second command word
-    sub at, t8, v0                 ; Subtraction to check if the new length is greater than or equal to v0
-    bgez at, do_popmtx             ; If the new matrix stack length is greater than or equal to v0, then use the new length as is
+    lw t3, lo(matrixStackPtr)  ; Get the current matrix stack pointer
+    lw v0, lo(OSTask) + OSTask_dram_stack ; Read the location of the dram stack
+    sub t8, t3, t8                 ; Decrease the matrix stack pointer by the amount passed in the second command word
+    sub at, t8, v0                 ; Subtraction to check if the new pointer is greater than or equal to v0
+    bgez at, do_popmtx             ; If the new matrix stack pointer is greater than or equal to v0, then use the new pointer as is
      nop
-    move t8, v0                    ; If the new matrix stack length is less than v0, then use v0 as the length instead
+    move t8, v0                    ; If the new matrix stack pointer is less than v0, then use v0 as the pointer instead
 do_popmtx:
     beq t8, t3, run_next_DL_command ; If no bytes were popped, then we don't need to make the mvp matrix as being out of date and can run the next command
-     sw t8, lo(matrixStackLength)  ; Update the matrix stack length with the new value
+     sw t8, lo(matrixStackPtr)  ; Update the matrix stack pointer with the new value
     j do_movemem
      sw r0, lo(mvpValid)           ; Mark the MVP matrix as being out of date
 G_D1_handler: ; unknown D1 command?
@@ -1493,12 +1514,12 @@ G_MTX_handler:
     andi t3, t9, G_MTX_P_MV | G_MTX_NOPUSH_PUSH ; Read the matrix type and push type flags into t3
     bnez t3, load_mtx                           ; If the matrix type is projection or this is not a push, skip pushing the matrix
      andi v0, t9, G_MTX_MUL_LOAD                ; Read the matrix load type into v0 (0 is multiply, 2 is load)
-    lw t8, lo(matrixStackLength) ; Load the matrix stack length into t8
+    lw t8, lo(matrixStackPtr) ; Set up the DMA from dmem to rdram at the matrix stack pointer
     li s4, -0x2000      ; 
-    jal dma_read_write  ; DMA read the matrix into memory
+    jal dma_read_write  ; DMA the current matrix from dmem to rdram
      li s3, 0x003F      ; Set the DMA length to the size of a matrix (minus 1 because DMA is inclusive)
-    addi t8, t8, 0x0040 ; Increase the matrix stack length by the size of one matrix
-    sw t8, lo(matrixStackLength) ; Update the matrix stack length
+    addi t8, t8, 0x0040 ; Increase the matrix stack pointer by the size of one matrix
+    sw t8, lo(matrixStackPtr) ; Update the matrix stack pointer
     lw t8, (inputBufferEnd - 0x04)(k1)
 load_mtx:
     add t4, t4, v0       ; Shift the... todo what is going on here exactly?
@@ -1715,7 +1736,18 @@ f3dzex_ovl2_000014C4:
     vmov $v28[6], $v28[2]
     vmov $v30[6], $v30[2]
     j f3dzex_ovl2_00001480
-    vmov $v31[6], $v31[2]
+    vmov $v31[6], $v31[2] ; v31[2] is 8
+/*  
+v31Value:
+.dh 0xFFFF
+.dh 0x0004
+.dh 0x0008
+.dh 0x7F00
+.dh 0xFFFC
+.dh 0x4000
+.dh 0x0420
+.dh 0x7FFF
+*/
 f3dzex_ovl2_0000155C:
     ldv $v20[8], 0x0000(t6)
     bltzal t4, f3dzex_ovl2_000014C4
@@ -1824,7 +1856,7 @@ f3dzex_ovl2_00001690:
     vmrg $v3, $v0, $v31[5]
     llv $v22[4], 0x0018(t6)
 f3dzex_ovl2_000016F4:
-    vge $v27, $v25, $v31[3]
+    vge $v27, $v25, $v31[3]; v31[3] is 32512
     andi t3, a1, hi(G_TEXTURE_GEN)
     vmulf $v21, $v7, $v2[0h]
     beqz t3, f3dzex_00001870
@@ -1833,19 +1865,19 @@ f3dzex_ovl2_00001708:
     vmacf $v21, $v6, $v2[1h]
     andi t4, a1, hi(G_TEXTURE_GEN_LINEAR)
     vmacf $v21, $v5, $v2[2h]
-    vxor $v4, $v3, $v31[5]
+    vxor $v4, $v3, $v31[5]; v31[5] is 0x4000
     vmulf $v28, $v7, $v20[0h]
     vmacf $v28, $v6, $v20[1h]
     vmacf $v28, $v5, $v20[2h]
-    lqv $v2[0], 0x01D0(r0)
-    vmudh $v22, $v1, $v31[5]
+    lqv $v2[0], lo(linearGenerateCoefficients)(r0)
+    vmudh $v22, $v1, $v31[5]; v31[5] is 16384
     vmacf $v22, $v3, $v21[0h]
     beqz t4, f3dzex_00001870
-     vmacf $v22, $v4, $v28[0h]
-    vmadh $v22, $v1, $v2[0]
+     vmacf $v22, $v4, $v28[0h] 
+    vmadh $v22, $v1, $v2[0] ; v2[0] is -0.5
     vmulf $v4, $v22, $v22
-    vmulf $v3, $v22, $v31[7]
-    vmacf $v3, $v22, $v2[2]
+    vmulf $v3, $v22, $v31[7] ; v31[7] is 0.999969482421875
+    vmacf $v3, $v22, $v2[2] ; v2[2] is 0.849212646484375
 .if (UCODE_IS_F3DEX2_204H)
     vec3 equ v22
 .else
