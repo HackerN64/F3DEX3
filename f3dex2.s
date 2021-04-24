@@ -311,7 +311,8 @@ vertexTable:
 
 vertexTableEntries 32
 
-; 0x03C4-0x040F: ??
+; 0x03C2-0x040F: ??
+cullFaceValues:
 .dh 0xFFFF
 .dh 0x8000
 .dh 0x0000
@@ -338,7 +339,7 @@ vertexTableEntries 32
 .dw 0x00000000
 .dw 0x00100000
 .dw 0x00200000
-
+testlabel:
 .dw 0x10000000
 .dw 0x20000000
 .dw 0x00004000
@@ -1016,7 +1017,7 @@ f3dzex_00001A7C:
     vlt $v13, $v2, $v4[1]
     vmrg $v14, $v6, $v4
     bnez t3, return_routine
-     lbu t3, 0x01EE
+     lbu t3, lo(geometryModeLabel) + 2 ; Loads the geometry mode byte that contains face culling settings
     vmudh $v29, $v10, $v12[1]
     lw t4, 0x03CC
     vmadh $v29, $v12, $v11[1]
@@ -1024,7 +1025,7 @@ f3dzex_00001A7C:
     vge $v2, $v2, $v4[1]
     or a1, a1, a3
     vmrg $v10, $v6, $v4
-    lw t3, 0x03C2(t3)
+    lw t3, lo(cullFaceValues)(t3)
     vge $v6, $v13, $v8[1]
     mfc2 a2, $v29[0]
     vmrg $v4, $v14, $v8
