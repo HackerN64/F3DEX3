@@ -788,19 +788,19 @@ f3dzex_000017BC:
      li s3, mvpMatAddr
 
 g_vtx_load_mvp:
-    lqv $v8[0],  (mvpMatAddr +  0)(r0) ; load bytes  0-15 of the mvp matrix into v8
-    lqv $v10[0], (mvpMatAddr + 16)(r0) ; load bytes 16-31 of the mvp matrix into v10
-    lqv $v12[0], (mvpMatAddr + 32)(r0) ; load bytes 32-47 of the mvp matrix into v12
-    lqv $v14[0], (mvpMatAddr + 48)(r0) ; load bytes 48-63 of the mvp matrix into v14
+    lqv $v8,  (mvpMatAddr +  0)(r0) ; load bytes  0-15 of the mvp matrix into v8
+    lqv $v10, (mvpMatAddr + 16)(r0) ; load bytes 16-31 of the mvp matrix into v10
+    lqv $v12, (mvpMatAddr + 32)(r0) ; load bytes 32-47 of the mvp matrix into v12
+    lqv $v14, (mvpMatAddr + 48)(r0) ; load bytes 48-63 of the mvp matrix into v14
 
-    copyv v9, v8                       ; copy v8 into v9
-    ldv $v9[0],  (mvpMatAddr +  8)(r0) ; load bytes  8-15 of the mvp matrix into the lower half of v9
-    copyv v11, v10                     ; copy v10 into v11
-    ldv $v11[0], (mvpMatAddr + 24)(r0) ; load bytes 24-31 of the mvp matrix into the lower half of v11
-    copyv v13, v12                     ; copy v10 into v11
-    ldv $v13[0], (mvpMatAddr + 40)(r0) ; load bytes 40-47 of the mvp matrix into the lower half of v13
-    copyv v15, v14                     ; copy v10 into v11
-    ldv $v15[0], (mvpMatAddr + 56)(r0) ; load bytes 56-63 of the mvp matrix into the lower half of v13
+    copyv v9, v8                    ; copy v8 into v9
+    ldv $v9,  (mvpMatAddr +  8)(r0) ; load bytes  8-15 of the mvp matrix into the lower half of v9
+    copyv v11, v10                  ; copy v10 into v11
+    ldv $v11, (mvpMatAddr + 24)(r0) ; load bytes 24-31 of the mvp matrix into the lower half of v11
+    copyv v13, v12                  ; copy v10 into v11
+    ldv $v13, (mvpMatAddr + 40)(r0) ; load bytes 40-47 of the mvp matrix into the lower half of v13
+    copyv v15, v14                  ; copy v10 into v11
+    ldv $v15, (mvpMatAddr + 56)(r0) ; load bytes 56-63 of the mvp matrix into the lower half of v13
 
     ldv $v8[8],  (mvpMatAddr +  0)(r0) ; load bytes  0- 8 of the mvp matrix into the upper half of v8
     ldv $v10[8], (mvpMatAddr + 16)(r0) ; load bytes 16-23 of the mvp matrix into the upper half of v10
@@ -1565,35 +1565,45 @@ f3dzex_ov2_000012F4:
     bnez t3, f3dzex_000017BC
      addi a2, a2, 0x0168
     sb t9, 0x01DC
-    lqv $v12[0], 0x0020(r0)
-    lqv $v8[0], 0x0000(r0)
-    lsv $v13[2], 0x002A(r0)
-    lsv $v9[2], 0x000A(r0)
-    vmov $v13[0], $v12[1]
-    lsv $v14[4], 0x0034(r0)
-    vmov $v9[0], $v8[1]
-    lsv $v10[4], 0x0014(r0)
-    vmov $v14[0], $v12[2]
+    ; mvp[x][y] is row x, column y
+    ; Matrix integer portion vector registers
+    col0int equ $v8  ; used to hold rows 0-1 temporarily
+    col1int equ $v9
+    col2int equ $v10
+    ; Matrix fractional portion vector registers
+    col0fra equ $v12 ; used to hold rows 0-1 temporarily
+    col1fra equ $v13
+    col2fra equ $v14
+    ; Set up the column registers
+    lqv  col0fra,    (lo(mvMatrix) + 0x20)(r0) ; load rows 0-1 of mvp (fractional)
+    lqv  col0int,    (lo(mvMatrix) + 0x00)(r0) ; load rows 0-1 of mvp (integer)
+    lsv  col1fra[2], (lo(mvMatrix) + 0x2A)(r0) ; load mvp[1][1] into col1 element 1 (fractional)
+    lsv  col1int[2], (lo(mvMatrix) + 0x0A)(r0) ; load mvp[1][1] into col1 element 1 (integer)
+    vmov col1fra[0], col0fra[1]                ; load mvp[0][1] into col1 element 0 (fractional)
+    lsv  col2fra[4], (lo(mvMatrix) + 0x34)(r0) ; load mvp[2][2] into col2 element 2 (fractional)
+    vmov col1int[0], col0int[1]                ; load mvp[0][1] into col1 element 0 (integer)
+    lsv  col2int[4], (lo(mvMatrix) + 0x14)(r0) ; load mvp[2][2] into col2 element 2 (integer)
+    vmov col2fra[0], col0fra[2]                ; load mvp[0][2] into col2 element 0 (fractional)
     li s4, 0x0150
-    vmov $v10[0], $v8[2]
-    lpv $v7[0], 0x00A8(s4)
-    vmov $v14[1], $v12[6]
-    lsv $v13[4], 0x0032(r0)
-    vmov $v10[1], $v8[6]
-    lsv $v9[4], 0x0012(r0)
-    vmov $v12[1], $v12[4]
-    lsv $v12[4], 0x0030(r0)
-    vmov $v8[1], $v8[4]
-    lsv $v8[4], 0x0010(r0)
+    vmov col2int[0], col0int[2]                ; load mvp[0][2] into col2 element 0 (integer)
+    lpv  $v7[0], 0x00A8(s4)
+    vmov col2fra[1], col0fra[6]                ; load mvp[1][2] into col2 element 1 (fractional)
+    lsv  col1fra[4], (lo(mvMatrix) + 0x32)(r0) ; load mvp[2][1] into col1 element 2 (fractional)
+    vmov col2int[1], col0int[6]                ; load mvp[1][2] into col2 element 1 (integer)
+    lsv  col1int[4], (lo(mvMatrix) + 0x12)(r0) ; load mvp[2][1] into col1 element 2 (integer)
+    vmov col0fra[1], col0fra[4]                ; load mvp[1][0] into col0 element 1 (fractional)
+    lsv  col0fra[4], (lo(mvMatrix) + 0x30)(r0) ; load mvp[2][0] into col0 element 2 (fractional)
+    vmov col0int[1], col0int[4]                ; load mvp[1][0] into col0 element 1 (integer)
+    lsv  col0int[4], (lo(mvMatrix) + 0x10)(r0) ; load mvp[2][0] into col0 element 2 (integer)
 f3dzex_ovl2_0x00001350:
-    vmudn $v29, $v13, $v7[1]
-    vmadh $v29, $v9, $v7[1]
-    vmadn $v29, $v12, $v7[0]
+    vmudn $v29, col1fra, $v7[1]
+    vmadh $v29, col1int, $v7[1]
+    vmadn $v29, col0fra, $v7[0]
     spv $v15[0], 0x00B0(s4)
-    vmadh $v29, $v8, $v7[0]
+    vmadh $v29, col0int, $v7[0]
     lw t4, 0x00B0(s4)
-    vmadn $v29, $v14, $v7[2]
-    vmadh $v29, $v10, $v7[2]
+    vmadn $v29, col2fra, $v7[2]
+    vmadh $v29, col2int, $v7[2]
     vsar $v11, $v11, $v11[1]
     sw t4, 0x00B4(s4)
     vsar $v15, $v15, $v15[0]
@@ -1629,16 +1639,13 @@ f3dzex_ovl2_00001398:
 light_vtx:
     vadd $v6, $v0, $v7[1h]
 .if UCODE_HAS_POINT_LIGHTING ; Point lighting difference
-    luv $v29[0], 0x00B8(t1) ; f3dzex 2.08
-.else
-    lpv $v20[0], 0x0098(t1) ; f3dex2
+    luv $v29[0], 0x00B8(t1)
+.else ; No point lighting
+    lpv $v20[0], 0x0098(t1)
 .endif
     vadd $v5, $v0, $v7[2h]
     luv $v27[0], 0x0008(t6)
     vne $v4, $v31, $v31[3h]
-.if !UCODE_HAS_POINT_LIGHTING ; Point lighting difference
-    luv $v29[0], 0x00B8(t1) ; f3dex2
-.endif
 
 .if UCODE_HAS_POINT_LIGHTING ; point lighting
     andi t3, a1, hi(G_POINT_LIGHTING) ; check if point lighting is enabled
@@ -1828,6 +1835,8 @@ f3dzex_ovl2_0000155C:
     j f3dzex_ovl2_0000144C
 f3dzex_ovl2_0000168C:
     lpv $v20[0], 0x0098(t1)
+.else ; No point lighting
+    luv $v29[0], 0x00B8(t1)
 .endif
 
 f3dzex_ovl2_00001690:
