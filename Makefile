@@ -9,7 +9,7 @@ NoN ?= 0
 #  2.08  (Banjo-Tooie, the best game on the N64)
 #  2.07  (Rocket: Robot on Wheels)
 #  2.04H (Kirby 64, Smash 64)
-#  2.08PM (Paper Mario, this is F3DZEX 2.08J with two instructions changed and renamed to F3DEX2 2.08)
+#  2.08PL (Paper Mario, F3DEX2.08 with point lighting added)
 #  
 # F3DZEX:
 #  2.08J (Animal Forest) (Recommended over 2.08I due to a change properly zeroes out $v0)
