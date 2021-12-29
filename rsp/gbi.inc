@@ -1,22 +1,33 @@
 // GBI: Graphics Binary Interface
 
-// Geometry mode flags
-G_ZBUFFER            equ 0x00000001
-G_TEXTURE_ENABLE     equ 0x00000002
-G_SHADE              equ 0x00000004
-G_CULL_FRONT         equ 0x00000200
-G_CULL_BACK          equ 0x00000400
-G_CULL_BOTH          equ 0x00000600
-G_FOG                equ 0x00010000
-G_LIGHTING           equ 0x00020000
-G_TEXTURE_GEN        equ 0x00040000
-G_TEXTURE_GEN_LINEAR equ 0x00080000
-G_LOD                equ 0x00100000
-G_SHADING_SMOOTH     equ 0x00200000
-G_POINT_LIGHTING     equ 0x00400000
-G_CLIPPING           equ 0x00800000
+OS_YIELD_DATA_SIZE equ 0xC00
 
-; dma
+// Geometry mode flags
+G_ZBUFFER               equ 0x00000001
+G_TEXTURE_ENABLE        equ 0x00000002
+G_SHADE                 equ 0x00000004
+G_CULL_FRONT            equ 0x00000200
+G_CULL_BACK             equ 0x00000400
+G_CULL_BOTH             equ 0x00000600
+G_FOG                   equ 0x00010000
+G_LIGHTING              equ 0x00020000
+G_TEXTURE_GEN           equ 0x00040000
+G_TEXTURE_GEN_LINEAR    equ 0x00080000
+G_LOD                   equ 0x00100000
+G_SHADING_SMOOTH        equ 0x00200000
+G_LIGHTING_POSITIONAL   equ 0x00400000
+G_CLIPPING              equ 0x00800000
+
+G_FOG_H                 equ G_FOG / 0x10000
+G_LIGHTING_H            equ G_LIGHTING / 0x10000
+G_TEXTURE_GEN_H         equ G_TEXTURE_GEN / 0x10000
+G_TEXTURE_GEN_LINEAR_H  equ G_TEXTURE_GEN_LINEAR / 0x10000
+G_LOD_H                 equ G_LOD / 0x10000
+G_SHADING_SMOOTH_H      equ G_SHADING_SMOOTH / 0x10000
+G_LIGHTING_POSITIONAL_H equ G_LIGHTING_POSITIONAL / 0x10000
+G_CLIPPING_H            equ G_CLIPPING / 0x10000
+
+// dma
 G_NOOP            equ 0x00
 G_RDPHALF_2       equ 0xf1
 G_SETOTHERMODE_H  equ 0xe3
@@ -37,7 +48,7 @@ G_SPECIAL_1       equ 0xd5
 G_SPECIAL_2       equ 0xd4
 G_SPECIAL_3       equ 0xd3
 
-; immediate
+// immediate
 G_VTX             equ 0x01
 G_MODIFYVTX       equ 0x02
 G_CULLDL          equ 0x03
@@ -47,7 +58,7 @@ G_TRI2            equ 0x06
 G_QUAD            equ 0x07
 G_LINE3D          equ 0x08
 
-; rdp
+// rdp
 G_SETCIMG         equ 0xff
 G_SETZIMG         equ 0xfe
 G_SETTIMG         equ 0xfd
