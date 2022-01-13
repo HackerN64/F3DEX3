@@ -91,4 +91,5 @@ G_MTX_P_MV        equ 0x04
 G_MTX_MUL_LOAD    equ 0x02
 G_MTX_NOPUSH_PUSH equ 0x01
 
-vtxSize equ 0x10
+inputVtxSize equ 0x10
+vtxSize equ 0x28
