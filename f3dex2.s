@@ -55,11 +55,11 @@ overlay_imem equ 0x0006
 // RSP DMEM
 .create DATA_FILE, 0x0000
 
-// 0x0000-0x003F: modelview matrix
+// 0x0000-0x0040: modelview matrix
 mvMatrix:
     .fill 64
 
-// 0x0040-0x007F: projection matrix
+// 0x0040-0x0080: projection matrix
 pMatrix:
     .fill 64
 
@@ -67,19 +67,19 @@ pMatrix:
 mvpMatrix:
     .fill 64
 
-// 0x00C0-0x00C7: scissor (four 12-bit values)
+// 0x00C0-0x00C8: scissor (four 12-bit values)
 scissorUpLeft: // the command byte is included since the command word is copied verbatim
     .dw (G_SETSCISSOR << 24) | ((  0 * 4) << 12) | ((  0 * 4) << 0)
 scissorBottomRight:
     .dw ((320 * 4) << 12) | ((240 * 4) << 0)
 
-// 0x00C8-0x00CF: othermode
+// 0x00C8-0x00D0: othermode
 otherMode0: // command byte included, same as above
     .dw (G_RDPSETOTHERMODE << 24) | (0x080CFF)
 otherMode1:
     .dw 0x00000000
 
-// 0x00D0-0x00D9: ??
+// 0x00D0-0x00DA: ??
 texrectWord1:
     .fill 4 // first word, has command byte, xh and yh
 texrectWord2:
@@ -87,7 +87,7 @@ texrectWord2:
 rdpHalf1Val:
     .dh 0x0000
 
-// 0x00DA-0x00DD: perspective norm
+// 0x00DA-0x00DE: perspective norm
 perspNorm:
     .dw 0x0000FFFF
 
@@ -97,28 +97,28 @@ displayListStackLength:
 
     .db 0x48 // this seems to be the max displaylist length
 
-// 0x00E0-0x00EF: viewport
+// 0x00E0-0x00F0: viewport
 viewport:
     .fill 16
 
-// 0x00F0-0x00F3: ?
+// 0x00F0-0x00F4: ?
 lbl_00F0:
     .fill 4
 
-// 0x00F4-0x00F7:
+// 0x00F4-0x00F8:
 matrixStackPtr:
     .dw 0x00000000
 
 .orga 0x00F8
 
-// 0x00F8-0x0137: segment table
+// 0x00F8-0x0138: segment table
 segmentTable:
     .fill (4 * 16) // 16 DRAM pointers
 
-// 0x0138-0x017F: displaylist stack
+// 0x0138-0x0180: displaylist stack
 displayListStack:
 
-// 0x0138-0x017F: ucode text (shared with DL stack)
+// 0x0138-0x0180: ucode text (shared with DL stack)
 .if (UCODE_IS_F3DEX2_204H) // F3DEX2 2.04H puts an extra 0x0A before the name
     .db 0x0A
 .endif
@@ -126,7 +126,7 @@ displayListStack:
 
 .align 16
 
-// 0x0180-0x2DF: ???
+// 0x0180-0x2E0: ???
 clipRatio:
     .dw 0x00010000
 G_MWO_CLIP_RNX:
@@ -219,31 +219,31 @@ geometryModeLabel:
 lightBuffer:
     .fill (8 * 6)
 
-// 0x0220-0x023F: Light colors
+// 0x0220-0x0240: Light colors
 lightColors:
     .fill (8 * 4)
 
-// 0x0240-0x02DF: ??
+// 0x0240-0x02E0: ??
 .orga 0x02E0
 
-// 0x02E0-0x02EF: Overlay 0/1 Table
+// 0x02E0-0x02F0: Overlay 0/1 Table
 overlayInfo0:
     OverlayEntry orga(Overlay0Address), orga(Overlay0End), Overlay0Address
 overlayInfo1:
     OverlayEntry orga(Overlay1Address), orga(Overlay1End), Overlay1Address
 
-// 0x02F0-0x02FD: Movemem table
+// 0x02F0-0x02FE: Movemem table
 movememTable:
-    .dh 0x09D0
+    .dh tempMatrix   // G_MTX multiply temp matrix (model)
     .dh mvMatrix     // G_MV_MMTX
-    .dh 0x09D0
+    .dh tempMatrix   // G_MTX multiply temp matrix (projection)
     .dh pMatrix      // G_MV_PMTX
     .dh viewport     // G_MV_VIEWPORT
     .dh lightBuffer  // G_MV_LIGHT
     .dh vertexBuffer // G_MV_POINT
 // Further entries in the movemem table come from the moveword table
 
-// 0x02FE-0x030D: moveword table
+// 0x02FE-0x030E: moveword table
 movewordTable:
     .dh mvpMatrix     // G_MW_MATRIX
     .dh numLights     // G_MW_NUMLIGHT
@@ -254,10 +254,13 @@ movewordTable:
     .dh forceMatrix   // G_MW_FORCEMTX
     .dh perspNorm     // G_MW_PERSPNORM
 
-// 0x030E-0x036F: RDP/Immediate Command Jump Table
-jumpTableEntry G_D0_D2_handler
-jumpTableEntry G_D1_handler
-jumpTableEntry G_D0_D2_handler
+// 0x030E-0x0314: G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
+movememHandlerTable:
+jumpTableEntry G_POPMTX_end   // G_POPMTX
+jumpTableEntry G_MTX_end      // G_MTX (multiply)
+jumpTableEntry G_MOVEMEM_end  // G_MOVEMEM, G_MTX (load)
+
+// 0x0314-0x0370: RDP/Immediate Command Jump Table
 jumpTableEntry G_SPECIAL_3_handler
 jumpTableEntry G_SPECIAL_2_handler
 jumpTableEntry G_SPECIAL_1_handler
@@ -307,7 +310,7 @@ jumpTableEntry G_SETxIMG_handler // G_SETCIMG
 commandJumpTable:
 jumpTableEntry G_NOOP_handler
 
-// 0x0370-0x037F: DMA Command Jump Table
+// 0x0370-0x0380: DMA Command Jump Table
 jumpTableEntry G_VTX_handler
 jumpTableEntry G_MODIFYVTX_handler
 jumpTableEntry G_CULLDL_handler
@@ -317,7 +320,7 @@ jumpTableEntry G_TRI2_handler
 jumpTableEntry G_QUAD_handler
 jumpTableEntry G_LINE3D_handler
 
-// 0x0380-0x03C3: vertex pointers
+// 0x0380-0x03C4: vertex pointers
 vertexTable:
 
 // The vertex table is a list of pointers to the location of each vertex in the buffer
@@ -337,7 +340,7 @@ vertexTable:
 
     vertexTableEntries 32
 
-// 0x03C2-0x040F: ??
+// 0x03C2-0x0410: ??
 cullFaceValues:
     .dh 0xFFFF
     .dh 0x8000
@@ -380,21 +383,28 @@ lbl_03F8:
 .dw 0x00000040 // Nearclipping
 .endif
 
-// 0x0410-0x041F: Overlay 2/3 table
+// 0x0410-0x0420: Overlay 2/3 table
 overlayInfo2:
     OverlayEntry orga(Overlay2Address), orga(Overlay2End), Overlay2Address
 overlayInfo3:
     OverlayEntry orga(Overlay3Address), orga(Overlay3End), Overlay3Address
 
-// 0x0420-0x0919: Vertex buffer
+// 0x0420-0x0920: Vertex buffer
 vertexBuffer:
     .skip (40 * 32) // 40 bytes per vertex, 32 vertices
 
-// 0x0920-0x09C7: Input buffer
+// 0x0920-0x09C8: Input buffer
 inputBuffer:
 inputBufferLength equ 0xA8
     .skip inputBufferLength
 inputBufferEnd:
+
+// 0x09C8-0x09D0: ??
+    .skip 8
+
+// 0x09D0 - 0x0A10: Temp matrix for G_MTX multiplication mode
+tempMatrix:
+    .skip 0x40
 
 .orga 0xBA8
 
@@ -416,7 +426,7 @@ lbl_0D00:
 
 .orga 0x0FC0
 
-// 0x0FC0-0x0FFF: OSTask
+// 0x0FC0-0x1000: OSTask
 OSTask:
     .skip 0x40
 
@@ -523,7 +533,8 @@ displaylist_dma: // loads inputBufferLength bytes worth of displaylist data via 
     addiu   taskDataPtr, taskDataPtr, inputBufferLength // increment the DRAM address to read from next time
     li      inputBufferPos, -inputBufferLength          // reset the DL word index
 wait_for_dma_and_run_next_command:
-G_D0_D2_handler: // unknown D0/D2 commands?
+G_POPMTX_end:
+G_MOVEMEM_end:
     jal     while_wait_dma_busy // wait for the DMA read to finish
 G_LINE3D_handler:
 G_SPNOOP_handler:
@@ -551,7 +562,7 @@ G_SPECIAL_1_handler:    // Seems to be a manual trigger for mvp recalculation
     li      $21, pMatrix
     li      $20, mvMatrix
     li      $19, mvpMatrix
-    j       calculate_mvp_matrix
+    j       mtx_concat
      sb     cmd_w0, mvpValid
 .endif
 
@@ -866,7 +877,7 @@ f3dzex_000017BC:
     li      $21, pMatrix
     li      $20, mvMatrix
     // Calculate the MVP matrix
-    jal     calculate_mvp_matrix
+    jal     mtx_concat
      li     $19, mvpMatrix
 
 g_vtx_load_mvp:
@@ -920,9 +931,9 @@ f3dzex_00001870:
     vmudl   $v29, $v23, $v18[4]
     sub     $11, $8, $7
     vmadm   $v2, $v24, $v18[4]
-    sbv     $v27[15], 0x0073($11)
+    sbv     $v27[15], -0x0D($11)
     vmadn   $v21, $v0, $v0[0]
-    sbv     $v27[7], 0x004B($11)
+    sbv     $v27[7], -0x35($11)
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
     vmov    $v26[1], $v3[2]
     ssv     $v3[12], 0x00F4($8)
@@ -1577,45 +1588,46 @@ do_popmtx:
     j       do_movemem
      sw     $zero, mvpValid                 // Mark the MVP matrix as being out of date
 
-G_D1_handler: // unknown D1 command?
-    lhu     $19, 0x02F2($1)
+G_MTX_end: // Multiplies the loaded model matrix into the model stack
+    lhu     $19, (movememTable + G_MV_MMTX)($1) // Set the output matrix to the model or projection matrix based on the command
     jal     while_wait_dma_busy
-     lhu    $21, 0x02F2($1)
+     lhu    $21, (movememTable + G_MV_MMTX)($1) // Set the first input matrix to the model or projection matrix based on the command
     li      $ra, run_next_DL_command
+    // The second input matrix will correspond to the address that memory was moved into, which will be tempMtx for G_MTX
 
-pMatrixPtr equ $21
-mvMatrixPtr equ $20
-mvpMatrixPtr equ $19
-calculate_mvp_matrix:
-    addi    $12, mvMatrixPtr, 0x0018
+input_mtx_0 equ $21
+input_mtx_1 equ $20
+output_mtx equ $19
+mtx_concat:
+    addi    $12, input_mtx_1, 0x0018
 @@loop:
     vmadn   $v9, $v0, $v0[0]
-    addi    $11, mvMatrixPtr, 0x0008
+    addi    $11, input_mtx_1, 0x0008
     vmadh   $v8, $v0, $v0[0]
-    addi    pMatrixPtr, pMatrixPtr, -0x0020
+    addi    input_mtx_0, input_mtx_0, -0x0020
     vmudh   $v29, $v0, $v0[0]
 @@innerloop:
-    ldv     $v5[0], 0x0040(pMatrixPtr)
-    ldv     $v5[8], 0x0040(pMatrixPtr)
-    lqv     $v3[0], 0x0020(mvMatrixPtr)
-    ldv     $v4[0], 0x0020(pMatrixPtr)
-    ldv     $v4[8], 0x0020(pMatrixPtr)
-    lqv     $v2[0], 0x0000(mvMatrixPtr)
+    ldv     $v5[0], 0x0040(input_mtx_0)
+    ldv     $v5[8], 0x0040(input_mtx_0)
+    lqv     $v3[0], 0x0020(input_mtx_1)
+    ldv     $v4[0], 0x0020(input_mtx_0)
+    ldv     $v4[8], 0x0020(input_mtx_0)
+    lqv     $v2[0], 0x0000(input_mtx_1)
     vmadl   $v29, $v5, $v3[0h]
-    addi    mvMatrixPtr, mvMatrixPtr, 0x0002
+    addi    input_mtx_1, input_mtx_1, 0x0002
     vmadm   $v29, $v4, $v3[0h]
-    addi    pMatrixPtr, pMatrixPtr, 0x0008
+    addi    input_mtx_0, input_mtx_0, 0x0008
     vmadn   $v7, $v5, $v2[0h]
-    bne     mvMatrixPtr, $11, @@innerloop
+    bne     input_mtx_1, $11, @@innerloop
      vmadh  $v6, $v4, $v2[0h]
-    bne     mvMatrixPtr, $12, @@loop
-     addi   mvMatrixPtr, mvMatrixPtr, 0x0008
+    bne     input_mtx_1, $12, @@loop
+     addi   input_mtx_1, input_mtx_1, 0x0008
     // Store the results in the passed in matrix
-    sqv     $v9[0], 0x0020(mvpMatrixPtr)
-    sqv     $v8[0], 0x0000(mvpMatrixPtr)
-    sqv     $v7[0], 0x0030(mvpMatrixPtr)
+    sqv     $v9[0], 0x0020(output_mtx)
+    sqv     $v8[0], 0x0000(output_mtx)
+    sqv     $v7[0], 0x0030(output_mtx)
     jr      $ra
-     sqv    $v6[0], 0x0010(mvpMatrixPtr)
+     sqv    $v6[0], 0x0010(output_mtx)
 
 matrixStackAddr equ $24
 G_MTX_handler:
@@ -1644,7 +1656,7 @@ do_movemem:
     lbu     $19, (inputBufferEnd - 0x07)(inputBufferPos) // Move the second byte of the first command word into $19
     lhu     $20, (movememTable)($1)                      // Load the address of the memory location for the given movemem index
     srl     $2, cmd_w0, 5                                // Left shifts the index by 5 (which is then added to the value read from the movemem table)
-    lhu     $ra, (overlayInfo2 + 2 - G_MOVEMEM)($12)     // Loads the return address based on command byte?
+    lhu     $ra, (movememHandlerTable - (G_POPMTX | 0xFF00))($12)  // Loads the return address from movememHandlerTable based on command byte
     j       dma_read_write
 G_SETOTHERMODE_H_handler:
      add    $20, $20, $2

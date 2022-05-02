@@ -91,5 +91,12 @@ G_MTX_P_MV        equ 0x04
 G_MTX_MUL_LOAD    equ 0x02
 G_MTX_NOPUSH_PUSH equ 0x01
 
+G_MV_MMTX     equ 0x02
+G_MV_PMTX     equ 0x06
+G_MV_VIEWPORT equ 0x08
+G_MV_LIGHT    equ 0x0A
+G_MV_POINT    equ 0x0C
+G_MV_MATRIX   equ 0x0E
+
 inputVtxSize equ 0x10
 vtxSize equ 0x28
