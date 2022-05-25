@@ -1,6 +1,10 @@
 // GBI: Graphics Binary Interface
 
+.if UCODE_METHOD == METHOD_FIFO
 OS_YIELD_DATA_SIZE equ 0xC00
+.else // UCODE_METHOD == METHOD_XBUS
+OS_YIELD_DATA_SIZE equ 0x920
+.endif
 
 // Geometry mode flags
 G_ZBUFFER               equ 0x00000001
