@@ -184,17 +184,18 @@ linearGenerateCoefficients:
     .dh 0x6CB3
     .dh 0x0002
 
-forceMatrix:
-    .db 0x00
-
+// 0x01D8
+    .db 0x00 // Padding to allow mvpValid to be written to as a 32-bit word
 mvpValid:
     .db 0x01
 
 // 0x01DA
-numLights:
-    .dh 0000
+    .dh 0x0000 // Shared padding to allow mvpValid and numLights to both be written to as 32-bit words for moveword
+
 // 0x01DC
+lightsValid:
     .db 0x01
+numLights:
     .db 0x00
 
     .dh 0x0BA8
@@ -246,12 +247,12 @@ movememTable:
 // 0x02FE-0x030E: moveword table
 movewordTable:
     .dh mvpMatrix     // G_MW_MATRIX
-    .dh numLights     // G_MW_NUMLIGHT
+    .dh numLights - 3 // G_MW_NUMLIGHT
     .dh clipRatio     // G_MW_CLIP
     .dh segmentTable  // G_MW_SEGMENT
     .dh fogFactor     // G_MW_FOG
     .dh lightColors   // G_MW_LIGHTCOL
-    .dh forceMatrix   // G_MW_FORCEMTX
+    .dh mvpValid - 1  // G_MW_FORCEMTX
     .dh perspNorm     // G_MW_PERSPNORM
 
 // 0x030E-0x0314: G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
@@ -1586,7 +1587,7 @@ do_popmtx:
     beq     $24, $11, run_next_DL_command   // If no bytes were popped, then we don't need to make the mvp matrix as being out of date and can run the next command
      sw     $24, matrixStackPtr             // Update the matrix stack pointer with the new value
     j       do_movemem
-     sw     $zero, mvpValid                 // Mark the MVP matrix as being out of date
+     sw     $zero, mvpValid                 // Mark the MVP matrix and light directions as being out of date (the word being written to contains both)
 
 G_MTX_end: // Multiplies the loaded model matrix into the model stack
     lhu     $19, (movememTable + G_MV_MMTX)($1) // Set the output matrix to the model or projection matrix based on the command
@@ -1648,7 +1649,7 @@ G_MTX_handler:
     lw      cmd_w1, (inputBufferEnd - 4)(inputBufferPos)
 load_mtx:
     add     $12, $12, $2        // Add the load type to the command byte, selects the return address based on whether the matrix needs multiplying or just loading
-    sw      $zero, mvpValid     // Mark the mvp matrix as out-of-date
+    sw      $zero, mvpValid     // Mark the MVP matrix and light directions as being out of date (the word being written to contains both)
 G_MOVEMEM_handler:
     jal     segmented_to_physical   // convert the memory address cmd_w1 to a virtual one
 do_movemem:
@@ -1680,9 +1681,9 @@ Overlay1End:
 .headersize Overlay23LoadAddress - orga()
 
 Overlay2Address:
-    lbu     $11, numLights + 2
+    lbu     $11, lightsValid
     j       f3dzex_ov2_000012F4
-     lbu    $6, numLights + 3
+     lbu    $6, numLights
 
 f3dzex_ov2_000012E4:
     move    savedRA, $ra
@@ -1691,9 +1692,9 @@ f3dzex_ov2_000012E4:
      li     $12, f3dzex_ov3_000012E8    // set up the return address in ovl3
 
 f3dzex_ov2_000012F4:
-    bnez    $11, f3dzex_000017BC // branch if number of lights non zero?
+    bnez    $11, f3dzex_000017BC // Skip calculating lights if they're not out of date
      addi   $6, $6, lightColors - 0x10 - (7 * 0x18)
-    sb      cmd_w0, numLights + 2
+    sb      cmd_w0, lightsValid
     // mv[x][y] is row x, column y
     // Matrix integer portion vector registers
     col0int equ $v8     // used to hold rows 0-1 temporarily
