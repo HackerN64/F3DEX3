@@ -109,8 +109,6 @@ lbl_00F0:
 matrixStackPtr:
     .dw 0x00000000
 
-.orga 0x00F8
-
 // 0x00F8-0x0138: segment table
 segmentTable:
     .fill (4 * 16) // 16 DRAM pointers
@@ -126,7 +124,7 @@ displayListStack:
 
 .align 16
 
-// 0x0180-0x2E0: ???
+// 0x0180-0x1B0: clipping values
 clipRatio:
     .dw 0x00010000
 G_MWO_CLIP_RNX:
@@ -149,15 +147,16 @@ G_MWO_CLIP_RPY:
     .dw 0x00010001 // Nearclipping
 .endif
 
+// 0x1B0
 v31Value:
-    .dh 0xFFFF
-    .dh 0x0004
-    .dh 0x0008
-    .dh 0x7F00
-    .dh 0xFFFC
-    .dh 0x4000
-    .dh 0x0420
-    .dh 0x7FFF
+    .dh 0xFFFF // 65535
+    .dh 0x0004 // 4
+    .dh 0x0008 // 8
+    .dh 0x7F00 // 32512
+    .dh 0xFFFC // 65532
+    .dh 0x4000 // 16384
+    .dh 0x0420 // 1056
+    .dh 0x7FFF // 32767
 
 v30Value:
     .dh 0x7FFC
@@ -194,11 +193,12 @@ mvpValid:
 
 // 0x01DC
 lightsValid:
-    .db 0x01
+    .db 1
 numLights:
-    .db 0x00
+    .db 0
 
-    .dh 0x0BA8
+    .db 11
+    .db 7 * 0x18
 
 // 0x01E0
 fogFactor:
@@ -216,16 +216,19 @@ textureSettings2:
 geometryModeLabel:
     .dw G_CLIPPING
 
+// excluding ambient light
+MAX_LIGHTS equ 7
+
 // 0x01F0-0x021F: Light data
 lightBuffer:
-    .fill (8 * 6)
+    .fill ((MAX_LIGHTS + 1) * 6)
 
 // 0x0220-0x0240: Light colors
 lightColors:
-    .fill (8 * 4)
+    .fill ((MAX_LIGHTS + 1) * 4)
 
 // 0x0240-0x02E0: ??
-.orga 0x02E0
+.skip 0xA0
 
 // 0x02E0-0x02F0: Overlay 0/1 Table
 overlayInfo0:
@@ -407,25 +410,22 @@ inputBufferEnd:
 tempMatrix:
     .skip 0x40
 
-.orga 0xBA8
+// 0xA50-0xBA8: ??
+.skip 0x198
 
-// 0x0BA8-??: RDP Command Buffer?
-lbl_0BA8:
+RDP_CMD_BUFSIZE equ 0x158
+// 0x0BA8-0x0D00: RDP Command Buffer
+rdpCmdBuffer1:
+    .skip RDP_CMD_BUFSIZE
 
-.orga 0x0BF8
+.skip 0xB0
 
-// 0x0BF8-0x0C00: ??
-lbl_0BF8:
-    .skip 4
-lbl_0BFC: // old ucode?
-    .skip 4
+// 0x0DB0-0x0F08: Another RDP Command Buffer?
+rdpCmdBuffer2:
+    .skip RDP_CMD_BUFSIZE
 
-.orga 0x0D00
-
-// 0x0D00-??: RDP Command Buffer?
-lbl_0D00:
-
-.orga 0x0FC0
+// 0x0F08-0x0FC0: ??
+.skip 0xB8
 
 // 0x0FC0-0x1000: OSTask
 OSTask:
@@ -446,6 +446,7 @@ cmd_w1 equ $24
 cmd_w0 equ $25
 taskDataPtr equ $26
 inputBufferPos equ $27
+rdpCmdBufPtr equ $23
 
 // Initialization routines
 // Everything up until displaylist_dma will get overwritten by ovl1
@@ -457,12 +458,12 @@ start:
 .endif
     lqv     $v31[0], (v31Value)($zero)
     lqv     $v30[0], (v30Value)($zero)
-    li      $23, lbl_0BA8
+    li      rdpCmdBufPtr, rdpCmdBuffer1
 .if !(UCODE_IS_207_OR_OLDER)
-    vadd    $v1, $v0, $v0
+    vadd    $v1, $v0, $v0   // $v0 is all 0s, $v1 also becomes all 0s
 .endif
-    li      $22, lbl_0D00
-    vsub    $v1, $v0, $v31[0]
+    li      $22, rdpCmdBuffer1 + RDP_CMD_BUFSIZE
+    vsub    $v1, $v0, $v31[0]   // Vector of 1s
     lw      $11, lbl_00F0
     lw      $12, OSTask + OSTask_flags
     li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // task done and yielded signals
@@ -472,7 +473,7 @@ start:
     beqz    $12, calculate_overlay_addrs    // skip overlay address calculations if resumed from yield?
      sw     $zero, OSTask + OSTask_flags
     j       load_overlay1_init              // Skip the initialization and go straight to loading overlay 1
-     lw     taskDataPtr, lbl_0BF8
+     lw     taskDataPtr, OS_YIELD_DATA_SIZE - 8
 
 task_init:
     mfc0    $11, DPC_STATUS
@@ -526,6 +527,11 @@ load_overlay1_init:
 
     jal     load_overlay_and_enter  // load overlay 1 and enter
      move   $12, $ra                // set up the return address, since load_overlay_and_enter returns to $12
+
+// Overlays 0 and 1 overwrite everything up to this point (2.08 versions overwrite up to the previous .align 8)
+.align 8
+Overlay01End_:
+
 displaylist_dma: // loads inputBufferLength bytes worth of displaylist data via DMA into inputBuffer
     li      $19, inputBufferLength - 1  // set the DMA length
     move    $24, taskDataPtr            // set up the DRAM address to read from
@@ -593,19 +599,18 @@ G_ENDDL_handler:
     j       f3dzex_ovl1_00001020                    // has a different version in ovl1
      lw     taskDataPtr, (displayListStack)(dlStackIdx) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
 
-rdpCmdBufPtr equ $23
 G_RDPHALF_2_handler:
     ldv     $v29[0], (texrectWord1)($zero)
-    lw      cmd_w0, rdpHalf1Val             // load the RDPHALF1 value into w0
-    addi    $23, $23, 8
-    sdv     $v29[0], (lbl_03F8)($23)        // move textrectWord1 to lbl_03F8
+    lw      cmd_w0, rdpHalf1Val                 // load the RDPHALF1 value into w0
+    addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
+    sdv     $v29[0], (0x400 - 8)(rdpCmdBufPtr)   // move textrectWord1 to lbl_03F8
 G_RDP_handler:
     sw      cmd_w1, 4(rdpCmdBufPtr)         // Add the second word of the command to the RDP command buffer
 G_SYNC_handler:
 G_NOOP_handler:
     sw      cmd_w0, 0(rdpCmdBufPtr)         // Add the command word to the RDP command buffer
     j       check_rdp_buffer_full_and_run_next_cmd
-     addi   rdpCmdBufPtr, rdpCmdBufPtr, 0x0008 // Increment the next RDP command pointer by 2 words
+     addi   rdpCmdBufPtr, rdpCmdBufPtr, 8   // Increment the next RDP command pointer by 2 words
 
 G_SETxIMG_handler:
     li      $ra, G_RDP_handler          // Load the RDP command handler into the return address, then fall through to convert the address to virtual
@@ -632,12 +637,12 @@ G_SETSCISSOR_handler:
 check_rdp_buffer_full_and_run_next_cmd:
     li      $ra, run_next_DL_command    // Set up running the next DL command as the return address
 check_rdp_buffer_full:
-     sub    $11, $23, $22               // todo what are $22 and $23?
-    blez    $11, return_routine         // Return if $22 >= $23
+     sub    $11, rdpCmdBufPtr, $22      // todo what is $22
+    blez    $11, return_routine         // Return if $22 >= rdpCmdBufPtr
 flush_rdp_buffer:
      mfc0   $12, SP_DMA_BUSY
     lw      $24, lbl_00F0
-    addiu   $19, $11, 0x0158
+    addiu   $19, $11, RDP_CMD_BUFSIZE
     bnez    $12, flush_rdp_buffer
      lw     $12, OSTask + OSTask_output_buff_size
     mtc0    $24, DPC_END
@@ -663,11 +668,11 @@ f3dzex_000012A8:
 f3dzex_000012BC:
      add    $11, $24, $19
     sw      $11, lbl_00F0
-    addi    $19, $19, -1        // subtract 1 from the length
-    addi    $20, $22, -0x2158
-    xori    $22, $22, 0x0208
+    addi    $19, $19, -1                            // subtract 1 from the length
+    addi    $20, $22, -(0x2000 | RDP_CMD_BUFSIZE)   // The 0x2000 is meaningless, negative means write
+    xori    $22, $22, 0x0208    // 0xD00 ^ 0xF08 = 0x208
     j       dma_read_write
-     addi   $23, $22, -0x0158
+     addi   rdpCmdBufPtr, $22, -RDP_CMD_BUFSIZE
 
 Overlay23LoadAddress:
 
@@ -852,6 +857,8 @@ f3dzex_000014EC:
 .orga max(Overlay2End - Overlay2Address + orga(Overlay3Address), orga())
 Overlay3End:
 
+Overlay23End_:
+
 do_lighting equ $6
 inputVtxPos equ $14
 outputVtxPos equ $15
@@ -872,8 +879,8 @@ G_VTX_handler:
     bnez    $6, Overlay23LoadAddress    // This will always end up in overlay 2, as the start of overlay 3 loads and enters overlay 2
      andi   $7, $5, G_FOG_H
 f3dzex_000017BC:
-    bnez    $8, g_vtx_load_mvp  // Skip recalculating the mvp matrix if it's already up-to-date
-     sll    $7, $7, 3
+    bnez    $8, g_vtx_load_mvp          // Skip recalculating the mvp matrix if it's already up-to-date
+     sll    $7, $7, 3                   // $7 is 8 if G_FOG is set, 0 otherwise
     sb      cmd_w0, mvpValid
     li      $21, pMatrix
     li      $20, mvMatrix
@@ -891,9 +898,9 @@ g_vtx_load_mvp:
     ldv     $v9, (mvpMatrix +  8)($zero)             // load bytes  8-15 of the mvp matrix into the lower half of v9
     vcopy   $v11, $v10                               // copy v10 into v11
     ldv     $v11, (mvpMatrix + 24)($zero)            // load bytes 24-31 of the mvp matrix into the lower half of v11
-    vcopy   $v13, $v12                               // copy v10 into v11
+    vcopy   $v13, $v12                               // copy v12 into v13
     ldv     $v13, (mvpMatrix + 40)($zero)            // load bytes 40-47 of the mvp matrix into the lower half of v13
-    vcopy   $v15, $v14                               // copy v10 into v11
+    vcopy   $v15, $v14                               // copy v14 into v15
     ldv     $v15, (mvpMatrix + 56)($zero)            // load bytes 56-63 of the mvp matrix into the lower half of v13
 
     ldv     $v8[8],  (mvpMatrix +  0)($zero)         // load bytes  0- 8 of the mvp matrix into the upper half of v8
@@ -908,27 +915,27 @@ g_vtx_load_mvp:
 
 f3dzex_0000182C:
     vmudn   $v29, $v15, $v1[0]
-    lw      $11, 0x001C(inputVtxPos)        // load the color/normal of the 2nd vertex into $11
+    lw      $11, (inputVtxSize + 0xC)(inputVtxPos)  // load the color/normal of the 2nd vertex into $11
     vmadh   $v29, $v11, $v1[0]
-    llv     $v22[12], 0x0008(inputVtxPos)   // load the texture coords of the 1st vertex into v22[12-15]
+    llv     $v22[12], 8(inputVtxPos)                // load the texture coords of the 1st vertex into v22[12-15]
     vmadn   $v29, $v12, $v20[0h]
-    move    $9, $6
+    move    $9, $6                                  // $9 is either 0 or 2 depending on whether G_LIGHTING is set (2) or unset (0)
     vmadh   $v29, $v8, $v20[0h]
-    lpv     $v2[0], 0x00B0($9)
+    lpv     $v2[0], (mvpMatrix + 0x30)($9)
     vmadn   $v29, $v13, $v20[1h]
-    sw      $11, 0x0008(inputVtxPos)    // Move the first vertex's colors/normals into the word before the second vertex's
+    sw      $11, 8(inputVtxPos)                     // Move the first vertex's colors/normals into the word before the second vertex's
     vmadh   $v29, $v9, $v20[1h]
-    lpv     $v7[0], 0x0008(inputVtxPos) // Load both vertex's colors/normals into the first half of v7
+    lpv     $v7[0], 8(inputVtxPos)                  // Load both vertex's colors/normals into the first half of v7
     vmadn   $v23, $v14, $v20[2h]
-    bnez    $6, light_vtx           // If G_LIGHTING is on, then process vertices accordingly
+    bnez    $6, light_vtx                           // If G_LIGHTING is on, then process vertices accordingly
      vmadh  $v24, $v10, $v20[2h]
     vge     $v27, $v25, $v31[3]
-    llv     $v22[4], 0x0018(inputVtxPos)    // load the texture coords of the 2nd vertex into v22[4-7]
+    llv     $v22[4], (inputVtxSize + 8)(inputVtxPos)  // load the texture coords of the 2nd vertex into v22[4-7]
 f3dzex_00001870:
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
     vge     $v3, $v25, $v0[0]
 .endif
-    addi    $1, $1, -0x0004
+    addi    $1, $1, -4
     vmudl   $v29, $v23, $v18[4]
     sub     $11, $8, $7
     vmadm   $v2, $v24, $v18[4]
@@ -1046,37 +1053,37 @@ f3dzex_00001870:
 
 f3dzex_000019F4: // handle clipping?
     li      curClipRatio, clipRatio
-    ldv     $v16[0], (viewport)($zero)
-    ldv     $v16[8], (viewport)($zero)
-    llv     $v29[0], 0x0060(curClipRatio)
-    ldv     $v17[0], (viewport + 8)($zero)
-    ldv     $v17[8], (viewport + 8)($zero)
-    vlt     $v19, $v31, $v31[3]
-    vsub    $v21, $v0, $v16
-    llv     $v18[4], 0x0068(curClipRatio)
+    ldv     $v16[0], (viewport)($zero)          // $v16 = [vscale[0], vscale[1], vscale[2], vscale[3], 0, 0, 0, 0]
+    ldv     $v16[8], (viewport)($zero)          // $v16 = [vscale[0], vscale[1], vscale[2], vscale[3], vscale[0], vscale[1], vscale[2], vscale[3]]
+    llv     $v29[0], 0x0060(curClipRatio)       // clipRatio + 0x60 = fogFactor ?
+    ldv     $v17[0], (viewport + 8)($zero)      // vtrans
+    ldv     $v17[8], (viewport + 8)($zero)      // vtrans
+    vlt     $v19, $v31, $v31[3]                 // VCC = [0, 1, 1, 0, 0, 1, 1, 0]
+    vsub    $v21, $v0, $v16                     // 0 - vscale
+    llv     $v18[4], 0x0068(curClipRatio)       // clipRatio + 0x68
     vmrg    $v16, $v16, $v29[0]
-    llv     $v18[12], 0x0068(curClipRatio)
+    llv     $v18[12], 0x0068(curClipRatio)      // clipRatio + 0x68
     vmrg    $v19, $v0, $v1[0]
     llv     $v18[8], (perspNorm + 2)($zero)
     vmrg    $v17, $v17, $v29[1]
-    lsv     $v18[10], 0x0006(curClipRatio)
+    lsv     $v18[10], 0x0006(curClipRatio)      // clipRatio + 0x06
     vmov    $v16[1], $v21[1]
     jr      $ra
-     addi   $8, $23, 0x0050
+     addi   $8, rdpCmdBufPtr, 0x50
 
 G_TRI2_handler:
 G_QUAD_handler:
     jal     f3dzex_00001A4C
-     sw     cmd_w1, 0x0004($23)
+     sw     cmd_w1, 4(rdpCmdBufPtr)
 G_TRI1_handler:
     li      $ra, run_next_DL_command
-    sw      cmd_w0, 0x0004($23) // store the command word (cmd_w0) into address $23 + 4
+    sw      cmd_w0, 4(rdpCmdBufPtr) // store the command word (cmd_w0) into address rdpCmdBufPtr + 4
 f3dzex_00001A4C:
-    lpv     $v2[0], 0x0000($23)
+    lpv     $v2[0], 0(rdpCmdBufPtr)
     // read the three vertex indices from the stored command word
-    lbu     $1, 0x0005($23)     // $1 = vertex 1 index
-    lbu     $2, 0x0006($23)     // $2 = vertex 2 index
-    lbu     $3, 0x0007($23)     // $3 = vertex 3 index
+    lbu     $1, 0x0005(rdpCmdBufPtr)     // $1 = vertex 1 index
+    lbu     $2, 0x0006(rdpCmdBufPtr)     // $2 = vertex 2 index
+    lbu     $3, 0x0007(rdpCmdBufPtr)     // $3 = vertex 3 index
     vor     $v3, $v0, $v31[5]
     lhu     $1, (vertexTable)($1) // convert vertex 1's index to its address
     vmudn   $v4, $v1, $v31[6]
@@ -1219,9 +1226,9 @@ shading_done:
     vmadn   $v15, $v0, $v0[0]
     sub     $5, $5, $11
     vsubc   $v4, $v0, $v4
-    sw      $5, 0x0010($23)
+    sw      $5, 0x0010(rdpCmdBufPtr)
     vsub    $v26, $v0, $v0
-    llv     $v27[0], 0x0010($23)
+    llv     $v27[0], 0x0010(rdpCmdBufPtr)
     vmudm   $v29, $v25, $v20
     mfc2    $5, $v17[1]
     vmadl   $v29, $v15, $v20
@@ -1242,19 +1249,19 @@ shading_done:
     vand    $v22, $v20, $v30[5]
 .endif
     vcr     $v15, $v15, $v30[i4]
-    sb      $11, 0x0000($23) // Store the triangle command id
+    sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
     vmudh   $v29, $v1, $v30[i5]
-    ssv     $v10[2], 0x0002($23) // Store YL edge coefficient
+    ssv     $v10[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
     vmadn   $v16, $v16, $v30[4]     // v30[4] is 0xFFF0
-    ssv     $v2[2], 0x0004($23) // Store YM edge coefficient
+    ssv     $v2[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
     vmadh   $v17, $v17, $v30[4]     // v30[4] is 0xFFF0
-    ssv     $v14[2], 0x0006($23) // Store YH edge coefficient
+    ssv     $v14[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vmudn   $v29, $v3, $v14[0]
     andi    $12, $5, 0x0080 // Extract the left major flag from $5
     vmadl   $v29, $vec2, $v4[1]
-    or      $12, $12, $7 // Combine the left major flag with the level and tile from the texture settings 
+    or      $12, $12, $7 // Combine the left major flag with the level and tile from the texture settings
     vmadm   $v29, $v15, $v4[1]
-    sb      $12, 0x0001($23) // Store the left major flag, level, and tile settings
+    sb      $12, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
     vmadn   $v2, $vec2, $v26[1]
     beqz    $9, f3dzex_00001D2C // If textures are not enabled, skip texture coefficient calculation
     vmadh   $v3, $v15, $v26[1]
@@ -1275,16 +1282,16 @@ shading_done:
     vmudm   $v29, $v22, $v14[0h]
     vmadh   $v22, $v22, $v13[0h]
     vmadn   $v25, $v0, $v0[0]
-    vmudm   $v29, $v10, $v14[6] ; acc = (v10 * v14[6]); v29 = mid(clamp(acc))
-    vmadh   $v10, $v10, $v13[6] ; acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
-    vmadn   $v13, $v0, $v0[0] ; v13 = lo(clamp(acc))
-    sdv     $v22[0], 0x0020($23)
+    vmudm   $v29, $v10, $v14[6] // acc = (v10 * v14[6]); v29 = mid(clamp(acc))
+    vmadh   $v10, $v10, $v13[6] // acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
+    vmadn   $v13, $v0, $v0[0]   // v13 = lo(clamp(acc))
+    sdv     $v22[0], 0x0020(rdpCmdBufPtr)
     vmrg    $v19, $v19, $v22
-    sdv     $v25[0], 0x0028($23) // 8
+    sdv     $v25[0], 0x0028(rdpCmdBufPtr) // 8
     vmrg    $v7, $v7, $v25
-    ldv     $v18[8], 0x0020($23) // 8
+    ldv     $v18[8], 0x0020(rdpCmdBufPtr) // 8
     vmrg    $v21, $v21, $v10
-    ldv     $v5[8], 0x0028($23) // 8
+    ldv     $v5[8], 0x0028(rdpCmdBufPtr) // 8
     vmrg    $v9, $v9, $v13
 f3dzex_00001D2C:
     vmudl   $v29, $v16, $v23
@@ -1294,33 +1301,33 @@ f3dzex_00001D2C:
     vmadn   $v23, $v16, $v24
     lh      $1, 0x0018($2)
     vmadh   $v24, $v17, $v24
-    addiu   $2, $23, 0x0020 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
+    addiu   $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
     vsubc   $v10, $v9, $v5
     andi    $3, $6, G_SHADE
     vsub    $v9, $v21, $v18
     sll     $1, $1, 14
     vsubc   $v13, $v7, $v5
-    sw      $1, 0x0008($23)         // Store XL edge coefficient
+    sw      $1, 0x0008(rdpCmdBufPtr)         // Store XL edge coefficient
     vsub    $v7, $v19, $v18
-    ssv     $v3[6], 0x0010($23)     // Store XH edge coefficient (integer part)
+    ssv     $v3[6], 0x0010(rdpCmdBufPtr)     // Store XH edge coefficient (integer part)
     vmudn   $v29, $v10, $v6[1]
-    ssv     $v2[6], 0x0012($23)     // Store XH edge coefficient (fractional part)
+    ssv     $v2[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
     vmadh   $v29, $v9, $v6[1]
-    ssv     $v3[4], 0x0018($23)     // Store XM edge coefficient (integer part)
+    ssv     $v3[4], 0x0018(rdpCmdBufPtr)     // Store XM edge coefficient (integer part)
     vmadn   $v29, $v13, $v12[1]
-    ssv     $v2[4], 0x001A($23)     // Store XM edge coefficient (fractional part)
+    ssv     $v2[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
     vmadh   $v29, $v7, $v12[1]
-    ssv     $v15[0], 0x000C($23)    // Store DxLDy edge coefficient (integer part)
+    ssv     $v15[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
     vreadacc $v2, ACC_MIDDLE
-    ssv     $v20[0], 0x000E($23)    // Store DxLDy edge coefficient (fractional part)
+    ssv     $v20[0], 0x000E(rdpCmdBufPtr)    // Store DxLDy edge coefficient (fractional part)
     vreadacc $v3, ACC_LOWER
-    ssv     $v15[6], 0x0014($23)    // Store DxHDy edge coefficient (integer part)
+    ssv     $v15[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
     vmudn   $v29, $v13, $v8[0]
-    ssv     $v20[6], 0x0016($23)    // Store DxHDy edge coefficient (fractional part)
+    ssv     $v20[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
     vmadh   $v29, $v7, $v8[0]
-    ssv     $v15[4], 0x001C($23)    // Store DxMDy edge coefficient (integer part)
+    ssv     $v15[4], 0x001C(rdpCmdBufPtr)    // Store DxMDy edge coefficient (integer part)
     vmadn   $v29, $v10, $v11[0]
-    ssv     $v20[4], 0x001E($23)    // Store DxMDy edge coefficient (fractional part)
+    ssv     $v20[4], 0x001E(rdpCmdBufPtr)    // Store DxMDy edge coefficient (fractional part)
     vmadh   $v29, $v9, $v11[0]
     sll     $11, $3, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
     vreadacc $v6, ACC_MIDDLE
@@ -1328,13 +1335,13 @@ f3dzex_00001D2C:
     vreadacc $v7, ACC_LOWER
     sll     $11, $9, 5              // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
     vmudl   $v29, $v2, $v23[1]
-    add     $23, $1, $11            // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
+    add     rdpCmdBufPtr, $1, $11            // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
     vmadm   $v29, $v3, $v23[1]
     andi    $6, $6, G_ZBUFFER       // Get the value of G_ZBUFFER from the current geometry mode
     vmadn   $v2, $v2, $v24[1]
     sll     $11, $6, 4              // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
     vmadh   $v3, $v3, $v24[1]
-    add     $23, $23, $11           // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
+    add     rdpCmdBufPtr, rdpCmdBufPtr, $11           // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
     vmudl   $v29, $v6, $v23[1]
     vmadm   $v29, $v7, $v23[1]
     vmadn   $v6, $v6, $v24[1]
@@ -1373,18 +1380,18 @@ f3dzex_00001D2C:
     vmudn   $v6, $v6, $v30[i6]      // v30[i6] is 0x0020
     sdv     $v18[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
     vmadh   $v7, $v7, $v30[i6]      // v30[i6] is 0x0020
-    ssv     $v8[14], 0x00FA($23)
+    ssv     $v8[14], 0x00FA(rdpCmdBufPtr)
     vmudl   $v29, $v10, $v30[i6]    // v30[i6] is 0x0020
-    ssv     $v9[14], 0x00F8($23)
+    ssv     $v9[14], 0x00F8(rdpCmdBufPtr)
     vmadn   $v5, $v5, $v30[i6]      // v30[i6] is 0x0020
-    ssv     $v2[14], 0x00F6($23)
+    ssv     $v2[14], 0x00F6(rdpCmdBufPtr)
     vmadh   $v18, $v18, $v30[i6]    // v30[i6] is 0x0020
-    ssv     $v3[14], 0x00F4($23)
-    ssv     $v6[14], 0x00FE($23)
-    ssv     $v7[14], 0x00FC($23)
-    ssv     $v5[14], 0x00F2($23)
+    ssv     $v3[14], 0x00F4(rdpCmdBufPtr)
+    ssv     $v6[14], 0x00FE(rdpCmdBufPtr)
+    ssv     $v7[14], 0x00FC(rdpCmdBufPtr)
+    ssv     $v5[14], 0x00F2(rdpCmdBufPtr)
     j       check_rdp_buffer_full
-    ssv     $v18[14], 0x00F0($23)
+    ssv     $v18[14], 0x00F0(rdpCmdBufPtr)
 
 no_z_buffer:
     sdv     $v5[0], 0x0010($2)      // Store RGBA shade color (fractional)
@@ -1427,7 +1434,7 @@ G_MODIFYVTX_handler:
     j       do_moveword
      lhu    vtxPtr, (vertexTable)(cmd_w0)
 
-.orga 0xF2C
+.org 0x1FAC
 
 // This subroutine sets up the values to load overlay 0 and then falls through
 // to load_overlay_and_enter to execute the load.
@@ -1485,8 +1492,8 @@ dma_write:
 
 // Overlay 0 controls the RDP and also stops the RSP when work is done
 Overlay0Address:
-    sub     $11, $23, $22
-    addiu   $12, $11, 0x0157
+    sub     $11, rdpCmdBufPtr, $22
+    addiu   $12, $11, RDP_CMD_BUFSIZE - 1
     bgezal  $12, flush_rdp_buffer
      nop
     jal     while_wait_dma_busy
@@ -1518,8 +1525,8 @@ ucode equ $11
 status equ $12
 task_yield:
     lw      ucode, OSTask + OSTask_ucode
-    sw      taskDataPtr, lbl_0BF8
-    sw      ucode, lbl_0BFC
+    sw      taskDataPtr, OS_YIELD_DATA_SIZE - 8
+    sw      ucode, OS_YIELD_DATA_SIZE - 4
     li      status, SP_SET_SIG1 | SP_SET_SIG2   // yielded and task done signals
     lw      $24, OSTask + OSTask_yield_data_ptr
     li      $20, -0x8000
@@ -1536,6 +1543,10 @@ break:
 
 .align 8
 Overlay0End:
+
+.if Overlay0End > Overlay01End_
+    .error "Overlay 0 too large"
+.endif
 
 // overlay 1 (0x170 bytes loaded into 0x1000)
 .headersize 0x00001000 - orga()
@@ -1678,6 +1689,10 @@ G_SETOTHERMODE_L_handler:
 .align 8
 Overlay1End:
 
+.if Overlay1End > Overlay01End_
+    .error "Overlay 1 too large"
+.endif
+
 .headersize Overlay23LoadAddress - orga()
 
 Overlay2Address:
@@ -1693,7 +1708,7 @@ f3dzex_ov2_000012E4:
 
 f3dzex_ov2_000012F4:
     bnez    $11, f3dzex_000017BC // Skip calculating lights if they're not out of date
-     addi   $6, $6, lightColors - 0x10 - (7 * 0x18)
+     addi   $6, $6, lightColors - 0x10 - (MAX_LIGHTS * 0x18)
     sb      cmd_w0, lightsValid
     // mv[x][y] is row x, column y
     // Matrix integer portion vector registers
@@ -1705,38 +1720,38 @@ f3dzex_ov2_000012F4:
     col1fra equ $v13
     col2fra equ $v14
     // Set up the column registers
-    lqv     col0fra,    (mvMatrix + 0x20)($zero)    // load rows 0-1 of mv (fractional)
-    lqv     col0int,    (mvMatrix + 0x00)($zero)    // load rows 0-1 of mv (integer)
-    lsv     col1fra[2], (mvMatrix + 0x2A)($zero)    // load mv[1][1] into col1 element 1 (fractional)
-    lsv     col1int[2], (mvMatrix + 0x0A)($zero)    // load mv[1][1] into col1 element 1 (integer)
-    vmov    col1fra[0], col0fra[1]                  // load mv[0][1] into col1 element 0 (fractional)
-    lsv     col2fra[4], (mvMatrix + 0x34)($zero)    // load mv[2][2] into col2 element 2 (fractional)
-    vmov    col1int[0], col0int[1]                  // load mv[0][1] into col1 element 0 (integer)
-    lsv     col2int[4], (mvMatrix + 0x14)($zero)    // load mv[2][2] into col2 element 2 (integer)
-    vmov    col2fra[0], col0fra[2]                  // load mv[0][2] into col2 element 0 (fractional)
-    li      $20, lightBuffer - (7 * 0x18) + 8       // set up pointer to light direction
-    vmov    col2int[0], col0int[2]                  // load mv[0][2] into col2 element 0 (integer)
-    lpv     $v7[0], (7 * 0x18)($20)                 // load light direction
-    vmov    col2fra[1], col0fra[6]                  // load mv[1][2] into col2 element 1 (fractional)
-    lsv     col1fra[4], (mvMatrix + 0x32)($zero)    // load mv[2][1] into col1 element 2 (fractional)
-    vmov    col2int[1], col0int[6]                  // load mv[1][2] into col2 element 1 (integer)
-    lsv     col1int[4], (mvMatrix + 0x12)($zero)    // load mv[2][1] into col1 element 2 (integer)
-    vmov    col0fra[1], col0fra[4]                  // load mv[1][0] into col0 element 1 (fractional)
-    lsv     col0fra[4], (mvMatrix + 0x30)($zero)    // load mv[2][0] into col0 element 2 (fractional)
-    vmov    col0int[1], col0int[4]                  // load mv[1][0] into col0 element 1 (integer)
-    lsv     col0int[4], (mvMatrix + 0x10)($zero)    // load mv[2][0] into col0 element 2 (integer)
+    lqv     col0fra,    (mvMatrix + 0x20)($zero)        // load rows 0-1 of mv (fractional)
+    lqv     col0int,    (mvMatrix + 0x00)($zero)        // load rows 0-1 of mv (integer)
+    lsv     col1fra[2], (mvMatrix + 0x2A)($zero)        // load mv[1][1] into col1 element 1 (fractional)
+    lsv     col1int[2], (mvMatrix + 0x0A)($zero)        // load mv[1][1] into col1 element 1 (integer)
+    vmov    col1fra[0], col0fra[1]                      // load mv[0][1] into col1 element 0 (fractional)
+    lsv     col2fra[4], (mvMatrix + 0x34)($zero)        // load mv[2][2] into col2 element 2 (fractional)
+    vmov    col1int[0], col0int[1]                      // load mv[0][1] into col1 element 0 (integer)
+    lsv     col2int[4], (mvMatrix + 0x14)($zero)        // load mv[2][2] into col2 element 2 (integer)
+    vmov    col2fra[0], col0fra[2]                      // load mv[0][2] into col2 element 0 (fractional)
+    li      $20, lightBuffer - (MAX_LIGHTS * 0x18) + 8  // set up pointer to light direction
+    vmov    col2int[0], col0int[2]                      // load mv[0][2] into col2 element 0 (integer)
+    lpv     $v7[0], (MAX_LIGHTS * 0x18)($20)            // load light direction
+    vmov    col2fra[1], col0fra[6]                      // load mv[1][2] into col2 element 1 (fractional)
+    lsv     col1fra[4], (mvMatrix + 0x32)($zero)        // load mv[2][1] into col1 element 2 (fractional)
+    vmov    col2int[1], col0int[6]                      // load mv[1][2] into col2 element 1 (integer)
+    lsv     col1int[4], (mvMatrix + 0x12)($zero)        // load mv[2][1] into col1 element 2 (integer)
+    vmov    col0fra[1], col0fra[4]                      // load mv[1][0] into col0 element 1 (fractional)
+    lsv     col0fra[4], (mvMatrix + 0x30)($zero)        // load mv[2][0] into col0 element 2 (fractional)
+    vmov    col0int[1], col0int[4]                      // load mv[1][0] into col0 element 1 (integer)
+    lsv     col0int[4], (mvMatrix + 0x10)($zero)        // load mv[2][0] into col0 element 2 (integer)
 @@loop:
     vmudn   $v29, col1fra, $v7[1]           // light y direction (fractional)
     vmadh   $v29, col1int, $v7[1]           // light y direction (integer)
     vmadn   $v29, col0fra, $v7[0]           // light x direction (fractional)
-    spv     $v15[0], (7 * 0x18 + 8)($20)
+    spv     $v15[0], (MAX_LIGHTS * 0x18 + 8)($20)
     vmadh   $v29, col0int, $v7[0]           // light x direction (integer)
-    lw      $12, (7 * 0x18 + 8)($20)
+    lw      $12, (MAX_LIGHTS * 0x18 + 8)($20)
     vmadn   $v29, col2fra, $v7[2]           // light z direction (fractional)
     vmadh   $v29, col2int, $v7[2]           // light z direction (integer)
     // Square the low 32 bits of each accumulator element
     vreadacc $v11, ACC_MIDDLE           // read the middle (bits 16..31) of the accumulator elements into v11
-    sw      $12, (7 * 0x18 + 0xC)($20)
+    sw      $12, (MAX_LIGHTS * 0x18 + 0xC)($20)
     vreadacc $v15, ACC_LOWER            // read the low (bits 0..15) of the accumulator elements into v15
     beq     $20, $6, f3dzex_000017BC    // exit if equal
      vmudl  $v29, $v11, $v11            // calculate the low partial product of the accumulator squared (low * low)
@@ -1752,7 +1767,7 @@ f3dzex_ov2_000012F4:
     vaddc   $v16, $v18, $v16[2]
     vadd    $v17, $v29, $v17[2]
     vrsqh   $v29[0], $v17[0]
-    lpv     $v7[0], (7 * 0x18 + 0x18)($20)
+    lpv     $v7[0], (MAX_LIGHTS * 0x18 + 0x18)($20)
     vrsql   $v16[0], $v16[0]
     vrsqh   $v17[0], $v0[0]
     vmudl   $v29, $v11, $v16[0]
@@ -1776,7 +1791,7 @@ light_vtx:
     lpv     $v20[0], 0x0098($9) // load light direction?
 .endif
     vadd    $v5, $v0, $v7[2h]
-    luv     $v27[0], 0x0008(inputVtxPos)
+    luv     $v27[0], 0x0008(inputVtxPos)    // Load texture coords, normal and alpha from the vertex
     vne     $v4, $v31, $v31[3h]
 .if UCODE_HAS_POINT_LIGHTING // point lighting
     andi    $11, $5, G_LIGHTING_POSITIONAL_H    // check if point lighting is enabled in the geometry mode
@@ -1909,7 +1924,7 @@ f3dzex_ovl2_0000155C:
     vmudh   $v2, $v29, $v29       // v2 = v29 * v29
     vreadacc $v2, ACC_LOWER       // v2 = accumulator lower
     vreadacc $v29, ACC_MIDDLE     // v2 = accumulator middle
-    vaddc   $v29, $v29, $v29[0q]  // 
+    vaddc   $v29, $v29, $v29[0q]
     vadd    $v2, $v2, $v2[0q]
     vaddc   $v29, $v29, $v29[2h]
     vadd    $v2, $v2, $v2[2h]
@@ -2045,9 +2060,5 @@ f3dzex_ovl2_00001758:
 
 .align 8
 Overlay2End:
-
-.if . > 0x00002000
-    .error "Not enough room in IMEM"
-.endif
 
 .close // CODE_FILE
