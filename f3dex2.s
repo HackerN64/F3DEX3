@@ -52,8 +52,6 @@ overlay_imem equ 0x0006
     .dh addr & 0xFFFF
 .endmacro
 
-DMEM equ $zero // Makes it easier to tell, at a glance, if a load/store comes from dmem directly.
-
 // RSP DMEM
 .create DATA_FILE, 0x0000
 
@@ -509,9 +507,9 @@ wait_dpc_start_valid:
     andi $11, $11, DPC_STATUS_DMA_BUSY | DPC_STATUS_START_VALID 
     bne $11, $zero, wait_dpc_start_valid
      sw $zero, lbl_00F0
-    addi $11, $zero, 2
+    addi $11, $zero, DPC_STATUS_SET_XBUS
     mtc0 $11, DPC_STATUS
-    addi $23, $zero, lbl_0BA8
+    addi $23, $zero, rdpCmdBuffer1
     mtc0 $23, DPC_START
     mtc0 $23, DPC_END
     lw $12, OSTask + OSTask_flags
@@ -521,23 +519,8 @@ wait_dpc_start_valid:
     beqz $12, f3dzex_xbus_0000111C
      sw $zero, OSTask + OSTask_flags
     j load_overlay1_init
-     lw $26, lbl_0BF8
-    nop // Bunch of nops here to make it the same size as the fifo code.
-    nop
-    nop
-    nop
-    nop
-    nop
-    nop
-    nop
-    nop
-    nop
-    nop
-    nop
-    nop
-    nop
-    nop
-    nop
+     lw $26, OS_YIELD_DATA_SIZE_FIFO - 8
+.fill 16 * 4 // Bunch of nops here to make it the same size as the fifo code.
 f3dzex_xbus_0000111C:
 .endif
     
@@ -722,11 +705,11 @@ check_rdp_buffer_full:
      mtc0 $23, DPC_END
 ovl0_04001260:
     mfc0 $11, DPC_STATUS
-    andi $11, $11, 0x600
+    andi $11, $11, DPC_STATUS_END_VALID | DPC_STATUS_START_VALID
     bne $11, $zero, ovl0_04001260
 ovl0_0400126C:
      mfc0 $11, DPC_CURRENT
-    addi $23, $zero, lbl_0BA8
+    addi $23, $zero, rdpCmdBuffer1
     beq $11, $23, ovl0_0400126C
      nop
     mtc0 $23, DPC_START
@@ -798,7 +781,7 @@ f3dzex_0000134C:
     vmadn   $v10, $v6, $v3
     vmadh   $v11, $v7, $v3
     vaddc   $v8, $v8, $v8[0q]
-    lqv     $v25[0], (linearGenerateCoefficients)(DMEM)
+    lqv     $v25[0], (linearGenerateCoefficients)($zero)
     vadd    $v9, $v9, $v9[0q]
     vaddc   $v10, $v10, $v10[0q]
     vadd    $v11, $v11, $v11[0q]
@@ -959,25 +942,25 @@ f3dzex_000017BC:
      li     $19, mvpMatrix
 
 g_vtx_load_mvp:
-    lqv     $v8,  (mvpMatrix +  0)(DMEM)            // load bytes  0-15 of the mvp matrix into v8
-    lqv     $v10, (mvpMatrix + 16)(DMEM)            // load bytes 16-31 of the mvp matrix into v10
-    lqv     $v12, (mvpMatrix + 32)(DMEM)            // load bytes 32-47 of the mvp matrix into v12
-    lqv     $v14, (mvpMatrix + 48)(DMEM)            // load bytes 48-63 of the mvp matrix into v14
+    lqv     $v8,  (mvpMatrix +  0)($zero)            // load bytes  0-15 of the mvp matrix into v8
+    lqv     $v10, (mvpMatrix + 16)($zero)            // load bytes 16-31 of the mvp matrix into v10
+    lqv     $v12, (mvpMatrix + 32)($zero)            // load bytes 32-47 of the mvp matrix into v12
+    lqv     $v14, (mvpMatrix + 48)($zero)            // load bytes 48-63 of the mvp matrix into v14
 
     vcopy   $v9, $v8                                 // copy v8 into v9
-    ldv     $v9, (mvpMatrix +  8)(DMEM)             // load bytes  8-15 of the mvp matrix into the lower half of v9
+    ldv     $v9, (mvpMatrix +  8)($zero)             // load bytes  8-15 of the mvp matrix into the lower half of v9
     vcopy   $v11, $v10
     ldv     $v11, (mvpMatrix + 24)($zero)            // load bytes 24-31 of the mvp matrix into the lower half of v11
     vcopy   $v13, $v12                               // copy v12 into v13
     ldv     $v13, (mvpMatrix + 40)($zero)            // load bytes 40-47 of the mvp matrix into the lower half of v13
     vcopy   $v15, $v14                               // copy v14 into v15
     ldv     $v15, (mvpMatrix + 56)($zero)            // load bytes 56-63 of the mvp matrix into the lower half of v13
-    ldv     $v8[8],  (mvpMatrix +  0)(DMEM)         // load bytes  0- 8 of the mvp matrix into the upper half of v8
-    ldv     $v10[8], (mvpMatrix + 16)(DMEM)         // load bytes 16-23 of the mvp matrix into the upper half of v10
+    ldv     $v8[8],  (mvpMatrix +  0)($zero)         // load bytes  0- 8 of the mvp matrix into the upper half of v8
+    ldv     $v10[8], (mvpMatrix + 16)($zero)         // load bytes 16-23 of the mvp matrix into the upper half of v10
     jal     f3dzex_000019F4
-     ldv    $v12[8], (mvpMatrix + 32)(DMEM)         // load bytes 32-39 of the mvp matrix into the upper half of v12
+     ldv    $v12[8], (mvpMatrix + 32)($zero)         // load bytes 32-39 of the mvp matrix into the upper half of v12
     jal     while_wait_dma_busy
-     ldv    $v14[8], (mvpMatrix + 48)(DMEM)         // load bytes 48-55 of the mvp matrix into the upper half of v14
+     ldv    $v14[8], (mvpMatrix + 48)($zero)         // load bytes 48-55 of the mvp matrix into the upper half of v14
     ldv     $v20[0], (inputVtxSize * 0)(inputVtxPos) // load the position of the 1st vertex into v20's lower 8 bytes
     vmov    $v16[5], $v21[1]                         // moves v21[1-2] into v16[5-6]
     ldv     $v20[8], (inputVtxSize * 1)(inputVtxPos) // load the position of the 2nd vertex into v20's upper 8 bytes
@@ -1133,7 +1116,7 @@ f3dzex_000019F4: // handle clipping?
     vmrg    $v16, $v16, $v29[0]
     llv     $v18[12], 0x0068(curClipRatio)      // clipRatio + 0x68
     vmrg    $v19, $v0, $v1[0]
-    llv     $v18[8], (perspNorm + 2)(DMEM)
+    llv     $v18[8], (perspNorm + 2)($zero)
     vmrg    $v17, $v17, $v29[1]
     lsv     $v18[10], 0x0006(curClipRatio)      // clipRatio + 0x06
     vmov    $v16[1], $v21[1]
@@ -1561,9 +1544,9 @@ dma_write:
 
 // Overlay 0 controls the RDP and also stops the RSP when work is done
 Overlay0Address:
+.if UCODE_METHOD == METHOD_FIFO
     sub     $11, rdpCmdBufPtr, $22
     addiu   $12, $11, RDP_CMD_BUFSIZE - 1
-.if UCODE_METHOD == METHOD_FIFO
     bgezal  $12, flush_rdp_buffer
      nop
     jal     while_wait_dma_busy
@@ -1605,22 +1588,22 @@ ucode equ $11
 status equ $12
 task_yield:
     lw      ucode, OSTask + OSTask_ucode
+.if UCODE_METHOD == METHOD_FIFO
     sw      taskDataPtr, OS_YIELD_DATA_SIZE - 8
     sw      ucode, OS_YIELD_DATA_SIZE - 4
     li      status, SP_SET_SIG1 | SP_SET_SIG2   // yielded and task done signals
-.if UCODE_METHOD == METHOD_FIFO
     lw      $24, OSTask + OSTask_yield_data_ptr
     li      $20, 0x8000
     li      $19, OS_YIELD_DATA_SIZE - 1
 .else // UCODE_METHOD == METHOD_XBUS
-    sw      taskDataPtr, inputBuffer // Is this right? Seems weird.
-    sw      ucode, inputBuffer + 4
+    sw      taskDataPtr, OS_YIELD_DATA_SIZE
+    sw      ucode, OS_YIELD_DATA_SIZE + 4
     lw      $24, OSTask + OSTask_yield_data_ptr
     li      $20, 0x8000
     jal     dma_read_write
      li     $19, OS_YIELD_DATA_SIZE - 1
     li      status, SP_SET_SIG1 | SP_SET_SIG2 // yielded and task done signals
-    addiu   $24, $24, lbl_0BF8
+    addiu   $24, $24, OS_YIELD_DATA_SIZE_FIFO - 8
     li      $20, -0x76E0 // ???
     li      $19, 7
 .endif
@@ -1920,8 +1903,8 @@ f3dzex_ovl2_0000140C:
     bne     $9, curClipRatio, f3dzex_ovl2_0000140C
      addi   $9, $9, -0x18
 f3dzex_ovl2_0000144C:
-    lqv     $v31[0], (v31Value)(DMEM)
-    lqv     $v30[0], (v30Value)(DMEM)
+    lqv     $v31[0], (v31Value)($zero)
+    lqv     $v30[0], (v30Value)($zero)
     llv     $v22[4], 0x0018(inputVtxPos)
     bgezal  $12, f3dzex_ovl2_00001480
      li     $12, -0x7F80
@@ -1955,37 +1938,37 @@ f3dzex_ovl2_00001480: // $12 is either 0 or -0x7F80
      ldv    $v14[8], 0x0030($12)
 
 f3dzex_ovl2_000014C4:
-    lsv     $v4[0], (mvMatrix)(DMEM)
-    lsv     $v3[0], (mvMatrix + 0x20)(DMEM)
-    lsv     $v21[0], (mvMatrix + 2)(DMEM)
-    lsv     $v28[0], (mvMatrix + 0x22)(DMEM)
-    lsv     $v30[0], (mvMatrix + 4)(DMEM)
+    lsv     $v4[0], (mvMatrix)($zero)
+    lsv     $v3[0], (mvMatrix + 0x20)($zero)
+    lsv     $v21[0], (mvMatrix + 2)($zero)
+    lsv     $v28[0], (mvMatrix + 0x22)($zero)
+    lsv     $v30[0], (mvMatrix + 4)($zero)
     vmov    $v4[4], $v4[0]
-    lsv     $v31[0], (mvMatrix + 0x24)(DMEM)
+    lsv     $v31[0], (mvMatrix + 0x24)($zero)
     vmov    $v3[4], $v3[0]
-    lsv     $v4[2], (mvMatrix + 8)(DMEM)
+    lsv     $v4[2], (mvMatrix + 8)($zero)
     vmov    $v21[4], $v21[0]
-    lsv     $v3[2], (mvMatrix + 0x28)(DMEM)
+    lsv     $v3[2], (mvMatrix + 0x28)($zero)
     vmov    $v28[4], $v28[0]
-    lsv     $v21[2], (mvMatrix + 0xA)(DMEM)
+    lsv     $v21[2], (mvMatrix + 0xA)($zero)
     vmov    $v30[4], $v30[0]
-    lsv     $v28[2], (mvMatrix + 0x2A)(DMEM)
+    lsv     $v28[2], (mvMatrix + 0x2A)($zero)
     vmov    $v31[4], $v31[0]
-    lsv     $v30[2], (mvMatrix + 0xC)(DMEM)
+    lsv     $v30[2], (mvMatrix + 0xC)($zero)
     vmov    $v4[5], $v4[1]
-    lsv     $v31[2], (mvMatrix + 0x2C)(DMEM)
+    lsv     $v31[2], (mvMatrix + 0x2C)($zero)
     vmov    $v3[5], $v3[1]
-    lsv     $v4[4], (mvMatrix + 0x10)(DMEM)
+    lsv     $v4[4], (mvMatrix + 0x10)($zero)
     vmov    $v21[5], $v21[1]
-    lsv     $v3[4], (mvMatrix + 0x30)(DMEM)
+    lsv     $v3[4], (mvMatrix + 0x30)($zero)
     vmov    $v28[5], $v28[1]
-    lsv     $v21[4], (mvMatrix + 0x12)(DMEM)
+    lsv     $v21[4], (mvMatrix + 0x12)($zero)
     vmov    $v30[5], $v30[1]
-    lsv     $v28[4], (mvMatrix + 0x32)(DMEM)
+    lsv     $v28[4], (mvMatrix + 0x32)($zero)
     vmov    $v31[5], $v31[1]    // v31[1] is 4
-    lsv     $v30[4], (mvMatrix + 0x14)(DMEM)
+    lsv     $v30[4], (mvMatrix + 0x14)($zero)
     vmov    $v4[6], $v4[2]
-    lsv     $v31[4], (mvMatrix + 0x34)(DMEM)
+    lsv     $v31[4], (mvMatrix + 0x34)($zero)
     vmov    $v3[6], $v3[2]
     or      $12, $zero, $zero
     vmov    $v21[6], $v21[2]
@@ -2127,7 +2110,7 @@ f3dzex_ovl2_00001708:
     vmulf   $v28, $v7, $v20[0h]
     vmacf   $v28, $v6, $v20[1h]
     vmacf   $v28, $v5, $v20[2h]
-    lqv     $v2[0], (linearGenerateCoefficients)(DMEM)
+    lqv     $v2[0], (linearGenerateCoefficients)($zero)
     vmudh   $v22, $v1, $v31[5]  // v31[5] is 16384
     vmacf   $v22, $v3, $v21[0h]
     beqz    $12, f3dzex_00001870

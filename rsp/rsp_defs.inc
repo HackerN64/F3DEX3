@@ -71,11 +71,12 @@ SP_STATUS_SIG7       equ 0x4000
 // RDP Status read flags
 DPC_STATUS_XBUS_DMA    equ 0x0001
 DPC_STATUS_DMA_BUSY    equ 0x0100
+DPC_STATUS_END_VALID   equ 0x0200
 DPC_STATUS_START_VALID equ 0x0400
 
 // RDP Status write flags
 DPC_STATUS_CLR_XBUS    equ 0x0001
-
+DPC_STATUS_SET_XBUS    equ 0x0002
 
 // Types
 TYPE_F3DEX2 equ 0
