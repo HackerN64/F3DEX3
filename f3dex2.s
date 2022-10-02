@@ -79,17 +79,19 @@ otherMode0: // command byte included, same as above
 otherMode1:
     .dw 0x00000000
 
-// 0x00D0-0x00DA: ??
+// 0x00D0-0x00D8: Saved texrect state for combining the multiple input commands into one RDP texrect command
 texrectWord1:
     .fill 4 // first word, has command byte, xh and yh
 texrectWord2:
     .fill 4 // second word, has tile, xl, yl
-rdpHalf1Val:
-    .dh 0x0000
 
-// 0x00DA-0x00DE: perspective norm
+// 0x00D8: First half of RDP value for split commands (shared by perspNorm moveword to be able to write a 32-bit value)
+rdpHalf1Val:
+    .fill 4
+
+// 0x00DC: perspective norm
 perspNorm:
-    .dw 0x0000FFFF
+    .dh 0xFFFF
 
 // 0x00DE: displaylist stack length
 displayListStackLength:
@@ -101,8 +103,8 @@ displayListStackLength:
 viewport:
     .fill 16
 
-// 0x00F0-0x00F4: ?
-lbl_00F0:
+// 0x00F0-0x00F4: Current RDP fifo output position
+rdpFifoPos:
     .fill 4
 
 // 0x00F4-0x00F8:
@@ -147,7 +149,7 @@ G_MWO_CLIP_RPY:
     .dw 0x00010001 // Nearclipping
 .endif
 
-// 0x1B0
+// 0x1B0: constants for register $v31
 v31Value:
     .dh 0xFFFF // 65535
     .dh 0x0004 // 4
@@ -158,6 +160,7 @@ v31Value:
     .dh 0x0420 // 1056
     .dh 0x7FFF // 32767
 
+// 0x1C0: constants for register $v30
 v30Value:
     .dh 0x7FFC
     .dh 0x1400
@@ -256,7 +259,7 @@ movewordTable:
     .dh fogFactor     // G_MW_FOG
     .dh lightColors   // G_MW_LIGHTCOL
     .dh mvpValid - 1  // G_MW_FORCEMTX
-    .dh perspNorm     // G_MW_PERSPNORM
+    .dh perspNorm - 2 // G_MW_PERSPNORM
 
 // 0x030E-0x0314: G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
 movememHandlerTable:
@@ -395,7 +398,7 @@ overlayInfo3:
 
 // 0x0420-0x0920: Vertex buffer
 vertexBuffer:
-    .skip (40 * 32) // 40 bytes per vertex, 32 vertices
+    .skip (vtxSize * 32) // 32 vertices
 
 // 0x0920-0x09C8: Input buffer
 inputBuffer:
@@ -414,26 +417,30 @@ tempMatrix:
 .skip 0x198
 
 RDP_CMD_BUFSIZE equ 0x158
-// 0x0BA8-0x0D00: RDP Command Buffer
+RDP_CMD_BUFSIZE_EXCESS equ 0xB0 // Maximum size of an RDP triangle command
+RDP_CMD_BUFSIZE_TOTAL equ RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS
+// 0x0BA8-0x0D00: First RDP Command Buffer
 rdpCmdBuffer1:
     .skip RDP_CMD_BUFSIZE
+rdpCmdBuffer1End:
+    .skip RDP_CMD_BUFSIZE_EXCESS
 
-.skip 0xB0
 
-// 0x0DB0-0x0F08: Another RDP Command Buffer?
+// 0x0DB0-0x0FB8: Second RDP Command Buffer
 rdpCmdBuffer2:
     .skip RDP_CMD_BUFSIZE
+rdpCmdBuffer2End:
+    .skip RDP_CMD_BUFSIZE_EXCESS
 
-// 0x0F08-0x0FC0: ??
-.skip 0xB8
+.if . > 0x00000FC0
+    .error "Not enough room in DMEM"
+.endif
+
+.org 0xFC0
 
 // 0x0FC0-0x1000: OSTask
 OSTask:
     .skip 0x40
-
-.if . > 0x00001000
-    .error "Not enough room in DMEM"
-.endif
 
 .close // DATA_FILE
 
@@ -447,6 +454,7 @@ cmd_w0 equ $25
 taskDataPtr equ $26
 inputBufferPos equ $27
 rdpCmdBufPtr equ $23
+rdpCmdBufEnd equ $22
 
 // Initialization routines
 // Everything up until displaylist_dma will get overwritten by ovl1
@@ -462,9 +470,9 @@ start:
 .if !(UCODE_IS_207_OR_OLDER)
     vadd    $v1, $v0, $v0   // $v0 is all 0s, $v1 also becomes all 0s
 .endif
-    li      $22, rdpCmdBuffer1 + RDP_CMD_BUFSIZE
+    li      rdpCmdBufEnd, rdpCmdBuffer1End
     vsub    $v1, $v0, $v31[0]   // Vector of 1s
-    lw      $11, lbl_00F0
+    lw      $11, rdpFifoPos
     lw      $12, OSTask + OSTask_flags
     li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // task done and yielded signals
     beqz    $11, task_init
@@ -500,7 +508,7 @@ wait_dpc_start_valid:
     mtc0    $2, DPC_START
     mtc0    $2, DPC_END
 f3dzex_0000111C:
-    sw      $2, lbl_00F0
+    sw      $2, rdpFifoPos
     lw      $11, matrixStackPtr
     bnez    $11, calculate_overlay_addrs
      lw     $11, OSTask + OSTask_dram_stack
@@ -637,11 +645,11 @@ G_SETSCISSOR_handler:
 check_rdp_buffer_full_and_run_next_cmd:
     li      $ra, run_next_DL_command    // Set up running the next DL command as the return address
 check_rdp_buffer_full:
-     sub    $11, rdpCmdBufPtr, $22      // todo what is $22
-    blez    $11, return_routine         // Return if $22 >= rdpCmdBufPtr
+     sub    $11, rdpCmdBufPtr, rdpCmdBufEnd
+    blez    $11, return_routine         // Return if rdpCmdBufEnd >= rdpCmdBufPtr
 flush_rdp_buffer:
      mfc0   $12, SP_DMA_BUSY
-    lw      $24, lbl_00F0
+    lw      $24, rdpFifoPos
     addiu   $19, $11, RDP_CMD_BUFSIZE
     bnez    $12, flush_rdp_buffer
      lw     $12, OSTask + OSTask_output_buff_size
@@ -667,12 +675,13 @@ f3dzex_000012A8:
     blez    $11, f3dzex_000012A8
 f3dzex_000012BC:
      add    $11, $24, $19
-    sw      $11, lbl_00F0
-    addi    $19, $19, -1                            // subtract 1 from the length
-    addi    $20, $22, -(0x2000 | RDP_CMD_BUFSIZE)   // The 0x2000 is meaningless, negative means write
-    xori    $22, $22, 0x0208    // 0xD00 ^ 0xF08 = 0x208
+    sw      $11, rdpFifoPos
+    // Set up the DMA from DMEM to the RDP fifo in RDRAM
+    addi    $19, $19, -1                                    // subtract 1 from the length
+    addi    $20, rdpCmdBufEnd, -(0x2000 | RDP_CMD_BUFSIZE)  // The 0x2000 is meaningless, negative means write
+    xori    rdpCmdBufEnd, rdpCmdBufEnd, rdpCmdBuffer1End ^ rdpCmdBuffer2End // Swap between the two RDP command buffers
     j       dma_read_write
-     addi   rdpCmdBufPtr, $22, -RDP_CMD_BUFSIZE
+     addi   rdpCmdBufPtr, rdpCmdBufEnd, -RDP_CMD_BUFSIZE    // Update the RDP command buffer pointer
 
 Overlay23LoadAddress:
 
@@ -800,19 +809,20 @@ f3dzex_0000134C:
     j       f3dzex_000019F4
      li   $ra, f3dzex_00001870 + 0x8000 // Why?
 
+outputVtxPos equ $15
 f3dzex_00001478:
 .if (UCODE_IS_F3DEX2_204H)
-    sdv     $v25[0], 0x03C8($15)
+    sdv     $v25[0], 0x03C8(outputVtxPos)
 .else
-    slv     $v25[0], 0x01C8($15)
+    slv     $v25[0], 0x01C8(outputVtxPos)
 .endif
-    ssv     $v26[4], 0x00CE($15)
-    suv     $v22[0], 0x03C0($15)
-    slv     $v22[8], 0x01C4($15)
+    ssv     $v26[4], 0x00CE(outputVtxPos)
+    suv     $v22[0], 0x03C0(outputVtxPos)
+    slv     $v22[8], 0x01C4(outputVtxPos)
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
-    ssv     $v3[4], 0x00CC($15)
+    ssv     $v3[4], 0x00CC(outputVtxPos)
 .endif
-    addi    $15, $15, -0x0028
+    addi    outputVtxPos, outputVtxPos, -vtxSize
     addi    $21, $21, 0x0002
 f3dzex_00001494:
     bnez    $16, f3dzex_00001320
@@ -861,7 +871,6 @@ Overlay23End_:
 
 do_lighting equ $6
 inputVtxPos equ $14
-outputVtxPos equ $15
 G_VTX_handler:
     lhu     $20, (vertexTable)(cmd_w0)      // Load the address of the provided vertex array
     jal     segmented_to_physical           // Convert the vertex array's segmented address (in $24) to a virtual one
@@ -1064,7 +1073,7 @@ f3dzex_000019F4: // handle clipping?
     vmrg    $v16, $v16, $v29[0]
     llv     $v18[12], 0x0068(curClipRatio)      // clipRatio + 0x68
     vmrg    $v19, $v0, $v1[0]
-    llv     $v18[8], (perspNorm + 2)($zero)
+    llv     $v18[8], (perspNorm)($zero)
     vmrg    $v17, $v17, $v29[1]
     lsv     $v18[10], 0x0006(curClipRatio)      // clipRatio + 0x06
     vmov    $v16[1], $v21[1]
@@ -1492,12 +1501,12 @@ dma_write:
 
 // Overlay 0 controls the RDP and also stops the RSP when work is done
 Overlay0Address:
-    sub     $11, rdpCmdBufPtr, $22
+    sub     $11, rdpCmdBufPtr, rdpCmdBufEnd
     addiu   $12, $11, RDP_CMD_BUFSIZE - 1
     bgezal  $12, flush_rdp_buffer
      nop
     jal     while_wait_dma_busy
-     lw     $24, lbl_00F0
+     lw     $24, rdpFifoPos
     bltz    $1, taskdone_and_break
      mtc0   $24, DPC_END            // Set the end pointer of the RDP so that it starts the task
     bnez    $1, task_yield
