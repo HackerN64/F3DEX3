@@ -1,4 +1,5 @@
 F3DZEX_*/
 F3DEX2_*/
 .vscode
-
+*.exe
+*.bat
