@@ -1,6 +1,11 @@
 // GBI: Graphics Binary Interface
 
+.if UCODE_METHOD == METHOD_FIFO
 OS_YIELD_DATA_SIZE equ 0xC00
+.else // UCODE_METHOD == METHOD_XBUS
+OS_YIELD_DATA_SIZE_FIFO equ 0xC00
+OS_YIELD_DATA_SIZE equ 0x920
+.endif
 
 // Geometry mode flags
 // First byte gets OR'd with 0xC8 to form triangle opcode. So we can use 0x80,

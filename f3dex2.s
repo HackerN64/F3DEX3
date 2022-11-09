@@ -541,6 +541,7 @@ start:
 .endif
     li      rdpCmdBufEnd, rdpCmdBuffer1End
     vsub    vOne, vZero, $v31[0]   // Vector of 1s
+.if UCODE_METHOD == METHOD_FIFO
     lw      $11, rdpFifoPos
     lw      $12, OSTask + OSTask_flags
     li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // task done and yielded signals
@@ -551,7 +552,6 @@ start:
      sw     $zero, OSTask + OSTask_flags
     j       load_overlay1_init              // Skip the initialization and go straight to loading overlay 1
      lw     taskDataPtr, OS_YIELD_DATA_SIZE - 8
-
 task_init:
     mfc0    $11, DPC_STATUS
     andi    $11, $11, DPC_STATUS_XBUS_DMA
@@ -578,6 +578,28 @@ wait_dpc_start_valid:
     mtc0    $2, DPC_END
 f3dzex_0000111C:
     sw      $2, rdpFifoPos
+.else // UCODE_METHOD == METHOD_XBUS
+wait_dpc_start_valid:
+    mfc0 $11, DPC_STATUS
+    andi $11, $11, DPC_STATUS_DMA_BUSY | DPC_STATUS_START_VALID 
+    bne $11, $zero, wait_dpc_start_valid
+     sw $zero, rdpFifoPos
+    addi $11, $zero, DPC_STATUS_SET_XBUS
+    mtc0 $11, DPC_STATUS
+    addi rdpCmdBufPtr, $zero, rdpCmdBuffer1
+    mtc0 rdpCmdBufPtr, DPC_START
+    mtc0 rdpCmdBufPtr, DPC_END
+    lw $12, OSTask + OSTask_flags
+    addi $1, $zero, SP_CLR_SIG2 | SP_CLR_SIG1
+    mtc0 $1, SP_STATUS
+    andi $12, $12, 1
+    beqz $12, f3dzex_xbus_0000111C
+     sw $zero, OSTask + OSTask_flags
+    j load_overlay1_init
+     lw taskDataPtr, OS_YIELD_DATA_SIZE_FIFO - 8
+.fill 16 * 4 // Bunch of nops here to make it the same size as the fifo code.
+f3dzex_xbus_0000111C:
+.endif
     lw      $11, matrixStackPtr
     bnez    $11, calculate_overlay_addrs
      lw     $11, OSTask + OSTask_dram_stack
@@ -713,6 +735,8 @@ G_SETSCISSOR_handler:
 
 check_rdp_buffer_full_and_run_next_cmd:
     li      $ra, run_next_DL_command    // Set up running the next DL command as the return address
+
+.if UCODE_METHOD == METHOD_FIFO
 check_rdp_buffer_full:
      sub    $11, rdpCmdBufPtr, rdpCmdBufEnd
     blez    $11, return_routine         // Return if rdpCmdBufEnd >= rdpCmdBufPtr
@@ -750,7 +774,35 @@ f3dzex_000012BC:
     addi    $20, rdpCmdBufEnd, -(0x2000 | RDP_CMD_BUFSIZE)  // The 0x2000 is meaningless, negative means write
     xori    rdpCmdBufEnd, rdpCmdBufEnd, rdpCmdBuffer1End ^ rdpCmdBuffer2End // Swap between the two RDP command buffers
     j       dma_read_write
-     addi   rdpCmdBufPtr, rdpCmdBufEnd, -RDP_CMD_BUFSIZE    // Update the RDP command buffer pointer
+     addi   rdpCmdBufPtr, rdpCmdBufEnd, -RDP_CMD_BUFSIZE
+.else // UCODE_METHOD == METHOD_XBUS
+check_rdp_buffer_full:
+    addi $11, rdpCmdBufPtr, -0xF10
+    blez $11, ovl0_04001284
+     mtc0 rdpCmdBufPtr, DPC_END
+ovl0_04001260:
+    mfc0 $11, DPC_STATUS
+    andi $11, $11, DPC_STATUS_END_VALID | DPC_STATUS_START_VALID
+    bne $11, $zero, ovl0_04001260
+ovl0_0400126C:
+     mfc0 $11, DPC_CURRENT
+    addi rdpCmdBufPtr, $zero, rdpCmdBuffer1
+    beq $11, rdpCmdBufPtr, ovl0_0400126C
+     nop
+    mtc0 rdpCmdBufPtr, DPC_START
+    mtc0 rdpCmdBufPtr, DPC_END
+ovl0_04001284:
+    mfc0 $11, DPC_CURRENT
+    sub $11, $11, rdpCmdBufPtr
+    blez $11, ovl0_0400129C
+     addi $11, $11, -0xB0
+    blez $11, ovl0_04001284
+     nop
+ovl0_0400129C:
+    jr $ra
+     nop
+    nop
+.endif
 
 Overlay23LoadAddress:
 
@@ -1607,6 +1659,7 @@ dma_write:
 
 // Overlay 0 controls the RDP and also stops the RSP when work is done
 Overlay0Address:
+.if UCODE_METHOD == METHOD_FIFO
     sub     $11, rdpCmdBufPtr, rdpCmdBufEnd
     addiu   $12, $11, RDP_CMD_BUFSIZE - 1
     bgezal  $12, flush_rdp_buffer
@@ -1615,6 +1668,10 @@ Overlay0Address:
      lw     $24, rdpFifoPos
     bltz    $1, taskdone_and_break
      mtc0   $24, DPC_END            // Set the end pointer of the RDP so that it starts the task
+.else // UCODE_METHOD == METHOD_XBUS
+    bltz    $1, taskdone_and_break
+     nop
+.endif
     bnez    $1, task_yield
      add    taskDataPtr, taskDataPtr, inputBufferPos
     lw      $24, 0x09C4(inputBufferPos) // Should this be (inputBufferEnd - 0x04)?
@@ -1623,6 +1680,12 @@ Overlay0Address:
     la      $20, start              // DMA address
     jal     dma_read_write          // initiate DMA read
      li     $19, 0x0F48 - 1
+.if UCODE_METHOD == METHOD_XBUS
+ovl0_xbus_wait_for_rdp:
+    mfc0 $11, DPC_STATUS
+    andi $11, $11, DPC_STATUS_DMA_BUSY
+    bnez $11, ovl0_xbus_wait_for_rdp // Keep looping while RDP is busy.
+.endif
     lw      $24, rdpHalf1Val
     la      $20, 0x0180             // DMA address; equal to but probably not actually spFxBase or clipRatio
     andi    $19, cmd_w0, 0x0FFF
@@ -1630,7 +1693,7 @@ Overlay0Address:
     jal     dma_read_write          // initate DMA read
      sub    $19, $19, $20
     j       while_wait_dma_busy
-.if (UCODE_IS_F3DEX2_204H)
+.if (UCODE_IS_F3DEX2_204H || UCODE_METHOD == METHOD_XBUS /* ??? */)
      li     $ra, taskdone_and_break_204H
 .else
      li     $ra, taskdone_and_break
@@ -1640,18 +1703,38 @@ ucode equ $11
 status equ $12
 task_yield:
     lw      ucode, OSTask + OSTask_ucode
+.if UCODE_METHOD == METHOD_FIFO
     sw      taskDataPtr, OS_YIELD_DATA_SIZE - 8
     sw      ucode, OS_YIELD_DATA_SIZE - 4
     li      status, SP_SET_SIG1 | SP_SET_SIG2   // yielded and task done signals
     lw      $24, OSTask + OSTask_yield_data_ptr
-    li      $20, -0x8000
+    li      $20, 0x8000
     li      $19, OS_YIELD_DATA_SIZE - 1
+.else // UCODE_METHOD == METHOD_XBUS
+    sw      taskDataPtr, OS_YIELD_DATA_SIZE
+    sw      ucode, OS_YIELD_DATA_SIZE + 4
+    lw      $24, OSTask + OSTask_yield_data_ptr
+    li      $20, 0x8000
+    jal     dma_read_write
+     li     $19, OS_YIELD_DATA_SIZE - 1
+    li      status, SP_SET_SIG1 | SP_SET_SIG2 // yielded and task done signals
+    addiu   $24, $24, OS_YIELD_DATA_SIZE_FIFO - 8
+    li      $20, -0x76E0 // ???
+    li      $19, 7
+.endif
     j       dma_read_write
 taskdone_and_break_204H: // Only used in f3dex2 2.04H
      li     $ra, break
 taskdone_and_break:
     li      status, SP_SET_SIG2   // task done signal
 break:
+.if UCODE_METHOD == METHOD_XBUS
+ovl0_xbus_wait_for_rdp_2:
+    mfc0 $11, DPC_STATUS
+    andi $11, $11, DPC_STATUS_DMA_BUSY
+    bnez $11, ovl0_xbus_wait_for_rdp_2 // Keep looping while RDP is busy.
+     nop
+.endif
     mtc0    status, SP_STATUS
     break   0
     nop
