@@ -3,9 +3,20 @@
 OS_YIELD_DATA_SIZE equ 0xC00
 
 // Geometry mode flags
+// First byte gets OR'd with 0xC8 to form triangle opcode. So we can use 0x80,
+// 0x40, and 0x08 for other purposes while remaining forward compatible. (Of
+// course, if you only care about backward compatibility, you can AND 0x07
+// before the OR 0xC8 and use all the extra bits.) Note that backward compatible
+// means a new/modded microcode will run old/vanilla DLs correctly, and forward
+// compatible means an old/vanilla microcode will run DLs made for a new/modded
+// microcode without any problems besides the specific new features missing.
 G_ZBUFFER               equ 0x00000001
 G_TEXTURE_ENABLE        equ 0x00000002
 G_SHADE                 equ 0x00000004
+// In this byte, the whole byte is used as an index into a table, so using any
+// other bits will break forwards compatibility. Again, if you only want
+// backwards compatibility, AND 0x06 when this is loaded and then you can use
+// all six other bits.
 G_CULL_FRONT            equ 0x00000200
 G_CULL_BACK             equ 0x00000400
 G_CULL_BOTH             equ 0x00000600
@@ -13,10 +24,15 @@ G_FOG                   equ 0x00010000
 G_LIGHTING              equ 0x00020000
 G_TEXTURE_GEN           equ 0x00040000
 G_TEXTURE_GEN_LINEAR    equ 0x00080000
-G_LOD                   equ 0x00100000
+G_LOD                   equ 0x00100000 // Not used in any ucodes in repo
 G_SHADING_SMOOTH        equ 0x00200000
 G_LIGHTING_POSITIONAL   equ 0x00400000
-G_CLIPPING              equ 0x00800000
+G_CLIPPING              equ 0x00800000 // Initially on, but never checked
+// The top byte holds the geometry mode opcode in the clear mask, so all its
+// bits will either get cleared every time geom mode is set, or can never be
+// cleared. The info in gbi.h warning programmers not to use the high 8 bits
+// because they form a "clip code mask" is kind of irrelevant given that these
+// bits can't be properly set or cleared.
 
 G_FOG_H                 equ G_FOG / 0x10000
 G_LIGHTING_H            equ G_LIGHTING / 0x10000
@@ -100,3 +116,4 @@ G_MV_MATRIX   equ 0x0E
 
 inputVtxSize equ 0x10
 vtxSize equ 0x28
+lightSize equ 0x18

@@ -9,6 +9,10 @@
     .error "armips 0.11 or newer is required"
 .endif
 
+// Not-application-specific global registers
+vZero equ $v0
+vOne equ $v1
+
 // Tweak the li and la macros so that the output matches
 .macro li, reg, imm
     addi reg, $zero, imm
@@ -24,16 +28,16 @@
 
 // Vector macros
 .macro vcopy, dst, src
-    vadd dst, src, $v0[0]
+    vadd dst, src, vZero[0]
 .endmacro
 
 .macro vclr, dst
     vxor dst, dst, dst
 .endmacro
 
-ACC_LOWER equ 0
+ACC_UPPER equ 0
 ACC_MIDDLE equ 1
-ACC_UPPER equ 2
+ACC_LOWER equ 2
 .macro vreadacc, dst, N
     vsar dst, dst, dst[N]
 .endmacro
@@ -55,6 +59,22 @@ overlay_imem equ 0x0006
 // RSP DMEM
 .create DATA_FILE, 0x0000
 
+/*
+Matrices are stored and used in a transposed format compared to how they are
+normally written in mathematics. For the integer part:
+00 02 04 06  typical  Xscl Rot  Rot  0
+08 0A 0C 0E  use:     Rot  Yscl Rot  0
+10 12 14 16           Rot  Rot  Zscl 0
+18 1A 1C 1E           Xpos Ypos Zpos 1
+The fractional part comes next and is in the same format.
+Applying this transformation is done by multiplying a row vector times the
+matrix, like:
+X  Y  Z  1  *  Xscl Rot  Rot  0  =  NewX NewY NewZ 1
+               Rot  Yscl Rot  0
+               Rot  Rot  Zscl 0
+               Xpos Ypos Zpos 1
+In C, the matrix is accessed as matrix[row][col], and the vector is vector[row].
+*/
 // 0x0000-0x0040: modelview matrix
 mvMatrix:
     .fill 64
@@ -66,6 +86,17 @@ pMatrix:
 // 0x0080-0x00C0: modelviewprojection matrix
 mvpMatrix:
     .fill 64
+    
+// Not global names, but used multiple times with the same meaning.
+// Matrix row X integer/fractional
+mxr0i equ $v8
+mxr1i equ $v9
+mxr2i equ $v10
+mxr3i equ $v11
+mxr0f equ $v12
+mxr1f equ $v13
+mxr2f equ $v14
+mxr3f equ $v15
 
 // 0x00C0-0x00C8: scissor (four 12-bit values)
 scissorUpLeft: // the command byte is included since the command word is copied verbatim
@@ -125,6 +156,13 @@ displayListStack:
     .ascii NAME, 0x0A
 
 .align 16
+
+// Base address for RSP effects DMEM region (see discussion in lighting below).
+// Could pick a better name, basically a global fixed DMEM pointer used with
+// fixed offsets to things in this region. Perhaps had to do with DMEM overlays
+// at some point in development.
+spFxBase:
+spFxBaseReg equ $13
 
 // 0x0180-0x1B0: clipping values
 clipRatio:
@@ -192,12 +230,13 @@ mvpValid:
     .db 0x01
 
 // 0x01DA
-    .dh 0x0000 // Shared padding to allow mvpValid and numLights to both be written to as 32-bit words for moveword
+    .dh 0x0000 // Shared padding to allow mvpValid (probably lightsValid?) and
+               // numLightsx18 to both be written to as 32-bit words for moveword
 
 // 0x01DC
-lightsValid:
+lightsValid:   // Gets overwritten with 0 when numLights is written with moveword.
     .db 1
-numLights:
+numLightsx18:
     .db 0
 
     .db 11
@@ -222,16 +261,47 @@ geometryModeLabel:
 // excluding ambient light
 MAX_LIGHTS equ 7
 
-// 0x01F0-0x021F: Light data
-lightBuffer:
-    .fill ((MAX_LIGHTS + 1) * 6)
-
-// 0x0220-0x0240: Light colors
-lightColors:
-    .fill ((MAX_LIGHTS + 1) * 4)
-
-// 0x0240-0x02E0: ??
-.skip 0xA0
+// 0x01F0-0x02E0: Light data; a total of 10 * lightSize light slots.
+// Each slot's data is either directional or point (each pair of letters is a byte):
+//      Directional lights:
+// 0x00 RR GG BB 00 RR GG BB -- NX NY NZ -- -- -- -- --
+// 0x10 TX TY TZ -- TX TY TZ -- (Normals transformed to camera space)
+//      Point lights: 
+// 0x00 RR GG BB CC RR GG BB LL XXXX YYYY ZZZZ QQ --
+// 0x10 -- -- -- -- -- -- -- -- (Invalid transformed normals get stored here)
+// CC: constant attenuation factor (0 indicates directional light)
+// LL: linear attenuation factor
+// QQ: quadratic attenuation factor
+//
+// First there are two lights, whose directions define the X and Y directions
+// for texgen, via g(s)SPLookAtX/Y. The colors are ignored. These lights get
+// transformed normals. g(s)SPLight which point here start copying at n*24+24,
+// where n starts from 1 for one light (or zero lights), which effectively
+// points at lightBufferMain.
+lightBufferLookat:
+    .fill (2 * lightSize)
+// Then there are the main 8 lights. This is between one and seven directional /
+// point (if built with this enabled) lights, plus the ambient light at the end.
+// Zero lights is not supported, and is encoded as one light with black color
+// (does not affect the result). Once there is one point light, the rest (until
+// ambient) are also assumed to be point lights.
+lightBufferMain:
+    .fill (8 * lightSize)
+// Code uses pointers relative to spFxBase, with immediate offsets, so that
+// another register isn't needed to store the start or end address of the array.
+curLight    equ $9 // With ltBufOfs immediate added, points to current light
+                   // (current max in list, counting down).
+tmpCurLight equ $6 // Same meaning, another register.
+// Pointers are kept relative to spFxBase; this offset gets them to point to
+// lightBufferMain instead.
+ltBufOfs equ (lightBufferMain - spFxBase)
+// One more topic on lighting: The point lighting code uses MV transpose instead
+// of MV inverse to transform from camera space to model space. If MV has a
+// uniform scale (same scale in X, Y, and Z), MV transpose = MV inverse times a
+// scale factor. The lighting code effectively gets rid of the scale factor, so
+// this is okay. But, if the matrix has nonuniform scaling, and especially if it
+// has shear (nonuniform scaling applied somewhere in the middle of the matrix
+// stack, such as to a whole skeletal / skinned mesh), this will not be correct.
 
 // 0x02E0-0x02F0: Overlay 0/1 Table
 overlayInfo0:
@@ -241,25 +311,25 @@ overlayInfo1:
 
 // 0x02F0-0x02FE: Movemem table
 movememTable:
-    .dh tempMatrix   // G_MTX multiply temp matrix (model)
-    .dh mvMatrix     // G_MV_MMTX
-    .dh tempMatrix   // G_MTX multiply temp matrix (projection)
-    .dh pMatrix      // G_MV_PMTX
-    .dh viewport     // G_MV_VIEWPORT
-    .dh lightBuffer  // G_MV_LIGHT
-    .dh vertexBuffer // G_MV_POINT
+    .dh tempMatrix        // G_MTX multiply temp matrix (model)
+    .dh mvMatrix          // G_MV_MMTX
+    .dh tempMatrix        // G_MTX multiply temp matrix (projection)
+    .dh pMatrix           // G_MV_PMTX
+    .dh viewport          // G_MV_VIEWPORT
+    .dh lightBufferLookat // G_MV_LIGHT
+    .dh vertexBuffer      // G_MV_POINT
 // Further entries in the movemem table come from the moveword table
 
 // 0x02FE-0x030E: moveword table
 movewordTable:
-    .dh mvpMatrix     // G_MW_MATRIX
-    .dh numLights - 3 // G_MW_NUMLIGHT
-    .dh clipRatio     // G_MW_CLIP
-    .dh segmentTable  // G_MW_SEGMENT
-    .dh fogFactor     // G_MW_FOG
-    .dh lightColors   // G_MW_LIGHTCOL
-    .dh mvpValid - 1  // G_MW_FORCEMTX
-    .dh perspNorm - 2 // G_MW_PERSPNORM
+    .dh mvpMatrix        // G_MW_MATRIX
+    .dh numLightsx18 - 3 // G_MW_NUMLIGHT
+    .dh clipRatio        // G_MW_CLIP
+    .dh segmentTable     // G_MW_SEGMENT
+    .dh fogFactor        // G_MW_FOG
+    .dh lightBufferMain  // G_MW_LIGHTCOL
+    .dh mvpValid - 1     // G_MW_FORCEMTX
+    .dh perspNorm - 2    // G_MW_PERSPNORM
 
 // 0x030E-0x0314: G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
 movememHandlerTable:
@@ -448,7 +518,6 @@ OSTask:
 .create CODE_FILE, 0x00001080
 
 // Global registers
-curClipRatio equ $13
 cmd_w1 equ $24
 cmd_w0 equ $25
 taskDataPtr equ $26
@@ -460,18 +529,18 @@ rdpCmdBufEnd equ $22
 // Everything up until displaylist_dma will get overwritten by ovl1
 start:
 .if UCODE_TYPE == TYPE_F3DZEX && UCODE_ID < 2
-    vor     $v0, $v16, $v16 // Sets $v0 to $v16
+    vor     vZero, $v16, $v16 // Sets vZero to $v16
 .else
-    vclr    $v0             // Clear $v0
+    vclr    vZero             // Clear vZero
 .endif
     lqv     $v31[0], (v31Value)($zero)
     lqv     $v30[0], (v30Value)($zero)
     li      rdpCmdBufPtr, rdpCmdBuffer1
 .if !(UCODE_IS_207_OR_OLDER)
-    vadd    $v1, $v0, $v0   // $v0 is all 0s, $v1 also becomes all 0s
+    vadd    vOne, vZero, vZero   // vZero is all 0s, vOne also becomes all 0s
 .endif
     li      rdpCmdBufEnd, rdpCmdBuffer1End
-    vsub    $v1, $v0, $v31[0]   // Vector of 1s
+    vsub    vOne, vZero, $v31[0]   // Vector of 1s
     lw      $11, rdpFifoPos
     lw      $12, OSTask + OSTask_flags
     li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // task done and yielded signals
@@ -577,7 +646,7 @@ G_SPECIAL_1_handler:    // Seems to be a manual trigger for mvp recalculation
     li      $21, pMatrix
     li      $20, mvMatrix
     li      $19, mvpMatrix
-    j       mtx_concat
+    j       mtx_multiply
      sb     cmd_w0, mvpValid
 .endif
 
@@ -689,6 +758,11 @@ Overlay23LoadAddress:
 savedRA equ $30
 savedNearclip equ $29
 
+vPairMVPPosI equ $v24
+vPairMVPPosF equ $v23
+vPairST equ $v22
+vPairRGBATemp equ $v7
+
 Overlay3Address:
     li      $11, overlayInfo2       // set up a load for overlay 2
     j       load_overlay_and_enter  // load overlay 2
@@ -748,11 +822,11 @@ f3dzex_0000134C:
 .if (UCODE_IS_F3DEX2_204H) // Only in F3DEX2 2.04H
     vrcph   $v29[0], $v11[3]
 .else
-    vor     $v29, $v11, $v1[0]
+    vor     $v29, $v11, vOne[0]
     vrcph   $v3[3], $v11[3]
 .endif
     vrcpl   $v2[3], $v10[3]
-    vrcph   $v3[3], $v0[0]
+    vrcph   $v3[3], vZero[0]
 .if (UCODE_IS_F3DEX2_204H) // Only in F3DEX2 2.04H
     vabs    $v29, $v11, $v25[3]
 .else
@@ -760,19 +834,19 @@ f3dzex_0000134C:
 .endif
     vmudn   $v2, $v2, $v29[3]
     vmadh   $v3, $v3, $v29[3]
-    veq     $v3, $v3, $v0[0]
+    veq     $v3, $v3, vZero[0]
     vmrg    $v2, $v2, $v31[0]
     vmudl   $v29, $v10, $v2[3]
     vmadm   $v11, $v11, $v2[3]
-    vmadn   $v10, $v0, $v0[0]
+    vmadn   $v10, vZero, vZero[0]
     vrcph   $v13[3], $v11[3]
     vrcpl   $v12[3], $v10[3]
-    vrcph   $v13[3], $v0[0]
+    vrcph   $v13[3], vZero[0]
     vmudl   $v29, $v12, $v10
     vmadm   $v29, $v13, $v10
     vmadn   $v10, $v12, $v11
     vmadh   $v11, $v13, $v11
-    vmudh   $v29, $v1, $v31[1]
+    vmudh   $v29, vOne, $v31[1]
     vmadn   $v10, $v10, $v31[4]
     vmadh   $v11, $v11, $v31[4]
     vmudl   $v29, $v12, $v10
@@ -789,25 +863,25 @@ f3dzex_0000134C:
     llv     $v25[8], 0x0014($19)
     vmudl   $v29, $v10, $v2[3]
     vmadm   $v11, $v11, $v2[3]
-    vmadn   $v10, $v10, $v0[0]
-    vlt     $v11, $v11, $v1[0]
+    vmadn   $v10, $v10, vZero[0]
+    vlt     $v11, $v11, vOne[0]
     vmrg    $v10, $v10, $v31[0]
-    vsubc   $v29, $v10, $v1[0]
-    vge     $v11, $v11, $v0[0]
-    vmrg    $v10, $v10, $v1[0]
+    vsubc   $v29, $v10, vOne[0]
+    vge     $v11, $v11, vZero[0]
+    vmrg    $v10, $v10, vOne[0]
     vmudn   $v2, $v10, $v31[0]
     vmudl   $v29, $v6, $v10[3]
     vmadm   $v29, $v7, $v10[3]
     vmadl   $v29, $v4, $v2[3]
-    vmadm   $v24, $v5, $v2[3]
-    vmadn   $v23, $v0, $v0[0]
+    vmadm   vPairMVPPosI, $v5, $v2[3]
+    vmadn   vPairMVPPosF, vZero, vZero[0]
     vmudm   $v29, $v26, $v10[3]
-    vmadm   $v22, $v25, $v2[3]
+    vmadm   vPairST, $v25, $v2[3]
     li      $7, 0x0000
     li      $1, 0x0002
     sh      $15, (lbl_03D0)($21)
-    j       f3dzex_000019F4
-     li   $ra, f3dzex_00001870 + 0x8000 // Why?
+    j       load_spFx_global_values // Goes to load_spFx_global_values, then to vertices_store, then
+     li   $ra, vertices_store + 0x8000 // comes back here, via bltz $ra, f3dzex_00001478
 
 outputVtxPos equ $15
 f3dzex_00001478:
@@ -817,8 +891,8 @@ f3dzex_00001478:
     slv     $v25[0], 0x01C8(outputVtxPos)
 .endif
     ssv     $v26[4], 0x00CE(outputVtxPos)
-    suv     $v22[0], 0x03C0(outputVtxPos)
-    slv     $v22[8], 0x01C4(outputVtxPos)
+    suv     vPairST[0], 0x03C0(outputVtxPos)
+    slv     vPairST[8], 0x01C4(outputVtxPos)
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
     ssv     $v3[4], 0x00CC(outputVtxPos)
 .endif
@@ -851,7 +925,7 @@ f3dzex_000014C4:
     lhu     $2, 0x03CC(reg1)
     lhu     $3, 0x03CE($21)
     mtc2    $1, $v2[10]
-    vor     $v3, $v0, $v31[5]
+    vor     $v3, vZero, $v31[5]
     mtc2    $2, $v4[12]
     jal     f3dzex_00001A7C
      mtc2   $3, $v2[14]
@@ -869,8 +943,15 @@ Overlay3End:
 
 Overlay23End_:
 
-do_lighting equ $6
 inputVtxPos equ $14
+tempCmdBuf50 equ $8
+// See load_spFx_global_values for detailed contents
+vFxScaleFMin equ $v16
+vFxTransFMax equ $v17
+vFxMisc      equ $v18
+vFxMask      equ $v19
+vFxNegScale  equ $v21
+
 G_VTX_handler:
     lhu     $20, (vertexTable)(cmd_w0)      // Load the address of the provided vertex array
     jal     segmented_to_physical           // Convert the vertex array's segmented address (in $24) to a virtual one
@@ -884,164 +965,180 @@ G_VTX_handler:
     lhu     outputVtxPos, (vertexTable)(outputVtxPos)
     move    inputVtxPos, $20
     lbu     $8, mvpValid
-    andi    $6, $5, G_LIGHTING_H
-    bnez    $6, Overlay23LoadAddress    // This will always end up in overlay 2, as the start of overlay 3 loads and enters overlay 2
+    andi    tmpCurLight, $5, G_LIGHTING_H  // If no lighting, tmpCurLight is 0, skips transforming light dirs and setting this up as a pointer
+    bnez    tmpCurLight, Overlay23LoadAddress  // This will always end up in overlay 2, as the start of overlay 3 loads and enters overlay 2
      andi   $7, $5, G_FOG_H
-f3dzex_000017BC:
-    bnez    $8, g_vtx_load_mvp          // Skip recalculating the mvp matrix if it's already up-to-date
-     sll    $7, $7, 3                   // $7 is 8 if G_FOG is set, 0 otherwise
-    sb      cmd_w0, mvpValid
-    li      $21, pMatrix
+after_light_dir_xfrm:
+    bnez    $8, vertex_skip_recalc_mvp  // Skip recalculating the mvp matrix if it's already up-to-date
+     sll    $7, $7, 3                 // $7 is 8 if G_FOG is set, 0 otherwise
+    sb      cmd_w0, mvpValid          // Set mvpValid
+    li      $21, pMatrix              // Arguments to mtx_multiply
     li      $20, mvMatrix
     // Calculate the MVP matrix
-    jal     mtx_concat
+    jal     mtx_multiply
      li     $19, mvpMatrix
 
-g_vtx_load_mvp:
-    lqv     $v8,  (mvpMatrix +  0)($zero)            // load bytes  0-15 of the mvp matrix into v8
-    lqv     $v10, (mvpMatrix + 16)($zero)            // load bytes 16-31 of the mvp matrix into v10
-    lqv     $v12, (mvpMatrix + 32)($zero)            // load bytes 32-47 of the mvp matrix into v12
-    lqv     $v14, (mvpMatrix + 48)($zero)            // load bytes 48-63 of the mvp matrix into v14
-
-    vcopy   $v9, $v8                                 // copy v8 into v9
-    ldv     $v9, (mvpMatrix +  8)($zero)             // load bytes  8-15 of the mvp matrix into the lower half of v9
-    vcopy   $v11, $v10                               // copy v10 into v11
-    ldv     $v11, (mvpMatrix + 24)($zero)            // load bytes 24-31 of the mvp matrix into the lower half of v11
-    vcopy   $v13, $v12                               // copy v12 into v13
-    ldv     $v13, (mvpMatrix + 40)($zero)            // load bytes 40-47 of the mvp matrix into the lower half of v13
-    vcopy   $v15, $v14                               // copy v14 into v15
-    ldv     $v15, (mvpMatrix + 56)($zero)            // load bytes 56-63 of the mvp matrix into the lower half of v13
-
-    ldv     $v8[8],  (mvpMatrix +  0)($zero)         // load bytes  0- 8 of the mvp matrix into the upper half of v8
-    ldv     $v10[8], (mvpMatrix + 16)($zero)         // load bytes 16-23 of the mvp matrix into the upper half of v10
-    jal     f3dzex_000019F4
-     ldv    $v12[8], (mvpMatrix + 32)($zero)         // load bytes 32-39 of the mvp matrix into the upper half of v12
+vertex_skip_recalc_mvp:
+    /* Load MVP matrix as follows--note that translation is in the bottom row,
+    not the right column.
+    Elem   0   1   2   3   4   5   6   7      (Example data)
+    I v8  00  02  04  06  00  02  04  06      Xscl Rot  Rot   0
+    I v9  08  0A  0C  0E  08  0A  0C  0E      Rot  Yscl Rot   0
+    I v10 10  12  14  16  10  12  14  16      Rot  Rot  Zscl  0
+    I v11 18  1A  1C  1E  18  1A  1C  1E      Xpos Ypos Zpos  1
+    F v12 20  22  24  26  20  22  24  26
+    F v13 28  2A  2C  2E  28  2A  2C  2E
+    F v14 30  32  34  36  30  32  34  36
+    F v15 38  3A  3C  3E  38  3A  3C  3E
+    Vector regs contain rows of original matrix (v11/v15 have translations)
+    */
+    lqv     mxr0i,    (mvpMatrix +  0)($zero)
+    lqv     mxr2i,    (mvpMatrix + 16)($zero)
+    lqv     mxr0f,    (mvpMatrix + 32)($zero)
+    lqv     mxr2f,    (mvpMatrix + 48)($zero)
+    vcopy   mxr1i, mxr0i
+    ldv     mxr1i,    (mvpMatrix +  8)($zero)
+    vcopy   mxr3i, mxr2i
+    ldv     mxr3i,    (mvpMatrix + 24)($zero)
+    vcopy   mxr1f, mxr0f
+    ldv     mxr1f,    (mvpMatrix + 40)($zero)
+    vcopy   mxr3f, mxr2f
+    ldv     mxr3f,    (mvpMatrix + 56)($zero)
+    ldv     mxr0i[8], (mvpMatrix +  0)($zero)
+    ldv     mxr2i[8], (mvpMatrix + 16)($zero)
+    jal     load_spFx_global_values
+     ldv    mxr0f[8], (mvpMatrix + 32)($zero)
     jal     while_wait_dma_busy
-     ldv    $v14[8], (mvpMatrix + 48)($zero)         // load bytes 48-55 of the mvp matrix into the upper half of v14
+     ldv    mxr2f[8], (mvpMatrix + 48)($zero)
     ldv     $v20[0], (inputVtxSize * 0)(inputVtxPos) // load the position of the 1st vertex into v20's lower 8 bytes
-    vmov    $v16[5], $v21[1]                         // moves v21[1-2] into v16[5-6]
+    vmov    vFxScaleFMin[5], vFxNegScale[1]          // Finish building vFxScaleFMin
     ldv     $v20[8], (inputVtxSize * 1)(inputVtxPos) // load the position of the 2nd vertex into v20's upper 8 bytes
 
-f3dzex_0000182C:
-    vmudn   $v29, $v15, $v1[0]
-    lw      $11, (inputVtxSize + 0xC)(inputVtxPos)  // load the color/normal of the 2nd vertex into $11
-    vmadh   $v29, $v11, $v1[0]
-    llv     $v22[12], 8(inputVtxPos)                // load the texture coords of the 1st vertex into v22[12-15]
-    vmadn   $v29, $v12, $v20[0h]
-    move    $9, $6                                  // $9 is either 0 or 2 depending on whether G_LIGHTING is set (2) or unset (0)
-    vmadh   $v29, $v8, $v20[0h]
-    lpv     $v2[0], (mvpMatrix + 0x30)($9)
-    vmadn   $v29, $v13, $v20[1h]
-    sw      $11, 8(inputVtxPos)                     // Move the first vertex's colors/normals into the word before the second vertex's
-    vmadh   $v29, $v9, $v20[1h]
-    lpv     $v7[0], 8(inputVtxPos)                  // Load both vertex's colors/normals into the first half of v7
-    vmadn   $v23, $v14, $v20[2h]
-    bnez    $6, light_vtx                           // If G_LIGHTING is on, then process vertices accordingly
-     vmadh  $v24, $v10, $v20[2h]
-    vge     $v27, $v25, $v31[3]
-    llv     $v22[4], (inputVtxSize + 8)(inputVtxPos)  // load the texture coords of the 2nd vertex into v22[4-7]
-f3dzex_00001870:
+vertices_process_pair:
+    // Two verts pos in v20; multiply by MVP
+    vmudn   $v29, mxr3f, vOne[0]
+    lw      $11, (inputVtxSize + 0xC)(inputVtxPos) // load the color/normal of the 2nd vertex into $11
+    vmadh   $v29, mxr3i, vOne[0]
+    llv     vPairST[12], 8(inputVtxPos)            // load the texture coords of the 1st vertex into v22[12-15]
+    vmadn   $v29, mxr0f, $v20[0h]
+    move    curLight, tmpCurLight
+    vmadh   $v29, mxr0i, $v20[0h]
+    lpv     $v2[0], (ltBufOfs + 0x10)(curLight)    // First instruction of lights_dircoloraccum2 loop; load light transformed dir
+    vmadn   $v29, mxr1f, $v20[1h]
+    sw      $11, 8(inputVtxPos)                    // Move the first vertex's colors/normals into the word before the second vertex's
+    vmadh   $v29, mxr1i, $v20[1h]
+    lpv     vPairRGBATemp[0], 8(inputVtxPos)       // Load both vertex's colors/normals into v7's elements RGBARGBA or XYZAXYZA
+    vmadn   vPairMVPPosF, mxr2f, $v20[2h]          // vPairMVPPosF = MVP * vpos result frac
+    bnez    tmpCurLight, light_vtx                 // Zero if lighting disabled, pointer if enabled
+     vmadh  vPairMVPPosI, mxr2i, $v20[2h]          // vPairMVPPosI = MVP * vpos result int
+    // These two instructions are repeated at the end of all the lighting codepaths,
+    // since they're skipped here if lighting is being performed
+    // This is the original location of INSTR 1 and INSTR 2
+    vge     $v27, $v25, $v31[3]                     // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
+    llv     vPairST[4], (inputVtxSize + 8)(inputVtxPos)  // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
+
+vertices_store:
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
-    vge     $v3, $v25, $v0[0]
+    vge     $v3, $v25, vZero[0]
 .endif
     addi    $1, $1, -4
-    vmudl   $v29, $v23, $v18[4]
-    sub     $11, $8, $7
-    vmadm   $v2, $v24, $v18[4]
+    vmudl   $v29, vPairMVPPosF, vFxMisc[4] // Persp norm
+    sub     $11, tempCmdBuf50, $7
+    vmadm   $v2, vPairMVPPosI, vFxMisc[4] // Persp norm
     sbv     $v27[15], -0x0D($11)
-    vmadn   $v21, $v0, $v0[0]
+    vmadn   $v21, vZero, vZero[0]
     sbv     $v27[7], -0x35($11)
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
     vmov    $v26[1], $v3[2]
-    ssv     $v3[12], 0x00F4($8)
+    ssv     $v3[12], 0x00F4(tempCmdBuf50)
 .endif
-    vmudn   $v7, $v23, $v18[5]
+    vmudn   $v7, vPairMVPPosF, vFxMisc[5] // 0x0002
 .if (UCODE_IS_F3DEX2_204H)
-    sdv     $v25[8], 0x03F0($8)
+    sdv     $v25[8], 0x03F0(tempCmdBuf50)
 .else
-    slv     $v25[8], 0x01F0($8)
+    slv     $v25[8], 0x01F0(tempCmdBuf50)
 .endif
-    vmadh   $v6, $v24, $v18[5]
-    sdv     $v25[0], 0x03C8($8)
+    vmadh   $v6, vPairMVPPosI, vFxMisc[5] // 0x0002
+    sdv     $v25[0], 0x03C8(tempCmdBuf50)
     vrcph   $v29[0], $v2[3]
-    ssv     $v26[12], 0x0F6($8)
+    ssv     $v26[12], 0x0F6(tempCmdBuf50)
     vrcpl   $v5[3], $v21[3]
 .if (UCODE_IS_F3DEX2_204H)
-    ssv     $v26[4], 0x00CE($8)
+    ssv     $v26[4], 0x00CE(tempCmdBuf50)
 .else
-    slv     $v26[2], 0x01CC($8)
+    slv     $v26[2], 0x01CC(tempCmdBuf50)
 .endif
     vrcph   $v4[3], $v2[7]
-    ldv     $v3[0], 0x0008(inputVtxPos)
+    ldv     $v3[0], 0x0008(inputVtxPos)  // Load RGBARGBA for two vectors (was stored this way above)
     vrcpl   $v5[7], $v21[7]
     sra     $11, $1, 31
-    vrcph   $v4[7], $v0[0]
+    vrcph   $v4[7], vZero[0]
     andi    $11, $11, 0x0028
-    vch     $v29, $v24, $v24[3h]
+    vch     $v29, vPairMVPPosI, vPairMVPPosI[3h]
     addi    outputVtxPos, outputVtxPos, (2 * vtxSize) // Advance two positions forward in the output vertices
-    vcl     $v29, $v23, $v23[3h]
+    vcl     $v29, vPairMVPPosF, vPairMVPPosF[3h]
     sub     $8, outputVtxPos, $11
     vmudl   $v29, $v21, $v5
     cfc2    $10, $vcc
     vmadm   $v29, $v2, $v5
-    sdv     $v23[8], 0x03E0($8)
+    sdv     vPairMVPPosF[8], 0x03E0($8)
     vmadn   $v21, $v21, $v4
-    ldv     $v20[0], 0x0020(inputVtxPos)
+    ldv     $v20[0], (2 * inputVtxSize)(inputVtxPos) // Load pos of 1st vector on next iteration
     vmadh   $v2, $v2, $v4
-    sdv     $v23[0], 0x03B8(outputVtxPos)
-    vge     $v29, $v24, $v0[0]
-    lsv     $v23[14], 0x00E4($8)
-    vmudh   $v29, $v1, $v31[1]
-    sdv     $v24[8], 0x03D8($8)
+    sdv     vPairMVPPosF[0], 0x03B8(outputVtxPos)
+    vge     $v29, vPairMVPPosI, vZero[0]
+    lsv     vPairMVPPosF[14], 0x00E4($8)
+    vmudh   $v29, vOne, $v31[1]
+    sdv     vPairMVPPosI[8], 0x03D8($8)
     vmadn   $v26, $v21, $v31[4]
-    lsv     $v23[6], 0x00BC(outputVtxPos)
+    lsv     vPairMVPPosF[6], 0x00BC(outputVtxPos)
     vmadh   $v25, $v2, $v31[4]
-    sdv     $v24[0], 0x03B0(outputVtxPos)
-    vmrg    $v2, $v0, $v31[7]
-    ldv     $v20[8], 0x0030(inputVtxPos)
-    vch     $v29, $v24, $v6[3h]
-    slv     $v3[0], 0x01E8($8)
+    sdv     vPairMVPPosI[0], 0x03B0(outputVtxPos)
+    vmrg    $v2, vZero, $v31[7]
+    ldv     $v20[8], (3 * inputVtxSize)(inputVtxPos) // Load pos of 2nd vector on next iteration
+    vch     $v29, vPairMVPPosI, $v6[3h]
+    slv     $v3[0], 0x01E8($8) // Store RGBA for first vector
     vmudl   $v29, $v26, $v5
-    lsv     $v24[14], 0x00DC($8)
+    lsv     vPairMVPPosI[14], 0x00DC($8)
     vmadm   $v29, $v25, $v5
-    slv     $v3[4], 0x01C0(outputVtxPos)
+    slv     $v3[4], 0x01C0(outputVtxPos) // Store RGBA for second vector
     vmadn   $v5, $v26, $v4
-    lsv     $v24[6], 0x00B4(outputVtxPos)
+    lsv     vPairMVPPosI[6], 0x00B4(outputVtxPos)
     vmadh   $v4, $v25, $v4
     sh      $10, -0x0002($8)
     vmadh   $v2, $v2, $v31[7]
     sll     $11, $10, 4
-    vcl     $v29, $v23, $v7[3h]
+    vcl     $v29, vPairMVPPosF, $v7[3h]
     cfc2    $10, $vcc
-    vmudl   $v29, $v23, $v5[3h]
+    vmudl   $v29, vPairMVPPosF, $v5[3h]
     ssv     $v5[14], 0x00FA($8)
-    vmadm   $v29, $v24, $v5[3h]
+    vmadm   $v29, vPairMVPPosI, $v5[3h]
     addi    inputVtxPos, inputVtxPos, (2 * inputVtxSize) // Advance two positions forward in the input vertices
-    vmadn   $v26, $v23, $v2[3h]
+    vmadn   $v26, vPairMVPPosF, $v2[3h]
     sh      $10, -0x0004($8)
-    vmadh   $v25, $v24, $v2[3h]
+    vmadh   $v25, vPairMVPPosI, $v2[3h]
     sll     $10, $10, 4
-    vmudm   $v3, $v22, $v18
+    vmudm   $v3, vPairST, vFxMisc // Scale ST for two verts, using TexSScl and TexTScl in elems 2, 3, 6, 7
     sh      $11, (0x26 - 2 * vtxSize)(outputVtxPos)
     sh      $10, (0x24 - 2 * vtxSize)(outputVtxPos)
-    vmudl   $v29, $v26, $v18[4]
+    vmudl   $v29, $v26, vFxMisc[4] // Persp norm
     ssv     $v5[6], 0x00D2(outputVtxPos)
-    vmadm   $v25, $v25, $v18[4]
+    vmadm   $v25, $v25, vFxMisc[4] // Persp norm
     ssv     $v4[14], 0x00F8($8)
-    vmadn   $v26, $v0, $v0[0]
+    vmadn   $v26, vZero, vZero[0]
     ssv     $v4[6], 0x00D0(outputVtxPos)
-    slv     $v3[4], 0x01EC($8)
-    vmudh   $v29, $v17, $v1[0]
-    slv     $v3[12], 0x01C4(outputVtxPos)
-    vmadh   $v29, $v19, $v31[3]
-    vmadn   $v26, $v26, $v16
-    bgtz    $1, f3dzex_0000182C
-     vmadh  $v25, $v25, $v16
+    slv     $v3[4], 0x01EC($8) // Store scaled S, T vertex 1
+    vmudh   $v29, vFxTransFMax, vOne[0]
+    slv     $v3[12], 0x01C4(outputVtxPos) // Store scaled S, T vertex 2
+    vmadh   $v29, vFxMask, $v31[3]
+    vmadn   $v26, $v26, vFxScaleFMin
+    bgtz    $1, vertices_process_pair
+     vmadh  $v25, $v25, vFxScaleFMin
     bltz    $ra, f3dzex_00001478    // has a different version in ovl2
 .if !(UCODE_IS_F3DEX2_204H) // Handled differently by F3DEX2 2.04H
-     vge    $v3, $v25, $v0[0]
+     vge    $v3, $v25, vZero[0]
     slv     $v25[8], 0x01F0($8)
-    vge     $v27, $v25, $v31[3]
+    vge     $v27, $v25, $v31[3] // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
     slv     $v25[0], 0x01C8(outputVtxPos)
     ssv     $v26[12], 0x00F6($8)
     ssv     $v26[4], 0x00CE(outputVtxPos)
@@ -1060,25 +1157,34 @@ f3dzex_00001870:
     j       run_next_DL_command
      sbv    $v27[7], 0x0043(outputVtxPos)
 
-f3dzex_000019F4: // handle clipping?
-    li      curClipRatio, clipRatio
-    ldv     $v16[0], (viewport)($zero)          // $v16 = [vscale[0], vscale[1], vscale[2], vscale[3], 0, 0, 0, 0]
-    ldv     $v16[8], (viewport)($zero)          // $v16 = [vscale[0], vscale[1], vscale[2], vscale[3], vscale[0], vscale[1], vscale[2], vscale[3]]
-    llv     $v29[0], 0x0060(curClipRatio)       // clipRatio + 0x60 = fogFactor ?
-    ldv     $v17[0], (viewport + 8)($zero)      // vtrans
-    ldv     $v17[8], (viewport + 8)($zero)      // vtrans
-    vlt     $v19, $v31, $v31[3]                 // VCC = [0, 1, 1, 0, 0, 1, 1, 0]
-    vsub    $v21, $v0, $v16                     // 0 - vscale
-    llv     $v18[4], 0x0068(curClipRatio)       // clipRatio + 0x68
-    vmrg    $v16, $v16, $v29[0]
-    llv     $v18[12], 0x0068(curClipRatio)      // clipRatio + 0x68
-    vmrg    $v19, $v0, $v1[0]
-    llv     $v18[8], (perspNorm)($zero)
-    vmrg    $v17, $v17, $v29[1]
-    lsv     $v18[10], 0x0006(curClipRatio)      // clipRatio + 0x06
-    vmov    $v16[1], $v21[1]
+load_spFx_global_values:
+    /*
+    vscale = viewport shorts 0:3, vtrans = viewport shorts 4:7
+    v16 = vFxScaleFMin = [vscale[0], -vscale[1], fogMin, vscale[3], (repeat)]
+                         (element 5 written just before vertices_process_pair)
+    v17 = vFxTransFMax = [vtrans[0], fogMax,     fogMax, vtrans[0], (repeat)]
+    v18 = vFxMisc = [???, ???, TexSScl, TexTScl, perspNorm, 0x0002, TexSScl, TexTScl]
+    v19 = vFxMask = [0x0000, 0x0001, 0x0001, 0x0000, 0x0000, 0x0001, 0x0001, 0x0000]
+    v21 = vFxNegScale = -[vscale[0:3], vscale[0:3]]
+    */
+    li      spFxBaseReg, spFxBase
+    ldv     vFxScaleFMin[0], (viewport)($zero)     // vFxScaleFMin = [vscale[0], vscale[1], vscale[2], vscale[3], 0, 0, 0, 0]
+    ldv     vFxScaleFMin[8], (viewport)($zero)     // vFxScaleFMin = [vscale[0], vscale[1], vscale[2], vscale[3], vscale[0], vscale[1], vscale[2], vscale[3]]
+    llv     $v29[0], (fogFactor - spFxBase)(spFxBaseReg) // Load fog settings
+    ldv     vFxTransFMax[0], (viewport + 8)($zero) // vtrans
+    ldv     vFxTransFMax[8], (viewport + 8)($zero) // vtrans
+    vlt     vFxMask, $v31, $v31[3]                 // VCC = [0, 1, 1, 0, 0, 1, 1, 0]
+    vsub    vFxNegScale, vZero, vFxScaleFMin       // 0 - vscale
+    llv     vFxMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
+    vmrg    vFxScaleFMin, vFxScaleFMin, $v29[0]    // Put fog min in elements 01100110 of vscale
+    llv     vFxMisc[12], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
+    vmrg    vFxMask, vZero, vOne[0]                // Put 0 or 1 in v19 01100110
+    llv     vFxMisc[8], (perspNorm)($zero)         // Perspective normalization long (actually short)
+    vmrg    vFxTransFMax, vFxTransFMax, $v29[1]    // Put fog max in elements 01100110 of vtrans
+    lsv     vFxMisc[10], (G_MWO_CLIP_RNX + 2 - spFxBase)(spFxBaseReg) // Value 0x0002
+    vmov    vFxScaleFMin[1], vFxNegScale[1]        // -vscale[1]
     jr      $ra
-     addi   $8, rdpCmdBufPtr, 0x50
+     addi   tempCmdBuf50, rdpCmdBufPtr, 0x50
 
 G_TRI2_handler:
 G_QUAD_handler:
@@ -1093,26 +1199,26 @@ f3dzex_00001A4C:
     lbu     $1, 0x0005(rdpCmdBufPtr)     // $1 = vertex 1 index
     lbu     $2, 0x0006(rdpCmdBufPtr)     // $2 = vertex 2 index
     lbu     $3, 0x0007(rdpCmdBufPtr)     // $3 = vertex 3 index
-    vor     $v3, $v0, $v31[5]
+    vor     $v3, vZero, $v31[5]
     lhu     $1, (vertexTable)($1) // convert vertex 1's index to its address
-    vmudn   $v4, $v1, $v31[6]
+    vmudn   $v4, vOne, $v31[6]
     lhu     $2, (vertexTable)($2) // convert vertex 2's index to its address
     vmadl   $v2, $v2, $v30[1]
     lhu     $3, (vertexTable)($3) // convert vertex 3's index to its address
-    vmadn   $v4, $v0, $v0[0]
+    vmadn   $v4, vZero, vZero[0]
     move    $4, $1
 f3dzex_00001A7C:
-    vnxor   $v5, $v0, $v31[7]
+    vnxor   $v5, vZero, $v31[7]
     llv     $v6[0], 0x0018($1) // Load pixel coords of vertex 1 into v6
-    vnxor   $v7, $v0, $v31[7]
+    vnxor   $v7, vZero, $v31[7]
     llv     $v4[0], 0x0018($2) // Load pixel coords of vertex 2 into v4
     vmov    $v6[6], $v2[5]
     llv     $v8[0], 0x0018($3) // Load pixel coords of vertex 3 into v8
-    vnxor   $v9, $v0, $v31[7]
+    vnxor   $v9, vZero, $v31[7]
     lw      $5, 0x0024($1)
     vmov    $v8[6], $v2[7]
     lw      $6, 0x0024($2)
-    vadd    $v2, $v0, $v6[1]  // v2 = y-coord of vertex 1
+    vadd    $v2, vZero, $v6[1] // v2 = y-coord of vertex 1
     lw      $7, 0x0024($3)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2
 .if NoN == 1
@@ -1164,7 +1270,7 @@ f3dzex_00001A7C:
     llv     $v13[12], 0x0020($3)
     vmadh   $v16, $v8, $v11[0]
     sll     $11, $6, 10             // Moves the value of G_SHADING_SMOOTH into the sign bit
-    vreadacc $v17, ACC_LOWER
+    vreadacc $v17, ACC_UPPER
     bgez    $11, no_smooth_shading  // Branch if G_SHADING_SMOOTH isn't set
      vreadacc $v16, ACC_MIDDLE
     lpv     $v18[0], 0x0010($1) // Load vert color of vertex 1
@@ -1172,19 +1278,19 @@ f3dzex_00001A7C:
     lpv     $v19[0], 0x0010($2) // Load vert color of vertex 2
     vrcp    $v20[0], $v15[1]
     lpv     $v21[0], 0x0010($3) // Load vert color of vertex 3
-    vrcph   $v22[0], $v17[1]
-    vrcpl   $v23[1], $v16[1]
+    vrcph   vPairST[0], $v17[1]
+    vrcpl   vPairMVPPosF[1], $v16[1]
     j       shading_done
-     vrcph   $v24[1], $v0[0]
+     vrcph   vPairMVPPosI[1], vZero[0]
 no_smooth_shading:
     lpv     $v18[0], 0x0010($4)
     vrcp    $v20[0], $v15[1]
     lbv     $v18[6], 0x0013($1)
-    vrcph   $v22[0], $v17[1]
+    vrcph   vPairST[0], $v17[1]
     lpv     $v19[0], 0x0010($4)
-    vrcpl   $v23[1], $v16[1]
+    vrcpl   vPairMVPPosF[1], $v16[1]
     lbv     $v19[6], 0x0013($2)
-    vrcph   $v24[1], $v0[0]
+    vrcph   vPairMVPPosI[1], vZero[0]
     lpv     $v21[0], 0x0010($4)
     vmov    $v15[2], $v6[0]
     lbv     $v21[6], 0x0013($3)
@@ -1209,11 +1315,11 @@ shading_done:
     vec2 equ v22
 .endif
     vrcp    $v20[2], $v6[1]
-    vrcph   $v22[2], $v6[1]
+    vrcph   vPairST[2], $v6[1]
     lw      $5, 0x0020($1)
     vrcp    $v20[3], $v8[1]
     lw      $7, 0x0020($2)
-    vrcph   $v22[3], $v8[1]
+    vrcph   vPairST[3], $v8[1]
     lw      $8, 0x0020($3)
     // v30[i1] is 0x0100
     vmudl   $v18, $v18, $v30[i1] // vertex color 1 >>= 8
@@ -1226,40 +1332,40 @@ shading_done:
     and     $11, $11, $12
     vmudl   $v29, $v20, $vec1[i2]
     sub     $5, $5, $11
-    vmadm   $v22, $v22, $vec1[i2]
+    vmadm   vPairST, vPairST, $vec1[i2]
     sub     $11, $5, $8
-    vmadn   $v20, $v0, $v0[0]
+    vmadn   $v20, vZero, vZero[0]
     sra     $12, $11, 31
     vmudm   $v25, $v15, $vec1[i3]
     and     $11, $11, $12
-    vmadn   $v15, $v0, $v0[0]
+    vmadn   $v15, vZero, vZero[0]
     sub     $5, $5, $11
-    vsubc   $v4, $v0, $v4
+    vsubc   $v4, vZero, $v4
     sw      $5, 0x0010(rdpCmdBufPtr)
-    vsub    $v26, $v0, $v0
+    vsub    $v26, vZero, vZero
     llv     $v27[0], 0x0010(rdpCmdBufPtr)
     vmudm   $v29, $v25, $v20
     mfc2    $5, $v17[1]
     vmadl   $v29, $v15, $v20
     lbu     $7, textureSettings1 + 2
-    vmadn   $v20, $v15, $v22
+    vmadn   $v20, $v15, vPairST
     lsv     $v19[14], 0x001C($2)
-    vmadh   $v15, $v25, $v22
+    vmadh   $v15, $v25, vPairST
     lsv     $v21[14], 0x001C($3)
-    vmudl   $v29, $v23, $v16
+    vmudl   $v29, vPairMVPPosF, $v16
     lsv     $v7[14], 0x001E($2)
-    vmadm   $v29, $v24, $v16
+    vmadm   $v29, vPairMVPPosI, $v16
     lsv     $v9[14], 0x001E($3)
-    vmadn   $v16, $v23, $v17
+    vmadn   $v16, vPairMVPPosF, $v17
     ori     $11, $6, 0x00C8 // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
-    vmadh   $v17, $v24, $v17
+    vmadh   $v17, vPairMVPPosI, $v17
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
 .if !(UCODE_IS_206_OR_OLDER)
-    vand    $v22, $v20, $v30[5]
+    vand    vPairST, $v20, $v30[5]
 .endif
     vcr     $v15, $v15, $v30[i4]
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
-    vmudh   $v29, $v1, $v30[i5]
+    vmudh   $v29, vOne, $v30[i5]
     ssv     $v10[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
     vmadn   $v16, $v16, $v30[4]     // v30[4] is 0xFFF0
     ssv     $v2[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
@@ -1276,26 +1382,26 @@ shading_done:
     vmadh   $v3, $v15, $v26[1]
     vrcph   $v29[0], $v27[0]
     vrcpl   $v10[0], $v27[1]
-    vadd    $v14, $v0, $v13[1q]
-    vrcph   $v27[0], $v0[0]
-    vor     $v22, $v0, $v31[7]
+    vadd    $v14, vZero, $v13[1q]
+    vrcph   $v27[0], vZero[0]
+    vor     vPairST, vZero, $v31[7]
     vmudm   $v29, $v13, $v10[0]
     vmadl   $v29, $v14, $v10[0]
-    llv     $v22[0], 0x0014($1)
+    llv     vPairST[0], 0x0014($1)
     vmadn   $v14, $v14, $v27[0]
-    llv     $v22[8], 0x0014($2)
+    llv     vPairST[8], 0x0014($2)
     vmadh   $v13, $v13, $v27[0]
-    vor     $v10, $v0, $v31[7]
+    vor     $v10, vZero, $v31[7]
     vge     $v29, $v30, $v30[7]
     llv     $v10[8], 0x0014($3)
-    vmudm   $v29, $v22, $v14[0h]
-    vmadh   $v22, $v22, $v13[0h]
-    vmadn   $v25, $v0, $v0[0]
-    vmudm   $v29, $v10, $v14[6] // acc = (v10 * v14[6]); v29 = mid(clamp(acc))
-    vmadh   $v10, $v10, $v13[6] // acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
-    vmadn   $v13, $v0, $v0[0]   // v13 = lo(clamp(acc))
-    sdv     $v22[0], 0x0020(rdpCmdBufPtr)
-    vmrg    $v19, $v19, $v22
+    vmudm   $v29, vPairST, $v14[0h]
+    vmadh   vPairST, vPairST, $v13[0h]
+    vmadn   $v25, vZero, vZero[0]
+    vmudm   $v29, $v10, $v14[6]     // acc = (v10 * v14[6]); v29 = mid(clamp(acc))
+    vmadh   $v10, $v10, $v13[6]     // acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
+    vmadn   $v13, vZero, vZero[0]   // v13 = lo(clamp(acc))
+    sdv     vPairST[0], 0x0020(rdpCmdBufPtr)
+    vmrg    $v19, $v19, vPairST
     sdv     $v25[0], 0x0028(rdpCmdBufPtr) // 8
     vmrg    $v7, $v7, $v25
     ldv     $v18[8], 0x0020(rdpCmdBufPtr) // 8
@@ -1303,13 +1409,13 @@ shading_done:
     ldv     $v5[8], 0x0028(rdpCmdBufPtr) // 8
     vmrg    $v9, $v9, $v13
 f3dzex_00001D2C:
-    vmudl   $v29, $v16, $v23
+    vmudl   $v29, $v16, vPairMVPPosF
     lsv     $v5[14], 0x001E($1)
-    vmadm   $v29, $v17, $v23
+    vmadm   $v29, $v17, vPairMVPPosF
     lsv     $v18[14], 0x001C($1)
-    vmadn   $v23, $v16, $v24
+    vmadn   vPairMVPPosF, $v16, vPairMVPPosI
     lh      $1, 0x0018($2)
-    vmadh   $v24, $v17, $v24
+    vmadh   vPairMVPPosI, $v17, vPairMVPPosI
     addiu   $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
     vsubc   $v10, $v9, $v5
     andi    $3, $6, G_SHADE
@@ -1329,7 +1435,7 @@ f3dzex_00001D2C:
     ssv     $v15[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
     vreadacc $v2, ACC_MIDDLE
     ssv     $v20[0], 0x000E(rdpCmdBufPtr)    // Store DxLDy edge coefficient (fractional part)
-    vreadacc $v3, ACC_LOWER
+    vreadacc $v3, ACC_UPPER
     ssv     $v15[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
     vmudn   $v29, $v13, $v8[0]
     ssv     $v20[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
@@ -1341,21 +1447,21 @@ f3dzex_00001D2C:
     sll     $11, $3, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
     vreadacc $v6, ACC_MIDDLE
     add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
-    vreadacc $v7, ACC_LOWER
+    vreadacc $v7, ACC_UPPER
     sll     $11, $9, 5              // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
-    vmudl   $v29, $v2, $v23[1]
+    vmudl   $v29, $v2, vPairMVPPosF[1]
     add     rdpCmdBufPtr, $1, $11            // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
-    vmadm   $v29, $v3, $v23[1]
+    vmadm   $v29, $v3, vPairMVPPosF[1]
     andi    $6, $6, G_ZBUFFER       // Get the value of G_ZBUFFER from the current geometry mode
-    vmadn   $v2, $v2, $v24[1]
+    vmadn   $v2, $v2, vPairMVPPosI[1]
     sll     $11, $6, 4              // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
-    vmadh   $v3, $v3, $v24[1]
+    vmadh   $v3, $v3, vPairMVPPosI[1]
     add     rdpCmdBufPtr, rdpCmdBufPtr, $11           // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
-    vmudl   $v29, $v6, $v23[1]
-    vmadm   $v29, $v7, $v23[1]
-    vmadn   $v6, $v6, $v24[1]
+    vmudl   $v29, $v6, vPairMVPPosF[1]
+    vmadm   $v29, $v7, vPairMVPPosF[1]
+    vmadn   $v6, $v6, vPairMVPPosI[1]
     sdv     $v2[0], 0x0018($2)      // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
-    vmadh   $v7, $v7, $v24[1]
+    vmadh   $v7, $v7, vPairMVPPosI[1]
     sdv     $v3[0], 0x0008($2)      // Store DrDx, DgDx, DbDx, DaDx shade coefficients (integer)
     vmadl   $v29, $v2, $v20[3]
     sdv     $v2[8], 0x0018($1)      // Store DsDx, DtDx, DwDx texture coefficients (fractional)
@@ -1365,9 +1471,9 @@ f3dzex_00001D2C:
     sdv     $v6[0], 0x0038($2)      // Store DrDy, DgDy, DbDy, DaDy shade coefficients (fractional)
     vmadh   $v9, $v3, $v15[3]
     sdv     $v7[0], 0x0028($2)      // Store DrDy, DgDy, DbDy, DaDy shade coefficients (integer)
-    vmudn   $v29, $v5, $v1[0]
+    vmudn   $v29, $v5, vOne[0]
     sdv     $v6[8], 0x0038($1)      // Store DsDy, DtDy, DwDy texture coefficeints (fractional)
-    vmadh   $v29, $v18, $v1[0]
+    vmadh   $v29, $v18, vOne[0]
     sdv     $v7[8], 0x0028($1)      // Store DsDy, DtDy, DwDy texture coefficeints (integer)
     vmadl   $v29, $v8, $v4[1]
     sdv     $v8[0], 0x0030($2)      // Store DrDe, DgDe, DbDe, DaDe shade coefficients (fractional)
@@ -1518,7 +1624,7 @@ Overlay0Address:
     jal     dma_read_write          // initiate DMA read
      li     $19, 0x0F48 - 1
     lw      $24, rdpHalf1Val
-    la      $20, clipRatio          // DMA address
+    la      $20, 0x0180             // DMA address; equal to but probably not actually spFxBase or clipRatio
     andi    $19, cmd_w0, 0x0FFF
     add     $24, $24, $20
     jal     dma_read_write          // initate DMA read
@@ -1619,14 +1725,14 @@ G_MTX_end: // Multiplies the loaded model matrix into the model stack
 input_mtx_0 equ $21
 input_mtx_1 equ $20
 output_mtx equ $19
-mtx_concat:
+mtx_multiply:
     addi    $12, input_mtx_1, 0x0018
 @@loop:
-    vmadn   $v9, $v0, $v0[0]
+    vmadn   $v9, vZero, vZero[0]
     addi    $11, input_mtx_1, 0x0008
-    vmadh   $v8, $v0, $v0[0]
+    vmadh   $v8, vZero, vZero[0]
     addi    input_mtx_0, input_mtx_0, -0x0020
-    vmudh   $v29, $v0, $v0[0]
+    vmudh   $v29, vZero, vZero[0]
 @@innerloop:
     ldv     $v5[0], 0x0040(input_mtx_0)
     ldv     $v5[8], 0x0040(input_mtx_0)
@@ -1706,80 +1812,93 @@ Overlay1End:
 
 Overlay2Address:
     lbu     $11, lightsValid
-    j       f3dzex_ov2_000012F4
-     lbu    $6, numLights
+    j       continue_light_dir_xfrm
+     lbu    tmpCurLight, numLightsx18
 
 f3dzex_ov2_000012E4:
     move    savedRA, $ra
     li      $11, overlayInfo3           // set up a load of overlay 3
     j       load_overlay_and_enter      // load overlay 3
      li     $12, f3dzex_ov3_000012E8    // set up the return address in ovl3
-
-f3dzex_ov2_000012F4:
-    bnez    $11, f3dzex_000017BC // Skip calculating lights if they're not out of date
-     addi   $6, $6, lightColors - 0x10 - (MAX_LIGHTS * 0x18)
-    sb      cmd_w0, lightsValid
-    // mv[x][y] is row x, column y
-    // Matrix integer portion vector registers
-    col0int equ $v8     // used to hold rows 0-1 temporarily
-    col1int equ $v9
-    col2int equ $v10
-    // Matrix fractional portion vector registers
-    col0fra equ $v12    // used to hold rows 0-1 temporarily
-    col1fra equ $v13
-    col2fra equ $v14
-    // Set up the column registers
-    lqv     col0fra,    (mvMatrix + 0x20)($zero)        // load rows 0-1 of mv (fractional)
-    lqv     col0int,    (mvMatrix + 0x00)($zero)        // load rows 0-1 of mv (integer)
-    lsv     col1fra[2], (mvMatrix + 0x2A)($zero)        // load mv[1][1] into col1 element 1 (fractional)
-    lsv     col1int[2], (mvMatrix + 0x0A)($zero)        // load mv[1][1] into col1 element 1 (integer)
-    vmov    col1fra[0], col0fra[1]                      // load mv[0][1] into col1 element 0 (fractional)
-    lsv     col2fra[4], (mvMatrix + 0x34)($zero)        // load mv[2][2] into col2 element 2 (fractional)
-    vmov    col1int[0], col0int[1]                      // load mv[0][1] into col1 element 0 (integer)
-    lsv     col2int[4], (mvMatrix + 0x14)($zero)        // load mv[2][2] into col2 element 2 (integer)
-    vmov    col2fra[0], col0fra[2]                      // load mv[0][2] into col2 element 0 (fractional)
-    li      $20, lightBuffer - (MAX_LIGHTS * 0x18) + 8  // set up pointer to light direction
-    vmov    col2int[0], col0int[2]                      // load mv[0][2] into col2 element 0 (integer)
-    lpv     $v7[0], (MAX_LIGHTS * 0x18)($20)            // load light direction
-    vmov    col2fra[1], col0fra[6]                      // load mv[1][2] into col2 element 1 (fractional)
-    lsv     col1fra[4], (mvMatrix + 0x32)($zero)        // load mv[2][1] into col1 element 2 (fractional)
-    vmov    col2int[1], col0int[6]                      // load mv[1][2] into col2 element 1 (integer)
-    lsv     col1int[4], (mvMatrix + 0x12)($zero)        // load mv[2][1] into col1 element 2 (integer)
-    vmov    col0fra[1], col0fra[4]                      // load mv[1][0] into col0 element 1 (fractional)
-    lsv     col0fra[4], (mvMatrix + 0x30)($zero)        // load mv[2][0] into col0 element 2 (fractional)
-    vmov    col0int[1], col0int[4]                      // load mv[1][0] into col0 element 1 (integer)
-    lsv     col0int[4], (mvMatrix + 0x10)($zero)        // load mv[2][0] into col0 element 2 (integer)
+     
+continue_light_dir_xfrm:
+    // Transform light directions from camera space to model space, by
+    // multiplying by modelview transpose, then normalize and store the results
+    // (not overwriting original dirs). This is applied starting from the two
+    // lookat lights and through all directional and point lights, but not
+    // ambient. For point lights, the data is garbage but doesn't harm anything.
+    bnez    $11, after_light_dir_xfrm // Skip calculating lights if they're not out of date
+     addi   tmpCurLight, tmpCurLight, spFxBase - lightSize // With ltBufOfs, points at top/max light.
+    sb      cmd_w0, lightsValid     // Set as valid, reusing state of w0
+    /* Load MV matrix 3x3 transposed as:
+    mxr0i 00 08 10 06 08 0A 0C 0E
+    mxr1i 02 0A 12
+    mxr2i 04 0C 14
+    mxr3i 
+    mxr0f 20 28 30 26 28 2A 2C 2E
+    mxr1f 22 2A 32
+    mxr2f 24 2C 34
+    mxr3f 
+    Vector regs now contain columns of the original matrix
+    This is computing:
+    vec3_s8 origDir = light[0x8:0xA];
+    vec3_s16 newDir = origDir * transpose(mvMatrix[0:2][0:2]);
+    newDir /= sqrt(newDir.x**2 + newDir.y**2 + newDir.z**2); //normalize
+    light[0x10:0x12] = light[0x14:0x16] = (vec3_s8)newDir;
+    */
+    lqv     mxr0f,    (mvMatrix + 0x20)($zero)
+    lqv     mxr0i,    (mvMatrix + 0x00)($zero)
+    lsv     mxr1f[2], (mvMatrix + 0x2A)($zero)
+    lsv     mxr1i[2], (mvMatrix + 0x0A)($zero)
+    vmov    mxr1f[0], mxr0f[1]
+    lsv     mxr2f[4], (mvMatrix + 0x34)($zero)
+    vmov    mxr1i[0], mxr0i[1]
+    lsv     mxr2i[4], (mvMatrix + 0x14)($zero)
+    vmov    mxr2f[0], mxr0f[2]
+    // With ltBufOfs immediate add, points two lights behind lightBufferMain, i.e. lightBufferLookat.
+    xfrmLtPtr equ $20
+    li      xfrmLtPtr, spFxBase - 2 * lightSize
+    vmov    mxr2i[0], mxr0i[2]                   
+    lpv     $v7[0], (ltBufOfs + 0x8)(xfrmLtPtr) // Load light direction
+    vmov    mxr2f[1], mxr0f[6]
+    lsv     mxr1f[4], (mvMatrix + 0x32)($zero)
+    vmov    mxr2i[1], mxr0i[6]
+    lsv     mxr1i[4], (mvMatrix + 0x12)($zero)
+    vmov    mxr0f[1], mxr0f[4]
+    lsv     mxr0f[4], (mvMatrix + 0x30)($zero)
+    vmov    mxr0i[1], mxr0i[4]
+    lsv     mxr0i[4], (mvMatrix + 0x10)($zero)
 @@loop:
-    vmudn   $v29, col1fra, $v7[1]           // light y direction (fractional)
-    vmadh   $v29, col1int, $v7[1]           // light y direction (integer)
-    vmadn   $v29, col0fra, $v7[0]           // light x direction (fractional)
-    spv     $v15[0], (MAX_LIGHTS * 0x18 + 8)($20)
-    vmadh   $v29, col0int, $v7[0]           // light x direction (integer)
-    lw      $12, (MAX_LIGHTS * 0x18 + 8)($20)
-    vmadn   $v29, col2fra, $v7[2]           // light z direction (fractional)
-    vmadh   $v29, col2int, $v7[2]           // light z direction (integer)
+    vmudn   $v29, mxr1f, $v7[1]         // light y direction (fractional)
+    vmadh   $v29, mxr1i, $v7[1]         // light y direction (integer)
+    vmadn   $v29, mxr0f, $v7[0]         // light x direction (fractional)
+    spv     $v15[0], (ltBufOfs + 0x10)(xfrmLtPtr) // Store transformed light direction; first loop is garbage
+    vmadh   $v29, mxr0i, $v7[0]         // light x direction (integer)
+    lw      $12, (ltBufOfs + 0x10)(xfrmLtPtr) // Reload transformed light direction
+    vmadn   $v29, mxr2f, $v7[2]         // light z direction (fractional)
+    vmadh   $v29, mxr2i, $v7[2]         // light z direction (integer)
     // Square the low 32 bits of each accumulator element
     vreadacc $v11, ACC_MIDDLE           // read the middle (bits 16..31) of the accumulator elements into v11
-    sw      $12, (MAX_LIGHTS * 0x18 + 0xC)($20)
-    vreadacc $v15, ACC_LOWER            // read the low (bits 0..15) of the accumulator elements into v15
-    beq     $20, $6, f3dzex_000017BC    // exit if equal
+    sw      $12, (ltBufOfs + 0x14)(xfrmLtPtr) // Store duplicate of transformed light direction
+    vreadacc $v15, ACC_UPPER            // read the upper (bits 32..47) of the accumulator elements into v15
+    beq     xfrmLtPtr, tmpCurLight, after_light_dir_xfrm    // exit if equal
      vmudl  $v29, $v11, $v11            // calculate the low partial product of the accumulator squared (low * low)
     vmadm   $v29, $v15, $v11            // calculate the mid partial product of the accumulator squared (mid * low)
     vmadn   $v16, $v11, $v15            // calculate the mid partial product of the accumulator squared (low * mid)
-    beqz    $11, @@skip_incr    // skip increment if $11 is 0
+    beqz    $11, @@skip_incr            // skip increment if $11 is 0 (first time through loop)
      vmadh  $v17, $v15, $v15            // calculate the high partial product of the accumulator squared (mid * mid)
-    addi    $20, $20, 0x18      // increment light pointer?
+    addi    xfrmLtPtr, xfrmLtPtr, lightSize // increment light pointer
 @@skip_incr:
-    vaddc   $v18, $v16, $v16[1]
-    li      $11, 1
-    vadd    $v29, $v17, $v17[1]
-    vaddc   $v16, $v18, $v16[2]
-    vadd    $v17, $v29, $v17[2]
-    vrsqh   $v29[0], $v17[0]
-    lpv     $v7[0], (MAX_LIGHTS * 0x18 + 0x18)($20)
-    vrsql   $v16[0], $v16[0]
-    vrsqh   $v17[0], $v0[0]
-    vmudl   $v29, $v11, $v16[0]
+    vaddc   $v18, $v16, $v16[1]         // X**2 + Y**2 frac
+    li      $11, 1                      // set flag to increment next time through loop
+    vadd    $v29, $v17, $v17[1]         // X**2 + Y**2 int
+    vaddc   $v16, $v18, $v16[2]         // + Z**2 frac
+    vadd    $v17, $v29, $v17[2]         // + Z**2 int
+    vrsqh   $v29[0], $v17[0]            // In upper rsq v17 (output discarded)
+    lpv     $v7[0], (ltBufOfs + lightSize + 0x8)(xfrmLtPtr) // Load direction of next light
+    vrsql   $v16[0], $v16[0]            // Lower rsq v16, do rsq, out lower to v16
+    vrsqh   $v17[0], vZero[0]           // Out upper v17 (input zero)
+    vmudl   $v29, $v11, $v16[0]         // Multiply vector by rsq to normalize
     vmadm   $v29, $v15, $v16[0]
     vmadn   $v11, $v11, $v17[0]
     vmadh   $v15, $v15, $v17[0]
@@ -1788,284 +1907,326 @@ f3dzex_ov2_000012F4:
 .else
     i7 equ 3
 .endif
-    vmudn   $v11, $v11, $v30[i7]
+    vmudn   $v11, $v11, $v30[i7]        // Scale results to become bytes
     j       @@loop
-     vmadh  $v15, $v15, $v30[i7]
+     vmadh  $v15, $v15, $v30[i7]        // Scale results to become bytes
+
+curMatrix equ $12
+ltColor equ $v29
+vPairRGBA equ $v27
+vPairAlpha37 equ $v28 // Same as mvTc1f, but alpha values are left in elems 3, 7
+vPairNX equ $v7 // also named vPairRGBATemp; with name vPairNX, uses X components = elems 0, 4
+vPairNY equ $v6
+vPairNZ equ $v5
+
+// For point lighting, but armips does not like these defined in an .if
+mvTc0i equ $v4
+mvTc1i equ $v21
+mvTc2i equ $v30
+mvTc0f equ $v3
+mvTc1f equ $v28
+mvTc2f equ $v31
 
 light_vtx:
-    vadd    $v6, $v0, $v7[1h]
-.if UCODE_HAS_POINT_LIGHTING // Point lighting difference
-    luv     $v29[0], 0x00B8($9) // load light position?
-.else // No point lighting
-    lpv     $v20[0], 0x0098($9) // load light direction?
+    vadd    vPairNY, vZero, vPairRGBATemp[1h] // Move vertex normals Y to separate reg
+.if UCODE_HAS_POINT_LIGHTING
+    luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Load next light color (ambient)
+.else
+    lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next below transformed light direction as XYZ_XYZ_ for lights_dircoloraccum2
 .endif
-    vadd    $v5, $v0, $v7[2h]
-    luv     $v27[0], 0x0008(inputVtxPos)    // Load texture coords, normal and alpha from the vertex
-    vne     $v4, $v31, $v31[3h]
-.if UCODE_HAS_POINT_LIGHTING // point lighting
-    andi    $11, $5, G_LIGHTING_POSITIONAL_H    // check if point lighting is enabled in the geometry mode
-    beqz    $11, f3dzex_ovl2_0000168C           // if not enabled, skip ahead
-     li     $12, -0x7F80
-    vaddc   $v28, $v27, $v0[0]
-    suv     $v29[0], 0x0008(inputVtxPos)
+    vadd    vPairNZ, vZero, vPairRGBATemp[2h] // Move vertex normals Z to separate reg
+    luv     vPairRGBA[0], 8(inputVtxPos)      // Load both verts' XYZAXYZA as unsigned
+    vne     $v4, $v31, $v31[3h]               // Set VCC to 11101110
+.if UCODE_HAS_POINT_LIGHTING
+    andi    $11, $5, G_LIGHTING_POSITIONAL_H  // check if point lighting is enabled in the geometry mode
+    beqz    $11, directional_lighting         // If not enabled, use directional algorithm for everything
+     li     curMatrix, mvpMatrix + 0x8000     // Set flag in negative to indicate cur mtx is MVP
+    vaddc   vPairAlpha37, vPairRGBA, vZero[0] // Copy vertex alpha
+    suv     ltColor[0], 8(inputVtxPos)        // Store ambient light color to two verts' RGBARGBA
     ori     $11, $zero, 0x0004
-    vmov    $v30[7], $v30[6]
-    mtc2    $11, $v31[6]
-f3dzex_ovl2_0000140C:
-    lbu     $11, 0x00A3($9)             // load light type / constant attenuation value at light structure + 3 ?
-    bnez    $11, f3dzex_ovl2_0000155C   // If not zero, use point lighting?
-     lpv    $v2[0], 0x00B0($9)
-    luv     $v29[0], 0x0008(inputVtxPos)
-    vmulu   $v20, $v7, $v2[0h]
-    vmacu   $v20, $v6, $v2[1h]
-    vmacu   $v20, $v5, $v2[2h]
-    luv     $v2[0], 0x00A0($9)
-    vmrg    $v29, $v29, $v28
-    vand    $v20, $v20, $v31[7]
-    vmrg    $v2, $v2, $v0[0]
-    vmulf   $v29, $v29, $v31[7]
-    vmacf   $v29, $v2, $v20[0h]
-    suv     $v29[0], 0x0008(inputVtxPos)
-    bne     $9, curClipRatio, f3dzex_ovl2_0000140C
-     addi   $9, $9, -0x18
-f3dzex_ovl2_0000144C:
-    lqv     $v31[0], (v31Value)($zero)
-    lqv     $v30[0], (v30Value)($zero)
-    llv     $v22[4], 0x0018(inputVtxPos)
-    bgezal  $12, f3dzex_ovl2_00001480
-     li     $12, -0x7F80
+    vmov    $v30[7], $v30[6]                  // v30[7] = 0x0010 because v30[0:2,4:6] will get clobbered
+    mtc2    $11, $v31[6]                      // v31[6] = 0x0004 (was previously 0x0420)
+next_light_dirorpoint:
+    lbu     $11, (ltBufOfs + 0x3)(curLight)   // Load light type / constant attenuation value at light structure + 3
+    bnez    $11, point_lighting_main          // If not zero, use point lighting for the rest of the lights
+     lpv    $v2[0], (ltBufOfs + 0x10)(curLight) // Load light transformed direction
+    luv     ltColor[0], 8(inputVtxPos)        // Load current light color of two verts RGBARGBA
+    vmulu   $v20, vPairNX, $v2[0h]            // Vertex normals X * light transformed dir X
+    vmacu   $v20, vPairNY, $v2[1h]            // + Vtx Y * light Y
+    vmacu   $v20, vPairNZ, $v2[2h]            // + Vtx Z * light Z; only elements 0, 4 matter
+    luv     $v2[0], (ltBufOfs + 0)(curLight)  // Load light RGB
+    vmrg    ltColor, ltColor, vPairAlpha37    // Select original alpha
+    vand    $v20, $v20, $v31[7]               // 0x7FFF; not sure why AND rather than clamp
+    vmrg    $v2, $v2, vZero[0]                // Set elements 3 and 7 of light RGB to 0
+    vmulf   ltColor, ltColor, $v31[7]         // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
+    vmacf   ltColor, $v2, $v20[0h]            // + light color * dot product
+    suv     ltColor[0], 8(inputVtxPos)        // Store new light color of two verts RGBARGBA
+    bne     curLight, spFxBaseReg, next_light_dirorpoint // If at start of lights, done
+     addi   curLight, curLight, -lightSize
+return_from_point_lights:
+    lqv     $v31[0], (v31Value)($zero)        // Fix clobbered v31
+    lqv     $v30[0], (v30Value)($zero)        // Fix clobbered v30
+    llv     vPairST[4], (inputVtxSize + 0x8)(inputVtxPos) // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
+    bgezal  curMatrix, lights_loadmtxdouble   // Branch if current matrix is MV matrix
+     li     curMatrix, mvpMatrix + 0x8000     // Load MVP matrix and set flag for is MVP
     andi    $11, $5, G_TEXTURE_GEN_H
-    vmrg    $v3, $v0, $v31[5]
-    beqz    $11, f3dzex_00001870
-     vge    $v27, $v25, $v31[3]
-    lpv     $v2[0], 0x00B0($9)
-    lpv     $v20[0], 0x0098($9)
-f3dzex_ovl2_00001478:
-    j       f3dzex_ovl2_00001708
-     vmulf  $v21, $v7, $v2[0h]
+    vmrg    $v3, vZero, $v31[5]               // INSTR 3: Setup for texgen: 0x4000 in elems 3, 7
+    beqz    $11, vertices_store               // Done if no texgen
+     vge    $v27, $v25, $v31[3]               // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
+    lpv     $v2[0], (ltBufOfs + 0x10)(curLight) // Load lookat 1 transformed dir for texgen (curLight was decremented)
+    lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load lookat 0 transformed dir for texgen
+    j       lights_texgenmain
+     vmulf  $v21, vPairNX, $v2[0h]            // First instruction of texgen, vertex normal X * last transformed dir
 
-f3dzex_ovl2_00001480: // $12 is either 0 or -0x7F80
-    lqv     $v8[0], 0x0000($12)
-    lqv     $v10[0], 0x0010($12)
-    lqv     $v12[0], 0x0020($12)
-    lqv     $v14[0], 0x0030($12)
-    vcopy   $v9, $v8
-    ldv     $v9[0], 0x0008($12)
-    vcopy   $v11, $v10
-    ldv     $v11[0], 0x0018($12)
-    vcopy   $v13, $v12
-    ldv     $v13[0], 0x0028($12)
-    vcopy   $v15, $v14
-    ldv     $v15[0], 0x0038($12)
-    ldv     $v8[8], 0x0000($12)
-    ldv     $v10[8], 0x0010($12)
-    ldv     $v12[8], 0x0020($12)
+lights_loadmtxdouble: // curMatrix is either positive mvMatrix or negative mvpMatrix
+    /* Load MVP matrix as follows--note that translation is in the bottom row,
+    not the right column.
+        Elem   0   1   2   3   4   5   6   7      (Example data)
+    I r0i v8  00  02  04  06  00  02  04  06      Xscl Rot  Rot   0
+    I r1i v9  08  0A  0C  0E  08  0A  0C  0E      Rot  Yscl Rot   0
+    I r2i v10 10  12  14  16  10  12  14  16      Rot  Rot  Zscl  0
+    I r3i v11 18  1A  1C  1E  18  1A  1C  1E      Xpos Ypos Zpos  1
+    F r0f v12 20  22  24  26  20  22  24  26
+    F r1f v13 28  2A  2C  2E  28  2A  2C  2E
+    F r2f v14 30  32  34  36  30  32  34  36
+    F r3f v15 38  3A  3C  3E  38  3A  3C  3E
+    Vector regs contain rows of original matrix (v11/v15 have translations)
+    */
+    lqv     mxr0i[0], 0x0000(curMatrix) // rows 0 and 1, int
+    lqv     mxr2i[0], 0x0010(curMatrix) // rows 2 and 3, int
+    lqv     mxr0f[0], 0x0020(curMatrix) // rows 0 and 1, frac
+    lqv     mxr2f[0], 0x0030(curMatrix) // rows 2 and 3, frac
+    vcopy   mxr1i, mxr0i
+    ldv     mxr1i[0], 0x0008(curMatrix) // row 1 int twice
+    vcopy   mxr3i, mxr2i
+    ldv     mxr3i[0], 0x0018(curMatrix) // row 3 int twice
+    vcopy   mxr1f, mxr0f
+    ldv     mxr1f[0], 0x0028(curMatrix) // row 1 frac twice
+    vcopy   mxr3f, mxr2f
+    ldv     mxr3f[0], 0x0038(curMatrix) // row 3 frac twice
+    ldv     mxr0i[8], 0x0000(curMatrix) // row 0 int twice
+    ldv     mxr2i[8], 0x0010(curMatrix) // row 2 int twice
+    ldv     mxr0f[8], 0x0020(curMatrix) // row 0 frac twice
     jr      $ra
-     ldv    $v14[8], 0x0030($12)
+     ldv    mxr2f[8], 0x0030(curMatrix) // row 2 frac twice
 
-f3dzex_ovl2_000014C4:
-    lsv     $v4[0], (mvMatrix)($zero)
-    lsv     $v3[0], (mvMatrix + 0x20)($zero)
-    lsv     $v21[0], (mvMatrix + 2)($zero)
-    lsv     $v28[0], (mvMatrix + 0x22)($zero)
-    lsv     $v30[0], (mvMatrix + 4)($zero)
-    vmov    $v4[4], $v4[0]
-    lsv     $v31[0], (mvMatrix + 0x24)($zero)
-    vmov    $v3[4], $v3[0]
-    lsv     $v4[2], (mvMatrix + 8)($zero)
-    vmov    $v21[4], $v21[0]
-    lsv     $v3[2], (mvMatrix + 0x28)($zero)
-    vmov    $v28[4], $v28[0]
-    lsv     $v21[2], (mvMatrix + 0xA)($zero)
-    vmov    $v30[4], $v30[0]
-    lsv     $v28[2], (mvMatrix + 0x2A)($zero)
-    vmov    $v31[4], $v31[0]
-    lsv     $v30[2], (mvMatrix + 0xC)($zero)
-    vmov    $v4[5], $v4[1]
-    lsv     $v31[2], (mvMatrix + 0x2C)($zero)
-    vmov    $v3[5], $v3[1]
-    lsv     $v4[4], (mvMatrix + 0x10)($zero)
-    vmov    $v21[5], $v21[1]
-    lsv     $v3[4], (mvMatrix + 0x30)($zero)
-    vmov    $v28[5], $v28[1]
-    lsv     $v21[4], (mvMatrix + 0x12)($zero)
-    vmov    $v30[5], $v30[1]
-    lsv     $v28[4], (mvMatrix + 0x32)($zero)
-    vmov    $v31[5], $v31[1]    // v31[1] is 4
-    lsv     $v30[4], (mvMatrix + 0x14)($zero)
-    vmov    $v4[6], $v4[2]
-    lsv     $v31[4], (mvMatrix + 0x34)($zero)
-    vmov    $v3[6], $v3[2]
-    or      $12, $zero, $zero
-    vmov    $v21[6], $v21[2]
-    vmov    $v28[6], $v28[2]
-    vmov    $v30[6], $v30[2]
-    j       f3dzex_ovl2_00001480
-     vmov   $v31[6], $v31[2]    // v31[2] is 8
+lights_loadmvtranspose3x3double:
+    /* Load 3x3 portion of MV matrix in transposed orientation
+    Vector regs now contain columns of original matrix; elems 3,7 not modified
+    Importantly, v28 elements 3 and 7 contain vertices 1 and 2 alpha.
+    This also clobbers v31 and v30 (except elements 3 and 7), which have to be
+    restored after lighting.
+            E 0   1   2   3   4   5   6   7
+    I c0i  v4 00  08  10  -   00  08  10  - 
+    I c1i v21 02  0A  12  -   02  0A  12  - 
+    I c2i v30 04  0C  14 CNST 04  0C  14 CNST
+    I XXX XXX -   -   -   -   -   -   -   - 
+    F c0f  v3 20  28  30  -   20  28  30  - 
+    F c1f v28 22  2A  32 V1A  22  2A  32 V2A
+    F c2f v31 24  2C  34 CNST 24  2C  34 CNST
+    F XXX XXX -   -   -   -   -   -   -   - 
+    */
+    lsv     mvTc0i[0], (mvMatrix)($zero)
+    lsv     mvTc0f[0], (mvMatrix + 0x20)($zero)
+    lsv     mvTc1i[0], (mvMatrix + 2)($zero)
+    lsv     mvTc1f[0], (mvMatrix + 0x22)($zero)
+    lsv     mvTc2i[0], (mvMatrix + 4)($zero)
+    vmov    mvTc0i[4], mvTc0i[0]
+    lsv     mvTc2f[0], (mvMatrix + 0x24)($zero)
+    vmov    mvTc0f[4], mvTc0f[0]
+    lsv     mvTc0i[2], (mvMatrix + 8)($zero)
+    vmov    mvTc1i[4], mvTc1i[0]
+    lsv     mvTc0f[2], (mvMatrix + 0x28)($zero)
+    vmov    mvTc1f[4], mvTc1f[0]
+    lsv     mvTc1i[2], (mvMatrix + 0xA)($zero)
+    vmov    mvTc2i[4], mvTc2i[0]
+    lsv     mvTc1f[2], (mvMatrix + 0x2A)($zero)
+    vmov    mvTc2f[4], mvTc2f[0]
+    lsv     mvTc2i[2], (mvMatrix + 0xC)($zero)
+    vmov    mvTc0i[5], mvTc0i[1]
+    lsv     mvTc2f[2], (mvMatrix + 0x2C)($zero)
+    vmov    mvTc0f[5], mvTc0f[1]
+    lsv     mvTc0i[4], (mvMatrix + 0x10)($zero)
+    vmov    mvTc1i[5], mvTc1i[1]
+    lsv     mvTc0f[4], (mvMatrix + 0x30)($zero)
+    vmov    mvTc1f[5], mvTc1f[1]
+    lsv     mvTc1i[4], (mvMatrix + 0x12)($zero)
+    vmov    mvTc2i[5], mvTc2i[1]
+    lsv     mvTc1f[4], (mvMatrix + 0x32)($zero)
+    vmov    mvTc2f[5], mvTc2f[1]
+    lsv     mvTc2i[4], (mvMatrix + 0x14)($zero)
+    vmov    mvTc0i[6], mvTc0i[2]
+    lsv     mvTc2f[4], (mvMatrix + 0x34)($zero)
+    vmov    mvTc0f[6], mvTc0f[2]
+    or      curMatrix, $zero, $zero // Set curMatrix = positive mvMatrix
+    vmov    mvTc1i[6], mvTc1i[2]
+    vmov    mvTc1f[6], mvTc1f[2]
+    vmov    mvTc2i[6], mvTc2i[2]
+    j       lights_loadmtxdouble
+     vmov   mvTc2f[6], mvTc2f[2]
 
-/*
-v31Value:
-.dh 0xFFFF // [0]
-.dh 0x0004 // [1]
-.dh 0x0008 // [2]
-.dh 0x7F00 // [3]
-.dh 0xFFFC // [4]
-.dh 0x4000 // [5]
-.dh 0x0420 // [6]
-.dh 0x7FFF // [7]
-*/
-f3dzex_ovl2_0000155C:
-    ldv     $v20[8], 0x0000(inputVtxPos) // load the position of the first input vert into the upper 4 elements of v20
-    bltzal  $12, f3dzex_ovl2_000014C4
-     ldv    $v20[0], 0x0010(inputVtxPos) // load the position of the second input vert into the lower 4 elements of v20
-    vmudn   $v2, $v15, $v1[0]
-    ldv     $v29[0], 0x00A8($9)
-    vmadh   $v2, $v11, $v1[0]
-    vmadn   $v2, $v12, $v20[0h]
-    vmadh   $v2, $v8, $v20[0h]
-    vmadn   $v2, $v13, $v20[1h]
-    ldv     $v29[8], 0x00A8($9)
-    vmadh   $v2, $v9, $v20[1h]
-    vmadn   $v2, $v14, $v20[2h]
-    vmadh   $v2, $v10, $v20[2h]
-    vsub    $v20, $v29, $v2       // v20 = v29 - v2
-    vmrg    $v29, $v20, $v0[0]    // v29 = v20 or zero based on vcc
-    vmudh   $v2, $v29, $v29       // v2 = v29 * v29
-    vreadacc $v2, ACC_LOWER       // v2 = accumulator lower
-    vreadacc $v29, ACC_MIDDLE     // v2 = accumulator middle
-    vaddc   $v29, $v29, $v29[0q]
-    vadd    $v2, $v2, $v2[0q]
-    vaddc   $v29, $v29, $v29[2h]
-    vadd    $v2, $v2, $v2[2h]
-    vrsqh   $v29[3], $v2[1]
-    vrsql   $v29[3], $v29[1]
-    vrsqh   $v29[2], $v2[5]
+point_lighting_main:
+    ldv     $v20[8], 0x0000(inputVtxPos) // Load v0 pos to upper 4 elements of v20
+    bltzal  curMatrix, lights_loadmvtranspose3x3double // branch if curMatrix is MVP; need MV and MV^T
+     ldv    $v20[0], 0x0010(inputVtxPos) // Load v1 pos to lower 4 elements of v20
+    // Transform input vertices by MV; puts them in camera space
+    vmudn   $v2, mxr3f, vOne[0]          // 1 * translation row
+    ldv     $v29[0], (ltBufOfs + 0x8)(curLight) // Load light pos (shorts, same mem as non-transformed light dir) into lower 4 elements
+    vmadh   $v2, mxr3i, vOne[0]          // 1 * translation row
+    vmadn   $v2, mxr0f, $v20[0h]
+    vmadh   $v2, mxr0i, $v20[0h]
+    vmadn   $v2, mxr1f, $v20[1h]
+    ldv     $v29[8], (ltBufOfs + 0x8)(curLight) // Load same light pos into upper 4
+    vmadh   $v2, mxr1i, $v20[1h]
+    vmadn   $v2, mxr2f, $v20[2h]
+    vmadh   $v2, mxr2i, $v20[2h]
+    vsub    $v20, $v29, $v2              // v20 = light pos - camera space verts pos
+    vmrg    $v29, $v20, vZero[0]         // Set elems 3 and 7 to 0
+    vmudh   $v2, $v29, $v29              // Squared
+    vreadacc $v2, ACC_UPPER              // v2 = accumulator upper
+    vreadacc $v29, ACC_MIDDLE            // v29 = accumulator middle
+    vaddc   $v29, $v29, $v29[0q]         // Add X to Y, Z to alpha(0) (middle)
+    vadd    $v2, $v2, $v2[0q]            // Add X to Y, Z to alpha(0) (upper)
+    vaddc   $v29, $v29, $v29[2h]         // Add Z+alpha(0) to all (middle)
+    vadd    $v2, $v2, $v2[2h]            // Add Z+alpha(0) to all (upper)
+    vrsqh   $v29[3], $v2[1]              // Input upper sum vtx 1
+    vrsql   $v29[3], $v29[1]             // Rsqrt lower
+    vrsqh   $v29[2], $v2[5]              // Get upper result, input upper sum vtx 0
     vrsql   $v29[7], $v29[5]
-    vrsqh   $v29[6], $v0[0]
-    vmudn   $v2, $v3, $v20[0h]
-    sll     $11, $11, 4
-    vmadh   $v2, $v4, $v20[0h]
-    lbu     $24, 0x00AE($9)
-    vmadn   $v2, $v28, $v20[1h]
-    mtc2    $11, $v27[0]
-    vmadh   $v2, $v21, $v20[1h]
-    vmadn   $v2, $v31, $v20[2h]
-    vmadh   $v20, $v30, $v20[2h]
-    vmudm   $v2, $v20, $v29[3h]
-    vmadh   $v20, $v20, $v29[2h]
-    vmudn   $v2, $v2, $v31[3]
-    vmadh   $v20, $v20, $v31[3]
-    vmulu   $v2, $v7, $v20[0h]
-    mtc2    $11, $v27[8]
-    vmacu   $v2, $v6, $v20[1h]
-    lbu     $11, 0x00A7($9)
-    vmacu   $v2, $v5, $v20[2h]
+    vrsqh   $v29[6], vZero[0]            // Results in v29[2:3, 6:7]
+    // Transform vert-to-light vector by MV transpose. See note about why this is
+    // not correct if non-uniform scale has been applied.
+    vmudn   $v2, mvTc0f, $v20[0h]
+    sll     $11, $11, 4                  // Holds light type / constant attenuation value (0x3)
+    vmadh   $v2, mvTc0i, $v20[0h]
+    lbu     $24, (ltBufOfs + 0xE)(curLight) // Quadratic attenuation factor byte from point light props
+    vmadn   $v2, mvTc1f, $v20[1h]
+    mtc2    $11, $v27[0]                 // 0x3 << 4 -> v27 elems 0, 1
+    vmadh   $v2, mvTc1i, $v20[1h]
+    vmadn   $v2, mvTc2f, $v20[2h]
+    vmadh   $v20, mvTc2i, $v20[2h]       // v20 = int result of vert-to-light in model space
+    vmudm   $v2, $v20, $v29[3h]          // v2l_model * length normalization frac
+    vmadh   $v20, $v20, $v29[2h]         // v2l_model * length normalization int
+    vmudn   $v2, $v2, $v31[3]            // this is 0x7F00; v31 is mvTc2f but elements 3 and 7 weren't overwritten
+    vmadh   $v20, $v20, $v31[3]          // scale to byte, only keep int part
+    vmulu   $v2, vPairNX, $v20[0h]       // Normal X * normalized vert-to-light X
+    mtc2    $11, $v27[8]                 // 0x3 << 4 -> v27 elems 4, 5
+    vmacu   $v2, vPairNY, $v20[1h]       // Y * Y
+    lbu     $11, (ltBufOfs + 0x7)(curLight) // Linear attenuation factor byte from point light props
+    vmacu   $v2, vPairNZ, $v20[2h]       // Z * Z
     sll     $24, $24, 5
-    vand    $v20, $v2, $v31[7]
-    mtc2    $24, $v20[14]
-    vrcph   $v29[0], $v29[2]
-    vrcpl   $v29[0], $v29[3]
-    vrcph   $v29[4], $v29[6]
-    vrcpl   $v29[4], $v29[7]
-    vmudh   $v2, $v29, $v30[7]
-    mtc2    $11, $v20[6]
-    vmudl   $v2, $v2, $v2[0h]
-    vmulf   $v29, $v29, $v20[3]
-    vmadm   $v29, $v2, $v20[7]
-    vmadn   $v29, $v27, $v30[3]
+    vand    $v20, $v2, $v31[7]           // 0x7FFF; not sure why AND rather than clamp
+    mtc2    $24, $v20[14]                // 0xE << 5 -> v20 elem 7
+    vrcph   $v29[0], $v29[2]             // rcp(rsqrt()) = sqrt = length of vert-to-light
+    vrcpl   $v29[0], $v29[3]             // For vertex 1 in v29[0]
+    vrcph   $v29[4], $v29[6]             // 
+    vrcpl   $v29[4], $v29[7]             // For vertex 0 in v29[4]
+    vmudh   $v2, $v29, $v30[7]           // scale by 0x0010 (value changed in light_vtx) (why?)
+    mtc2    $11, $v20[6]                 // 0x7 -> v20 elem 3
+    vmudl   $v2, $v2, $v2[0h]            // squared
+    vmulf   $v29, $v29, $v20[3]          // Length * byte 0x7
+    vmadm   $v29, $v2, $v20[7]           // + (scaled length squared) * byte 0xE << 5
+    vmadn   $v29, $v27, $v30[3]          // + (byte 0x3 << 4) * 0xFFF0
     vreadacc $v2, ACC_MIDDLE
-    vrcph   $v2[0], $v2[0]
-    vrcpl   $v2[0], $v29[0]
+    vrcph   $v2[0], $v2[0]               // v2 int, v29 frac: function of distance to light
+    vrcpl   $v2[0], $v29[0]              // Reciprocal = inversely proportional
     vrcph   $v2[4], $v2[4]
     vrcpl   $v2[4], $v29[4]
-    luv     $v29[0], 0x0008(inputVtxPos)
-    vand    $v2, $v2, $v31[7]
-    vmulf   $v2, $v2, $v20
-    luv     $v20[0], 0x00A0($9)
-    vmrg    $v29, $v29, $v28
-    vand    $v2, $v2, $v31[7]
-    vmrg    $v20, $v20, $v0[0]
-    vmulf   $v29, $v29, $v31[7]
-    vmacf   $v29, $v20, $v2[0h]
-    suv     $v29[0], 0x0008(inputVtxPos)
-    bne     $9, curClipRatio, f3dzex_ovl2_0000140C
-     addi   $9, $9, -0x18
-    j       f3dzex_ovl2_0000144C
-f3dzex_ovl2_0000168C:
-     lpv     $v20[0], 0x0098($9)
+    luv     ltColor[0], 0x0008(inputVtxPos) // Get current RGBARGBA for two verts
+    vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
+    vmulf   $v2, $v2, $v20               // Inverse dist factor * dot product (elems 0, 4)
+    luv     $v20[0], (ltBufOfs + 0)(curLight) // Light color RGB_RGB_
+    vmrg    ltColor, ltColor, vPairAlpha37 // Select orig alpha; vPairAlpha37 = v28 = mvTc1f, but alphas were not overwritten
+    vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
+    vmrg    $v20, $v20, vZero[0]         // Zero elements 3 and 7 of light color
+    vmulf   ltColor, ltColor, $v31[7]    // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
+    vmacf   ltColor, $v20, $v2[0h]       // + light color * light amount
+    suv     ltColor[0], 0x0008(inputVtxPos) // Store new RGBARGBA for two verts
+    bne     curLight, spFxBaseReg, next_light_dirorpoint
+     addi   curLight, curLight, -lightSize
+    j       return_from_point_lights
+directional_lighting:
+     lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next light transformed dir; this value is overwritten with the same thing
 .else // No point lighting
-    luv     $v29[0], 0x00B8($9)
+    luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Init to ambient light color
 .endif
-f3dzex_ovl2_00001690:
-    vmulu   $v21, $v7, $v2[0h]
-    luv     $v4[0], 0x00A0($9)
-    vmacu   $v21, $v6, $v2[1h]
-    beq     $9, curClipRatio, f3dzex_ovl2_00001758
-     vmacu  $v21, $v5, $v2[2h]
-    vmulu   $v28, $v7, $v20[0h]
-    luv     $v3[0], 0x0088($9)
-    vmacu   $v28, $v6, $v20[1h]
-    addi    $11, $9, -0x18
-    vmacu   $v28, $v5, $v20[2h]
-    addi    $9, $9, -0x0030
-    vmrg    $v29, $v29, $v27
-    mtc2    $zero, $v4[6]
-    vmrg    $v3, $v3, $v0[0]
-    mtc2    $zero, $v4[14]
-    vand    $v21, $v21, $v31[7]
-    lpv     $v2[0], 0x00B0($9)
-    vand    $v28, $v28, $v31[7]
-    lpv     $v20[0], 0x0098($9)
-    vmulf   $v29, $v29, $v31[7]
-    vmacf   $v29, $v4, $v21[0h]
-    bne     $11, curClipRatio, f3dzex_ovl2_00001690
-     vmacf  $v29, $v3, $v28[0h]
-    vmrg    $v3, $v0, $v31[5]
-    llv     $v22[4], 0x0018(inputVtxPos)
-f3dzex_ovl2_000016F4:
-    vge     $v27, $v25, $v31[3] // v31[3] is 32512
-    andi    $11, $5, G_TEXTURE_GEN_H
-    vmulf   $v21, $v7, $v2[0h]
-    beqz    $11, f3dzex_00001870
-     suv    $v29[0], 0x0008(inputVtxPos)
-f3dzex_ovl2_00001708:
-    vmacf   $v21, $v6, $v2[1h]
-    andi    $12, $5, G_TEXTURE_GEN_LINEAR_H
-    vmacf   $v21, $v5, $v2[2h]
-    vxor    $v4, $v3, $v31[5]   // v31[5] is 0x4000
-    vmulf   $v28, $v7, $v20[0h]
-    vmacf   $v28, $v6, $v20[1h]
-    vmacf   $v28, $v5, $v20[2h]
-    lqv     $v2[0], (linearGenerateCoefficients)($zero)
-    vmudh   $v22, $v1, $v31[5]  // v31[5] is 16384
-    vmacf   $v22, $v3, $v21[0h]
-    beqz    $12, f3dzex_00001870
-     vmacf  $v22, $v4, $v28[0h]
-    vmadh   $v22, $v1, $v2[0]   // v2[0] is -0.5
-    vmulf   $v4, $v22, $v22
-    vmulf   $v3, $v22, $v31[7]  // v31[7] is 0.999969482421875
-    vmacf   $v3, $v22, $v2[2]   // v2[2] is 0.849212646484375
-.if (UCODE_IS_F3DEX2_204H)
-    vec3 equ v22
-.else
-    vec3 equ v21
-.endif
-    vmudh   $vec3, $v1, $v31[5]
-    vmacf   $v22, $v22, $v2[1]
-    j       f3dzex_00001870
-     vmacf  $v22, $v4, $v3
 
-f3dzex_ovl2_00001758:
-    vmrg    $v29, $v29, $v27
-    vmrg    $v4, $v4, $v0[0]
-    vand    $v21, $v21, $v31[7]
-    veq     $v3, $v31, $v31[3h]
-    lpv     $v2[0], 0x0080($9)
-    vmrg    $v3, $v0, $v31[5]
-    llv     $v22[4], 0x0018(inputVtxPos)
-    vmulf   $v29, $v29, $v31[7]
-    j       f3dzex_ovl2_000016F4
-     vmacf  $v29, $v4, $v21[0h]
+// Loop for dot product normals and multiply-add color for 2 lights
+// curLight starts pointing to the top light, and v2 and v20 already have the dirs
+lights_dircoloraccum2:
+    vmulu   $v21, vPairNX, $v2[0h]       // vtx normals all (X) * light transformed dir 2n+1 X
+    luv     $v4[0], (ltBufOfs + 0)(curLight) // color light 2n+1
+    vmacu   $v21, vPairNY, $v2[1h]       // + vtx n Y only * light dir 2n+1 Y
+    beq     curLight, spFxBaseReg, lights_finishone // Finish pipeline for odd number of lights
+     vmacu  $v21, vPairNZ, $v2[2h]       // + vtx n Z only * light dir 2n+1 Z
+    vmulu   $v28, vPairNX, $v20[0h]      // vtx normals all (X) * light transformed dir 2n X
+    luv     $v3[0], (ltBufOfs - lightSize + 0)(curLight) // color light 2n
+    vmacu   $v28, vPairNY, $v20[1h]      // + vtx n Y only * light dir 2n Y
+    addi    $11, curLight, -lightSize    // Subtract 1 light for comparison at bottom of loop
+    vmacu   $v28, vPairNZ, $v20[2h]      // + vtx n Y only * light dir 2n Y
+    addi    curLight, curLight, -(2 * lightSize)
+    vmrg    ltColor, ltColor, vPairRGBA  // select orig alpha
+    mtc2    $zero, $v4[6]                // light 2n+1 color comp 3 = 0 (to not interfere with alpha)
+    vmrg    $v3, $v3, vZero[0]           // light 2n color components 3,7 = 0
+    mtc2    $zero, $v4[14]               // light 2n+1 color comp 7 = 0 (to not interfere with alpha)
+    vand    $v21, $v21, $v31[7]          // 0x7FFF; not sure why AND rather than clamp
+    lpv     $v2[0], (ltBufOfs + 0x10)(curLight) // Normal for light or lookat next slot down, 2n+1
+    vand    $v28, $v28, $v31[7]          // 0x7FFF; not sure why AND rather than clamp
+    lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Normal two slots down, 2n
+    vmulf   ltColor, ltColor, $v31[7]    // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
+    vmacf   ltColor, $v4, $v21[0h]       // + color 2n+1 * dot product
+    bne     $11, spFxBaseReg, lights_dircoloraccum2 // Pointer 1 behind, minus 1 light, if at base then done
+     vmacf  ltColor, $v3, $v28[0h]       // + color 2n * dot product
+// End of loop for even number of lights
+    vmrg    $v3, vZero, $v31[5]          // INSTR 3: Setup for texgen: 0x4000 in elems 3, 7
+    llv     vPairST[4], (inputVtxSize + 8)(inputVtxPos)  // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
+    
+lights_texgenpre:
+// Texgen beginning
+    vge     $v27, $v25, $v31[3]         // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
+    andi    $11, $5, G_TEXTURE_GEN_H
+    vmulf   $v21, vPairNX, $v2[0h]      // Vertex normal X * lookat 1 dir X
+    beqz    $11, vertices_store
+     suv    ltColor[0], 0x0008(inputVtxPos) // write back color/alpha for two verts
+lights_texgenmain:
+// Texgen main
+    vmacf   $v21, vPairNY, $v2[1h]      // VN Y * lookat 1 dir Y
+    andi    $12, $5, G_TEXTURE_GEN_LINEAR_H
+    vmacf   $v21, vPairNZ, $v2[2h]      // VN Z * lookat 1 dir Z
+    vxor    $v4, $v3, $v31[5]           // v4 has 0x4000 in opposite pattern as v3, normally 11101110
+    vmulf   $v28, vPairNX, $v20[0h]     // VN XYZ * lookat 0 dir XYZ
+    vmacf   $v28, vPairNY, $v20[1h]     // Y
+    vmacf   $v28, vPairNZ, $v20[2h]     // Z
+    lqv     $v2[0], (linearGenerateCoefficients)($zero)
+    vmudh   vPairST, vOne, $v31[5]      // S, T init to 0x4000 each
+    vmacf   vPairST, $v3, $v21[0h]      // Add dot product with lookat 1 to T (elems 3, 7)
+    beqz    $12, vertices_store
+     vmacf  vPairST, $v4, $v28[0h]      // Add dot product with lookat 0 to S (elems 2, 6)
+// Texgen Linear--not sure what formula this is implementing
+    vmadh   vPairST, vOne, $v2[0]       // ST + Coefficient 0xC000
+    vmulf   $v4, vPairST, vPairST       // ST squared
+    vmulf   $v3, vPairST, $v31[7]       // Move to accumulator
+    vmacf   $v3, vPairST, $v2[2]        // + ST * coefficient 0x6CB3
+.if (UCODE_IS_F3DEX2_204H)
+    vmudh   vPairST, vOne, $v31[5]      // Bug? Reinit S, T init to 0x4000 each
+.else
+    vmudh   $v21, vOne, $v31[5]         // Initialize accumulator with 0x4000 each (v21 discarded)
+.endif
+    vmacf   vPairST, vPairST, $v2[1]    // + ST * coefficient 0x44D3
+    j       vertices_store
+     vmacf  vPairST, $v4, $v3           // + ST squared * (ST + ST * coeff)
+
+lights_finishone:
+    vmrg    ltColor, ltColor, vPairRGBA // select orig alpha
+    vmrg    $v4, $v4, vZero[0]          // clear alpha component of color
+    vand    $v21, $v21, $v31[7]         // 0x7FFF; not sure why AND rather than clamp
+    veq     $v3, $v31, $v31[3h]         // set VCC to 00010001, opposite of 2 light case
+    lpv     $v2[0], (ltBufOfs - 2 * lightSize + 0x10)(curLight) // Load second dir down, lookat 0, for texgen
+    vmrg    $v3, vZero, $v31[5]         // INSTR 3 OPPOSITE: Setup for texgen: 0x4000 in 0,1,2,4,5,6
+    llv     vPairST[4], (inputVtxSize + 8)(inputVtxPos)  // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
+    vmulf   ltColor, ltColor, $v31[7]   // Move cur color to accumulator
+    j       lights_texgenpre
+     vmacf  ltColor, $v4, $v21[0h]      // + light color * dot product
 
 .align 8
 Overlay2End:
