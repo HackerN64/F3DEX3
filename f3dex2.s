@@ -2031,7 +2031,7 @@ light_vtx:
     mtc2    $11, $v31[6]                      // v31[6] = 0x0004 (was previously 0x0420)
 next_light_dirorpoint:
     lbu     $11, (ltBufOfs + 0x3)(curLight)   // Load light type / constant attenuation value at light structure + 3
-    bnez    $11, point_lighting_main          // If not zero, use point lighting for the rest of the lights
+    bnez    $11, light_point                  // If not zero, this is a point light
      lpv    $v2[0], (ltBufOfs + 0x10)(curLight) // Load light transformed direction
     luv     ltColor[0], 8(inputVtxPos)        // Load current light color of two verts RGBARGBA
     vmulu   $v20, vPairNX, $v2[0h]            // Vertex normals X * light transformed dir X
@@ -2046,7 +2046,7 @@ next_light_dirorpoint:
     suv     ltColor[0], 8(inputVtxPos)        // Store new light color of two verts RGBARGBA
     bne     curLight, spFxBaseReg, next_light_dirorpoint // If at start of lights, done
      addi   curLight, curLight, -lightSize
-return_from_point_lights:
+after_dirorpoint_loop:
     lqv     $v31[0], (v31Value)($zero)        // Fix clobbered v31
     lqv     $v30[0], (v30Value)($zero)        // Fix clobbered v30
     llv     vPairST[4], (inputVtxSize + 0x8)(inputVtxPos) // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
@@ -2148,7 +2148,7 @@ lights_loadmvtranspose3x3double:
     j       lights_loadmtxdouble
      vmov   mvTc2f[6], mvTc2f[2]
 
-point_lighting_main:
+light_point:
     ldv     $v20[8], 0x0000(inputVtxPos) // Load v0 pos to upper 4 elements of v20
     bltzal  curMatrix, lights_loadmvtranspose3x3double // branch if curMatrix is MVP; need MV and MV^T
      ldv    $v20[0], 0x0010(inputVtxPos) // Load v1 pos to lower 4 elements of v20
@@ -2227,7 +2227,7 @@ point_lighting_main:
     suv     ltColor[0], 0x0008(inputVtxPos) // Store new RGBARGBA for two verts
     bne     curLight, spFxBaseReg, next_light_dirorpoint
      addi   curLight, curLight, -lightSize
-    j       return_from_point_lights
+    j       after_dirorpoint_loop
 directional_lighting:
      lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next light transformed dir; this value is overwritten with the same thing
 .else // No point lighting
