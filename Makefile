@@ -6,8 +6,10 @@ NoN ?= 0
 
 # Selects which version of a given microcode to build:
 # F3DEX2:
-#  2.08  (Banjo-Tooie, the best game on the N64)
+#  2.08  (Banjo-Tooie)
+#  2.08_XBUS (Power Rangers)
 #  2.07  (Rocket: Robot on Wheels)
+#  2.07_XBUS (Lode Runner 3-D)
 #  2.04H (Kirby 64, Smash 64)
 #  2.08PL (Paper Mario, F3DEX2.08 with point lighting added)
 #  

@@ -596,7 +596,7 @@ wait_dpc_start_valid:
     beqz $12, f3dzex_xbus_0000111C
      sw $zero, OSTask + OSTask_flags
     j load_overlay1_init
-     lw taskDataPtr, OS_YIELD_DATA_SIZE_FIFO - 8
+     lw taskDataPtr, OS_YIELD_DATA_SIZE_TOTAL - 8
 .fill 16 * 4 // Bunch of nops here to make it the same size as the fifo code.
 f3dzex_xbus_0000111C:
 .endif
@@ -1718,7 +1718,7 @@ task_yield:
     jal     dma_read_write
      li     $19, OS_YIELD_DATA_SIZE - 1
     li      status, SP_SET_SIG1 | SP_SET_SIG2 // yielded and task done signals
-    addiu   $24, $24, OS_YIELD_DATA_SIZE_FIFO - 8
+    addiu   $24, $24, OS_YIELD_DATA_SIZE_TOTAL - 8
     li      $20, -0x76E0 // ???
     li      $19, 7
 .endif
