@@ -188,6 +188,7 @@ G_MWO_CLIP_RPY:
 .endif
 
 // 0x1B0: constants for register $v31
+.align 0x10 // loaded with lqv
 v31Value:
     .dh 0xFFFF // 65535
     .dh 0x0004 // 4
@@ -199,6 +200,7 @@ v31Value:
     .dh 0x7FFF // 32767
 
 // 0x1C0: constants for register $v30
+.align 0x10 // loaded with lqv
 v30Value:
     .dh 0x7FFC
     .dh 0x1400
@@ -218,6 +220,7 @@ v30Value:
     .dh 0x0020
 .endif
 
+.align 0x10 // loaded with lqv
 linearGenerateCoefficients:
     .dh 0xC000
     .dh 0x44D3
@@ -592,7 +595,7 @@ wait_dpc_start_valid:
     lw $12, OSTask + OSTask_flags
     addi $1, $zero, SP_CLR_SIG2 | SP_CLR_SIG1
     mtc0 $1, SP_STATUS
-    andi $12, $12, 1
+    andi $12, $12, OS_TASK_YIELDED
     beqz $12, f3dzex_xbus_0000111C
      sw $zero, OSTask + OSTask_flags
     j load_overlay1_init
@@ -626,10 +629,10 @@ load_overlay1_init:
 
     jal     load_overlay_and_enter  // load overlay 1 and enter
      move   $12, $ra                // set up the return address, since load_overlay_and_enter returns to $12
-
-// Overlays 0 and 1 overwrite everything up to this point (2.08 versions overwrite up to the previous .align 8)
-.align 8
+    // This return should be such that it coincides with displaylist_dma so no code from overlay 1 is ran, ensure that
+    // Overlay01End_ remains aligned to 8 bytes
 Overlay01End_:
+// Overlays 0 and 1 overwrite everything up to this point (2.08 versions overwrite up to the previous .align 8)
 
 displaylist_dma: // loads inputBufferLength bytes worth of displaylist data via DMA into inputBuffer
     li      $19, inputBufferLength - 1  // set the DMA length
@@ -801,9 +804,9 @@ ovl0_04001284:
 ovl0_0400129C:
     jr $ra
      nop
-    nop
 .endif
 
+.align 8
 Overlay23LoadAddress:
 
 // Overlay 3 registers
@@ -1868,10 +1871,10 @@ do_movemem:
     srl     $2, cmd_w0, 5                                // Left shifts the index by 5 (which is then added to the value read from the movemem table)
     lhu     $ra, (movememHandlerTable - (G_POPMTX | 0xFF00))($12)  // Loads the return address from movememHandlerTable based on command byte
     j       dma_read_write
-G_SETOTHERMODE_H_handler:
+G_SETOTHERMODE_H_handler: // These handler labels must be 4 bytes apart for the code below to work
      add    $20, $20, $2
 G_SETOTHERMODE_L_handler:
-    lw      $3, -0x1074($11)
+    lw      $3, (othermode0 - G_SETOTHERMODE_H_handler)($11) // resolves to othermode0 or othermode1 based on which handler was jumped to
     lui     $2, 0x8000
     srav    $2, $2, cmd_w0
     srl     $1, cmd_w0, 8
@@ -1879,7 +1882,7 @@ G_SETOTHERMODE_L_handler:
     nor     $2, $2, $zero
     and     $3, $3, $2
     or      $3, $3, cmd_w1
-    sw      $3, -0x1074($11)
+    sw      $3, (othermode0 - G_SETOTHERMODE_H_handler)($11)
     lw      cmd_w0, otherMode0
     j       G_RDP_handler
      lw     cmd_w1, otherMode1
