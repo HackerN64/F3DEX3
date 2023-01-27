@@ -42,6 +42,41 @@ ACC_LOWER equ 2
     vsar dst, dst, dst[N]
 .endmacro
 
+// There are two different memory spaces for the overlays: (a) IMEM and (b) the
+// microcode file (which, plus an offset, is also the location in DRAM).
+// 
+// A label marks both an IMEM addresses and a file address, but evaluating the
+// label in an integer context (e.g. in a branch) gives the IMEM address.
+// `orga(your_label)` gets the file address of the label.
+// The IMEM address can be set with `.headersize desired_imem_addr - orga()`.
+// The file address can be set with `.org`.
+// 
+// In IMEM, the whole microcode is organized as (each row is the same address):
+// 
+// start               Overlay 0          Overlay 1
+// (initialization)    (End task)         (More cmd handlers)
+// 
+// Many command
+// handlers
+// 
+// Overlay 2           Overlay 3
+// (Lighting)          (Clipping)
+// 
+// Vertex and
+// tri handlers
+// 
+// DMA code
+//
+// In the file, the microcode is organized as:
+// start
+// Many command handlers
+// Overlay 3
+// Vertex and tri handlers
+// DMA code
+// Overlay 0
+// Overlay 1
+// Overlay 2
+
 // Overlay table data member offsets
 overlay_load equ 0x0000
 overlay_len  equ 0x0004
@@ -308,9 +343,9 @@ ltBufOfs equ (lightBufferMain - spFxBase)
 
 // 0x02E0-0x02F0: Overlay 0/1 Table
 overlayInfo0:
-    OverlayEntry orga(Overlay0Address), orga(Overlay0End), Overlay0Address
+    OverlayEntry orga(ovl0_start), orga(ovl0_end), ovl0_start
 overlayInfo1:
-    OverlayEntry orga(Overlay1Address), orga(Overlay1End), Overlay1Address
+    OverlayEntry orga(ovl1_start), orga(ovl1_end), ovl1_start
 
 // 0x02F0-0x02FE: Movemem table
 movememTable:
@@ -465,9 +500,9 @@ lbl_03F8:
 
 // 0x0410-0x0420: Overlay 2/3 table
 overlayInfo2:
-    OverlayEntry orga(Overlay2Address), orga(Overlay2End), Overlay2Address
+    OverlayEntry orga(ovl2_start), orga(ovl2_end), ovl2_start
 overlayInfo3:
-    OverlayEntry orga(Overlay3Address), orga(Overlay3End), Overlay3Address
+    OverlayEntry orga(ovl3_start), orga(ovl3_end), ovl3_start
 
 // 0x0420-0x0920: Vertex buffer
 vertexBuffer:
@@ -529,7 +564,7 @@ rdpCmdBufPtr equ $23
 rdpCmdBufEnd equ $22
 
 // Initialization routines
-// Everything up until displaylist_dma will get overwritten by ovl1
+// Everything up until displaylist_dma will get overwritten by ovl0 and/or ovl1
 start:
 .if UCODE_TYPE == TYPE_F3DZEX && UCODE_ID < 2
     vor     vZero, $v16, $v16 // Sets vZero to $v16
@@ -630,8 +665,8 @@ load_overlay1_init:
     jal     load_overlay_and_enter  // load overlay 1 and enter
      move   $12, $ra                // set up the return address, since load_overlay_and_enter returns to $12
     // This return should be such that it coincides with displaylist_dma so no code from overlay 1 is ran, ensure that
-    // Overlay01End_ remains aligned to 8 bytes
-Overlay01End_:
+    // ovl01_end remains aligned to 8 bytes
+ovl01_end:
 // Overlays 0 and 1 overwrite everything up to this point (2.08 versions overwrite up to the previous .align 8)
 
 displaylist_dma: // loads inputBufferLength bytes worth of displaylist data via DMA into inputBuffer
@@ -807,7 +842,9 @@ ovl0_0400129C:
 .endif
 
 .align 8
-Overlay23LoadAddress:
+ovl23_start:
+
+ovl3_start:
 
 // Overlay 3 registers
 savedRA equ $30
@@ -818,14 +855,18 @@ vPairMVPPosF equ $v23
 vPairST equ $v22
 vPairRGBATemp equ $v7
 
-Overlay3Address:
+// Jump here to do lighting. If overlay 3 is loaded (this code), loads and jumps
+// to overlay 2 (same address as right here).
+ovl23_lighting_entrypoint:
     li      $11, overlayInfo2       // set up a load for overlay 2
     j       load_overlay_and_enter  // load overlay 2
-     li     $12, Overlay2Address    // set the return address to overlay 2's start
+     li     $12, ovl23_lighting_entrypoint  // set the return address
 
-f3dzex_ov3_000012E4:
+// Jump here to do clipping. If overlay 3 is loaded (this code), directly starts
+// the clipping code.
+ovl23_clipping_entrypoint:
     move    savedRA, $ra
-f3dzex_ov3_000012E8:
+ovl3_clipping_nosavera:
     la      $5, 0x0014
     la      $18, 6
     la      $15, inputBufferEnd
@@ -935,7 +976,7 @@ f3dzex_0000134C:
     li      $7, 0x0000
     li      $1, 0x0002
     sh      $15, (lbl_03D0)($21)
-    j       load_spFx_global_values // Goes to load_spFx_global_values, then to vertices_store, then
+    j       load_spfx_global_values // Goes to load_spfx_global_values, then to vertices_store, then
      li   $ra, vertices_store + 0x8000 // comes back here, via bltz $ra, f3dzex_00001478
 
 outputVtxPos equ $15
@@ -993,14 +1034,14 @@ f3dzex_000014EC:
 .align 8
 
 // Leave room for loading overlay 2 if it is larger than overlay 3 (true for f3dzex)
-.orga max(Overlay2End - Overlay2Address + orga(Overlay3Address), orga())
-Overlay3End:
+.orga max(ovl2_end - ovl2_start + orga(ovl3_start), orga())
+ovl3_end:
 
-Overlay23End_:
+ovl23_end:
 
 inputVtxPos equ $14
 tempCmdBuf50 equ $8
-// See load_spFx_global_values for detailed contents
+// See load_spfx_global_values for detailed contents
 vFxScaleFMin equ $v16
 vFxTransFMax equ $v17
 vFxMisc      equ $v18
@@ -1021,7 +1062,7 @@ G_VTX_handler:
     move    inputVtxPos, $20
     lbu     $8, mvpValid
     andi    tmpCurLight, $5, G_LIGHTING_H  // If no lighting, tmpCurLight is 0, skips transforming light dirs and setting this up as a pointer
-    bnez    tmpCurLight, Overlay23LoadAddress  // This will always end up in overlay 2, as the start of overlay 3 loads and enters overlay 2
+    bnez    tmpCurLight, ovl23_lighting_entrypoint // Run overlay 2 for lighting, either directly or via overlay 3 loading overlay 2
      andi   $7, $5, G_FOG_H
 after_light_dir_xfrm:
     bnez    $8, vertex_skip_recalc_mvp  // Skip recalculating the mvp matrix if it's already up-to-date
@@ -1061,7 +1102,7 @@ vertex_skip_recalc_mvp:
     ldv     mxr3f,    (mvpMatrix + 56)($zero)
     ldv     mxr0i[8], (mvpMatrix +  0)($zero)
     ldv     mxr2i[8], (mvpMatrix + 16)($zero)
-    jal     load_spFx_global_values
+    jal     load_spfx_global_values
      ldv    mxr0f[8], (mvpMatrix + 32)($zero)
     jal     while_wait_dma_busy
      ldv    mxr2f[8], (mvpMatrix + 48)($zero)
@@ -1212,7 +1253,7 @@ vertices_store:
     j       run_next_DL_command
      sbv    $v27[7], 0x0043(outputVtxPos)
 
-load_spFx_global_values:
+load_spfx_global_values:
     /*
     vscale = viewport shorts 0:3, vtrans = viewport shorts 4:7
     v16 = vFxScaleFMin = [vscale[0], -vscale[1], fogMin, vscale[3], (repeat)]
@@ -1302,7 +1343,7 @@ f3dzex_00001A7C:
     vmrg    $v4, $v14, $v8    // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     and     $5, $5, $12
     vmrg    $v14, $v8, $v14   // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
-    bnez    $5, f3dzex_ov2_000012E4 // has a different version in ovl3
+    bnez    $5, ovl23_clipping_entrypoint // Run overlay 3 for clipping, either directly or via overlay 2 loading overlay 3
      add     $11, $6, $11
     vlt     $v6, $v6, $v2     // v6 (thrown out), VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
     bgez    $11, return_routine
@@ -1604,13 +1645,17 @@ G_MODIFYVTX_handler:
     j       do_moveword
      lhu    vtxPtr, (vertexTable)(cmd_w0)
 
+     
+.if . > 0x00001FAC
+    .error "Not enough room in IMEM"
+.endif
 .org 0x1FAC
 
 // This subroutine sets up the values to load overlay 0 and then falls through
 // to load_overlay_and_enter to execute the load.
 load_overlay_0_and_enter:
 G_LOAD_UCODE_handler:
-    li      $12, Overlay0Address    // Sets up return address
+    li      $12, ovl0_start    // Sets up return address
     li      $11, overlayInfo0       // Sets up ovl0 table address
 // This subroutine accepts the address of an overlay table entry and loads that overlay.
 // It then jumps to that overlay's address after DMA of the overlay is complete.
@@ -1661,7 +1706,7 @@ dma_write:
 .headersize 0x00001000 - orga()
 
 // Overlay 0 controls the RDP and also stops the RSP when work is done
-Overlay0Address:
+ovl0_start:
 .if UCODE_METHOD == METHOD_FIFO
     sub     $11, rdpCmdBufPtr, rdpCmdBufEnd
     addiu   $12, $11, RDP_CMD_BUFSIZE - 1
@@ -1743,16 +1788,16 @@ ovl0_xbus_wait_for_rdp_2:
     nop
 
 .align 8
-Overlay0End:
+ovl0_end:
 
-.if Overlay0End > Overlay01End_
+.if ovl0_end > ovl01_end
     .error "Overlay 0 too large"
 .endif
 
 // overlay 1 (0x170 bytes loaded into 0x1000)
 .headersize 0x00001000 - orga()
 
-Overlay1Address:
+ovl1_start:
 
 G_DL_handler:
     lbu     $1, displayListStackLength  // Get the DL stack length
@@ -1888,24 +1933,25 @@ G_SETOTHERMODE_L_handler:
      lw     cmd_w1, otherMode1
 
 .align 8
-Overlay1End:
+ovl1_end:
 
-.if Overlay1End > Overlay01End_
+.if ovl1_end > ovl01_end
     .error "Overlay 1 too large"
 .endif
 
-.headersize Overlay23LoadAddress - orga()
+.headersize ovl23_start - orga()
 
-Overlay2Address:
+ovl2_start:
+ovl23_lighting_entrypoint_copy:         // same IMEM address as ovl23_lighting_entrypoint
     lbu     $11, lightsValid
     j       continue_light_dir_xfrm
      lbu    tmpCurLight, numLightsx18
 
-f3dzex_ov2_000012E4:
+ovl23_clipping_entrypoint_copy:         // same IMEM address as ovl23_clipping_entrypoint
     move    savedRA, $ra
     li      $11, overlayInfo3           // set up a load of overlay 3
     j       load_overlay_and_enter      // load overlay 3
-     li     $12, f3dzex_ov3_000012E8    // set up the return address in ovl3
+     li     $12, ovl3_clipping_nosavera // set up the return address in ovl3
      
 continue_light_dir_xfrm:
     // Transform light directions from camera space to model space, by
@@ -2315,6 +2361,6 @@ lights_finishone:
      vmacf  ltColor, $v4, $v21[0h]      // + light color * dot product
 
 .align 8
-Overlay2End:
+ovl2_end:
 
 .close // CODE_FILE
