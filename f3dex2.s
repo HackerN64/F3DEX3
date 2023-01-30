@@ -504,7 +504,7 @@ overlayInfo2:
 overlayInfo3:
     OverlayEntry orga(ovl3_start), orga(ovl3_end), ovl3_start
 
-// 0x0420-0x0920: Vertex buffer
+// 0x0420-0x0920: Vertex buffer in RSP internal format
 vertexBuffer:
     .skip (vtxSize * 32) // 32 vertices
 
@@ -740,7 +740,7 @@ G_RDPHALF_2_handler:
     ldv     $v29[0], (texrectWord1)($zero)
     lw      cmd_w0, rdpHalf1Val                 // load the RDPHALF1 value into w0
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
-    sdv     $v29[0], (0x400 - 8)(rdpCmdBufPtr)   // move textrectWord1 to lbl_03F8
+    sdv     $v29[0], -8(rdpCmdBufPtr)           // move textrectWord1 to lbl_03F8
 G_RDP_handler:
     sw      cmd_w1, 4(rdpCmdBufPtr)         // Add the second word of the command to the RDP command buffer
 G_SYNC_handler:
@@ -870,7 +870,7 @@ ovl3_clipping_nosavera:
     la      $5, 0x0014
     la      $18, 6
     la      $15, inputBufferEnd
-    sh      $1, (lbl_03D0 - 6)($18)
+    sh      $1, (lbl_03D0 - 6 + 0)($18)
     sh      $2, (lbl_03D0 - 6 + 2)($18)
     sh      $3, (lbl_03D0 - 6 + 4)($18)
     sh      $zero, (lbl_03D0)($18)
@@ -982,24 +982,24 @@ f3dzex_0000134C:
 outputVtxPos equ $15
 f3dzex_00001478:
 .if (UCODE_IS_F3DEX2_204H)
-    sdv     $v25[0], 0x03C8(outputVtxPos)
+    sdv     $v25[0], (VTX_SCR_VEC - 2 * vtxSize)(outputVtxPos)
 .else
-    slv     $v25[0], 0x01C8(outputVtxPos)
+    slv     $v25[0], (VTX_SCR_VEC - 2 * vtxSize)(outputVtxPos)
 .endif
-    ssv     $v26[4], 0x00CE(outputVtxPos)
-    suv     vPairST[0], 0x03C0(outputVtxPos)
-    slv     vPairST[8], 0x01C4(outputVtxPos)
+    ssv     $v26[4], (VTX_DZ - 2 * vtxSize)(outputVtxPos)
+    suv     vPairST[0], (VTX_COLOR_VEC - 2 * vtxSize)(outputVtxPos)
+    slv     vPairST[8], (VTX_TC_VEC - 2 * vtxSize)(outputVtxPos)
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
-    ssv     $v3[4], 0x00CC(outputVtxPos)
+    ssv     $v3[4], (VTX_Z - 2 * vtxSize)(outputVtxPos)
 .endif
     addi    outputVtxPos, outputVtxPos, -vtxSize
-    addi    $21, $21, 0x0002
+    addi    $21, $21, 2
 f3dzex_00001494:
     bnez    $16, f3dzex_00001320
      move   $3, $2
     sh      $3, (lbl_03D0)($21)
     j       f3dzex_00001320
-     addi   $21, $21, 0x0002
+     addi   $21, $21, 2
 
 f3dzex_000014A8:
     sub     $11, $21, $18
@@ -1106,24 +1106,24 @@ vertex_skip_recalc_mvp:
      ldv    mxr0f[8], (mvpMatrix + 32)($zero)
     jal     while_wait_dma_busy
      ldv    mxr2f[8], (mvpMatrix + 48)($zero)
-    ldv     $v20[0], (inputVtxSize * 0)(inputVtxPos) // load the position of the 1st vertex into v20's lower 8 bytes
+    ldv     $v20[0], (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // load the position of the 1st vertex into v20's lower 8 bytes
     vmov    vFxScaleFMin[5], vFxNegScale[1]          // Finish building vFxScaleFMin
-    ldv     $v20[8], (inputVtxSize * 1)(inputVtxPos) // load the position of the 2nd vertex into v20's upper 8 bytes
+    ldv     $v20[8], (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos) // load the position of the 2nd vertex into v20's upper 8 bytes
 
 vertices_process_pair:
     // Two verts pos in v20; multiply by MVP
     vmudn   $v29, mxr3f, vOne[0]
-    lw      $11, (inputVtxSize + 0xC)(inputVtxPos) // load the color/normal of the 2nd vertex into $11
+    lw      $11, (VTX_IN_CN + inputVtxSize * 1)(inputVtxPos) // load the color/normal of the 2nd vertex into $11
     vmadh   $v29, mxr3i, vOne[0]
-    llv     vPairST[12], 8(inputVtxPos)            // load the texture coords of the 1st vertex into v22[12-15]
+    llv     vPairST[12], (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // load the texture coords of the 1st vertex into v22[12-15]
     vmadn   $v29, mxr0f, $v20[0h]
     move    curLight, tmpCurLight
     vmadh   $v29, mxr0i, $v20[0h]
     lpv     $v2[0], (ltBufOfs + 0x10)(curLight)    // First instruction of lights_dircoloraccum2 loop; load light transformed dir
     vmadn   $v29, mxr1f, $v20[1h]
-    sw      $11, 8(inputVtxPos)                    // Move the first vertex's colors/normals into the word before the second vertex's
+    sw      $11, (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Move the first vertex's colors/normals into the word before the second vertex's
     vmadh   $v29, mxr1i, $v20[1h]
-    lpv     vPairRGBATemp[0], 8(inputVtxPos)       // Load both vertex's colors/normals into v7's elements RGBARGBA or XYZAXYZA
+    lpv     vPairRGBATemp[0], (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Load both vertex's colors/normals into v7's elements RGBARGBA or XYZAXYZA
     vmadn   vPairMVPPosF, mxr2f, $v20[2h]          // vPairMVPPosF = MVP * vpos result frac
     bnez    tmpCurLight, light_vtx                 // Zero if lighting disabled, pointer if enabled
      vmadh  vPairMVPPosI, mxr2i, $v20[2h]          // vPairMVPPosI = MVP * vpos result int
@@ -1131,7 +1131,7 @@ vertices_process_pair:
     // since they're skipped here if lighting is being performed
     // This is the original location of INSTR 1 and INSTR 2
     vge     $v27, $v25, $v31[3]                     // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
-    llv     vPairST[4], (inputVtxSize + 8)(inputVtxPos)  // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
+    llv     vPairST[4], (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos)  // INSTR 2: load the texture coords of the 2nd vertex into v22[4-7]
 
 vertices_store:
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
@@ -1146,30 +1146,30 @@ vertices_store:
     sbv     $v27[7], -0x35($11)
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
     vmov    $v26[1], $v3[2]
-    ssv     $v3[12], 0x00F4(tempCmdBuf50)
+    ssv     $v3[12], -0xC(tempCmdBuf50)
 .endif
     vmudn   $v7, vPairMVPPosF, vFxMisc[5] // 0x0002
 .if (UCODE_IS_F3DEX2_204H)
-    sdv     $v25[8], 0x03F0(tempCmdBuf50)
+    sdv     $v25[8], -0x10(tempCmdBuf50)
 .else
-    slv     $v25[8], 0x01F0(tempCmdBuf50)
+    slv     $v25[8], -0x10(tempCmdBuf50)
 .endif
     vmadh   $v6, vPairMVPPosI, vFxMisc[5] // 0x0002
-    sdv     $v25[0], 0x03C8(tempCmdBuf50)
+    sdv     $v25[0], -0x38(tempCmdBuf50)
     vrcph   $v29[0], $v2[3]
-    ssv     $v26[12], 0x0F6(tempCmdBuf50)
+    ssv     $v26[12], -0x0A(tempCmdBuf50)
     vrcpl   $v5[3], $v21[3]
 .if (UCODE_IS_F3DEX2_204H)
-    ssv     $v26[4], 0x00CE(tempCmdBuf50)
+    ssv     $v26[4], -0x32(tempCmdBuf50)
 .else
-    slv     $v26[2], 0x01CC(tempCmdBuf50)
+    slv     $v26[2], -0x34(tempCmdBuf50)
 .endif
     vrcph   $v4[3], $v2[7]
-    ldv     $v3[0], 0x0008(inputVtxPos)  // Load RGBARGBA for two vectors (was stored this way above)
+    ldv     $v3[0], 8(inputVtxPos)  // Load RGBARGBA for two vectors (was stored this way above)
     vrcpl   $v5[7], $v21[7]
     sra     $11, $1, 31
     vrcph   $v4[7], vZero[0]
-    andi    $11, $11, 0x0028
+    andi    $11, $11, vtxSize
     vch     $v29, vPairMVPPosI, vPairMVPPosI[3h]
     addi    outputVtxPos, outputVtxPos, (2 * vtxSize) // Advance two positions forward in the output vertices
     vcl     $v29, vPairMVPPosF, vPairMVPPosF[3h]
@@ -1177,55 +1177,55 @@ vertices_store:
     vmudl   $v29, $v21, $v5
     cfc2    $10, $vcc
     vmadm   $v29, $v2, $v5
-    sdv     vPairMVPPosF[8], 0x03E0($8)
+    sdv     vPairMVPPosF[8], (VTX_FRAC_VEC - 1 * vtxSize)($8)
     vmadn   $v21, $v21, $v4
-    ldv     $v20[0], (2 * inputVtxSize)(inputVtxPos) // Load pos of 1st vector on next iteration
+    ldv     $v20[0], (VTX_IN_OB + 2 * inputVtxSize)(inputVtxPos) // Load pos of 1st vector on next iteration
     vmadh   $v2, $v2, $v4
-    sdv     vPairMVPPosF[0], 0x03B8(outputVtxPos)
+    sdv     vPairMVPPosF[0], (VTX_FRAC_VEC - 2 * vtxSize)(outputVtxPos)
     vge     $v29, vPairMVPPosI, vZero[0]
-    lsv     vPairMVPPosF[14], 0x00E4($8)
+    lsv     vPairMVPPosF[14], (VTX_Z_FRAC - 1 * vtxSize)($8)
     vmudh   $v29, vOne, $v31[1]
-    sdv     vPairMVPPosI[8], 0x03D8($8)
+    sdv     vPairMVPPosI[8], (VTX_INT_VEC - 1 * vtxSize)($8)
     vmadn   $v26, $v21, $v31[4]
-    lsv     vPairMVPPosF[6], 0x00BC(outputVtxPos)
+    lsv     vPairMVPPosF[6], (VTX_Z_FRAC - 2 * vtxSize)(outputVtxPos)
     vmadh   $v25, $v2, $v31[4]
-    sdv     vPairMVPPosI[0], 0x03B0(outputVtxPos)
+    sdv     vPairMVPPosI[0], (VTX_INT_VEC - 2 * vtxSize)(outputVtxPos)
     vmrg    $v2, vZero, $v31[7]
-    ldv     $v20[8], (3 * inputVtxSize)(inputVtxPos) // Load pos of 2nd vector on next iteration
+    ldv     $v20[8], (VTX_IN_OB + 3 * inputVtxSize)(inputVtxPos) // Load pos of 2nd vector on next iteration
     vch     $v29, vPairMVPPosI, $v6[3h]
-    slv     $v3[0], 0x01E8($8) // Store RGBA for first vector
+    slv     $v3[0], (VTX_COLOR_VEC - 1 * vtxSize)($8) // Store RGBA for first vector
     vmudl   $v29, $v26, $v5
-    lsv     vPairMVPPosI[14], 0x00DC($8)
+    lsv     vPairMVPPosI[14], (VTX_Z_INT - 1 * vtxSize)($8)
     vmadm   $v29, $v25, $v5
-    slv     $v3[4], 0x01C0(outputVtxPos) // Store RGBA for second vector
+    slv     $v3[4], (VTX_COLOR_VEC - 2 * vtxSize)(outputVtxPos) // Store RGBA for second vector
     vmadn   $v5, $v26, $v4
-    lsv     vPairMVPPosI[6], 0x00B4(outputVtxPos)
+    lsv     vPairMVPPosI[6], (VTX_Z_INT - 2 * vtxSize)(outputVtxPos)
     vmadh   $v4, $v25, $v4
-    sh      $10, -0x0002($8)
+    sh      $10, (VTX_FLAGS_HI - 1 * vtxSize)($8)
     vmadh   $v2, $v2, $v31[7]
     sll     $11, $10, 4
     vcl     $v29, vPairMVPPosF, $v7[3h]
     cfc2    $10, $vcc
     vmudl   $v29, vPairMVPPosF, $v5[3h]
-    ssv     $v5[14], 0x00FA($8)
+    ssv     $v5[14], (VTX_INV_W_FRAC - 1 * vtxSize)($8)
     vmadm   $v29, vPairMVPPosI, $v5[3h]
     addi    inputVtxPos, inputVtxPos, (2 * inputVtxSize) // Advance two positions forward in the input vertices
     vmadn   $v26, vPairMVPPosF, $v2[3h]
-    sh      $10, -0x0004($8)
+    sh      $10, (VTX_FLAGS_LO - 1 * vtxSize)($8)
     vmadh   $v25, vPairMVPPosI, $v2[3h]
     sll     $10, $10, 4
     vmudm   $v3, vPairST, vFxMisc // Scale ST for two verts, using TexSScl and TexTScl in elems 2, 3, 6, 7
-    sh      $11, (0x26 - 2 * vtxSize)(outputVtxPos)
-    sh      $10, (0x24 - 2 * vtxSize)(outputVtxPos)
+    sh      $11, (VTX_FLAGS_HI - 2 * vtxSize)(outputVtxPos)
+    sh      $10, (VTX_FLAGS_LO - 2 * vtxSize)(outputVtxPos)
     vmudl   $v29, $v26, vFxMisc[4] // Persp norm
-    ssv     $v5[6], 0x00D2(outputVtxPos)
+    ssv     $v5[6], (VTX_INV_W_FRAC - 2 * vtxSize)(outputVtxPos)
     vmadm   $v25, $v25, vFxMisc[4] // Persp norm
-    ssv     $v4[14], 0x00F8($8)
+    ssv     $v4[14], (VTX_INV_W_INT - 1 * vtxSize)($8)
     vmadn   $v26, vZero, vZero[0]
-    ssv     $v4[6], 0x00D0(outputVtxPos)
-    slv     $v3[4], 0x01EC($8) // Store scaled S, T vertex 1
+    ssv     $v4[6], (VTX_INV_W_INT - 2 * vtxSize)(outputVtxPos)
+    slv     $v3[4], (VTX_TC_VEC - 1 * vtxSize)($8) // Store scaled S, T vertex 1
     vmudh   $v29, vFxTransFMax, vOne[0]
-    slv     $v3[12], 0x01C4(outputVtxPos) // Store scaled S, T vertex 2
+    slv     $v3[12], (VTX_TC_VEC - 2 * vtxSize)(outputVtxPos) // Store scaled S, T vertex 2
     vmadh   $v29, vFxMask, $v31[3]
     vmadn   $v26, $v26, vFxScaleFMin
     bgtz    $1, vertices_process_pair
@@ -1233,25 +1233,25 @@ vertices_store:
     bltz    $ra, f3dzex_00001478    // has a different version in ovl2
 .if !(UCODE_IS_F3DEX2_204H) // Handled differently by F3DEX2 2.04H
      vge    $v3, $v25, vZero[0]
-    slv     $v25[8], 0x01F0($8)
+    slv     $v25[8], (VTX_SCR_VEC - 1 * vtxSize)($8)
     vge     $v27, $v25, $v31[3] // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
-    slv     $v25[0], 0x01C8(outputVtxPos)
-    ssv     $v26[12], 0x00F6($8)
-    ssv     $v26[4], 0x00CE(outputVtxPos)
-    ssv     $v3[12], 0x00F4($8)
+    slv     $v25[0], (VTX_SCR_VEC - 2 * vtxSize)(outputVtxPos)
+    ssv     $v26[12], (VTX_DZ - 1 * vtxSize)($8)
+    ssv     $v26[4], (VTX_DZ - 2 * vtxSize)(outputVtxPos)
+    ssv     $v3[12], (VTX_Z - 1 * vtxSize)($8)
     beqz    $7, run_next_DL_command
-     ssv    $v3[4], 0x00CC(outputVtxPos)
+     ssv    $v3[4], (VTX_Z - 2 * vtxSize)(outputVtxPos)
 .else // This is the F3DEX2 2.04H version
      vge    $v27, $v25, $v31[3]
-    sdv     $v25[8], 0x03F0($8)
-    sdv     $v25[0], 0x03C8(outputVtxPos)
-    ssv     $v26[12], 0x00F6($8)
+    sdv     $v25[8], (VTX_SCR_VEC - 1 * vtxSize)($8)
+    sdv     $v25[0], (VTX_SCR_VEC - 2 * vtxSize)(outputVtxPos)
+    ssv     $v26[12], (VTX_DZ - 1 * vtxSize)($8)
     beqz    $7, run_next_DL_command
-     ssv    $v26[4], 0x00CE(outputVtxPos)
+     ssv    $v26[4], (VTX_DZ - 2 * vtxSize)(outputVtxPos)
 .endif
-    sbv     $v27[15], 0x006B($8)
+    sbv     $v27[15], (VTX_COLOR_A - 1 * vtxSize)($8)
     j       run_next_DL_command
-     sbv    $v27[7], 0x0043(outputVtxPos)
+     sbv    $v27[7], (VTX_COLOR_A - 2 * vtxSize)(outputVtxPos)
 
 load_spfx_global_values:
     /*
@@ -1305,17 +1305,17 @@ f3dzex_00001A4C:
     move    $4, $1
 f3dzex_00001A7C:
     vnxor   $v5, vZero, $v31[7]
-    llv     $v6[0], 0x0018($1) // Load pixel coords of vertex 1 into v6
+    llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6
     vnxor   $v7, vZero, $v31[7]
-    llv     $v4[0], 0x0018($2) // Load pixel coords of vertex 2 into v4
+    llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
     vmov    $v6[6], $v2[5]
-    llv     $v8[0], 0x0018($3) // Load pixel coords of vertex 3 into v8
+    llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
     vnxor   $v9, vZero, $v31[7]
-    lw      $5, 0x0024($1)
+    lw      $5, VTX_FLAGS($1)
     vmov    $v8[6], $v2[7]
-    lw      $6, 0x0024($2)
+    lw      $6, VTX_FLAGS($2)
     vadd    $v2, vZero, $v6[1] // v2 = y-coord of vertex 1
-    lw      $7, 0x0024($3)
+    lw      $7, VTX_FLAGS($3)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2
 .if NoN == 1
     andi    $11, $5, 0x70B0   // No Nearclipping
@@ -1359,37 +1359,37 @@ f3dzex_00001A7C:
     vsub    $v11, $v14, $v2
     lw      $6, geometryModeLabel
     vsub    $v12, $v14, $v10
-    llv     $v13[0], 0x0020($1)
+    llv     $v13[0], VTX_INV_W_VEC($1)
     vsub    $v15, $v10, $v2
-    llv     $v13[8], 0x0020($2)
+    llv     $v13[8], VTX_INV_W_VEC($2)
     vmudh   $v16, $v6, $v8[0]
-    llv     $v13[12], 0x0020($3)
+    llv     $v13[12], VTX_INV_W_VEC($3)
     vmadh   $v16, $v8, $v11[0]
     sll     $11, $6, 10             // Moves the value of G_SHADING_SMOOTH into the sign bit
     vreadacc $v17, ACC_UPPER
     bgez    $11, no_smooth_shading  // Branch if G_SHADING_SMOOTH isn't set
      vreadacc $v16, ACC_MIDDLE
-    lpv     $v18[0], 0x0010($1) // Load vert color of vertex 1
+    lpv     $v18[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vmov    $v15[2], $v6[0]
-    lpv     $v19[0], 0x0010($2) // Load vert color of vertex 2
+    lpv     $v19[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
     vrcp    $v20[0], $v15[1]
-    lpv     $v21[0], 0x0010($3) // Load vert color of vertex 3
+    lpv     $v21[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
     vrcph   vPairST[0], $v17[1]
     vrcpl   vPairMVPPosF[1], $v16[1]
     j       shading_done
      vrcph   vPairMVPPosI[1], vZero[0]
 no_smooth_shading:
-    lpv     $v18[0], 0x0010($4)
+    lpv     $v18[0], VTX_COLOR_VEC($4)
     vrcp    $v20[0], $v15[1]
-    lbv     $v18[6], 0x0013($1)
+    lbv     $v18[6], VTX_COLOR_A($1)
     vrcph   vPairST[0], $v17[1]
-    lpv     $v19[0], 0x0010($4)
+    lpv     $v19[0], VTX_COLOR_VEC($4)
     vrcpl   vPairMVPPosF[1], $v16[1]
-    lbv     $v19[6], 0x0013($2)
+    lbv     $v19[6], VTX_COLOR_A($2)
     vrcph   vPairMVPPosI[1], vZero[0]
-    lpv     $v21[0], 0x0010($4)
+    lpv     $v21[0], VTX_COLOR_VEC($4)
     vmov    $v15[2], $v6[0]
-    lbv     $v21[6], 0x0013($3)
+    lbv     $v21[6], VTX_COLOR_A($3)
 shading_done:
 .if (UCODE_IS_206_OR_OLDER)
     i1 equ 7 // v30[7] is 0x0100
@@ -1412,11 +1412,11 @@ shading_done:
 .endif
     vrcp    $v20[2], $v6[1]
     vrcph   vPairST[2], $v6[1]
-    lw      $5, 0x0020($1)
+    lw      $5, VTX_INV_W_VEC($1)
     vrcp    $v20[3], $v8[1]
-    lw      $7, 0x0020($2)
+    lw      $7, VTX_INV_W_VEC($2)
     vrcph   vPairST[3], $v8[1]
-    lw      $8, 0x0020($3)
+    lw      $8, VTX_INV_W_VEC($3)
     // v30[i1] is 0x0100
     vmudl   $v18, $v18, $v30[i1] // vertex color 1 >>= 8
     lbu     $9, textureSettings1 + 3
@@ -1445,15 +1445,15 @@ shading_done:
     vmadl   $v29, $v15, $v20
     lbu     $7, textureSettings1 + 2
     vmadn   $v20, $v15, vPairST
-    lsv     $v19[14], 0x001C($2)
+    lsv     $v19[14], VTX_Z($2)
     vmadh   $v15, $v25, vPairST
-    lsv     $v21[14], 0x001C($3)
+    lsv     $v21[14], VTX_Z($3)
     vmudl   $v29, vPairMVPPosF, $v16
-    lsv     $v7[14], 0x001E($2)
+    lsv     $v7[14], VTX_DZ($2)
     vmadm   $v29, vPairMVPPosI, $v16
-    lsv     $v9[14], 0x001E($3)
+    lsv     $v9[14], VTX_DZ($3)
     vmadn   $v16, vPairMVPPosF, $v17
-    ori     $11, $6, 0x00C8 // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
+    ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
     vmadh   $v17, vPairMVPPosI, $v17
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
 .if !(UCODE_IS_206_OR_OLDER)
@@ -1483,13 +1483,13 @@ shading_done:
     vor     vPairST, vZero, $v31[7]
     vmudm   $v29, $v13, $v10[0]
     vmadl   $v29, $v14, $v10[0]
-    llv     vPairST[0], 0x0014($1)
+    llv     vPairST[0], VTX_TC_VEC($1)
     vmadn   $v14, $v14, $v27[0]
-    llv     vPairST[8], 0x0014($2)
+    llv     vPairST[8], VTX_TC_VEC($2)
     vmadh   $v13, $v13, $v27[0]
     vor     $v10, vZero, $v31[7]
     vge     $v29, $v30, $v30[7]
-    llv     $v10[8], 0x0014($3)
+    llv     $v10[8], VTX_TC_VEC($3)
     vmudm   $v29, vPairST, $v14[0h]
     vmadh   vPairST, vPairST, $v13[0h]
     vmadn   $v25, vZero, vZero[0]
@@ -1506,11 +1506,11 @@ shading_done:
     vmrg    $v9, $v9, $v13
 f3dzex_00001D2C:
     vmudl   $v29, $v16, vPairMVPPosF
-    lsv     $v5[14], 0x001E($1)
+    lsv     $v5[14], VTX_DZ($1)
     vmadm   $v29, $v17, vPairMVPPosF
-    lsv     $v18[14], 0x001C($1)
+    lsv     $v18[14], VTX_Z($1)
     vmadn   vPairMVPPosF, $v16, vPairMVPPosI
-    lh      $1, 0x0018($2)
+    lh      $1, VTX_SCR_VEC($2)
     vmadh   vPairMVPPosI, $v17, vPairMVPPosI
     addiu   $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
     vsubc   $v10, $v9, $v5
@@ -1591,18 +1591,18 @@ f3dzex_00001D2C:
     vmudn   $v6, $v6, $v30[i6]      // v30[i6] is 0x0020
     sdv     $v18[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
     vmadh   $v7, $v7, $v30[i6]      // v30[i6] is 0x0020
-    ssv     $v8[14], 0x00FA(rdpCmdBufPtr)
+    ssv     $v8[14], -0x0006(rdpCmdBufPtr)
     vmudl   $v29, $v10, $v30[i6]    // v30[i6] is 0x0020
-    ssv     $v9[14], 0x00F8(rdpCmdBufPtr)
+    ssv     $v9[14], -0x0008(rdpCmdBufPtr)
     vmadn   $v5, $v5, $v30[i6]      // v30[i6] is 0x0020
-    ssv     $v2[14], 0x00F6(rdpCmdBufPtr)
+    ssv     $v2[14], -0x000A(rdpCmdBufPtr)
     vmadh   $v18, $v18, $v30[i6]    // v30[i6] is 0x0020
-    ssv     $v3[14], 0x00F4(rdpCmdBufPtr)
-    ssv     $v6[14], 0x00FE(rdpCmdBufPtr)
-    ssv     $v7[14], 0x00FC(rdpCmdBufPtr)
-    ssv     $v5[14], 0x00F2(rdpCmdBufPtr)
+    ssv     $v3[14], -0x000C(rdpCmdBufPtr)
+    ssv     $v6[14], -0x0002(rdpCmdBufPtr)
+    ssv     $v7[14], -0x0004(rdpCmdBufPtr)
+    ssv     $v5[14], -0x000E(rdpCmdBufPtr)
     j       check_rdp_buffer_full
-    ssv     $v18[14], 0x00F0(rdpCmdBufPtr)
+    ssv     $v18[14], -0x10(rdpCmdBufPtr)
 
 no_z_buffer:
     sdv     $v5[0], 0x0010($2)      // Store RGBA shade color (fractional)
@@ -1617,24 +1617,24 @@ G_CULLDL_handler:
     lhu     vtxPtr, (vertexTable)(cmd_w0) // load start vertex address
     lhu     endVtxPtr, (vertexTable)(cmd_w1) // load end vertex address
 .if NoN == 1
-    addiu   $1, $zero, 0x70B0       // todo what is this value (No Nearclipping)
+    addiu   $1, $zero, 0x70B0       // clip flags (No Nearclipping)
 .else
-    addiu   $1, $zero, 0x7070       // todo what is this value (Nearclipping)
+    addiu   $1, $zero, 0x7070       // clip flags (Nearclipping)
 .endif
-    lw      $11, 0x0024(vtxPtr)     // todo what is this reading from the vertex?
+    lw      $11, VTX_FLAGS(vtxPtr)  // read flags from vertex
 culldl_loop:
     and     $1, $1, $11
-    beqz    $1, run_next_DL_command
-     lw     $11, 0x004C(vtxPtr)
+    beqz    $1, run_next_DL_command         // display list is not culled
+     lw     $11, (vtxSize + VTX_FLAGS)(vtxPtr)
     bne     vtxPtr, endVtxPtr, culldl_loop  // loop until reaching the last vertex
      addiu  vtxPtr, vtxPtr, vtxSize         // advance to the next vertex
     j       G_ENDDL_handler                 // otherwise skip the rest of the displaylist
 G_BRANCH_WZ_handler:
      lhu    vtxPtr, (vertexTable)(cmd_w0)   // get the address of the vertex being tested
-.if UCODE_TYPE == TYPE_F3DZEX // BRANCH_W/BRANCH_Z difference
-    lh      vtxPtr, 0x0006(vtxPtr)          // read the w coordinate of the vertex (f3dzex)
+.if UCODE_TYPE == TYPE_F3DZEX               // BRANCH_W/BRANCH_Z difference
+    lh      vtxPtr, VTX_W_INT(vtxPtr)       // read the w coordinate of the vertex (f3dzex)
 .else
-    lw      vtxPtr, 0x001C(vtxPtr)          // read the z coordinate of the vertex (f3dex2)
+    lw      vtxPtr, VTX_Z(vtxPtr)           // read the z coordinate of the vertex (f3dex2)
 .endif
     sub     $2, vtxPtr, endVtxPtr       // subtract the w/z value being tested
     bgez    $2, run_next_DL_command     // if vtx.w/z > w/z, continue running this DL
