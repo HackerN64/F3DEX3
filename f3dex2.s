@@ -42,40 +42,47 @@ ACC_LOWER equ 2
     vsar dst, dst, dst[N]
 .endmacro
 
-// There are two different memory spaces for the overlays: (a) IMEM and (b) the
-// microcode file (which, plus an offset, is also the location in DRAM).
-// 
-// A label marks both an IMEM addresses and a file address, but evaluating the
-// label in an integer context (e.g. in a branch) gives the IMEM address.
-// `orga(your_label)` gets the file address of the label.
-// The IMEM address can be set with `.headersize desired_imem_addr - orga()`.
-// The file address can be set with `.org`.
-// 
-// In IMEM, the whole microcode is organized as (each row is the same address):
-// 
-// start               Overlay 0          Overlay 1
-// (initialization)    (End task)         (More cmd handlers)
-// 
-// Many command
-// handlers
-// 
-// Overlay 2           Overlay 3
-// (Lighting)          (Clipping)
-// 
-// Vertex and
-// tri handlers
-// 
-// DMA code
-//
-// In the file, the microcode is organized as:
-// start
-// Many command handlers
-// Overlay 3
-// Vertex and tri handlers
-// DMA code
-// Overlay 0
-// Overlay 1
-// Overlay 2
+/*
+There are two different memory spaces for the overlays: (a) IMEM and (b) the
+microcode file (which, plus an offset, is also the location in DRAM).
+
+A label marks both an IMEM addresses and a file address, but evaluating the
+label in an integer context (e.g. in a branch) gives the IMEM address.
+`orga(your_label)` gets the file address of the label, and `.orga` sets the
+file address.
+`.headersize`, as well as the value after `.create`, sets the difference
+between IMEM addresses and file addresses, so you can set the IMEM address
+with `.headersize desired_imem_addr - orga()`.
+
+In IMEM, the whole microcode is organized as (each row is the same address):
+
+0x80 space             |                |
+for boot code       Overlay 0       Overlay 1
+                      (End          (More cmd 
+start                 task)         handlers)
+(initialization)       |                |
+
+Many command
+handlers
+
+Overlay 2           Overlay 3
+(Lighting)          (Clipping)
+
+Vertex and
+tri handlers
+
+DMA code
+
+In the file, the microcode is organized as:
+start (file addr 0x0 = IMEM 0x1080)
+Many command handlers
+Overlay 3
+Vertex and tri handlers
+DMA code (end of this = IMEM 0x2000 = file 0xF80)
+Overlay 0
+Overlay 1
+Overlay 2
+*/
 
 // Overlay table data member offsets
 overlay_load equ 0x0000
@@ -321,8 +328,8 @@ lightBufferLookat:
 // Then there are the main 8 lights. This is between one and seven directional /
 // point (if built with this enabled) lights, plus the ambient light at the end.
 // Zero lights is not supported, and is encoded as one light with black color
-// (does not affect the result). Once there is one point light, the rest (until
-// ambient) are also assumed to be point lights.
+// (does not affect the result). Directional and point lights can be mixed in
+// any order; ambient is always at the end.
 lightBufferMain:
     .fill (8 * lightSize)
 // Code uses pointers relative to spFxBase, with immediate offsets, so that
@@ -565,7 +572,7 @@ rdpCmdBufEnd equ $22
 
 // Initialization routines
 // Everything up until displaylist_dma will get overwritten by ovl0 and/or ovl1
-start:
+start: // This is at IMEM 0x1080, not the start of IMEM
 .if UCODE_TYPE == TYPE_F3DZEX && UCODE_ID < 2
     vor     vZero, $v16, $v16 // Sets vZero to $v16
 .else
@@ -660,12 +667,24 @@ calculate_overlay_addrs:
 load_overlay1_init:
     li      $11, overlayInfo1   // set up loading of overlay 1
 
+// Make room for overlays 0 and 1. Normally, overlay 1 ends exactly at ovl01_end,
+// and overlay 0 is much shorter, but if things are modded this constraint must be met.
+// The 0x88 is because the file starts 0x80 into IMEM, and the overlays can extend 8
+// bytes over the next two instructions as well.
+.orga max(orga(), max(ovl0_end - ovl0_start, ovl1_end - ovl1_start) - 0x88)
+
+// Also needs to be aligned so that ovl01_end is a DMA word, in case ovl0 and ovl1
+// are shorter than the code above and the code above is an odd number of instructions.
 .align 8
 
+// Unnecessarily clever code. The jal sets $ra to the address of the next instruction,
+// which is displaylist_dma. So the padding has to be before these two instructions,
+// so that this is immediately before displaylist_dma; otherwise the return address
+// will be in the last few instructions of overlay 1. However, this was unnecessary--
+// it could have been a jump and then `addiu $12, $zero, displaylist_dma`.
     jal     load_overlay_and_enter  // load overlay 1 and enter
      move   $12, $ra                // set up the return address, since load_overlay_and_enter returns to $12
-    // This return should be such that it coincides with displaylist_dma so no code from overlay 1 is ran, ensure that
-    // ovl01_end remains aligned to 8 bytes
+
 ovl01_end:
 // Overlays 0 and 1 overwrite everything up to this point (2.08 versions overwrite up to the previous .align 8)
 
@@ -857,7 +876,7 @@ vPairRGBATemp equ $v7
 
 // Jump here to do lighting. If overlay 3 is loaded (this code), loads and jumps
 // to overlay 2 (same address as right here).
-ovl23_lighting_entrypoint:
+ovl23_lighting_entrypoint_copy:     // same IMEM address as ovl23_lighting_entrypoint
     li      $11, overlayInfo2       // set up a load for overlay 2
     j       load_overlay_and_enter  // load overlay 2
      li     $12, ovl23_lighting_entrypoint  // set the return address
@@ -1791,7 +1810,7 @@ ovl0_xbus_wait_for_rdp_2:
 ovl0_end:
 
 .if ovl0_end > ovl01_end
-    .error "Overlay 0 too large"
+    .error "Automatic resizing for overlay 0 failed"
 .endif
 
 // overlay 1 (0x170 bytes loaded into 0x1000)
@@ -1936,13 +1955,13 @@ G_SETOTHERMODE_L_handler:
 ovl1_end:
 
 .if ovl1_end > ovl01_end
-    .error "Overlay 1 too large"
+    .error "Automatic resizing for overlay 1 failed"
 .endif
 
 .headersize ovl23_start - orga()
 
 ovl2_start:
-ovl23_lighting_entrypoint_copy:         // same IMEM address as ovl23_lighting_entrypoint
+ovl23_lighting_entrypoint:
     lbu     $11, lightsValid
     j       continue_light_dir_xfrm
      lbu    tmpCurLight, numLightsx18
