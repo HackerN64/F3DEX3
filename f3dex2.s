@@ -464,12 +464,18 @@ gCullMagicNumbers:
 // costs two bytes of DMEM.
 
 activeClipPlanes:
-    .dw ((CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY) << CLIP_SHIFT_SCAL) |
-        ((CLIP_FAR | CLIP_NEAR)                  << CLIP_SHIFT_SCRN)
+    .dw ((CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY) << CLIP_SHIFT_SCAL) | ((CLIP_FAR | CLIP_NEAR) << CLIP_SHIFT_SCRN)
 
-// 0x3D0
-clipStack:
-    .fill 20 * 2
+// 0x3D0: Clipping polygons, as lists of vertex addresses. When handling each
+// clipping condition, the polygon is read off one list and the modified polygon
+// is written to the next one.
+// Max verts in each polygon:
+clipPoly:
+    .fill 10 * 2   // 3   5   7   9
+clipPoly2:         //  \ / \ / \ /
+    .fill 10 * 2   //   4   6   8
+// but there needs to be room for the terminating 0, and clipMaskList below needs
+// to be word-aligned. So this is why it's 10 each.
 
 clipMaskList:
     .dw CLIP_NX   << CLIP_SHIFT_SCAL
@@ -545,8 +551,8 @@ OSTask:
 secondVtxPos equ $8
 outputVtxPos equ $15
 clipFlags equ $16
-clipStackBot equ $17
-clipStackSelect equ $18
+clipPolyRead equ $17
+clipPolySelect equ $18
 rdpCmdBufEnd equ $22
 rdpCmdBufPtr equ $23
 cmd_w1 equ $24
@@ -858,7 +864,7 @@ ovl23_start:
 
 ovl3_start:
 
-clipStackEnd equ $21
+clipPolyWrite equ $21
 clipMaskIdx equ $5
 
 vPairRGBATemp equ $v7
@@ -876,34 +882,35 @@ ovl23_clipping_entrypoint:
     move    savedRA, $ra
 ovl3_clipping_nosavera:
     la      clipMaskIdx, 0x0014
-    la      clipStackSelect, 6
+    la      clipPolySelect, 6  // Everything being indexed from 6 saves one instruction at the end of the loop
     la      outputVtxPos, clipTempVerts
-    // Store addresses of current three verts to the stack
-    sh      $1, (clipStack - 6 + 0)(clipStackSelect)
-    sh      $2, (clipStack - 6 + 2)(clipStackSelect)
-    sh      $3, (clipStack - 6 + 4)(clipStackSelect)
-    sh      $zero, (clipStack)(clipStackSelect) // Zero to mark end of stack
+    // Write the current three verts as the initial polygon
+    sh      $1, (clipPoly - 6 + 0)(clipPolySelect)
+    sh      $2, (clipPoly - 6 + 2)(clipPolySelect)
+    sh      $3, (clipPoly - 6 + 4)(clipPolySelect)
+    sh      $zero, (clipPoly)(clipPolySelect) // Zero to mark end of polygon
     lw      savedActiveClipPlanes, activeClipPlanes
-clipping_masklooptop:
-    lw      $9, (clipMaskList)(clipMaskIdx)
-    lw      clipFlags, VTX_CLIP($3)    // Load flags for third vertex
-    and     clipFlags, clipFlags, $9          // Look at only the flag for the current clip mask
-    addi    clipStackBot,    clipStackSelect, -6 // Start at bottom of stack
-    xori    clipStackSelect, clipStackSelect, 6 ^ 0x1A // changes between 6 and 1A
-    addi    clipStackEnd,    clipStackSelect, -6
-clipping_stacklooptop:
-    lhu     $2, (clipStack)(clipStackBot)  // Read second vertex from bottom of stack
-    addi    clipStackBot, clipStackBot, 0x0002 // Increment bottom of stack
-    beqz    $2, clipping_nextmask // If vertex is 0, done with stack
-     lw     $11, VTX_CLIP($2)     // Load flags for second vertex
-    and     $11, $11, $9          // Same mask for current clip mask
-    beq     $11, clipFlags, clipping_nextstack // Both set or both clear
-     move   clipFlags, $11
-    beqz    clipFlags, clipping_skipswap23 // Second vertex flag is cleared (and third is set)
-     move   $19, $2              // Second vertex addr in $19
-    move    $19, $3              // Third vertex addr in $19
-    move    $3, $2               // Second vertex addr in $3
-clipping_skipswap23: // After possible swap, $19 = vtx with flag cleared, $3 = vtx with flag set
+clipping_condlooptop: // Loop over six clipping conditions: near, far, +y, +x, -y, -x
+    lw      $9, (clipMaskList)(clipMaskIdx)          // Load clip mask
+    lw      clipFlags, VTX_CLIP($3)                  // Load flags for V3, which will be the final vertex of the last polygon
+    and     clipFlags, clipFlags, $9                 // Mask V3's flags to current clip condition
+    addi    clipPolyRead,   clipPolySelect, -6       // Start reading at the beginning of the old polygon
+    xori    clipPolySelect, clipPolySelect, (clipPoly2 - clipPoly) + 6 // Swap to the other polygon memory
+    addi    clipPolyWrite,  clipPolySelect, -6       // Start writing at the beginning of the new polygon
+clipping_edgelooptop: // Loop over edges connecting verts, possibly subdivide the edge
+    // Edge starts from V3, ends at V2
+    lhu     $2, (clipPoly)(clipPolyRead)       // Read next vertex of input polygon as V2 (end of edge)
+    addi    clipPolyRead, clipPolyRead, 0x0002 // Increment read pointer
+    beqz    $2, clipping_nextcond              // If V2 is 0, done with input polygon
+     lw     $11, VTX_CLIP($2)                  // Load flags for V2
+    and     $11, $11, $9                       // Mask V2's flags to current clip condition
+    beq     $11, clipFlags, clipping_nextedge  // Both set or both clear = both off screen or both on screen, no subdivision
+     move   clipFlags, $11                     // clipFlags = masked V2's flags
+    beqz    clipFlags, clipping_skipswap23     // V2 flag is clear / on screen, therefore V3 is set / off screen
+     move   $19, $2                            // 
+    move    $19, $3                            // Otherwise swap V2 and V3; note we are overwriting $3 but not $2
+    move    $3, $2                             // 
+clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / on screen, $3 = vtx meeting clip cond / off screen
     // Interpolate between these two vertices; create a new vertex which is on the
     // clipping boundary (e.g. at the screen edge)
     sll     $11, clipMaskIdx, 1  // clipMaskIdx counts by 4, so this is now by 8
@@ -961,13 +968,13 @@ clipping_skipswap23: // After possible swap, $19 = vtx with flag cleared, $3 = v
     vmadn   $v12, $v12, $v11
     vmadh   $v13, $v13, $v11
     vmudl   $v29, $v8, $v12
-    luv     $v26[0], VTX_COLOR_VEC($3)  // Vtx with flag set, RGBA
+    luv     $v26[0], VTX_COLOR_VEC($3)  // Vtx off screen, RGBA
     vmadm   $v29, $v9, $v12
-    llv     $v26[8], VTX_TC_VEC   ($3)  // Vtx with flag set, ST
+    llv     $v26[8], VTX_TC_VEC   ($3)  // Vtx off screen, ST
     vmadn   $v10, $v8, $v13
-    luv     $v25[0], VTX_COLOR_VEC($19) // Vtx with flag cleared, RGBA
+    luv     $v25[0], VTX_COLOR_VEC($19) // Vtx on screen, RGBA
     vmadh   $v11, $v9, $v13
-    llv     $v25[8], VTX_TC_VEC   ($19) // Vtx with flag cleared, RGBA
+    llv     $v25[8], VTX_TC_VEC   ($19) // Vtx on screen, RGBA
     vmudl   $v29, $v10, $v2[3]
     vmadm   $v11, $v11, $v2[3]
     vmadn   $v10, $v10, vZero[0]
@@ -986,7 +993,7 @@ clipping_skipswap23: // After possible swap, $19 = vtx with flag cleared, $3 = v
     vmadm   vPairST, $v25, $v2[3]
     li      $7, 0x0000 // Set no fog
     li      $1, 0x0002 // Set vertex count to 1, so will only write one
-    sh      outputVtxPos, (clipStack)(clipStackEnd) // New vertex will be stored here
+    sh      outputVtxPos, (clipPoly)(clipPolyWrite) // Add the address of the new vert to the output polygon
     j       load_spfx_global_values // Goes to load_spfx_global_values, then to vertices_store, then
      li   $ra, vertices_store + 0x8000 // comes back here, via bltz $ra, clipping_after_vtxwrite
 
@@ -1005,45 +1012,46 @@ clipping_after_vtxwrite:
     ssv     $v3[4],     (VTX_Z         - 2 * vtxSize)(outputVtxPos)
 .endif
     addi    outputVtxPos, outputVtxPos, -vtxSize // back by 1 vtx so we are actually 1 ahead of where started
-    addi    clipStackEnd, clipStackEnd, 2
-clipping_nextstack:
-    bnez    clipFlags, clipping_stacklooptop
-     move   $3, $2
-    sh      $3, (clipStack)(clipStackEnd)
-    j       clipping_stacklooptop
-     addi   clipStackEnd, clipStackEnd, 2
+    addi    clipPolyWrite, clipPolyWrite, 2    // Original outputVtxPos was already written here; increment write ptr
+clipping_nextedge:
+    bnez    clipFlags, clipping_edgelooptop  // Discard V2 if it was off screen (whether inserted vtx or not)
+     move   $3, $2                           // Move what was the end of the edge to be the new start of the edge
+    sh      $3, (clipPoly)(clipPolyWrite)    // Former V2 was on screen, so add it to the output polygon
+    j       clipping_edgelooptop
+     addi   clipPolyWrite, clipPolyWrite, 2
 
-clipping_nextmask:
-    sub     $11, clipStackEnd, clipStackSelect
-    bltz    $11, clipping_done
-     sh     $zero, (clipStack)(clipStackEnd)
-    lhu     $3, (clipStack - 2)(clipStackEnd)
-    bnez    clipMaskIdx, clipping_masklooptop
-     addi   clipMaskIdx, clipMaskIdx, -0x0004
-    sw      $zero, activeClipPlanes // Disable all clipping planes while drawing tris
+clipping_nextcond:
+    sub     $11, clipPolyWrite, clipPolySelect // Are there less than 3 verts in the output polygon?
+    bltz    $11, clipping_done                 // If so, degenerate result, quit
+     sh     $zero, (clipPoly)(clipPolyWrite)   // Terminate the output polygon with a 0
+    lhu     $3, (clipPoly - 2)(clipPolyWrite)  // Initialize the edge start (V3) to the last vert
+    bnez    clipMaskIdx, clipping_condlooptop  // Done with clipping conditions?
+     addi   clipMaskIdx, clipMaskIdx, -0x0004  // Point to next condition
+    sw      $zero, activeClipPlanes            // Disable all clipping planes while drawing tris
 clipping_draw_tris_loop:
 .if (UCODE_IS_F3DEX2_204H)
     // Draws verts in pattern like 0-4-3, 0-3-2, 0-2-1
-    reg1 equ clipStackEnd
+    reg1 equ clipPolyWrite
     val1 equ -0x0002
 .else
     // Draws verts in pattern like 0-1-4, 1-2-4, 2-3-4
-    reg1 equ clipStackSelect
+    reg1 equ clipPolySelect
     val1 equ 0x0002
 .endif
-    // Load addresses of three verts to draw; these may be in normal vertex array or temp buffer
-    lhu     $1, (clipStack - 6)(clipStackSelect)
-    lhu     $2, (clipStack - 4)(reg1)
-    lhu     $3, (clipStack - 2)(clipStackEnd)
+    // TODO init states
+    // Load addresses of three verts to draw; each vert may be in normal vertex array or temp buffer
+    lhu     $1, (clipPoly - 6)(clipPolySelect)
+    lhu     $2, (clipPoly - 4)(reg1)
+    lhu     $3, (clipPoly - 2)(clipPolyWrite)
     mtc2    $1, $v2[10]               // Addresses go in vector regs too
     vor     $v3, vZero, $v31[5]       // Not sure what this is, was in init code before tri_to_rdp_noinit
     mtc2    $2, $v4[12]
     jal     tri_to_rdp_noinit
      mtc2   $3, $v2[14]
-    bne     clipStackEnd, clipStackSelect, clipping_draw_tris_loop
+    bne     clipPolyWrite, clipPolySelect, clipping_draw_tris_loop
      addi   reg1, reg1, val1
 clipping_done:
-    jr      savedRA
+    jr      savedRA  // This will be G_TRI1_handler if was first tri of pair, else run_next_DL_command
      sw     savedActiveClipPlanes, activeClipPlanes
 
 .align 8
@@ -1304,7 +1312,7 @@ load_spfx_global_values:
     vmrg    vFxMask, vZero, vOne[0]                // Put 0 or 1 in v19 01100110
     llv     vFxMisc[8], (perspNorm)($zero)         // Perspective normalization long (actually short)
     vmrg    vFxTransFMax, vFxTransFMax, $v29[1]    // Put fog max in elements 01100110 of vtrans
-    lsv     vFxMisc[10], (G_MWO_CLIP_RNX + 2 - spFxBase)(spFxBaseReg) // Clip ratio (-x version, but normally +/- same in all dirs)
+    lsv     vFxMisc[10], (clipRatio + 6 - spFxBase)(spFxBaseReg) // Clip ratio (-x version, but normally +/- same in all dirs)
     vmov    vFxScaleFMin[1], vFxNegScale[1]        // -vscale[1]
     jr      $ra
      addi   secondVtxPos, rdpCmdBufPtr, 0x50
