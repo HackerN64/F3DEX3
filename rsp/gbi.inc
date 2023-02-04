@@ -163,8 +163,8 @@ VTX_TC_T        equ 0x16
   VTX_SCR_VEC   equ 0x18
 VTX_SCR_X       equ 0x18
 VTX_SCR_Y       equ 0x1A
-VTX_Z           equ 0x1C
-VTX_DZ          equ 0x1E
+VTX_SCR_Z       equ 0x1C
+VTX_SCR_Z_FRAC  equ 0x1E
   VTX_INV_W_VEC equ 0x20
 VTX_INV_W_INT   equ 0x20
 VTX_INV_W_FRAC  equ 0x22
@@ -173,7 +173,9 @@ VTX_CLIP_SCAL   equ 0x24
 VTX_CLIP_SCRN   equ 0x26
 
 // Clipping flags. Bits 0-3, 8-11, etc. contain garbage (values from another
-// vertex or zeros) and are not used. 
+// vertex or zeros) and are not used. Also, the bits for comparisons to W in
+// clip ratio scaled clipping are actually for Z, but only X and Y are used in
+// clip ratio scaled clipping.
 CLIP_NX equ (1 << 4)
 CLIP_NY equ (1 << 5)
 CLIP_NZ equ (1 << 6)

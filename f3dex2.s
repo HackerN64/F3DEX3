@@ -1005,15 +1005,15 @@ clipping_after_vtxwrite:
 // outputVtxPos has been incremented by 2 * vtxSize
 // Store last vertex attributes which were skipped by the early return
 .if (UCODE_IS_F3DEX2_204H)
-    sdv     $v25[0],    (VTX_SCR_VEC   - 2 * vtxSize)(outputVtxPos)
+    sdv     $v25[0],    (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
 .else
-    slv     $v25[0],    (VTX_SCR_VEC   - 2 * vtxSize)(outputVtxPos)
+    slv     $v25[0],    (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
 .endif
-    ssv     $v26[4],    (VTX_DZ        - 2 * vtxSize)(outputVtxPos)
-    suv     vPairST[0], (VTX_COLOR_VEC - 2 * vtxSize)(outputVtxPos)
-    slv     vPairST[8], (VTX_TC_VEC    - 2 * vtxSize)(outputVtxPos)
+    ssv     $v26[4],    (VTX_SCR_Z_FRAC - 2 * vtxSize)(outputVtxPos)
+    suv     vPairST[0], (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
+    slv     vPairST[8], (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos)
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
-    ssv     $v3[4],     (VTX_Z         - 2 * vtxSize)(outputVtxPos)
+    ssv     $v3[4],     (VTX_SCR_Z      - 2 * vtxSize)(outputVtxPos)
 .endif
     addi    outputVtxPos, outputVtxPos, -vtxSize // back by 1 vtx so we are actually 1 ahead of where started
     addi    clipPolyWrite, clipPolyWrite, 2    // Original outputVtxPos was already written here; increment write ptr
@@ -1156,7 +1156,7 @@ vertices_process_pair:
     // These two instructions are repeated at the end of all the lighting codepaths,
     // since they're skipped here if lighting is being performed
     // This is the original location of INSTR 1 and INSTR 2
-    vge     $v27, $v25, $v31[3]                    // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
+    vge     $v27, $v25, $v31[3]                    // INSTR 1: Clamp W/fog to >= 0x7F00 (low byte is used)
     llv     vPairST[4], (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos)  // INSTR 2: load the texture coords of the 2nd vertex into first half of vPairST
 
 vertices_store:
@@ -1165,7 +1165,7 @@ vertices_store:
     // This is also in the first half and second half of vPairMVPPosI / vPairMVPPosF.
     // However, they are reversed in vPairST and the vector regs used for lighting.
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
-    vge     $v3, $v25, vZero[0]
+    vge     $v3, $v25, vZero[0]            // Clamp Z to >= 0
 .endif
     addi    $1, $1, -4                     // Decrement vertex count by 2
     vmudl   $v29, vPairMVPPosF, vFxMisc[4] // Persp norm
@@ -1179,7 +1179,7 @@ vertices_store:
     sbv     $v27[7],          (VTX_COLOR_A + 8 - 2 * vtxSize)($11) // ...which gets overwritten below
 .if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
     vmov    $v26[1], $v3[2]
-    ssv     $v3[12],          (VTX_Z          - 1 * vtxSize)(secondVtxPos)
+    ssv     $v3[12],          (VTX_SCR_Z      - 1 * vtxSize)(secondVtxPos)
 .endif
     vmudn   $v7, vPairMVPPosF, vFxMisc[5] // Clip ratio
 .if (UCODE_IS_F3DEX2_204H)
@@ -1190,12 +1190,12 @@ vertices_store:
     vmadh   $v6, vPairMVPPosI, vFxMisc[5] // Clip ratio
     sdv     $v25[0],          (VTX_SCR_VEC    - 2 * vtxSize)(secondVtxPos)
     vrcph   $v29[0], $v2[3]
-    ssv     $v26[12],         (VTX_DZ         - 1 * vtxSize)(secondVtxPos)
+    ssv     $v26[12],         (VTX_SCR_Z_FRAC - 1 * vtxSize)(secondVtxPos)
     vrcpl   $v5[3], $v21[3]
 .if (UCODE_IS_F3DEX2_204H)
-    ssv     $v26[4],          (VTX_DZ         - 2 * vtxSize)(secondVtxPos)
+    ssv     $v26[4],          (VTX_SCR_Z_FRAC - 2 * vtxSize)(secondVtxPos)
 .else
-    slv     $v26[2],          (VTX_Z          - 2 * vtxSize)(secondVtxPos)
+    slv     $v26[2],          (VTX_SCR_Z      - 2 * vtxSize)(secondVtxPos)
 .endif
     vrcph   $v4[3], $v2[7]
     ldv     $v3[0], 8(inputVtxPos)  // Load RGBARGBA for two vectors (was stored this way above)
@@ -1221,72 +1221,73 @@ vertices_store:
     ldv     $v20[0], (VTX_IN_OB + 2 * inputVtxSize)(inputVtxPos) // Load pos of 1st vector on next iteration
     vmadh   $v2, $v2, $v4
     sdv     vPairMVPPosF[0],  (VTX_FRAC_VEC   - 2 * vtxSize)(outputVtxPos)
-    vge     $v29, vPairMVPPosI, vZero[0]
-    lsv     vPairMVPPosF[14], (VTX_Z_FRAC     - 1 * vtxSize)(secondVtxPos)
+    vge     $v29, vPairMVPPosI, vZero[0] // Int position XYZW >= 0
+    lsv     vPairMVPPosF[14], (VTX_Z_FRAC     - 1 * vtxSize)(secondVtxPos) // load Z into W slot, will be for fog below
     vmudh   $v29, vOne, $v31[1]
     sdv     vPairMVPPosI[8],  (VTX_INT_VEC    - 1 * vtxSize)(secondVtxPos)
     vmadn   $v26, $v21, $v31[4]
-    lsv     vPairMVPPosF[6],  (VTX_Z_FRAC     - 2 * vtxSize)(outputVtxPos)
+    lsv     vPairMVPPosF[6],  (VTX_Z_FRAC     - 2 * vtxSize)(outputVtxPos) // load Z into W slot, will be for fog below
     vmadh   $v25, $v2, $v31[4]
     sdv     vPairMVPPosI[0],  (VTX_INT_VEC    - 2 * vtxSize)(outputVtxPos)
-    vmrg    $v2, vZero, $v31[7]
+    vmrg    $v2, vZero, $v31[7] // Set to 0 where positive, 0x7FFF where negative
     ldv     $v20[8], (VTX_IN_OB + 3 * inputVtxSize)(inputVtxPos) // Load pos of 2nd vector on next iteration
-    vch     $v29, vPairMVPPosI, $v6[3h] // Compare XYZW to clip-ratio-scaled W (int part)
+    vch     $v29, vPairMVPPosI, $v6[3h] // Compare XYZZ to clip-ratio-scaled W (int part)
     slv     $v3[0],           (VTX_COLOR_VEC  - 1 * vtxSize)(secondVtxPos) // Store RGBA for first vector
     vmudl   $v29, $v26, $v5
-    lsv     vPairMVPPosI[14], (VTX_Z_INT      - 1 * vtxSize)(secondVtxPos)
+    lsv     vPairMVPPosI[14], (VTX_Z_INT      - 1 * vtxSize)(secondVtxPos) // load Z into W slot, will be for fog below
     vmadm   $v29, $v25, $v5
     slv     $v3[4],           (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos) // Store RGBA for second vector
     vmadn   $v5, $v26, $v4
-    lsv     vPairMVPPosI[6],  (VTX_Z_INT      - 2 * vtxSize)(outputVtxPos)
+    lsv     vPairMVPPosI[6],  (VTX_Z_INT      - 2 * vtxSize)(outputVtxPos) // load Z into W slot, will be for fog below
     vmadh   $v4, $v25, $v4
     sh      $10,              (VTX_CLIP_SCRN  - 1 * vtxSize)(secondVtxPos) // XYZW/W second vtx results in bits 0xF0F0
-    vmadh   $v2, $v2, $v31[7]
+    vmadh   $v2, $v2, $v31[7]           // Some extended precision thing? 0x7FFF times 0 or 0x7FFF
     sll     $11, $10, 4                 // Shift first vtx screen space clip into positions 0xF0F0
-    vcl     $v29, vPairMVPPosF, $v7[3h] // Compare XYZW to clip-ratio-scaled W (frac part)
+    vcl     $v29, vPairMVPPosF, $v7[3h] // Compare XYZZ to clip-ratio-scaled W (frac part)
     cfc2    $10, $vcc                   // Load 16 bit clip-ratio-scaled results, two verts
-    vmudl   $v29, vPairMVPPosF, $v5[3h]
+    vmudl   $v29, vPairMVPPosF, $v5[3h] // Pos times inv W
     ssv     $v5[14],          (VTX_INV_W_FRAC - 1 * vtxSize)(secondVtxPos)
-    vmadm   $v29, vPairMVPPosI, $v5[3h]
+    vmadm   $v29, vPairMVPPosI, $v5[3h] // Pos times inv W
     addi    inputVtxPos, inputVtxPos, (2 * inputVtxSize) // Advance two positions forward in the input vertices
-    vmadn   $v26, vPairMVPPosF, $v2[3h]
+    vmadn   $v26, vPairMVPPosF, $v2[3h] // Pos times inv W extended precision thing?
     sh      $10,              (VTX_CLIP_SCAL  - 1 * vtxSize)(secondVtxPos) // Clip scaled second vtx results in bits 0xF0F0
-    vmadh   $v25, vPairMVPPosI, $v2[3h]
-    sll     $10, $10, 4                 // Shift first vtx clip scaled into positions 0xF0F0
+    vmadh   $v25, vPairMVPPosI, $v2[3h] // v25:v26 = pos times inv W
+    sll     $10, $10, 4                 // Shift first vtx scaled clip into positions 0xF0F0
     vmudm   $v3, vPairST, vFxMisc       // Scale ST for two verts, using TexSScl and TexTScl in elems 2, 3, 6, 7
     sh      $11,              (VTX_CLIP_SCRN  - 2 * vtxSize)(outputVtxPos) // Clip screen first vtx results
     sh      $10,              (VTX_CLIP_SCAL  - 2 * vtxSize)(outputVtxPos) // Clip scaled first vtx results
-    vmudl   $v29, $v26, vFxMisc[4]      // Persp norm
+    vmudl   $v29, $v26, vFxMisc[4]      // Scale result by persp norm
     ssv     $v5[6],           (VTX_INV_W_FRAC - 2 * vtxSize)(outputVtxPos)
-    vmadm   $v25, $v25, vFxMisc[4]      // Persp norm
+    vmadm   $v25, $v25, vFxMisc[4]      // Scale result by persp norm
     ssv     $v4[14],          (VTX_INV_W_INT  - 1 * vtxSize)(secondVtxPos)
-    vmadn   $v26, vZero, vZero[0]
+    vmadn   $v26, vZero, vZero[0]       // Now v26:v25 = projected position
     ssv     $v4[6],           (VTX_INV_W_INT  - 2 * vtxSize)(outputVtxPos)
     slv     $v3[4],           (VTX_TC_VEC     - 1 * vtxSize)(secondVtxPos) // Store scaled S, T vertex 1
-    vmudh   $v29, vFxTransFMax, vOne[0]
+    vmudh   $v29, vFxTransFMax, vOne[0] //   1 * vtrans (elems 0-2, 4-6) or fog (elems 3, 7)
     slv     $v3[12],          (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos) // Store scaled S, T vertex 2
-    vmadh   $v29, vFxMask, $v31[3]
-    vmadn   $v26, $v26, vFxScaleFMin
+    vmadh   $v29, vFxMask, $v31[3]      // + 0x7F00 in fog elements (because auto-clamp to 0x7FFF, and will clamp to 0x7F00 below)
+    vmadn   $v26, $v26, vFxScaleFMin    // + pos frac * scale
     bgtz    $1, vertices_process_pair
-     vmadh  $v25, $v25, vFxScaleFMin
+     vmadh  $v25, $v25, vFxScaleFMin    // int part, v25:v26 is now screen space pos
     bltz    $ra, clipping_after_vtxwrite // Return to clipping if from clipping
 .if !(UCODE_IS_F3DEX2_204H) // Handled differently by F3DEX2 2.04H
-     vge    $v3, $v25, vZero[0]
+     vge    $v3, $v25, vZero[0]         // Clamp Z to >= 0
     slv     $v25[8],          (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
-    vge     $v27, $v25, $v31[3] // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
+    vge     $v27, $v25, $v31[3] // INSTR 1: Clamp W/fog to >= 0x7F00 (low byte is used)
     slv     $v25[0],          (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
-    ssv     $v26[12],         (VTX_DZ         - 1 * vtxSize)(secondVtxPos)
-    ssv     $v26[4],          (VTX_DZ         - 2 * vtxSize)(outputVtxPos)
-    ssv     $v3[12],          (VTX_Z          - 1 * vtxSize)(secondVtxPos)
+    ssv     $v26[12],         (VTX_SCR_Z_FRAC - 1 * vtxSize)(secondVtxPos)
+    ssv     $v26[4],          (VTX_SCR_Z_FRAC - 2 * vtxSize)(outputVtxPos)
+    ssv     $v3[12],          (VTX_SCR_Z      - 1 * vtxSize)(secondVtxPos)
     beqz    $7, run_next_DL_command
-     ssv    $v3[4],           (VTX_Z          - 2 * vtxSize)(outputVtxPos)
+     ssv    $v3[4],           (VTX_SCR_Z      - 2 * vtxSize)(outputVtxPos)
 .else // This is the F3DEX2 2.04H version
-     vge    $v27, $v25, $v31[3] // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
+     vge    $v27, $v25, $v31[3] // INSTR 1: Clamp W/fog to >= 0x7F00 (low byte is used)
     sdv     $v25[8],          (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
     sdv     $v25[0],          (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
-    ssv     $v26[12],         (VTX_DZ         - 1 * vtxSize)(secondVtxPos)
+    // Int part of Z stored in VTX_SCR_Z by sdv above
+    ssv     $v26[12],         (VTX_SCR_Z_FRAC - 1 * vtxSize)(secondVtxPos)
     beqz    $7, run_next_DL_command
-     ssv    $v26[4],          (VTX_DZ         - 2 * vtxSize)(outputVtxPos)
+     ssv    $v26[4],          (VTX_SCR_Z_FRAC - 2 * vtxSize)(outputVtxPos)
 .endif
     sbv     $v27[15],         (VTX_COLOR_A    - 1 * vtxSize)(secondVtxPos)
     j       run_next_DL_command
@@ -1297,7 +1298,7 @@ load_spfx_global_values:
     vscale = viewport shorts 0:3, vtrans = viewport shorts 4:7
     v16 = vFxScaleFMin = [vscale[0], -vscale[1], fogMin, vscale[3], (repeat)]
                          (element 5 written just before vertices_process_pair)
-    v17 = vFxTransFMax = [vtrans[0], fogMax,     fogMax, vtrans[0], (repeat)]
+    v17 = vFxTransFMax = [vtrans[0], fogMax,     fogMax, vtrans[3], (repeat)]
     v18 = vFxMisc = [???, ???, TexSScl, TexTScl, perspNorm, clipRatio, TexSScl, TexTScl]
     v19 = vFxMask = [0x0000, 0x0001, 0x0001, 0x0000, 0x0000, 0x0001, 0x0001, 0x0000]
     v21 = vFxNegScale = -[vscale[0:3], vscale[0:3]]
@@ -1357,11 +1358,11 @@ tri_to_rdp_noinit:
     vadd    $v2, vZero, $v6[1] // v2 all elems = y-coord of vertex 1
     lw      $7, VTX_CLIP($3)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
-    andi    $11, $5, (CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY | CLIP_FAR | CLIP_NEAR)
+    andi    $11, $5, (CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY | CLIP_FAR | CLIP_NEAR) << CLIP_SHIFT_SCRN
     vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
     and     $11, $6, $11
     vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
-    and     $11, $7, $11      // If there is any clipping plane where all three verts are past it...
+    and     $11, $7, $11      // If there is any screen clipping plane where all three verts are past it...
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
     vmrg    $v14, $v6, $v4    // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     bnez    $11, return_routine // ...whole tri is offscreen, cull.
@@ -1377,7 +1378,7 @@ tri_to_rdp_noinit:
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
     mfc2    $6, $v29[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    $v4, $v14, $v8    // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
-    and     $5, $5, $12       // ...which is in the set of currently enabled clipping planes...
+    and     $5, $5, $12       // ...which is in the set of currently enabled clipping planes (scaled for XY, screen for ZW)...
     vmrg    $v14, $v8, $v14   // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
     bnez    $5, ovl23_clipping_entrypoint // ...then run overlay 3 for clipping, either directly or via overlay 2 loading overlay 3.
      add     $11, $6, $11     // Add magic number; see description at gCullMagicNumbers
@@ -1481,13 +1482,13 @@ shading_done:
     vmadl   $v29, $v15, $v20
     lbu     $7, textureSettings1 + 2
     vmadn   $v20, $v15, vPairST
-    lsv     $v19[14], VTX_Z($2)
+    lsv     $v19[14], VTX_SCR_Z($2)
     vmadh   $v15, $v25, vPairST
-    lsv     $v21[14], VTX_Z($3)
+    lsv     $v21[14], VTX_SCR_Z($3)
     vmudl   $v29, vPairMVPPosF, $v16
-    lsv     $v7[14], VTX_DZ($2)
+    lsv     $v7[14], VTX_SCR_Z_FRAC($2)
     vmadm   $v29, vPairMVPPosI, $v16
-    lsv     $v9[14], VTX_DZ($3)
+    lsv     $v9[14], VTX_SCR_Z_FRAC($3)
     vmadn   $v16, vPairMVPPosF, $v17
     ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
     vmadh   $v17, vPairMVPPosI, $v17
@@ -1542,9 +1543,9 @@ shading_done:
     vmrg    $v9, $v9, $v13
 no_textures:
     vmudl   $v29, $v16, vPairMVPPosF
-    lsv     $v5[14], VTX_DZ($1)
+    lsv     $v5[14], VTX_SCR_Z_FRAC($1)
     vmadm   $v29, $v17, vPairMVPPosF
-    lsv     $v18[14], VTX_Z($1)
+    lsv     $v18[14], VTX_SCR_Z($1)
     vmadn   vPairMVPPosF, $v16, vPairMVPPosI
     lh      $1, VTX_SCR_VEC($2)
     vmadh   vPairMVPPosI, $v17, vPairMVPPosI
@@ -1666,7 +1667,7 @@ G_BRANCH_WZ_handler:
 .if UCODE_TYPE == TYPE_F3DZEX               // BRANCH_W/BRANCH_Z difference
     lh      vtxPtr, VTX_W_INT(vtxPtr)       // read the w coordinate of the vertex (f3dzex)
 .else
-    lw      vtxPtr, VTX_Z(vtxPtr)           // read the z coordinate of the vertex (f3dex2)
+    lw      vtxPtr, VTX_SCR_Z(vtxPtr)       // read the screen z coordinate (int and frac) of the vertex (f3dex2)
 .endif
     sub     $2, vtxPtr, endVtxPtr       // subtract the w/z value being tested
     bgez    $2, run_next_DL_command     // if vtx.w/z > w/z, continue running this DL
@@ -2136,7 +2137,7 @@ after_dirorpoint_loop:
     andi    $11, $5, G_TEXTURE_GEN_H
     vmrg    $v3, vZero, $v31[5]               // INSTR 3: Setup for texgen: 0x4000 in elems 3, 7
     beqz    $11, vertices_store               // Done if no texgen
-     vge    $v27, $v25, $v31[3]               // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
+     vge    $v27, $v25, $v31[3]               // INSTR 1: Clamp W/fog to >= 0x7F00 (low byte is used)
     lpv     $v2[0], (ltBufOfs + 0x10)(curLight) // Load lookat 1 transformed dir for texgen (curLight was decremented)
     lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load lookat 0 transformed dir for texgen
     j       lights_texgenmain
@@ -2347,7 +2348,7 @@ lights_dircoloraccum2:
     
 lights_texgenpre:
 // Texgen beginning
-    vge     $v27, $v25, $v31[3]         // INSTR 1: Finishing prev vtx store loop, some sort of clamp Z?
+    vge     $v27, $v25, $v31[3]         // INSTR 1: Clamp W/fog to >= 0x7F00 (low byte is used)
     andi    $11, $5, G_TEXTURE_GEN_H
     vmulf   $v21, vPairNX, $v2[0h]      // Vertex normal X * lookat 1 dir X
     beqz    $11, vertices_store
