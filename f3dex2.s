@@ -1068,11 +1068,11 @@ ovl23_end:
 
 inputVtxPos equ $14
 // See load_spfx_global_values for detailed contents
-vFxScaleFMin equ $v16
-vFxTransFMax equ $v17
-vFxMisc      equ $v18
-vFxMask      equ $v19
-vFxNegScale  equ $v21
+vVpFgScale  equ $v16
+vVpFgOffset equ $v17
+vVpMisc     equ $v18
+vFogMask    equ $v19
+vVpNegScale equ $v21
 
 G_VTX_handler:
     lhu     $20, (vertexTable)(cmd_w0)      // Load the address of the provided vertex array
@@ -1133,7 +1133,7 @@ vertex_skip_recalc_mvp:
     jal     while_wait_dma_busy
      ldv    mxr2f[8], (mvpMatrix + 48)($zero)
     ldv     $v20[0], (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // load the position of the 1st vertex into v20's lower 8 bytes
-    vmov    vFxScaleFMin[5], vFxNegScale[1]          // Finish building vFxScaleFMin
+    vmov    vVpFgScale[5], vVpNegScale[1]          // Finish building vVpFgScale
     ldv     $v20[8], (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos) // load the position of the 2nd vertex into v20's upper 8 bytes
 
 vertices_process_pair:
@@ -1168,12 +1168,12 @@ vertices_store:
     vge     $v3, $v25, vZero[0]            // Clamp Z to >= 0
 .endif
     addi    $1, $1, -4                     // Decrement vertex count by 2
-    vmudl   $v29, vPairMVPPosF, vFxMisc[4] // Persp norm
+    vmudl   $v29, vPairMVPPosF, vVpMisc[4] // Persp norm
     // First time through, secondVtxPos is temp memory in the current RDP output buffer,
     // so these writes don't harm anything. On subsequent loops, this is finishing the
     // store of the previous two vertices.
     sub     $11, secondVtxPos, $7          // Points 8 above secondVtxPos if fog, else 0
-    vmadm   $v2, vPairMVPPosI, vFxMisc[4] // Persp norm
+    vmadm   $v2, vPairMVPPosI, vVpMisc[4] // Persp norm
     sbv     $v27[15],         (VTX_COLOR_A + 8 - 1 * vtxSize)($11) // In VTX_SCR_Y if fog disabled...
     vmadn   $v21, vZero, vZero[0]
     sbv     $v27[7],          (VTX_COLOR_A + 8 - 2 * vtxSize)($11) // ...which gets overwritten below
@@ -1181,13 +1181,13 @@ vertices_store:
     vmov    $v26[1], $v3[2]
     ssv     $v3[12],          (VTX_SCR_Z      - 1 * vtxSize)(secondVtxPos)
 .endif
-    vmudn   $v7, vPairMVPPosF, vFxMisc[5] // Clip ratio
+    vmudn   $v7, vPairMVPPosF, vVpMisc[5] // Clip ratio
 .if (UCODE_IS_F3DEX2_204H)
     sdv     $v25[8],          (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
 .else
     slv     $v25[8],          (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
 .endif
-    vmadh   $v6, vPairMVPPosI, vFxMisc[5] // Clip ratio
+    vmadh   $v6, vPairMVPPosI, vVpMisc[5] // Clip ratio
     sdv     $v25[0],          (VTX_SCR_VEC    - 2 * vtxSize)(secondVtxPos)
     vrcph   $v29[0], $v2[3]
     ssv     $v26[12],         (VTX_SCR_Z_FRAC - 1 * vtxSize)(secondVtxPos)
@@ -1253,22 +1253,22 @@ vertices_store:
     sh      $10,              (VTX_CLIP_SCAL  - 1 * vtxSize)(secondVtxPos) // Clip scaled second vtx results in bits 0xF0F0
     vmadh   $v25, vPairMVPPosI, $v2[3h] // v25:v26 = pos times inv W
     sll     $10, $10, 4                 // Shift first vtx scaled clip into positions 0xF0F0
-    vmudm   $v3, vPairST, vFxMisc       // Scale ST for two verts, using TexSScl and TexTScl in elems 2, 3, 6, 7
+    vmudm   $v3, vPairST, vVpMisc       // Scale ST for two verts, using TexSScl and TexTScl in elems 2, 3, 6, 7
     sh      $11,              (VTX_CLIP_SCRN  - 2 * vtxSize)(outputVtxPos) // Clip screen first vtx results
     sh      $10,              (VTX_CLIP_SCAL  - 2 * vtxSize)(outputVtxPos) // Clip scaled first vtx results
-    vmudl   $v29, $v26, vFxMisc[4]      // Scale result by persp norm
+    vmudl   $v29, $v26, vVpMisc[4]      // Scale result by persp norm
     ssv     $v5[6],           (VTX_INV_W_FRAC - 2 * vtxSize)(outputVtxPos)
-    vmadm   $v25, $v25, vFxMisc[4]      // Scale result by persp norm
+    vmadm   $v25, $v25, vVpMisc[4]      // Scale result by persp norm
     ssv     $v4[14],          (VTX_INV_W_INT  - 1 * vtxSize)(secondVtxPos)
     vmadn   $v26, vZero, vZero[0]       // Now v26:v25 = projected position
     ssv     $v4[6],           (VTX_INV_W_INT  - 2 * vtxSize)(outputVtxPos)
     slv     $v3[4],           (VTX_TC_VEC     - 1 * vtxSize)(secondVtxPos) // Store scaled S, T vertex 1
-    vmudh   $v29, vFxTransFMax, vOne[0] //   1 * vtrans (elems 0-2, 4-6) or fog (elems 3, 7)
+    vmudh   $v29, vVpFgOffset, vOne[0]  //   1 * vtrans (and fog offset in elems 3,7)
     slv     $v3[12],          (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos) // Store scaled S, T vertex 2
-    vmadh   $v29, vFxMask, $v31[3]      // + 0x7F00 in fog elements (because auto-clamp to 0x7FFF, and will clamp to 0x7F00 below)
-    vmadn   $v26, $v26, vFxScaleFMin    // + pos frac * scale
+    vmadh   $v29, vFogMask, $v31[3]     // + 0x7F00 in fog elements (because auto-clamp to 0x7FFF, and will clamp to 0x7F00 below)
+    vmadn   $v26, $v26, vVpFgScale      // + pos frac * scale
     bgtz    $1, vertices_process_pair
-     vmadh  $v25, $v25, vFxScaleFMin    // int part, v25:v26 is now screen space pos
+     vmadh  $v25, $v25, vVpFgScale      // int part, v25:v26 is now screen space pos
     bltz    $ra, clipping_after_vtxwrite // Return to clipping if from clipping
 .if !(UCODE_IS_F3DEX2_204H) // Handled differently by F3DEX2 2.04H
      vge    $v3, $v25, vZero[0]         // Clamp Z to >= 0
@@ -1295,32 +1295,32 @@ vertices_store:
 
 load_spfx_global_values:
     /*
-    vscale = viewport shorts 0:3, vtrans = viewport shorts 4:7
-    v16 = vFxScaleFMin = [vscale[0], -vscale[1], fogMin, vscale[3], (repeat)]
-                         (element 5 written just before vertices_process_pair)
-    v17 = vFxTransFMax = [vtrans[0], fogMax,     fogMax, vtrans[3], (repeat)]
-    v18 = vFxMisc = [???, ???, TexSScl, TexTScl, perspNorm, clipRatio, TexSScl, TexTScl]
-    v19 = vFxMask = [0x0000, 0x0001, 0x0001, 0x0000, 0x0000, 0x0001, 0x0001, 0x0000]
-    v21 = vFxNegScale = -[vscale[0:3], vscale[0:3]]
+    vscale = viewport shorts 0:3, vtrans = viewport shorts 4:7, VpFg = Viewport Fog
+    v16 = vVpFgScale = [vscale[0], -vscale[1], vscale[2], fogMult, (repeat)]
+                       (element 5 written just before vertices_process_pair)
+    v17 = vVpFgOffset = [vtrans[0], vtrans[1], vtrans[2], fogOffset, (repeat)]
+    v18 = vVpMisc = [???, ???, TexSScl, TexTScl, perspNorm, clipRatio, TexSScl, TexTScl]
+    v19 = vFogMask = [0x0000, 0x0000, 0x0000, 0x0001, 0x0000, 0x0000, 0x0000, 0x0001]
+    v21 = vVpNegScale = -[vscale[0:3], vscale[0:3]]
     */
     li      spFxBaseReg, spFxBase
-    ldv     vFxScaleFMin[0], (viewport)($zero)     // vFxScaleFMin = [vscale[0], vscale[1], vscale[2], vscale[3], 0, 0, 0, 0]
-    ldv     vFxScaleFMin[8], (viewport)($zero)     // vFxScaleFMin = [vscale[0], vscale[1], vscale[2], vscale[3], vscale[0], vscale[1], vscale[2], vscale[3]]
-    llv     $v29[0], (fogFactor - spFxBase)(spFxBaseReg) // Load fog settings
-    ldv     vFxTransFMax[0], (viewport + 8)($zero) // vtrans
-    ldv     vFxTransFMax[8], (viewport + 8)($zero) // vtrans
-    vlt     vFxMask, $v31, $v31[3]                 // VCC = [0, 1, 1, 0, 0, 1, 1, 0]
-    vsub    vFxNegScale, vZero, vFxScaleFMin       // 0 - vscale
-    llv     vFxMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
-    vmrg    vFxScaleFMin, vFxScaleFMin, $v29[0]    // Put fog min in elements 01100110 of vscale
-    llv     vFxMisc[12], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
-    vmrg    vFxMask, vZero, vOne[0]                // Put 0 or 1 in v19 01100110
-    llv     vFxMisc[8], (perspNorm)($zero)         // Perspective normalization long (actually short)
-    vmrg    vFxTransFMax, vFxTransFMax, $v29[1]    // Put fog max in elements 01100110 of vtrans
-    lsv     vFxMisc[10], (clipRatio + 6 - spFxBase)(spFxBaseReg) // Clip ratio (-x version, but normally +/- same in all dirs)
-    vmov    vFxScaleFMin[1], vFxNegScale[1]        // -vscale[1]
+    ldv     vVpFgScale[0], (viewport)($zero)      // Load vscale duplicated in 0-3 and 4-7
+    ldv     vVpFgScale[8], (viewport)($zero)
+    llv     $v29[0], (fogFactor - spFxBase)(spFxBaseReg) // Load fog multiplier and offset
+    ldv     vVpFgOffset[0], (viewport + 8)($zero) // Load vtrans duplicated in 0-3 and 4-7
+    ldv     vVpFgOffset[8], (viewport + 8)($zero)
+    vlt     vFogMask, $v31, $v31[3]               // VCC = [0, 0, 0, 1, 0, 0, 0, 1]
+    vsub    vVpNegScale, vZero, vVpFgScale        // -vscale
+    llv     vVpMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
+    vmrg    vVpFgScale, vVpFgScale, $v29[0]       // Put fog multiplier in elements 3,7 of vscale
+    llv     vVpMisc[12], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
+    vmrg    vFogMask, vZero, vOne[0]              // Put 0 in elems 3,7, 1 in others
+    llv     vVpMisc[8], (perspNorm)($zero)        // Perspective normalization long (actually short)
+    vmrg    vVpFgOffset, vVpFgOffset, $v29[1]     // Put fog offset in elements 3,7 of vtrans
+    lsv     vVpMisc[10], (clipRatio + 6 - spFxBase)(spFxBaseReg) // Clip ratio (-x version, but normally +/- same in all dirs)
+    vmov    vVpFgScale[1], vVpNegScale[1]         // Negate vscale[1] because RDP top = y=0
     jr      $ra
-     addi   secondVtxPos, rdpCmdBufPtr, 0x50
+     addi   secondVtxPos, rdpCmdBufPtr, 0x50      // Pointer to currently unused memory in command buffer
 
 G_TRI2_handler:
 G_QUAD_handler:
