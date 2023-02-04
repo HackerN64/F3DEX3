@@ -220,11 +220,11 @@ clipRatio: // This is an array of 6 doublewords
 // 0x1B0: constants for register $v31
 .align 0x10 // loaded with lqv
 v31Value:
-    .dh 0xFFFF // 65535
+    .dh 0xFFFF // -1
     .dh 0x0004 // 4
     .dh 0x0008 // 8
     .dh 0x7F00 // 32512
-    .dh 0xFFFC // 65532
+    .dh 0xFFFC // -4
     .dh 0x4000 // 16384
     .dh vertexBuffer // 0x420
     .dh 0x7FFF // 32767
@@ -895,7 +895,7 @@ clipping_condlooptop: // Loop over six clipping conditions: near, far, +y, +x, -
     lw      clipFlags, VTX_CLIP($3)                  // Load flags for V3, which will be the final vertex of the last polygon
     and     clipFlags, clipFlags, $9                 // Mask V3's flags to current clip condition
     addi    clipPolyRead,   clipPolySelect, -6       // Start reading at the beginning of the old polygon
-    xori    clipPolySelect, clipPolySelect, (clipPoly2 - clipPoly) + 6 // Swap to the other polygon memory
+    xori    clipPolySelect, clipPolySelect, 6 ^ (clipPoly2 + 6 - clipPoly) // Swap to the other polygon memory
     addi    clipPolyWrite,  clipPolySelect, -6       // Start writing at the beginning of the new polygon
 clipping_edgelooptop: // Loop over edges connecting verts, possibly subdivide the edge
     // Edge starts from V3, ends at V2
@@ -915,82 +915,86 @@ clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / o
     // clipping boundary (e.g. at the screen edge)
     sll     $11, clipMaskIdx, 1  // clipMaskIdx counts by 4, so this is now by 8
     ldv     $v2[0], clipRatio($11) // Load four shorts holding clip ratio for this clip condition
-    ldv     $v4[0], VTX_FRAC_VEC($19) // Vtx with flag cleared, frac pos
-    ldv     $v5[0], VTX_INT_VEC ($19) // Vtx with flag cleared, int pos
-    ldv     $v6[0], VTX_FRAC_VEC($3)  // Vtx with flag set, frac pos
-    ldv     $v7[0], VTX_INT_VEC ($3)  // Vtx with flag set, int pos
-    vmudh   $v3, $v2, $v31[0]
-    vmudn   $v8, $v4, $v2
-    vmadh   $v9, $v5, $v2
-    vmadn   $v10, $v6, $v3
-    vmadh   $v11, $v7, $v3
-    vaddc   $v8, $v8, $v8[0q]
+    ldv     $v4[0], VTX_FRAC_VEC($19) // Vtx on screen, frac pos
+    ldv     $v5[0], VTX_INT_VEC ($19) // Vtx on screen, int pos
+    ldv     $v6[0], VTX_FRAC_VEC($3)  // Vtx off screen, frac pos
+    ldv     $v7[0], VTX_INT_VEC ($3)  // Vtx off screen, int pos
+    vmudh   $v3, $v2, $v31[0]         // v3 = -clipRatio
+    vmudn   $v8, $v4, $v2             // frac:   vtx on screen * clip ratio
+    vmadh   $v9, $v5, $v2             // int:  + vtx on screen * clip ratio   9:8
+    vmadn   $v10, $v6, $v3            // frac: - vtx off screen * clip ratio
+    vmadh   $v11, $v7, $v3            // int:  - vtx off screen * clip ratio 11:10
+    vaddc   $v8, $v8, $v8[0q]         // frac: y += x, w += z, vtx on screen only
     lqv     $v25[0], (linearGenerateCoefficients)($zero) // Used just to load the value 0x0002
-    vadd    $v9, $v9, $v9[0q]
-    vaddc   $v10, $v10, $v10[0q]
-    vadd    $v11, $v11, $v11[0q]
-    vaddc   $v8, $v8, $v8[1h]
-    vadd    $v9, $v9, $v9[1h]
-    vaddc   $v10, $v10, $v10[1h]
-    vadd    $v11, $v11, $v11[1h]
+    vadd    $v9, $v9, $v9[0q]         // int:  y += x, w += z, vtx on screen only
+    vaddc   $v10, $v10, $v10[0q]      // frac: y += x, w += z, vtx on screen - vtx off screen
+    vadd    $v11, $v11, $v11[0q]      // int:  y += x, w += z, vtx on screen - vtx off screen
+    vaddc   $v8, $v8, $v8[1h]         // frac: w += y (sum of all 4), vtx on screen only
+    vadd    $v9, $v9, $v9[1h]         // int:  w += y (sum of all 4), vtx on screen only
+    vaddc   $v10, $v10, $v10[1h]      // frac: w += y (sum of all 4), vtx on screen - vtx off screen
+    vadd    $v11, $v11, $v11[1h]      // int:  w += y (sum of all 4), vtx on screen - vtx off screen
+    // This algorithm below with the two reciprocals is probably some kind of Newton's
+    // method to get a better precision result, cause the precision of the divide is awful.
 .if (UCODE_IS_F3DEX2_204H) // Only in F3DEX2 2.04H
-    vrcph   $v29[0], $v11[3]
+    vrcph   $v29[0], $v11[3]          // int:  1 / (x+y+z+w), vtx on screen - vtx off screen
 .else
-    vor     $v29, $v11, vOne[0]
+    vor     $v29, $v11, vOne[0]       // round up int sum to odd; this ensures the value is not 0, otherwise v29 will be 0 instead of +/- 2
     vrcph   $v3[3], $v11[3]
 .endif
-    vrcpl   $v2[3], $v10[3]
-    vrcph   $v3[3], vZero[0]
+    vrcpl   $v2[3], $v10[3]           // frac: 1 / (x+y+z+w), vtx on screen - vtx off screen
+    vrcph   $v3[3], vZero[0]          // get int result of reciprocal
 .if (UCODE_IS_F3DEX2_204H) // Only in F3DEX2 2.04H
-    vabs    $v29, $v11, $v25[3] // 0x0002
+    vabs    $v29, $v11, $v25[3] // 0x0002 // v29 = +/- 2 based on sum positive or negative (Bug: or 0 if sum is 0)
 .else
-    vabs    $v29, $v29, $v25[3] // 0x0002
+    vabs    $v29, $v29, $v25[3] // 0x0002 // v29 = +/- 2 based on sum positive (incl. zero) or negative
 .endif
-    vmudn   $v2, $v2, $v29[3]
+    vmudn   $v2, $v2, $v29[3]         // multiply reciprocal by +/- 2
     vmadh   $v3, $v3, $v29[3]
-    veq     $v3, $v3, vZero[0]
-    vmrg    $v2, $v2, $v31[0]
-    vmudl   $v29, $v10, $v2[3]
-    vmadm   $v11, $v11, $v2[3]
-    vmadn   $v10, vZero, vZero[0]
-    vrcph   $v13[3], $v11[3]
-    vrcpl   $v12[3], $v10[3]
-    vrcph   $v13[3], vZero[0]
-    vmudl   $v29, $v12, $v10
-    vmadm   $v29, $v13, $v10
-    vmadn   $v10, $v12, $v11
-    vmadh   $v11, $v13, $v11
-    vmudh   $v29, vOne, $v31[1]
-    vmadn   $v10, $v10, $v31[4]
-    vmadh   $v11, $v11, $v31[4]
-    vmudl   $v29, $v12, $v10
-    vmadm   $v29, $v13, $v10
-    vmadn   $v12, $v12, $v11
-    vmadh   $v13, $v13, $v11
+    veq     $v3, $v3, vZero[0]        // if reciprocal high is 0
+    vmrg    $v2, $v2, $v31[0]         // keep reciprocal low, otherwise set to -1
+    vmudl   $v29, $v10, $v2[3]        // sum frac * reciprocal, discard
+    vmadm   $v11, $v11, $v2[3]        // sum int * reciprocal, frac out
+    vmadn   $v10, vZero, vZero[0]     // get int out
+    vrcph   $v13[3], $v11[3]          // reciprocal again (discard result)
+    vrcpl   $v12[3], $v10[3]          // frac part
+    vrcph   $v13[3], vZero[0]         // int part
+    vmudl   $v29, $v12, $v10          // self * own reciprocal? frac*frac discard
+    vmadm   $v29, $v13, $v10          // self * own reciprocal? int*frac discard
+    vmadn   $v10, $v12, $v11          // self * own reciprocal? frac out
+    vmadh   $v11, $v13, $v11          // self * own reciprocal? int out
+    vmudh   $v29, vOne, $v31[1]       // 4 (int part)
+    vmadn   $v10, $v10, $v31[4]       // - 4 * prev result frac part
+    vmadh   $v11, $v11, $v31[4]       // - 4 * prev result frac part
+    vmudl   $v29, $v12, $v10          // * own reciprocal again? frac*frac discard
+    vmadm   $v29, $v13, $v10          // * own reciprocal again? int*frac discard
+    vmadn   $v12, $v12, $v11          // * own reciprocal again? frac out
+    vmadh   $v13, $v13, $v11          // * own reciprocal again? int out
     vmudl   $v29, $v8, $v12
     luv     $v26[0], VTX_COLOR_VEC($3)  // Vtx off screen, RGBA
     vmadm   $v29, $v9, $v12
     llv     $v26[8], VTX_TC_VEC   ($3)  // Vtx off screen, ST
     vmadn   $v10, $v8, $v13
     luv     $v25[0], VTX_COLOR_VEC($19) // Vtx on screen, RGBA
-    vmadh   $v11, $v9, $v13
+    vmadh   $v11, $v9, $v13           // 11:10 = vtx on screen sum * prev calculated value
     llv     $v25[8], VTX_TC_VEC   ($19) // Vtx on screen, RGBA
     vmudl   $v29, $v10, $v2[3]
     vmadm   $v11, $v11, $v2[3]
-    vmadn   $v10, $v10, vZero[0]
-    vlt     $v11, $v11, vOne[0]
-    vmrg    $v10, $v10, $v31[0]
-    vsubc   $v29, $v10, vOne[0]
-    vge     $v11, $v11, vZero[0]
-    vmrg    $v10, $v10, vOne[0]
-    vmudn   $v2, $v10, $v31[0]
-    vmudl   $v29, $v6, $v10[3]
-    vmadm   $v29, $v7, $v10[3]
-    vmadl   $v29, $v4, $v2[3]
-    vmadm   vPairMVPPosI, $v5, $v2[3]
-    vmadn   vPairMVPPosF, vZero, vZero[0]
-    vmudm   $v29, $v26, $v10[3]
-    vmadm   vPairST, $v25, $v2[3]
+    vmadn   $v10, $v10, vZero[0]      // * one of the reciprocals above
+    // Clamp fade factor
+    vlt     $v11, $v11, vOne[0]       // If integer part of factor less than 1,
+    vmrg    $v10, $v10, $v31[0]       // keep frac part of factor, else set to 0xFFFF (max val)
+    vsubc   $v29, $v10, vOne[0]       // frac part - 1 for carry
+    vge     $v11, $v11, vZero[0]      // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
+    vmrg    $v10, $v10, vOne[0]       // keep frac part of factor, else set to 1 (min val)
+    vmudn   $v2, $v10, $v31[0]        // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
+    // Fade between attributes for on screen and off screen vert
+    vmudl   $v29, $v6, $v10[3]        //   Fade factor for off screen vert * off screen vert pos frac
+    vmadm   $v29, $v7, $v10[3]        // + Fade factor for off screen vert * off screen vert pos int
+    vmadl   $v29, $v4, $v2[3]         // + Fade factor for on  screen vert * on  screen vert pos frac
+    vmadm   vPairMVPPosI, $v5, $v2[3] // + Fade factor for on  screen vert * on  screen vert pos int
+    vmadn   vPairMVPPosF, vZero, vZero[0] // Load resulting frac pos
+    vmudm   $v29, $v26, $v10[3]       //   Fade factor for off screen vert * off screen vert color and TC
+    vmadm   vPairST, $v25, $v2[3]     // + Fade factor for on  screen vert * on  screen vert color and TC
     li      $7, 0x0000 // Set no fog
     li      $1, 0x0002 // Set vertex count to 1, so will only write one
     sh      outputVtxPos, (clipPoly)(clipPolyWrite) // Add the address of the new vert to the output polygon
@@ -1029,6 +1033,7 @@ clipping_nextcond:
      addi   clipMaskIdx, clipMaskIdx, -0x0004  // Point to next condition
     sw      $zero, activeClipPlanes            // Disable all clipping planes while drawing tris
 clipping_draw_tris_loop:
+    // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
 .if (UCODE_IS_F3DEX2_204H)
     // Draws verts in pattern like 0-4-3, 0-3-2, 0-2-1
     reg1 equ clipPolyWrite
@@ -1038,7 +1043,6 @@ clipping_draw_tris_loop:
     reg1 equ clipPolySelect
     val1 equ 0x0002
 .endif
-    // TODO init states
     // Load addresses of three verts to draw; each vert may be in normal vertex array or temp buffer
     lhu     $1, (clipPoly - 6)(clipPolySelect)
     lhu     $2, (clipPoly - 4)(reg1)
@@ -1046,7 +1050,7 @@ clipping_draw_tris_loop:
     mtc2    $1, $v2[10]               // Addresses go in vector regs too
     vor     $v3, vZero, $v31[5]       // Not sure what this is, was in init code before tri_to_rdp_noinit
     mtc2    $2, $v4[12]
-    jal     tri_to_rdp_noinit
+    jal     tri_to_rdp_noinit         // Draw tri
      mtc2   $3, $v2[14]
     bne     clipPolyWrite, clipPolySelect, clipping_draw_tris_loop
      addi   reg1, reg1, val1
