@@ -125,17 +125,6 @@ pMatrix:
 mvpMatrix:
     .fill 64
     
-// Not global names, but used multiple times with the same meaning.
-// Matrix row X integer/fractional
-mxr0i equ $v8
-mxr1i equ $v9
-mxr2i equ $v10
-mxr3i equ $v11
-mxr0f equ $v12
-mxr1f equ $v13
-mxr2f equ $v14
-mxr3f equ $v15
-
 // 0x00C0-0x00C8: scissor (four 12-bit values)
 scissorUpLeft: // the command byte is included since the command word is copied verbatim
     .dw (G_SETSCISSOR << 24) | ((  0 * 4) << 12) | ((  0 * 4) << 0)
@@ -200,7 +189,6 @@ displayListStack:
 // fixed offsets to things in this region. Perhaps had to do with DMEM overlays
 // at some point in development.
 spFxBase:
-spFxBaseReg equ $13
 
 // 0x0180-0x1B0: clipping values
 clipRatio: // This is an array of 6 doublewords
@@ -322,9 +310,6 @@ lightBufferMain:
     .fill (8 * lightSize)
 // Code uses pointers relative to spFxBase, with immediate offsets, so that
 // another register isn't needed to store the start or end address of the array.
-curLight    equ $9 // With ltBufOfs immediate added, points to current light
-                   // (current max in list, counting down).
-tmpCurLight equ $6 // Same meaning, another register.
 // Pointers are kept relative to spFxBase; this offset gets them to point to
 // lightBufferMain instead.
 ltBufOfs equ (lightBufferMain - spFxBase)
@@ -547,27 +532,111 @@ OSTask:
 // RSP IMEM
 .create CODE_FILE, 0x00001080
 
-// Global registers
-secondVtxPos equ $8
-outputVtxPos equ $15
-clipFlags equ $16
-clipPolyRead equ $17
-clipPolySelect equ $18
-rdpCmdBufEnd equ $22
-rdpCmdBufPtr equ $23
-cmd_w1 equ $24
-cmd_w0 equ $25
-taskDataPtr equ $26
-inputBufferPos equ $27
-savedActiveClipPlanes equ $29
-savedRA equ $30
+////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////// Register Use Map ///////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 
-// Global vector registers
-vZero equ $v0
-vOne equ $v1
-vPairST equ $v22
-vPairMVPPosF equ $v23
-vPairMVPPosI equ $v24
+// Registers marked as "global" are only used for one purpose in the vanilla
+// microcode. However, this does not necessarily mean they can't be used for
+// other things in mods--this depends on which group they're listed in below.
+
+// Note that these lists do not cover registers which are just used locally in
+// a particular region of code--you're still responsible for not breaking the
+// code you modify. This is designed to help you avoid breaking one part of the
+// code by modifying a different part.
+
+// Local register definitions are included with their code, not here.
+
+// These registers are used globally, and their values can't be rebuilt, so
+// they should never be used for anything besides their original purpose.
+//                 $zero // global
+rdpCmdBufEnd   equ $22   // global
+rdpCmdBufPtr   equ $23   // global
+taskDataPtr    equ $26   // global
+inputBufferPos equ $27   // global
+//                 $ra   // global
+
+// These registers are used throughout the codebase and expected to have
+// certain values, but you're free to overwrite them as long as you
+// reconstruct the normal values after you're done (in fact point lighting does
+// this for $v30 and $v31).
+vZero equ $v0  // global
+vOne  equ $v1  // global
+//        $v30 // global
+//        $v31 // global
+
+// Must keep values during the full clipping process: clipping overlay, vertex
+// write, tri drawing.
+clipPolySelect        equ $18 // global
+clipPolyWrite         equ $21 // also input_mtx_0
+savedActiveClipPlanes equ $29 // global
+savedRA               equ $30 // global
+
+// Must keep values during the first part of the clipping process only: polygon
+// subdivision and vertex write.
+clipMaskIdx  equ $5
+secondVtxPos equ $8  // global
+outputVtxPos equ $15 // global
+clipFlags    equ $16 // global
+clipPolyRead equ $17 // global
+
+// Must keep values during the second part of the clipping process: tri drawing.
+
+
+// Must keep values during tri drawing.
+// They are also used throughout the codebase, but can be overwritten once their
+// use has been fulfilled for the specific command.
+cmd_w1_dram equ $24 // almost global, occasionally used locally
+cmd_w0      equ $25 // global
+
+// Must keep values during the full vertex process: load, lighting, and vertex write
+topLightPtr  equ $6   // Used locally elsewhere
+curLight     equ $9   // Used locally elsewhere
+inputVtxPos  equ $14  // global
+mxr0i        equ $v8  // "matrix row 0 int part"
+mxr1i        equ $v9  // All of these used locally elsewhere
+mxr2i        equ $v10
+mxr3i        equ $v11
+mxr0f        equ $v12
+mxr1f        equ $v13
+mxr2f        equ $v14
+mxr3f        equ $v15
+vPairST      equ $v22 // global
+vPairMVPPosF equ $v23 // global
+vPairMVPPosI equ $v24 // global
+// For point lighting
+mvTc0f equ $v3
+mvTc0i equ $v4
+mvTc1i equ $v21
+mvTc1f equ $v28 // same as vPairAlpha37
+mvTc2i equ $v30
+mvTc2f equ $v31
+
+// Values set up by load_spfx_global_values, which must be kept during the full
+// vertex process, and which are reloaded for each vert during clipping. See
+// that routine for the detailed contents of each of these registers.
+spFxBaseReg equ $13  // global
+vVpFgScale  equ $v16 // All of these used locally elsewhere
+vVpFgOffset equ $v17
+vVpMisc     equ $v18
+vFogMask    equ $v19
+vVpNegScale equ $v21
+
+
+// Arguments to mtx_multiply
+output_mtx  equ $19 // also dmaLen, also used by itself
+input_mtx_1 equ $20 // also dmemAddr and xfrmLtPtr
+input_mtx_0 equ $21 // also clipPolyWrite
+
+// Arguments to dma_read_write
+dmaLen   equ $19 // also output_mtx, also used by itself
+dmemAddr equ $20 // also input_mtx_1 and xfrmLtPtr
+// cmd_w1_dram   // used for all dma_read_write DRAM addresses, not just second word of command
+
+// Arguments to load_overlay_and_enter
+ovlTableEntry equ $11 // Commonly used locally
+postOvlRA     equ $12 // Commonly used locally
+
 
 // Initialization routines
 // Everything up until displaylist_dma will get overwritten by ovl0 and/or ovl1
@@ -664,7 +733,7 @@ calculate_overlay_addrs:
     sw      $5, overlayInfo3 + overlay_load
     lw      taskDataPtr, OSTask + OSTask_data_ptr
 load_overlay1_init:
-    li      $11, overlayInfo1   // set up loading of overlay 1
+    li      ovlTableEntry, overlayInfo1   // set up loading of overlay 1
 
 // Make room for overlays 0 and 1. Normally, overlay 1 ends exactly at ovl01_end,
 // and overlay 0 is much shorter, but if things are modded this constraint must be met.
@@ -680,18 +749,19 @@ load_overlay1_init:
 // which is displaylist_dma. So the padding has to be before these two instructions,
 // so that this is immediately before displaylist_dma; otherwise the return address
 // will be in the last few instructions of overlay 1. However, this was unnecessary--
-// it could have been a jump and then `addiu $12, $zero, displaylist_dma`.
+// it could have been a jump and then `addiu postOvlRA, $zero, displaylist_dma`,
+// and the padding put after this.
     jal     load_overlay_and_enter  // load overlay 1 and enter
-     move   $12, $ra                // set up the return address, since load_overlay_and_enter returns to $12
+     move   postOvlRA, $ra          // set up the return address, since load_overlay_and_enter returns to postOvlRA
 
 ovl01_end:
 // Overlays 0 and 1 overwrite everything up to this point (2.08 versions overwrite up to the previous .align 8)
 
 displaylist_dma: // loads inputBufferLength bytes worth of displaylist data via DMA into inputBuffer
-    li      $19, inputBufferLength - 1  // set the DMA length
-    move    $24, taskDataPtr            // set up the DRAM address to read from
-    jal     dma_read_write              // initiate the DMA read
-     la     $20, inputBuffer            // set the address to DMA read to
+    li      dmaLen, inputBufferLength - 1               // set the DMA length
+    move    cmd_w1_dram, taskDataPtr                    // set up the DRAM address to read from
+    jal     dma_read_write                              // initiate the DMA read
+     la     dmemAddr, inputBuffer                       // set the address to DMA read to
     addiu   taskDataPtr, taskDataPtr, inputBufferLength // increment the DRAM address to read from next time
     li      inputBufferPos, -inputBufferLength          // reset the DL word index
 wait_for_dma_and_run_next_command:
@@ -714,45 +784,43 @@ run_next_DL_command:
     sll     $11, $12, 1                                 // multiply command byte by 2 to get jump table offset
     lhu     $11, (commandJumpTable)($11)                // get command subroutine address from command jump table
     bnez    $1, load_overlay_0_and_enter                // load and execute overlay 0 if yielding
-     lw     cmd_w1, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1
+     lw     cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
     jr      $11                                         // jump to the loaded command handler
      addiu  inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
 
 .if (UCODE_IS_F3DEX2_204H) // Microcodes besides F3DEX2 2.04H have this as a noop
 G_SPECIAL_1_handler:    // Seems to be a manual trigger for mvp recalculation
     li      $ra, run_next_DL_command
-    li      $21, pMatrix
-    li      $20, mvMatrix
-    li      $19, mvpMatrix
+    li      input_mtx_0, pMatrix
+    li      input_mtx_1, mvMatrix
+    li      output_mtx, mvpMatrix
     j       mtx_multiply
      sb     cmd_w0, mvpValid
 .endif
 
 G_DMA_IO_handler:
-    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1) to a virtual one
-     lh     $20, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
-    andi    $19, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
-    // At this point, $20's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
+    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
+     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
+    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
+    // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
     // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
-    sra     $20, $20, 2
-    j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of $20)
+    sra     dmemAddr, dmemAddr, 2
+    j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
      li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
 
-geometryMode equ $11
 G_GEOMETRYMODE_handler:
-    lw      geometryMode, geometryModeLabel     // load the geometry mode value
-    and     geometryMode, geometryMode, cmd_w0  // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
-    or      geometryMode, geometryMode, cmd_w1  // sets the flags in cmd_w1 (set in g*SPSetGeometryMode)
-    j       run_next_DL_command                 // run the next DL command
-     sw     geometryMode, geometryModeLabel     // update the geometry mode value
+    lw      $11, geometryModeLabel  // load the geometry mode value
+    and     $11, $11, cmd_w0        // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
+    or      $11, $11, cmd_w1_dram   // sets the flags in cmd_w1_dram (set in g*SPSetGeometryMode)
+    j       run_next_DL_command     // run the next DL command
+     sw     $11, geometryModeLabel  // update the geometry mode value
 
-dlStackIdx equ $1
 G_ENDDL_handler:
-    lbu     dlStackIdx, displayListStackLength      // Load the DL stack index
-    beqz    dlStackIdx, load_overlay_0_and_enter    // Load overlay 0 if there is no DL return address, to end the graphics task processing
-     addi   dlStackIdx, dlStackIdx, -4              // Decrement the DL stack index
-    j       f3dzex_ovl1_00001020                    // has a different version in ovl1
-     lw     taskDataPtr, (displayListStack)(dlStackIdx) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
+    lbu     $1, displayListStackLength          // Load the DL stack index
+    beqz    $1, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing
+     addi   $1, $1, -4                          // Decrement the DL stack index
+    j       f3dzex_ovl1_00001020                // has a different version in ovl1
+     lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
 
 G_RDPHALF_2_handler:
     ldv     $v29[0], (texrectWord1)($zero)
@@ -760,7 +828,7 @@ G_RDPHALF_2_handler:
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
     sdv     $v29[0], -8(rdpCmdBufPtr)
 G_RDP_handler:
-    sw      cmd_w1, 4(rdpCmdBufPtr)         // Add the second word of the command to the RDP command buffer
+    sw      cmd_w1_dram, 4(rdpCmdBufPtr)        // Add the second word of the command to the RDP command buffer
 G_SYNC_handler:
 G_NOOP_handler:
     sw      cmd_w0, 0(rdpCmdBufPtr)         // Add the command word to the RDP command buffer
@@ -769,25 +837,25 @@ G_NOOP_handler:
 
 G_SETxIMG_handler:
     li      $ra, G_RDP_handler          // Load the RDP command handler into the return address, then fall through to convert the address to virtual
-// Converts the segmented address in $24 (also cmd_w1) to the corresponding physical address
+// Converts the segmented address in cmd_w1_dram to the corresponding physical address
 segmented_to_physical:
-    srl     $11, $24, 22                // Copy (segment index << 2) into $11
-    andi    $11, $11, 0x3C              // Clear the bottom 2 bits that remained during the shift
-    lw      $11, (segmentTable)($11)    // Get the current address of the segment
-    sll     $24, $24, 8                 // Shift the address to the left so that the top 8 bits are shifted out
-    srl     $24, $24, 8                 // Shift the address back to the right, resulting in the original with the top 8 bits cleared
+    srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
+    andi    $11, $11, 0x3C                // Clear the bottom 2 bits that remained during the shift
+    lw      $11, (segmentTable)($11)      // Get the current address of the segment
+    sll     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address to the left so that the top 8 bits are shifted out
+    srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
     jr      $ra
-     add    $24, $24, $11               // Add the segment's address to the masked input address, resulting in the virtual address
+     add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
 G_RDPSETOTHERMODE_handler:
-    sw      cmd_w0, otherMode0  // Record the local otherMode0 copy
-    j       G_RDP_handler       // Send the command to the RDP
-     sw     cmd_w1, otherMode1  // Record the local otherMode1 copy
+    sw      cmd_w0, otherMode0       // Record the local otherMode0 copy
+    j       G_RDP_handler            // Send the command to the RDP
+     sw     cmd_w1_dram, otherMode1  // Record the local otherMode1 copy
 
 G_SETSCISSOR_handler:
-    sw      cmd_w0, scissorUpLeft       // Record the local scissorUpleft copy
-    j       G_RDP_handler               // Send the command to the RDP
-     sw     cmd_w1, scissorBottomRight  // Record the local scissorBottomRight copy
+    sw      cmd_w0, scissorUpLeft            // Record the local scissorUpleft copy
+    j       G_RDP_handler                    // Send the command to the RDP
+     sw     cmd_w1_dram, scissorBottomRight  // Record the local scissorBottomRight copy
 
 check_rdp_buffer_full_and_run_next_cmd:
     li      $ra, run_next_DL_command    // Set up running the next DL command as the return address
@@ -798,36 +866,36 @@ check_rdp_buffer_full:
     blez    $11, return_routine         // Return if rdpCmdBufEnd >= rdpCmdBufPtr
 flush_rdp_buffer:
      mfc0   $12, SP_DMA_BUSY
-    lw      $24, rdpFifoPos
-    addiu   $19, $11, RDP_CMD_BUFSIZE
+    lw      cmd_w1_dram, rdpFifoPos
+    addiu   dmaLen, $11, RDP_CMD_BUFSIZE
     bnez    $12, flush_rdp_buffer
      lw     $12, OSTask + OSTask_output_buff_size
-    mtc0    $24, DPC_END
-    add     $11, $24, $19
+    mtc0    cmd_w1_dram, DPC_END
+    add     $11, cmd_w1_dram, dmaLen
     sub     $12, $12, $11
     bgez    $12, f3dzex_000012A8
 @@await_start_valid:
      mfc0   $11, DPC_STATUS
     andi    $11, $11, DPC_STATUS_START_VALID
     bnez    $11, @@await_start_valid
-     lw     $24, OSTask + OSTask_output_buff
+     lw     cmd_w1_dram, OSTask + OSTask_output_buff
 f3dzex_00001298:
     mfc0    $11, DPC_CURRENT
-    beq     $11, $24, f3dzex_00001298
+    beq     $11, cmd_w1_dram, f3dzex_00001298
      nop
-    mtc0    $24, DPC_START
+    mtc0    cmd_w1_dram, DPC_START
 f3dzex_000012A8:
     mfc0    $11, DPC_CURRENT
-    sub     $11, $11, $24
+    sub     $11, $11, cmd_w1_dram
     blez    $11, f3dzex_000012BC
-     sub    $11, $11, $19
+     sub    $11, $11, dmaLen
     blez    $11, f3dzex_000012A8
 f3dzex_000012BC:
-     add    $11, $24, $19
+     add    $11, cmd_w1_dram, dmaLen
     sw      $11, rdpFifoPos
     // Set up the DMA from DMEM to the RDP fifo in RDRAM
-    addi    $19, $19, -1                                    // subtract 1 from the length
-    addi    $20, rdpCmdBufEnd, -(0x2000 | RDP_CMD_BUFSIZE)  // The 0x2000 is meaningless, negative means write
+    addi    dmaLen, dmaLen, -1                                  // subtract 1 from the length
+    addi    dmemAddr, rdpCmdBufEnd, -(0x2000 | RDP_CMD_BUFSIZE) // The 0x2000 is meaningless, negative means write
     xori    rdpCmdBufEnd, rdpCmdBufEnd, rdpCmdBuffer1End ^ rdpCmdBuffer2End // Swap between the two RDP command buffers
     j       dma_read_write
      addi   rdpCmdBufPtr, rdpCmdBufEnd, -RDP_CMD_BUFSIZE
@@ -864,17 +932,12 @@ ovl23_start:
 
 ovl3_start:
 
-clipPolyWrite equ $21
-clipMaskIdx equ $5
-
-vPairRGBATemp equ $v7
-
 // Jump here to do lighting. If overlay 3 is loaded (this code), loads and jumps
 // to overlay 2 (same address as right here).
-ovl23_lighting_entrypoint_copy:     // same IMEM address as ovl23_lighting_entrypoint
-    li      $11, overlayInfo2       // set up a load for overlay 2
-    j       load_overlay_and_enter  // load overlay 2
-     li     $12, ovl23_lighting_entrypoint  // set the return address
+ovl23_lighting_entrypoint_copy:  // same IMEM address as ovl23_lighting_entrypoint
+    li      ovlTableEntry, overlayInfo2          // set up a load for overlay 2
+    j       load_overlay_and_enter               // load overlay 2
+     li     postOvlRA, ovl23_lighting_entrypoint // set the return address
 
 // Jump here to do clipping. If overlay 3 is loaded (this code), directly starts
 // the clipping code.
@@ -1066,39 +1129,33 @@ ovl3_end:
 
 ovl23_end:
 
-inputVtxPos equ $14
-// See load_spfx_global_values for detailed contents
-vVpFgScale  equ $v16
-vVpFgOffset equ $v17
-vVpMisc     equ $v18
-vFogMask    equ $v19
-vVpNegScale equ $v21
+vPairRGBATemp equ $v7
 
 G_VTX_handler:
-    lhu     $20, (vertexTable)(cmd_w0)      // Load the address of the provided vertex array
-    jal     segmented_to_physical           // Convert the vertex array's segmented address (in $24) to a virtual one
+    lhu     dmemAddr, (vertexTable)(cmd_w0) // Load the address of the provided vertex array
+    jal     segmented_to_physical           // Convert the vertex array's segmented address (in cmd_w1_dram) to a virtual one
      lhu    $1, (inputBufferEnd - 0x07)(inputBufferPos) // Load the size of the vertex array to copy into reg $1
-    sub     $20, $20, $1                    // Calculate the address to DMA the provided vertices into
+    sub     dmemAddr, dmemAddr, $1          // Calculate the address to DMA the provided vertices into
     jal     dma_read_write                  // DMA read the vertices from DRAM
-     addi   $19, $1, -1                     // Set up the DMA length
+     addi   dmaLen, $1, -1                  // Set up the DMA length
     lhu     $5, geometryModeLabel           // Load the geometry mode into $5
     srl     $1, $1, 3
     sub     outputVtxPos, cmd_w0, $1
     lhu     outputVtxPos, (vertexTable)(outputVtxPos)
-    move    inputVtxPos, $20
+    move    inputVtxPos, dmemAddr
     lbu     secondVtxPos, mvpValid          // used as temp reg
-    andi    tmpCurLight, $5, G_LIGHTING_H   // If no lighting, tmpCurLight is 0, skips transforming light dirs and setting this up as a pointer
-    bnez    tmpCurLight, ovl23_lighting_entrypoint // Run overlay 2 for lighting, either directly or via overlay 3 loading overlay 2
+    andi    topLightPtr, $5, G_LIGHTING_H   // If no lighting, topLightPtr is 0, skips transforming light dirs and setting this up as a pointer
+    bnez    topLightPtr, ovl23_lighting_entrypoint // Run overlay 2 for lighting, either directly or via overlay 3 loading overlay 2
      andi   $7, $5, G_FOG_H
 after_light_dir_xfrm:
     bnez    secondVtxPos, vertex_skip_recalc_mvp  // Skip recalculating the mvp matrix if it's already up-to-date
      sll    $7, $7, 3                 // $7 is 8 if G_FOG is set, 0 otherwise
     sb      cmd_w0, mvpValid          // Set mvpValid
-    li      $21, pMatrix              // Arguments to mtx_multiply
-    li      $20, mvMatrix
+    li      input_mtx_0, pMatrix      // Arguments to mtx_multiply
+    li      input_mtx_1, mvMatrix
     // Calculate the MVP matrix
     jal     mtx_multiply
-     li     $19, mvpMatrix
+     li     output_mtx, mvpMatrix
 
 vertex_skip_recalc_mvp:
     /* Load MVP matrix as follows--note that translation is in the bottom row,
@@ -1143,7 +1200,7 @@ vertices_process_pair:
     vmadh   $v29, mxr3i, vOne[0]
     llv     vPairST[12], (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // load the texture coords of the 1st vertex into second half of vPairST
     vmadn   $v29, mxr0f, $v20[0h]
-    move    curLight, tmpCurLight
+    move    curLight, topLightPtr
     vmadh   $v29, mxr0i, $v20[0h]
     lpv     $v2[0], (ltBufOfs + 0x10)(curLight)    // First instruction of lights_dircoloraccum2 loop; load light transformed dir
     vmadn   $v29, mxr1f, $v20[1h]
@@ -1151,7 +1208,7 @@ vertices_process_pair:
     vmadh   $v29, mxr1i, $v20[1h]
     lpv     vPairRGBATemp[0], (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Load both vertex's colors/normals into v7's elements RGBARGBA or XYZAXYZA
     vmadn   vPairMVPPosF, mxr2f, $v20[2h]          // vPairMVPPosF = MVP * vpos result frac
-    bnez    tmpCurLight, light_vtx                 // Zero if lighting disabled, pointer if enabled
+    bnez    topLightPtr, light_vtx                 // Zero if lighting disabled, pointer if enabled
      vmadh  vPairMVPPosI, mxr2i, $v20[2h]          // vPairMVPPosI = MVP * vpos result int
     // These two instructions are repeated at the end of all the lighting codepaths,
     // since they're skipped here if lighting is being performed
@@ -1324,13 +1381,13 @@ load_spfx_global_values:
 
 G_TRI2_handler:
 G_QUAD_handler:
-    jal     tri_to_rdp               // Send second tri; return here for first tri
-     sw     cmd_w1, 4(rdpCmdBufPtr)  // Put second tri indices in temp memory
+    jal     tri_to_rdp                   // Send second tri; return here for first tri
+     sw     cmd_w1_dram, 4(rdpCmdBufPtr) // Put second tri indices in temp memory
 G_TRI1_handler:
-    li      $ra, run_next_DL_command // After done with this tri, run next cmd
-    sw      cmd_w0, 4(rdpCmdBufPtr)  // Put first tri indices in temp memory
+    li      $ra, run_next_DL_command     // After done with this tri, run next cmd
+    sw      cmd_w0, 4(rdpCmdBufPtr)      // Put first tri indices in temp memory
 tri_to_rdp:
-    lpv     $v2[0], 0(rdpCmdBufPtr)  // Load tri indexes to vector unit for shuffling
+    lpv     $v2[0], 0(rdpCmdBufPtr)      // Load tri indexes to vector unit for shuffling
     // read the three vertex indices from the stored command word
     lbu     $1, 0x0005(rdpCmdBufPtr)     // $1 = vertex 1 index
     lbu     $2, 0x0006(rdpCmdBufPtr)     // $2 = vertex 2 index
@@ -1648,35 +1705,33 @@ no_z_buffer:
     j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
      sdv    $v18[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
 
-vtxPtr equ $25
-endVtxPtr equ $24
 G_CULLDL_handler:
-    lhu     vtxPtr, (vertexTable)(cmd_w0)   // load start vertex address
-    lhu     endVtxPtr, (vertexTable)(cmd_w1) // load end vertex address
+    lhu     cmd_w0, (vertexTable)(cmd_w0)     // load start vertex address
+    lhu     cmd_w1_dram, (vertexTable)(cmd_w1_dram) // load end vertex address
     addiu   $1, $zero, (CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY | CLIP_FAR | CLIP_NEAR)
-    lw      $11, VTX_CLIP(vtxPtr)           // read clip flags from vertex
+    lw      $11, VTX_CLIP(cmd_w0)             // read clip flags from vertex
 culldl_loop:
     and     $1, $1, $11
-    beqz    $1, run_next_DL_command         // Some vertex is on the screen-side of all clipping planes; have to render
-     lw     $11, (vtxSize + VTX_CLIP)(vtxPtr) // next vertex clip flags
-    bne     vtxPtr, endVtxPtr, culldl_loop  // loop until reaching the last vertex
-     addiu  vtxPtr, vtxPtr, vtxSize         // advance to the next vertex
-    j       G_ENDDL_handler                 // If got here, there's some clipping plane where all verts are outside it; skip DL
+    beqz    $1, run_next_DL_command           // Some vertex is on the screen-side of all clipping planes; have to render
+     lw     $11, (vtxSize + VTX_CLIP)(cmd_w0) // next vertex clip flags
+    bne     cmd_w0, cmd_w1_dram, culldl_loop  // loop until reaching the last vertex
+     addiu  cmd_w0, cmd_w0, vtxSize           // advance to the next vertex
+    j       G_ENDDL_handler                   // If got here, there's some clipping plane where all verts are outside it; skip DL
 G_BRANCH_WZ_handler:
-     lhu    vtxPtr, (vertexTable)(cmd_w0)   // get the address of the vertex being tested
-.if UCODE_TYPE == TYPE_F3DZEX               // BRANCH_W/BRANCH_Z difference
-    lh      vtxPtr, VTX_W_INT(vtxPtr)       // read the w coordinate of the vertex (f3dzex)
+     lhu    cmd_w0, (vertexTable)(cmd_w0)     // get the address of the vertex being tested
+.if UCODE_TYPE == TYPE_F3DZEX                 // BRANCH_W/BRANCH_Z difference
+    lh      cmd_w0, VTX_W_INT(cmd_w0)         // read the w coordinate of the vertex (f3dzex)
 .else
-    lw      vtxPtr, VTX_SCR_Z(vtxPtr)       // read the screen z coordinate (int and frac) of the vertex (f3dex2)
+    lw      cmd_w0, VTX_SCR_Z(cmd_w0)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
 .endif
-    sub     $2, vtxPtr, endVtxPtr       // subtract the w/z value being tested
-    bgez    $2, run_next_DL_command     // if vtx.w/z > w/z, continue running this DL
-     lw     $24, rdpHalf1Val            // load the RDPHALF1 value
-    j       f3dzex_ovl1_00001008
+    sub     $2, cmd_w0, cmd_w1_dram           // subtract the w/z value being tested
+    bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
+     lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
+    j       branch_dl
 G_MODIFYVTX_handler:
      lbu    $1, (inputBufferEnd - 0x07)(inputBufferPos)
     j       do_moveword
-     lhu    vtxPtr, (vertexTable)(cmd_w0)
+     lhu    cmd_w0, (vertexTable)(cmd_w0)
 
      
 .if . > 0x00001FAC
@@ -1688,46 +1743,40 @@ G_MODIFYVTX_handler:
 // to load_overlay_and_enter to execute the load.
 load_overlay_0_and_enter:
 G_LOAD_UCODE_handler:
-    li      $12, ovl0_start    // Sets up return address
-    li      $11, overlayInfo0       // Sets up ovl0 table address
+    li      postOvlRA, ovl0_start                    // Sets up return address
+    li      ovlTableEntry, overlayInfo0              // Sets up ovl0 table address
 // This subroutine accepts the address of an overlay table entry and loads that overlay.
 // It then jumps to that overlay's address after DMA of the overlay is complete.
-// $11 is used to provide the overlay table entry
-// $12 is used to pass in a value to return to
-ovlTableEntry equ $11
-returnAddr equ $12
+// ovlTableEntry is used to provide the overlay table entry
+// postOvlRA is used to pass in a value to return to
 load_overlay_and_enter:
-    lw      $24, overlay_load(ovlTableEntry)    // Set up overlay dram address
-    lhu     $19, overlay_len(ovlTableEntry)     // Set up overlay length
-    jal     dma_read_write                      // DMA the overlay
-     lhu    $20, overlay_imem(ovlTableEntry)    // Set up overlay load address
-    move    $ra, returnAddr     // Set the return address to the passed in value
+    lw      cmd_w1_dram, overlay_load(ovlTableEntry) // Set up overlay dram address
+    lhu     dmaLen, overlay_len(ovlTableEntry)       // Set up overlay length
+    jal     dma_read_write                           // DMA the overlay
+     lhu    dmemAddr, overlay_imem(ovlTableEntry)    // Set up overlay load address
+    move    $ra, postOvlRA                // Set the return address to the passed in value
 while_wait_dma_busy:
-    mfc0    $11, SP_DMA_BUSY    // Load the DMA_BUSY value into $11
+    mfc0    ovlTableEntry, SP_DMA_BUSY    // Load the DMA_BUSY value into ovlTableEntry
 while_dma_busy:
-    bnez    $11, while_dma_busy // Loop until DMA_BUSY is cleared
-     mfc0   $11, SP_DMA_BUSY    // Update $11's DMA_BUSY value
+    bnez    ovlTableEntry, while_dma_busy // Loop until DMA_BUSY is cleared
+     mfc0   ovlTableEntry, SP_DMA_BUSY    // Update ovlTableEntry's DMA_BUSY value
 // This routine is used to return via conditional branch
 return_routine:
     jr      $ra
 
-dmemAddr equ $20
-dramAddr equ $24
-dmaLen equ $19
-dmaFull equ $11
 dma_read_write:
-     mfc0   dmaFull, SP_DMA_FULL    // load the DMA_FULL value
+     mfc0   $11, SP_DMA_FULL          // load the DMA_FULL value
 while_dma_full:
-    bnez    dmaFull, while_dma_full // Loop until DMA_FULL is cleared
-     mfc0   dmaFull, SP_DMA_FULL    // Update DMA_FULL value
-    mtc0    dmemAddr, SP_MEM_ADDR   // Set the DMEM address to DMA from/to
-    bltz    dmemAddr, dma_write     // If the DMEM address is negative, this is a DMA write, if not read
-     mtc0   dramAddr, SP_DRAM_ADDR  // Set the DRAM address to DMA from/to
+    bnez    $11, while_dma_full       // Loop until DMA_FULL is cleared
+     mfc0   $11, SP_DMA_FULL          // Update DMA_FULL value
+    mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from/to
+    bltz    dmemAddr, dma_write       // If the DMEM address is negative, this is a DMA write, if not read
+     mtc0   cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA from/to
     jr $ra
-     mtc0   dmaLen, SP_RD_LEN       // Initiate a DMA read with a length of dmaLen
+     mtc0   dmaLen, SP_RD_LEN         // Initiate a DMA read with a length of dmaLen
 dma_write:
     jr $ra
-     mtc0   dmaLen, SP_WR_LEN       // Initiate a DMA write with a length of dmaLen
+     mtc0   dmaLen, SP_WR_LEN         // Initiate a DMA write with a length of dmaLen
 
 .if . > 0x00002000
     .error "Not enough room in IMEM"
@@ -1758,21 +1807,21 @@ ovl0_start:
     lw      $24, 0x09C4(inputBufferPos) // Should this be (inputBufferEnd - 0x04)?
     sw      taskDataPtr, OSTask + OSTask_data_ptr
     sw      $24, OSTask + OSTask_ucode
-    la      $20, start              // DMA address
+    la      dmemAddr, start         // DMA address
     jal     dma_read_write          // initiate DMA read
-     li     $19, 0x0F48 - 1
+     li     dmaLen, 0x0F48 - 1
 .if UCODE_METHOD == METHOD_XBUS
 ovl0_xbus_wait_for_rdp:
     mfc0 $11, DPC_STATUS
     andi $11, $11, DPC_STATUS_DMA_BUSY
     bnez $11, ovl0_xbus_wait_for_rdp // Keep looping while RDP is busy.
 .endif
-    lw      $24, rdpHalf1Val
-    la      $20, 0x0180             // DMA address; equal to but probably not actually spFxBase or clipRatio
-    andi    $19, cmd_w0, 0x0FFF
-    add     $24, $24, $20
+    lw      cmd_w1_dram, rdpHalf1Val
+    la      dmemAddr, 0x0180        // DMA address; equal to but probably not actually spFxBase or clipRatio
+    andi    dmaLen, cmd_w0, 0x0FFF
+    add     cmd_w1_dram, cmd_w1_dram, dmemAddr
     jal     dma_read_write          // initate DMA read
-     sub    $19, $19, $20
+     sub    dmaLen, dmaLen, dmemAddr
     j       while_wait_dma_busy
 .if (UCODE_IS_F3DEX2_204H || UCODE_METHOD == METHOD_XBUS /* ??? */)
      li     $ra, taskdone_and_break_204H
@@ -1788,20 +1837,20 @@ task_yield:
     sw      taskDataPtr, OS_YIELD_DATA_SIZE - 8
     sw      ucode, OS_YIELD_DATA_SIZE - 4
     li      status, SP_SET_SIG1 | SP_SET_SIG2   // yielded and task done signals
-    lw      $24, OSTask + OSTask_yield_data_ptr
-    li      $20, 0x8000
-    li      $19, OS_YIELD_DATA_SIZE - 1
+    lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
+    li      dmemAddr, 0x8000
+    li      dmaLen, OS_YIELD_DATA_SIZE - 1
 .else // UCODE_METHOD == METHOD_XBUS
     sw      taskDataPtr, OS_YIELD_DATA_SIZE
     sw      ucode, OS_YIELD_DATA_SIZE + 4
-    lw      $24, OSTask + OSTask_yield_data_ptr
-    li      $20, 0x8000
+    lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
+    li      dmemAddr, 0x8000
     jal     dma_read_write
-     li     $19, OS_YIELD_DATA_SIZE - 1
+     li     dmaLen, OS_YIELD_DATA_SIZE - 1
     li      status, SP_SET_SIG1 | SP_SET_SIG2 // yielded and task done signals
-    addiu   $24, $24, OS_YIELD_DATA_SIZE_TOTAL - 8
-    li      $20, -0x76E0 // ???
-    li      $19, 7
+    addiu   cmd_w1_dram, cmd_w1_dram, OS_YIELD_DATA_SIZE_TOTAL - 8
+    li      dmemAddr, -0x76E0 // ???
+    li      dmaLen, 7
 .endif
     j       dma_read_write
 taskdone_and_break_204H: // Only used in f3dex2 2.04H
@@ -1835,11 +1884,11 @@ ovl1_start:
 G_DL_handler:
     lbu     $1, displayListStackLength  // Get the DL stack length
     sll     $2, cmd_w0, 15              // Shifts the push/nopush value to the highest bit in $2
-f3dzex_ovl1_00001008:
+branch_dl:
     jal     segmented_to_physical
      add    $3, taskDataPtr, inputBufferPos
     bltz    $2, displaylist_dma         // If the operation is nopush (branch) then simply DMA the new displaylist
-     move   taskDataPtr, cmd_w1         // Set the task data pointer to the target display list
+     move   taskDataPtr, cmd_w1_dram    // Set the task data pointer to the target display list
     sw      $3, (displayListStack)($1)
     addi    $1, $1, 4                   // Increment the DL stack length
 f3dzex_ovl1_00001020:
@@ -1855,7 +1904,7 @@ G_TEXRECTFLIP_handler:
 G_RDPHALF_1_handler:
     j       run_next_DL_command
     // Stores second command word into textureSettings for gSPTexture, 0x00D4 for gSPTextureRectangle/Flip, 0x00D8 for G_RDPHALF_1
-     sw     cmd_w1, (texrectWord2 - G_TEXRECTFLIP_handler)($11)
+     sw     cmd_w1_dram, (texrectWord2 - G_TEXRECTFLIP_handler)($11)
 
 G_MOVEWORD_handler:
     srl     $2, cmd_w0, 16                              // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
@@ -1863,32 +1912,29 @@ G_MOVEWORD_handler:
 do_moveword:
     add     $1, $1, cmd_w0          // adds the offset in the command word to the address from the table (the upper 4 bytes are effectively ignored)
     j       run_next_DL_command     // process the next command
-     sw     cmd_w1, ($1)            // moves the specified value (in cmd_w1) into the word (offset + moveword_table[index])
+     sw     cmd_w1_dram, ($1)       // moves the specified value (in cmd_w1_dram) into the word (offset + moveword_table[index])
 
 G_POPMTX_handler:
     lw      $11, matrixStackPtr             // Get the current matrix stack pointer
     lw      $2, OSTask + OSTask_dram_stack  // Read the location of the dram stack
-    sub     $24, $11, cmd_w1                // Decrease the matrix stack pointer by the amount passed in the second command word
-    sub     $1, $24, $2                     // Subtraction to check if the new pointer is greater than or equal to $2
+    sub     cmd_w1_dram, $11, cmd_w1_dram           // Decrease the matrix stack pointer by the amount passed in the second command word
+    sub     $1, cmd_w1_dram, $2                     // Subtraction to check if the new pointer is greater than or equal to $2
     bgez    $1, do_popmtx                   // If the new matrix stack pointer is greater than or equal to $2, then use the new pointer as is
      nop
-    move    $24, $2                         // If the new matrix stack pointer is less than $2, then use $2 as the pointer instead
+    move    cmd_w1_dram, $2                         // If the new matrix stack pointer is less than $2, then use $2 as the pointer instead
 do_popmtx:
-    beq     $24, $11, run_next_DL_command   // If no bytes were popped, then we don't need to make the mvp matrix as being out of date and can run the next command
-     sw     $24, matrixStackPtr             // Update the matrix stack pointer with the new value
+    beq     cmd_w1_dram, $11, run_next_DL_command   // If no bytes were popped, then we don't need to make the mvp matrix as being out of date and can run the next command
+     sw     cmd_w1_dram, matrixStackPtr             // Update the matrix stack pointer with the new value
     j       do_movemem
      sw     $zero, mvpValid                 // Mark the MVP matrix and light directions as being out of date (the word being written to contains both)
 
 G_MTX_end: // Multiplies the loaded model matrix into the model stack
-    lhu     $19, (movememTable + G_MV_MMTX)($1) // Set the output matrix to the model or projection matrix based on the command
+    lhu     output_mtx, (movememTable + G_MV_MMTX)($1) // Set the output matrix to the model or projection matrix based on the command
     jal     while_wait_dma_busy
-     lhu    $21, (movememTable + G_MV_MMTX)($1) // Set the first input matrix to the model or projection matrix based on the command
+     lhu    input_mtx_0, (movememTable + G_MV_MMTX)($1) // Set the first input matrix to the model or projection matrix based on the command
     li      $ra, run_next_DL_command
     // The second input matrix will correspond to the address that memory was moved into, which will be tempMtx for G_MTX
 
-input_mtx_0 equ $21
-input_mtx_1 equ $20
-output_mtx equ $19
 mtx_multiply:
     addi    $12, input_mtx_1, 0x0018
 @@loop:
@@ -1920,7 +1966,6 @@ mtx_multiply:
     jr      $ra
      sqv    $v6[0], 0x0010(output_mtx)
 
-matrixStackAddr equ $24
 G_MTX_handler:
     // The lower 3 bits of G_MTX are, from LSb to MSb (0 value/1 value),
     //  matrix type (modelview/projection)
@@ -1930,27 +1975,27 @@ G_MTX_handler:
     andi    $11, cmd_w0, G_MTX_P_MV | G_MTX_NOPUSH_PUSH // Read the matrix type and push type flags into $11
     bnez    $11, load_mtx                               // If the matrix type is projection or this is not a push, skip pushing the matrix
      andi   $2, cmd_w0, G_MTX_MUL_LOAD                  // Read the matrix load type into $2 (0 is multiply, 2 is load)
-    lw      matrixStackAddr, matrixStackPtr             // Set up the DMA from dmem to rdram at the matrix stack pointer
-    li      $20, -0x2000                                //
+    lw      cmd_w1_dram, matrixStackPtr                 // Set up the DMA from dmem to rdram at the matrix stack pointer
+    li      dmemAddr, -0x2000                           //
     jal     dma_read_write                              // DMA the current matrix from dmem to rdram
-     li     $19, 0x0040 - 1                             // Set the DMA length to the size of a matrix (minus 1 because DMA is inclusive)
-    addi    matrixStackAddr, matrixStackAddr, 0x40      // Increase the matrix stack pointer by the size of one matrix
-    sw      matrixStackAddr, matrixStackPtr             // Update the matrix stack pointer
-    lw      cmd_w1, (inputBufferEnd - 4)(inputBufferPos)
+     li     dmaLen, 0x0040 - 1                          // Set the DMA length to the size of a matrix (minus 1 because DMA is inclusive)
+    addi    cmd_w1_dram, cmd_w1_dram, 0x40              // Increase the matrix stack pointer by the size of one matrix
+    sw      cmd_w1_dram, matrixStackPtr                 // Update the matrix stack pointer
+    lw      cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos)
 load_mtx:
     add     $12, $12, $2        // Add the load type to the command byte, selects the return address based on whether the matrix needs multiplying or just loading
     sw      $zero, mvpValid     // Mark the MVP matrix and light directions as being out of date (the word being written to contains both)
 G_MOVEMEM_handler:
-    jal     segmented_to_physical   // convert the memory address cmd_w1 to a virtual one
+    jal     segmented_to_physical   // convert the memory address cmd_w1_dram to a virtual one
 do_movemem:
-     andi   $1, cmd_w0, 0x00FE                           // Move the movemem table index into $1 (bits 1-7 of the first command word)
-    lbu     $19, (inputBufferEnd - 0x07)(inputBufferPos) // Move the second byte of the first command word into $19
-    lhu     $20, (movememTable)($1)                      // Load the address of the memory location for the given movemem index
-    srl     $2, cmd_w0, 5                                // Left shifts the index by 5 (which is then added to the value read from the movemem table)
+     andi   $1, cmd_w0, 0x00FE                              // Move the movemem table index into $1 (bits 1-7 of the first command word)
+    lbu     dmaLen, (inputBufferEnd - 0x07)(inputBufferPos) // Move the second byte of the first command word into dmaLen
+    lhu     dmemAddr, (movememTable)($1)                    // Load the address of the memory location for the given movemem index
+    srl     $2, cmd_w0, 5                                   // Left shifts the index by 5 (which is then added to the value read from the movemem table)
     lhu     $ra, (movememHandlerTable - (G_POPMTX | 0xFF00))($12)  // Loads the return address from movememHandlerTable based on command byte
     j       dma_read_write
 G_SETOTHERMODE_H_handler: // These handler labels must be 4 bytes apart for the code below to work
-     add    $20, $20, $2
+     add    dmemAddr, dmemAddr, $2                          // This is for the code above, does nothing for G_SETOTHERMODE_H
 G_SETOTHERMODE_L_handler:
     lw      $3, (othermode0 - G_SETOTHERMODE_H_handler)($11) // resolves to othermode0 or othermode1 based on which handler was jumped to
     lui     $2, 0x8000
@@ -1959,11 +2004,11 @@ G_SETOTHERMODE_L_handler:
     srlv    $2, $2, $1
     nor     $2, $2, $zero
     and     $3, $3, $2
-    or      $3, $3, cmd_w1
+    or      $3, $3, cmd_w1_dram
     sw      $3, (othermode0 - G_SETOTHERMODE_H_handler)($11)
     lw      cmd_w0, otherMode0
     j       G_RDP_handler
-     lw     cmd_w1, otherMode1
+     lw     cmd_w1_dram, otherMode1
 
 .align 8
 ovl1_end:
@@ -1978,13 +2023,13 @@ ovl2_start:
 ovl23_lighting_entrypoint:
     lbu     $11, lightsValid
     j       continue_light_dir_xfrm
-     lbu    tmpCurLight, numLightsx18
+     lbu    topLightPtr, numLightsx18
 
-ovl23_clipping_entrypoint_copy:         // same IMEM address as ovl23_clipping_entrypoint
+ovl23_clipping_entrypoint_copy:  // same IMEM address as ovl23_clipping_entrypoint
     move    savedRA, $ra
-    li      $11, overlayInfo3           // set up a load of overlay 3
-    j       load_overlay_and_enter      // load overlay 3
-     li     $12, ovl3_clipping_nosavera // set up the return address in ovl3
+    li      ovlTableEntry, overlayInfo3       // set up a load of overlay 3
+    j       load_overlay_and_enter            // load overlay 3
+     li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
      
 continue_light_dir_xfrm:
     // Transform light directions from camera space to model space, by
@@ -1993,7 +2038,7 @@ continue_light_dir_xfrm:
     // lookat lights and through all directional and point lights, but not
     // ambient. For point lights, the data is garbage but doesn't harm anything.
     bnez    $11, after_light_dir_xfrm // Skip calculating lights if they're not out of date
-     addi   tmpCurLight, tmpCurLight, spFxBase - lightSize // With ltBufOfs, points at top/max light.
+     addi   topLightPtr, topLightPtr, spFxBase - lightSize // With ltBufOfs, points at top/max light.
     sb      cmd_w0, lightsValid     // Set as valid, reusing state of w0
     /* Load MV matrix 3x3 transposed as:
     mxr0i 00 08 10 06 08 0A 0C 0E
@@ -2021,7 +2066,7 @@ continue_light_dir_xfrm:
     lsv     mxr2i[4], (mvMatrix + 0x14)($zero)
     vmov    mxr2f[0], mxr0f[2]
     // With ltBufOfs immediate add, points two lights behind lightBufferMain, i.e. lightBufferLookat.
-    xfrmLtPtr equ $20
+    xfrmLtPtr equ $20 // also input_mtx_1 and dmemAddr
     li      xfrmLtPtr, spFxBase - 2 * lightSize
     vmov    mxr2i[0], mxr0i[2]                   
     lpv     $v7[0], (ltBufOfs + 0x8)(xfrmLtPtr) // Load light direction
@@ -2046,7 +2091,7 @@ continue_light_dir_xfrm:
     vreadacc $v11, ACC_MIDDLE           // read the middle (bits 16..31) of the accumulator elements into v11
     sw      $12, (ltBufOfs + 0x14)(xfrmLtPtr) // Store duplicate of transformed light direction
     vreadacc $v15, ACC_UPPER            // read the upper (bits 32..47) of the accumulator elements into v15
-    beq     xfrmLtPtr, tmpCurLight, after_light_dir_xfrm    // exit if equal
+    beq     xfrmLtPtr, topLightPtr, after_light_dir_xfrm    // exit if equal
      vmudl  $v29, $v11, $v11            // calculate the low partial product of the accumulator squared (low * low)
     vmadm   $v29, $v15, $v11            // calculate the mid partial product of the accumulator squared (mid * low)
     vmadn   $v16, $v11, $v15            // calculate the mid partial product of the accumulator squared (low * mid)
@@ -2083,14 +2128,6 @@ vPairAlpha37 equ $v28 // Same as mvTc1f, but alpha values are left in elems 3, 7
 vPairNX equ $v7 // also named vPairRGBATemp; with name vPairNX, uses X components = elems 0, 4
 vPairNY equ $v6
 vPairNZ equ $v5
-
-// For point lighting, but armips does not like these defined in an .if
-mvTc0i equ $v4
-mvTc1i equ $v21
-mvTc2i equ $v30
-mvTc0f equ $v3
-mvTc1f equ $v28
-mvTc2f equ $v31
 
 light_vtx:
     vadd    vPairNY, vZero, vPairRGBATemp[1h] // Move vertex normals Y to separate reg
