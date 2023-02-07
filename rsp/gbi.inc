@@ -163,11 +163,36 @@ VTX_TC_T        equ 0x16
   VTX_SCR_VEC   equ 0x18
 VTX_SCR_X       equ 0x18
 VTX_SCR_Y       equ 0x1A
-VTX_Z           equ 0x1C
-VTX_DZ          equ 0x1E
+VTX_SCR_Z       equ 0x1C
+VTX_SCR_Z_FRAC  equ 0x1E
   VTX_INV_W_VEC equ 0x20
 VTX_INV_W_INT   equ 0x20
 VTX_INV_W_FRAC  equ 0x22
-  VTX_FLAGS     equ 0x24
-VTX_FLAGS_LO    equ 0x24
-VTX_FLAGS_HI    equ 0x26
+  VTX_CLIP      equ 0x24
+VTX_CLIP_SCAL   equ 0x24
+VTX_CLIP_SCRN   equ 0x26
+
+// Clipping flags. Bits 0-3, 8-11, etc. contain garbage (values from another
+// vertex or zeros) and are not used. Also, the bits for comparisons to W in
+// clip ratio scaled clipping are actually for Z, but only X and Y are used in
+// clip ratio scaled clipping.
+CLIP_NX equ (1 << 4)
+CLIP_NY equ (1 << 5)
+CLIP_NZ equ (1 << 6)
+CLIP_NW equ (1 << 7)
+CLIP_PX equ (1 << 12)
+CLIP_PY equ (1 << 13)
+CLIP_PZ equ (1 << 14)
+CLIP_PW equ (1 << 15) // never used
+// These values apply to either screen space clipping or clip ratio scaled
+// clipping, with appropriate shifts when used as one whole word.
+CLIP_SHIFT_SCAL equ 16
+CLIP_SHIFT_SCRN equ 0
+// Values used for far and near clipping.
+CLIP_FAR equ CLIP_PZ
+.if NoN == 1
+    // No Nearclipping uses -w instead of -z
+    CLIP_NEAR equ CLIP_NW
+.else
+    CLIP_NEAR equ CLIP_NZ
+.endif
