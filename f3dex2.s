@@ -1050,7 +1050,7 @@ clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / o
     // Interpolate between these two vertices; create a new vertex which is on the
     // clipping boundary (e.g. at the screen edge)
     sll     $11, clipMaskIdx, 1  // clipMaskIdx counts by 4, so this is now by 8
-    ldv     $v2[0], clipRatio($11) // Load four shorts holding clip ratio for this clip condition
+    ldv     $v2[0], (clipRatio)($11) // Load four shorts holding clip ratio for this clip condition
     ldv     $v4[0], VTX_FRAC_VEC($19) // Vtx on screen, frac pos
     ldv     $v5[0], VTX_INT_VEC ($19) // Vtx on screen, int pos
     ldv     $v6[0], VTX_FRAC_VEC($3)  // Vtx off screen, frac pos
