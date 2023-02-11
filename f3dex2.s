@@ -207,35 +207,41 @@ clipRatio: // This is an array of 6 doublewords
 
 // 0x1B0: constants for register $v31
 .align 0x10 // loaded with lqv
+// VCC patterns used:
+// vlt xxx, $v31, $v31[3]  = 11101110 in load_spfx_global_values
+// vne xxx, $v31, $v31[3h] = 11101110 in lighting
+// veq xxx, $v31, $v31[3h] = 00010001 in lighting
 v31Value:
-    .dh 0xFFFF // -1
-    .dh 0x0004 // 4
-    .dh 0x0008 // 8
-    .dh 0x7F00 // 32512
-    .dh 0xFFFC // -4
-    .dh 0x4000 // 16384
-    .dh vertexBuffer // 0x420
-    .dh 0x7FFF // 32767
+    .dh 0xFFFF // -1; used in init, clipping
+    .dh 0x0004 // 4; used in clipping, vtx write
+    .dh 0x0008 // 8; old ucode only: used in tri write
+    .dh 0x7F00 // 32512; used in vtx write and pre-jump instrs to there, also 0x0004 put here during point lighting
+    .dh 0xFFFC // -4; used in clipping, vtx write
+    .dh 0x4000 // 16384; used in tri write, texgen
+    .dh vertexBuffer // 0x420; used in tri write
+    .dh 0x7FFF // 32767; used in vtx write, tri write, lighting, point lighting
 
 // 0x1C0: constants for register $v30
 .align 0x10 // loaded with lqv
+// VCC patterns used:
+// vge xxx, $v30, $v30[7] = 11110001 in tri write
 v30Value:
-    .dh 0x7FFC
-    .dh vtxSize << 7 // 0x1400
+    .dh 0x7FFC // not used!
+    .dh vtxSize << 7 // 0x1400; used in tri write for vtx index to addr
 .if (UCODE_IS_206_OR_OLDER)
-    .dh 0x01CC
-    .dh 0x0200
-    .dh 0xFFF0
-    .dh 0x0010
-    .dh 0x0020
-    .dh 0x0100
+    .dh 0x01CC // used in tri write, vcr?
+    .dh 0x0200 // not used!
+    .dh 0xFFF0 // used in tri write, some signed multiplier (-16)
+    .dh 0x0010 // used in tri write, some accumulator init value
+    .dh 0x0020 // used in tri write, both signed and unsigned multipliers
+    .dh 0x0100 // used in tri write, vertex color >>= 8; also in lighting
 .else
-    .dh 0x1000
-    .dh 0x0100
-    .dh 0xFFF0
-    .dh 0xFFF8
-    .dh 0x0010
-    .dh 0x0020
+    .dh 0x1000 // used in tri write, some multiplier
+    .dh 0x0100 // used in tri write, vertex color >>= 8 and vcr?; also in lighting and point lighting
+    .dh 0xFFF0 // used in tri write, some signed multiplier (-16)
+    .dh 0xFFF8 // used in tri write, mask away lower ST bits?
+    .dh 0x0010 // used in tri write, some accumulator init value; value moved to elem 7 for point lighting
+    .dh 0x0020 // used in tri write, both signed and unsigned multipliers; value moved from elem 6 from point lighting
 .endif
 
 .align 0x10 // loaded with lqv
@@ -574,14 +580,12 @@ savedRA               equ $30 // global
 
 // Must keep values during the first part of the clipping process only: polygon
 // subdivision and vertex write.
+// $2: vertex at end of edge
 clipMaskIdx  equ $5
 secondVtxPos equ $8  // global
 outputVtxPos equ $15 // global
 clipFlags    equ $16 // global
 clipPolyRead equ $17 // global
-
-// Must keep values during the second part of the clipping process: tri drawing.
-
 
 // Must keep values during tri drawing.
 // They are also used throughout the codebase, but can be overwritten once their
@@ -590,6 +594,7 @@ cmd_w1_dram equ $24 // almost global, occasionally used locally
 cmd_w0      equ $25 // global
 
 // Must keep values during the full vertex process: load, lighting, and vertex write
+// $1: count of remaining vertices
 topLightPtr  equ $6   // Used locally elsewhere
 curLight     equ $9   // Used locally elsewhere
 inputVtxPos  equ $14  // global
@@ -604,6 +609,8 @@ mxr3f        equ $v15
 vPairST      equ $v22 // global
 vPairMVPPosF equ $v23 // global
 vPairMVPPosI equ $v24 // global
+// v25: prev vertex screen pos
+// v26: prev vertex screen Z
 // For point lighting
 mvTc0f equ $v3
 mvTc0i equ $v4
@@ -615,13 +622,13 @@ mvTc2f equ $v31
 // Values set up by load_spfx_global_values, which must be kept during the full
 // vertex process, and which are reloaded for each vert during clipping. See
 // that routine for the detailed contents of each of these registers.
+// secondVtxPos
 spFxBaseReg equ $13  // global
 vVpFgScale  equ $v16 // All of these used locally elsewhere
 vVpFgOffset equ $v17
 vVpMisc     equ $v18
 vFogMask    equ $v19
 vVpNegScale equ $v21
-
 
 // Arguments to mtx_multiply
 output_mtx  equ $19 // also dmaLen, also used by itself
@@ -636,6 +643,72 @@ dmemAddr equ $20 // also input_mtx_1 and xfrmLtPtr
 // Arguments to load_overlay_and_enter
 ovlTableEntry equ $11 // Commonly used locally
 postOvlRA     equ $12 // Commonly used locally
+
+// ==== Summary of uses of all registers
+// $zero: Hardwired zero scalar register
+// $1: vertex 1 addr, count of remaining vertices, pointer to store texture coefficients, local
+// $2: vertex 2 addr, vertex at end of edge in clipping, pointer to store shade coefficients, local
+// $3: vertex 3 addr, vertex at start of edge in clipping, local
+// $4: pre-shuffle vertex 1 addr for flat shading, local
+// $5: clipMaskIdx, geometry mode high short during vertex load / lighting, local
+// $6: topLightPtr, geometry mode low byte during tri write, local
+// $7: fog flag in vtx write, local
+// $8: secondVtxPos
+// $9: curLight, local
+// $10: briefly used local in vtx write
+// $11: ovlTableEntry, very common local
+// $12: postOvlRA, curMatrix, local
+// $13: spFxBaseReg
+// $14: inputVtxPos
+// $15: outputVtxPos
+// $16: clipFlags
+// $17: clipPolyRead
+// $18: clipPolySelect
+// $19: dmaLen, output_mtx, briefly used local
+// $20: dmemAddr, input_mtx_1, xfrmLtPtr
+// $21: clipPolyWrite, input_mtx_0
+// $22: rdpCmdBufEnd
+// $23: rdpCmdBufPtr
+// $24: cmd_w1_dram, local
+// $25: cmd_w0
+// $26: taskDataPtr
+// $27: inputBufferPos
+// $28: not used!
+// $29: savedActiveClipPlanes
+// $30: savedRA
+// $ra: Return address for jal, b*al
+// $v0: vZero (every element 0)
+// $v1: vOne (every element 1)
+// $v2: very common local
+// $v3: mvTc0f, local
+// $v4: mvTc0i, local
+// $v5: vPairNZ, local
+// $v6: vPairNY, local
+// $v7: vPairNX, vPairRGBATemp, local
+// $v8: mxr0i, local
+// $v9: mxr1i, local
+// $v10: mxr2i, local
+// $v11: mxr3i, local
+// $v12: mxr0f, local
+// $v13: mxr1f, local
+// $v14: mxr2f, local
+// $v15: mxr3f, local
+// $v16: vVpFgScale, local
+// $v17: vVpFgOffset, local
+// $v18: vVpMisc, local
+// $v19: vFogMask, local
+// $v20: local
+// $v21: mvTc1i, vVpNegScale, local
+// $v22: vPairST
+// $v23: vPairMVPPosF
+// $v24: vPairMVPPosI
+// $v25: prev vertex data, local
+// $v26: prev vertex data, local
+// $v27: vPairRGBA, local
+// $v28: mvTc1f, vPairAlpha37, local
+// $v29: very common local
+// $v30: mvTc2i, constant values for tri write
+// $v31: mvTc2f, general constant values
 
 
 // Initialization routines
@@ -1366,12 +1439,12 @@ load_spfx_global_values:
     llv     $v29[0], (fogFactor - spFxBase)(spFxBaseReg) // Load fog multiplier and offset
     ldv     vVpFgOffset[0], (viewport + 8)($zero) // Load vtrans duplicated in 0-3 and 4-7
     ldv     vVpFgOffset[8], (viewport + 8)($zero)
-    vlt     vFogMask, $v31, $v31[3]               // VCC = [0, 0, 0, 1, 0, 0, 0, 1]
+    vlt     vFogMask, $v31, $v31[3]               // VCC = 11101110
     vsub    vVpNegScale, vZero, vVpFgScale        // -vscale
     llv     vVpMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
     vmrg    vVpFgScale, vVpFgScale, $v29[0]       // Put fog multiplier in elements 3,7 of vscale
     llv     vVpMisc[12], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
-    vmrg    vFogMask, vZero, vOne[0]              // Put 0 in elems 3,7, 1 in others
+    vmrg    vFogMask, vZero, vOne[0]              // Put 0 in most elems, 1 in elems 3,7
     llv     vVpMisc[8], (perspNorm)($zero)        // Perspective normalization long (actually short)
     vmrg    vVpFgOffset, vVpFgOffset, $v29[1]     // Put fog offset in elements 3,7 of vtrans
     lsv     vVpMisc[10], (clipRatio + 6 - spFxBase)(spFxBaseReg) // Clip ratio (-x version, but normally +/- same in all dirs)
@@ -1662,9 +1735,9 @@ no_textures:
     vmadh   $v9, $v3, $v15[3]
     sdv     $v7[0], 0x0028($2)      // Store DrDy, DgDy, DbDy, DaDy shade coefficients (integer)
     vmudn   $v29, $v5, vOne[0]
-    sdv     $v6[8], 0x0038($1)      // Store DsDy, DtDy, DwDy texture coefficeints (fractional)
+    sdv     $v6[8], 0x0038($1)      // Store DsDy, DtDy, DwDy texture coefficients (fractional)
     vmadh   $v29, $v18, vOne[0]
-    sdv     $v7[8], 0x0028($1)      // Store DsDy, DtDy, DwDy texture coefficeints (integer)
+    sdv     $v7[8], 0x0028($1)      // Store DsDy, DtDy, DwDy texture coefficients (integer)
     vmadl   $v29, $v8, $v4[1]
     sdv     $v8[0], 0x0030($2)      // Store DrDe, DgDe, DbDe, DaDe shade coefficients (fractional)
     vmadm   $v29, $v9, $v4[1]
@@ -2112,16 +2185,11 @@ continue_light_dir_xfrm:
     vmadm   $v29, $v15, $v16[0]
     vmadn   $v11, $v11, $v17[0]
     vmadh   $v15, $v15, $v17[0]
-.if (UCODE_IS_206_OR_OLDER)
-    i7 equ 7
-.else
-    i7 equ 3
-.endif
-    vmudn   $v11, $v11, $v30[i7]        // Scale results to become bytes
+    vmudn   $v11, $v11, $v30[i1]        // 0x0100; scale results to become bytes
     j       @@loop
-     vmadh  $v15, $v15, $v30[i7]        // Scale results to become bytes
+     vmadh  $v15, $v15, $v30[i1]        // 0x0100; scale results to become bytes
 
-curMatrix equ $12
+curMatrix equ $12 // Overwritten during texgen, but with a value which is 0 or positive, so means cur matrix is MV
 ltColor equ $v29
 vPairRGBA equ $v27
 vPairAlpha37 equ $v28 // Same as mvTc1f, but alpha values are left in elems 3, 7
@@ -2147,7 +2215,7 @@ light_vtx:
     suv     ltColor[0], 8(inputVtxPos)        // Store ambient light color to two verts' RGBARGBA
     ori     $11, $zero, 0x0004
     vmov    $v30[7], $v30[6]                  // v30[7] = 0x0010 because v30[0:2,4:6] will get clobbered
-    mtc2    $11, $v31[6]                      // v31[6] = 0x0004 (was previously 0x0420)
+    mtc2    $11, $v31[6]                      // v31[3] = 0x0004 (was previously 0x7F00)
 next_light_dirorpoint:
     lbu     $11, (ltBufOfs + 0x3)(curLight)   // Load light type / constant attenuation value at light structure + 3
     bnez    $11, light_point                  // If not zero, this is a point light
@@ -2309,8 +2377,8 @@ light_point:
     vmadh   $v20, mvTc2i, $v20[2h]       // v20 = int result of vert-to-light in model space
     vmudm   $v2, $v20, $v29[3h]          // v2l_model * length normalization frac
     vmadh   $v20, $v20, $v29[2h]         // v2l_model * length normalization int
-    vmudn   $v2, $v2, $v31[3]            // this is 0x7F00; v31 is mvTc2f but elements 3 and 7 weren't overwritten
-    vmadh   $v20, $v20, $v31[3]          // scale to byte, only keep int part
+    vmudn   $v2, $v2, $v31[3]            // this is 0x0004; v31 is mvTc2f but elem 3 replaced, elem 7 left
+    vmadh   $v20, $v20, $v31[3]          // 
     vmulu   $v2, vPairNX, $v20[0h]       // Normal X * normalized vert-to-light X
     mtc2    $11, $v27[8]                 // 0x3 << 4 -> v27 elems 4, 5
     vmacu   $v2, vPairNY, $v20[1h]       // Y * Y
@@ -2328,7 +2396,7 @@ light_point:
     vmudl   $v2, $v2, $v2[0h]            // squared
     vmulf   $v29, $v29, $v20[3]          // Length * byte 0x7
     vmadm   $v29, $v2, $v20[7]           // + (scaled length squared) * byte 0xE << 5
-    vmadn   $v29, $v27, $v30[3]          // + (byte 0x3 << 4) * 0xFFF0
+    vmadn   $v29, $v27, $v30[3]          // + (byte 0x3 << 4) * 0x0100
     vreadacc $v2, ACC_MIDDLE
     vrcph   $v2[0], $v2[0]               // v2 int, v29 frac: function of distance to light
     vrcpl   $v2[0], $v29[0]              // Reciprocal = inversely proportional
