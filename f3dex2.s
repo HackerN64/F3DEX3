@@ -177,12 +177,15 @@ segmentTable:
 displayListStack:
 
 // 0x0138-0x0180: ucode text (shared with DL stack)
-.if (UCODE_IS_F3DEX2_204H) // F3DEX2 2.04H puts an extra 0x0A before the name
+.if CFG_EXTRA_0A_BEFORE_ID_STR // F3DEX2 2.04H puts an extra 0x0A before the name
     .db 0x0A
 .endif
-    .ascii NAME, 0x0A
+    .ascii ID_STR, 0x0A
 
 .align 16
+.if . - displayListStack != 0x48
+    .warning "ID_STR incorrect length, affects displayListStack"
+.endif
 
 // Base address for RSP effects DMEM region (see discussion in lighting below).
 // Could pick a better name, basically a global fixed DMEM pointer used with
@@ -199,7 +202,7 @@ clipRatio: // This is an array of 6 doublewords
     .dw 0x00010000, 0x0000FFFE // 1 * x, (-)G_MWO_CLIP_RPX * w = positive x clip
     .dw 0x00000001, 0x0000FFFE // 1 * x, (-)G_MWO_CLIP_RPY * w = positive y clip
     .dw 0x00000000, 0x0001FFFF // 1 * z,  -1 * w = far clip
-.if NoN == 1
+.if CFG_NoN
     .dw 0x00000000, 0x00000001 // 0 * all, 1 * w = no nearclipping
 .else
     .dw 0x00000000, 0x00010001 // 1 * z,   1 * w = nearclipping
@@ -228,7 +231,7 @@ v31Value:
 v30Value:
     .dh 0x7FFC // not used!
     .dh vtxSize << 7 // 0x1400; used in tri write for vtx index to addr
-.if (UCODE_IS_206_OR_OLDER)
+.if CFG_OLD_TRI_WRITE // See discussion in tri write where v30 values used
     .dh 0x01CC // used in tri write, vcr?
     .dh 0x0200 // not used!
     .dh -16    // used in tri write, some signed multiplier
@@ -714,20 +717,20 @@ postOvlRA     equ $12 // Commonly used locally
 // Initialization routines
 // Everything up until displaylist_dma will get overwritten by ovl0 and/or ovl1
 start: // This is at IMEM 0x1080, not the start of IMEM
-.if UCODE_TYPE == TYPE_F3DZEX && UCODE_ID < 2
-    vor     vZero, $v16, $v16 // Sets vZero to $v16
+.if BUG_WRONG_INIT_VZERO
+    vor     vZero, $v16, $v16 // Sets vZero to $v16--maybe set to zero by the boot ucode?
 .else
     vclr    vZero             // Clear vZero
 .endif
     lqv     $v31[0], (v31Value)($zero)
     lqv     $v30[0], (v30Value)($zero)
     li      rdpCmdBufPtr, rdpCmdBuffer1
-.if !(UCODE_IS_207_OR_OLDER)
-    vadd    vOne, vZero, vZero   // vZero is all 0s, vOne also becomes all 0s
+.if BUG_HARMLESS_EXTRA_INIT_VONE
+    vadd    vOne, vZero, vZero   // Harmless extra initialization of vOne (to zero)
 .endif
     li      rdpCmdBufEnd, rdpCmdBuffer1End
     vsub    vOne, vZero, $v31[0]   // Vector of 1s
-.if UCODE_METHOD == METHOD_FIFO
+.if !CFG_XBUS // FIFO version
     lw      $11, rdpFifoPos
     lw      $12, OSTask + OSTask_flags
     li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // task done and yielded signals
@@ -764,7 +767,7 @@ wait_dpc_start_valid:
     mtc0    $2, DPC_END
 f3dzex_0000111C:
     sw      $2, rdpFifoPos
-.else // UCODE_METHOD == METHOD_XBUS
+.else // CFG_XBUS
 wait_dpc_start_valid:
     mfc0 $11, DPC_STATUS
     andi $11, $11, DPC_STATUS_DMA_BUSY | DPC_STATUS_START_VALID 
@@ -840,10 +843,10 @@ displaylist_dma: // loads inputBufferLength bytes worth of displaylist data via 
 wait_for_dma_and_run_next_command:
 G_POPMTX_end:
 G_MOVEMEM_end:
-    jal     while_wait_dma_busy // wait for the DMA read to finish
+    jal     while_wait_dma_busy                         // wait for the DMA read to finish
 G_LINE3D_handler:
 G_SPNOOP_handler:
-.if !(UCODE_IS_F3DEX2_204H) // F3DEX2 2.04H has this located elsewhere
+.if !CFG_G_SPECIAL_1_IS_RECALC_MVP                      // F3DEX2 2.04H has this as a real command
 G_SPECIAL_1_handler:
 .endif
 G_SPECIAL_2_handler:
@@ -861,7 +864,7 @@ run_next_DL_command:
     jr      $11                                         // jump to the loaded command handler
      addiu  inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
 
-.if (UCODE_IS_F3DEX2_204H) // Microcodes besides F3DEX2 2.04H have this as a noop
+.if CFG_G_SPECIAL_1_IS_RECALC_MVP // Microcodes besides F3DEX2 2.04H have this as a noop
 G_SPECIAL_1_handler:    // Seems to be a manual trigger for mvp recalculation
     li      $ra, run_next_DL_command
     li      input_mtx_0, pMatrix
@@ -933,7 +936,7 @@ G_SETSCISSOR_handler:
 check_rdp_buffer_full_and_run_next_cmd:
     li      $ra, run_next_DL_command    // Set up running the next DL command as the return address
 
-.if UCODE_METHOD == METHOD_FIFO
+.if !CFG_XBUS // FIFO version
 check_rdp_buffer_full:
      sub    $11, rdpCmdBufPtr, rdpCmdBufEnd
     blez    $11, return_routine         // Return if rdpCmdBufEnd >= rdpCmdBufPtr
@@ -972,7 +975,7 @@ f3dzex_000012BC:
     xori    rdpCmdBufEnd, rdpCmdBufEnd, rdpCmdBuffer1End ^ rdpCmdBuffer2End // Swap between the two RDP command buffers
     j       dma_read_write
      addi   rdpCmdBufPtr, rdpCmdBufEnd, -RDP_CMD_BUFSIZE
-.else // UCODE_METHOD == METHOD_XBUS
+.else // CFG_XBUS
 check_rdp_buffer_full:
     addi $11, rdpCmdBufPtr, -0xF10
     blez $11, ovl0_04001284
@@ -1071,7 +1074,7 @@ clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / o
     vadd    $v11, $v11, $v11[1h]      // int:  w += y (sum of all 4), vtx on screen - vtx off screen
     // This algorithm below with the two reciprocals is probably some kind of Newton's
     // method to get a better precision result, cause the precision of the divide is awful.
-.if (UCODE_IS_F3DEX2_204H) // Only in F3DEX2 2.04H
+.if BUG_CLIPPING_FAIL_WHEN_SUM_ZERO   // Only in F3DEX2 2.04H
     vrcph   $v29[0], $v11[3]          // int:  1 / (x+y+z+w), vtx on screen - vtx off screen
 .else
     vor     $v29, $v11, vOne[0]       // round up int sum to odd; this ensures the value is not 0, otherwise v29 will be 0 instead of +/- 2
@@ -1079,7 +1082,7 @@ clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / o
 .endif
     vrcpl   $v2[3], $v10[3]           // frac: 1 / (x+y+z+w), vtx on screen - vtx off screen
     vrcph   $v3[3], vZero[0]          // get int result of reciprocal
-.if (UCODE_IS_F3DEX2_204H) // Only in F3DEX2 2.04H
+.if BUG_CLIPPING_FAIL_WHEN_SUM_ZERO   // Only in F3DEX2 2.04H
     vabs    $v29, $v11, $v25[3] // 0x0002 // v29 = +/- 2 based on sum positive or negative (Bug: or 0 if sum is 0)
 .else
     vabs    $v29, $v29, $v25[3] // 0x0002 // v29 = +/- 2 based on sum positive (incl. zero) or negative
@@ -1140,7 +1143,7 @@ clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / o
 clipping_after_vtxwrite:
 // outputVtxPos has been incremented by 2 * vtxSize
 // Store last vertex attributes which were skipped by the early return
-.if (UCODE_IS_F3DEX2_204H)
+.if BUG_NO_CLAMP_SCREEN_Z_POSITIVE
     sdv     $v25[0],    (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
 .else
     slv     $v25[0],    (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
@@ -1148,11 +1151,11 @@ clipping_after_vtxwrite:
     ssv     $v26[4],    (VTX_SCR_Z_FRAC - 2 * vtxSize)(outputVtxPos)
     suv     vPairST[0], (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
     slv     vPairST[8], (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos)
-.if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
+.if !BUG_NO_CLAMP_SCREEN_Z_POSITIVE          // Not in F3DEX2 2.04H
     ssv     $v3[4],     (VTX_SCR_Z      - 2 * vtxSize)(outputVtxPos)
 .endif
     addi    outputVtxPos, outputVtxPos, -vtxSize // back by 1 vtx so we are actually 1 ahead of where started
-    addi    clipPolyWrite, clipPolyWrite, 2    // Original outputVtxPos was already written here; increment write ptr
+    addi    clipPolyWrite, clipPolyWrite, 2  // Original outputVtxPos was already written here; increment write ptr
 clipping_nextedge:
     bnez    clipFlags, clipping_edgelooptop  // Discard V2 if it was off screen (whether inserted vtx or not)
      move   $3, $2                           // Move what was the end of the edge to be the new start of the edge
@@ -1170,7 +1173,7 @@ clipping_nextcond:
     sw      $zero, activeClipPlanes            // Disable all clipping planes while drawing tris
 clipping_draw_tris_loop:
     // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
-.if (UCODE_IS_F3DEX2_204H)
+.if CFG_CLIPPING_SUBDIVIDE_DESCENDING
     // Draws verts in pattern like 0-4-3, 0-3-2, 0-2-1
     reg1 equ clipPolyWrite
     val1 equ -0x0002
@@ -1294,7 +1297,7 @@ vertices_store:
     // which is also first and second in the output list.
     // This is also in the first half and second half of vPairMVPPosI / vPairMVPPosF.
     // However, they are reversed in vPairST and the vector regs used for lighting.
-.if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
+.if !BUG_NO_CLAMP_SCREEN_Z_POSITIVE        // Bugfixed version
     vge     $v3, $v25, vZero[0]            // Clamp Z to >= 0
 .endif
     addi    $1, $1, -4                     // Decrement vertex count by 2
@@ -1303,26 +1306,26 @@ vertices_store:
     // so these writes don't harm anything. On subsequent loops, this is finishing the
     // store of the previous two vertices.
     sub     $11, secondVtxPos, $7          // Points 8 above secondVtxPos if fog, else 0
-    vmadm   $v2, vPairMVPPosI, vVpMisc[4] // Persp norm
+    vmadm   $v2, vPairMVPPosI, vVpMisc[4]  // Persp norm
     sbv     $v27[15],         (VTX_COLOR_A + 8 - 1 * vtxSize)($11) // In VTX_SCR_Y if fog disabled...
     vmadn   $v21, vZero, vZero[0]
     sbv     $v27[7],          (VTX_COLOR_A + 8 - 2 * vtxSize)($11) // ...which gets overwritten below
-.if !(UCODE_IS_F3DEX2_204H) // Not in F3DEX2 2.04H
+.if !BUG_NO_CLAMP_SCREEN_Z_POSITIVE        // Bugfixed version
     vmov    $v26[1], $v3[2]
     ssv     $v3[12],          (VTX_SCR_Z      - 1 * vtxSize)(secondVtxPos)
 .endif
-    vmudn   $v7, vPairMVPPosF, vVpMisc[5] // Clip ratio
-.if (UCODE_IS_F3DEX2_204H)
+    vmudn   $v7, vPairMVPPosF, vVpMisc[5]  // Clip ratio
+.if BUG_NO_CLAMP_SCREEN_Z_POSITIVE
     sdv     $v25[8],          (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
 .else
     slv     $v25[8],          (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
 .endif
-    vmadh   $v6, vPairMVPPosI, vVpMisc[5] // Clip ratio
+    vmadh   $v6, vPairMVPPosI, vVpMisc[5]  // Clip ratio
     sdv     $v25[0],          (VTX_SCR_VEC    - 2 * vtxSize)(secondVtxPos)
     vrcph   $v29[0], $v2[3]
     ssv     $v26[12],         (VTX_SCR_Z_FRAC - 1 * vtxSize)(secondVtxPos)
     vrcpl   $v5[3], $v21[3]
-.if (UCODE_IS_F3DEX2_204H)
+.if BUG_NO_CLAMP_SCREEN_Z_POSITIVE
     ssv     $v26[4],          (VTX_SCR_Z_FRAC - 2 * vtxSize)(secondVtxPos)
 .else
     slv     $v26[2],          (VTX_SCR_Z      - 2 * vtxSize)(secondVtxPos)
@@ -1400,7 +1403,7 @@ vertices_store:
     bgtz    $1, vertices_process_pair
      vmadh  $v25, $v25, vVpFgScale      // int part, v25:v26 is now screen space pos
     bltz    $ra, clipping_after_vtxwrite // Return to clipping if from clipping
-.if !(UCODE_IS_F3DEX2_204H) // Handled differently by F3DEX2 2.04H
+.if !BUG_NO_CLAMP_SCREEN_Z_POSITIVE     // Bugfixed version
      vge    $v3, $v25, vZero[0]         // Clamp Z to >= 0
     slv     $v25[8],          (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
     vge     $v27, $v25, $v31[3] // INSTR 1: Clamp W/fog to >= 0x7F00 (low byte is used)
@@ -1558,7 +1561,10 @@ no_smooth_shading:
     vmov    $v15[2], $v6[0]
     lbv     $v21[6], VTX_COLOR_A($3)
 shading_done:
-.if (UCODE_IS_206_OR_OLDER)
+    // Not sure what the underlying reason for this change is, perhaps a bugfix
+    // or a way to improve the fractional precision sent to the RDP.
+    // Hopefully this will become clear once tri write is documented.
+.if CFG_OLD_TRI_WRITE
     i1 equ 7 // v30[7] is 0x0100
     i2 equ 2 // v31[2] is 0x0008
     i3 equ 5 // v31[5] is 0x4000
@@ -1623,7 +1629,7 @@ shading_done:
     ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
     vmadh   $v17, vPairMVPPosI, $v17
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
-.if !(UCODE_IS_206_OR_OLDER)
+.if !CFG_OLD_TRI_WRITE
     vand    vPairST, $v20, $v30[5]
 .endif
     vcr     $v15, $v15, $v30[i4]
@@ -1792,7 +1798,7 @@ culldl_loop:
     j       G_ENDDL_handler                   // If got here, there's some clipping plane where all verts are outside it; skip DL
 G_BRANCH_WZ_handler:
      lhu    cmd_w0, (vertexTable)(cmd_w0)     // get the address of the vertex being tested
-.if UCODE_TYPE == TYPE_F3DZEX                 // BRANCH_W/BRANCH_Z difference
+.if CFG_G_BRANCH_W                            // BRANCH_W/BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
     lh      cmd_w0, VTX_W_INT(cmd_w0)         // read the w coordinate of the vertex (f3dzex)
 .else
     lw      cmd_w0, VTX_SCR_Z(cmd_w0)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
@@ -1862,7 +1868,7 @@ dma_write:
 
 // Overlay 0 controls the RDP and also stops the RSP when work is done
 ovl0_start:
-.if UCODE_METHOD == METHOD_FIFO
+.if !CFG_XBUS // FIFO version
     sub     $11, rdpCmdBufPtr, rdpCmdBufEnd
     addiu   $12, $11, RDP_CMD_BUFSIZE - 1
     bgezal  $12, flush_rdp_buffer
@@ -1871,7 +1877,7 @@ ovl0_start:
      lw     $24, rdpFifoPos
     bltz    $1, taskdone_and_break
      mtc0   $24, DPC_END            // Set the end pointer of the RDP so that it starts the task
-.else // UCODE_METHOD == METHOD_XBUS
+.else // CFG_XBUS
     bltz    $1, taskdone_and_break
      nop
 .endif
@@ -1883,7 +1889,7 @@ ovl0_start:
     la      dmemAddr, start         // DMA address
     jal     dma_read_write          // initiate DMA read
      li     dmaLen, 0x0F48 - 1
-.if UCODE_METHOD == METHOD_XBUS
+.if CFG_XBUS
 ovl0_xbus_wait_for_rdp:
     mfc0 $11, DPC_STATUS
     andi $11, $11, DPC_STATUS_DMA_BUSY
@@ -1896,8 +1902,8 @@ ovl0_xbus_wait_for_rdp:
     jal     dma_read_write          // initate DMA read
      sub    dmaLen, dmaLen, dmemAddr
     j       while_wait_dma_busy
-.if (UCODE_IS_F3DEX2_204H || UCODE_METHOD == METHOD_XBUS /* ??? */)
-     li     $ra, taskdone_and_break_204H
+.if BUG_HARMLESS_TASKDONE_WRONG_ADDR
+     li     $ra, taskdone_and_break_wrong_addr // See here for more info
 .else
      li     $ra, taskdone_and_break
 .endif
@@ -1906,14 +1912,14 @@ ucode equ $11
 status equ $12
 task_yield:
     lw      ucode, OSTask + OSTask_ucode
-.if UCODE_METHOD == METHOD_FIFO
+.if !CFG_XBUS // FIFO version
     sw      taskDataPtr, OS_YIELD_DATA_SIZE - 8
     sw      ucode, OS_YIELD_DATA_SIZE - 4
     li      status, SP_SET_SIG1 | SP_SET_SIG2   // yielded and task done signals
     lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
     li      dmemAddr, 0x8000
     li      dmaLen, OS_YIELD_DATA_SIZE - 1
-.else // UCODE_METHOD == METHOD_XBUS
+.else // CFG_XBUS
     sw      taskDataPtr, OS_YIELD_DATA_SIZE
     sw      ucode, OS_YIELD_DATA_SIZE + 4
     lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
@@ -1926,12 +1932,13 @@ task_yield:
     li      dmaLen, 7
 .endif
     j       dma_read_write
-taskdone_and_break_204H: // Only used in f3dex2 2.04H
+// Harmless bug to jump here instead of next instr; state of $ra doesn't matter, about to stop
+taskdone_and_break_wrong_addr:
      li     $ra, break
 taskdone_and_break:
     li      status, SP_SET_SIG2   // task done signal
 break:
-.if UCODE_METHOD == METHOD_XBUS
+.if CFG_XBUS
 ovl0_xbus_wait_for_rdp_2:
     mfc0 $11, DPC_STATUS
     andi $11, $11, DPC_STATUS_DMA_BUSY
@@ -2199,7 +2206,7 @@ vPairNZ equ $v5
 
 light_vtx:
     vadd    vPairNY, vZero, vPairRGBATemp[1h] // Move vertex normals Y to separate reg
-.if UCODE_HAS_POINT_LIGHTING
+.if CFG_POINT_LIGHTING
     luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Load next light color (ambient)
 .else
     lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next below transformed light direction as XYZ_XYZ_ for lights_dircoloraccum2
@@ -2207,7 +2214,7 @@ light_vtx:
     vadd    vPairNZ, vZero, vPairRGBATemp[2h] // Move vertex normals Z to separate reg
     luv     vPairRGBA[0], 8(inputVtxPos)      // Load both verts' XYZAXYZA as unsigned
     vne     $v4, $v31, $v31[3h]               // Set VCC to 11101110
-.if UCODE_HAS_POINT_LIGHTING
+.if CFG_POINT_LIGHTING
     andi    $11, $5, G_LIGHTING_POSITIONAL_H  // check if point lighting is enabled in the geometry mode
     beqz    $11, directional_lighting         // If not enabled, use directional algorithm for everything
      li     curMatrix, mvpMatrix + 0x8000     // Set flag in negative to indicate cur mtx is MVP
@@ -2477,8 +2484,8 @@ lights_texgenmain:
     vmulf   $v4, vPairST, vPairST       // ST squared
     vmulf   $v3, vPairST, $v31[7]       // Move to accumulator
     vmacf   $v3, vPairST, $v2[2]        // + ST * coefficient 0x6CB3
-.if (UCODE_IS_F3DEX2_204H)
-    vmudh   vPairST, vOne, $v31[5]      // Bug? Reinit S, T init to 0x4000 each
+.if BUG_TEXGEN_LINEAR_CLOBBER_S_T
+    vmudh   vPairST, vOne, $v31[5]      // Clobber S, T with 0x4000 each
 .else
     vmudh   $v21, vOne, $v31[5]         // Initialize accumulator with 0x4000 each (v21 discarded)
 .endif

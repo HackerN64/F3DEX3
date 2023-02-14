@@ -3,9 +3,9 @@
 // XBUS doesn't use the full yield data buffer, but does reference the full size,
 // so a definition for both sizes needs to exist.
 OS_YIELD_DATA_SIZE_TOTAL equ 0xC00
-.if UCODE_METHOD == METHOD_FIFO
+.if !CFG_XBUS // FIFO version
 OS_YIELD_DATA_SIZE equ 0xC00
-.else // UCODE_METHOD == METHOD_XBUS
+.else // CFG_XBUS
 OS_YIELD_DATA_SIZE equ 0x920
 .endif
 
@@ -190,7 +190,7 @@ CLIP_SHIFT_SCAL equ 16
 CLIP_SHIFT_SCRN equ 0
 // Values used for far and near clipping.
 CLIP_FAR equ CLIP_PZ
-.if NoN == 1
+.if CFG_NoN
     // No Nearclipping uses -w instead of -z
     CLIP_NEAR equ CLIP_NW
 .else
