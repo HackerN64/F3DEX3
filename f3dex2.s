@@ -212,14 +212,14 @@ clipRatio: // This is an array of 6 doublewords
 // vne xxx, $v31, $v31[3h] = 11101110 in lighting
 // veq xxx, $v31, $v31[3h] = 00010001 in lighting
 v31Value:
-    .dh 0xFFFF // -1; used in init, clipping
-    .dh 0x0004 // 4; used in clipping, vtx write
-    .dh 0x0008 // 8; old ucode only: used in tri write
-    .dh 0x7F00 // 32512; used in vtx write and pre-jump instrs to there, also 0x0004 put here during point lighting
-    .dh 0xFFFC // -4; used in clipping, vtx write
-    .dh 0x4000 // 16384; used in tri write, texgen
+    .dh -1     // used in init, clipping
+    .dh 4      // used in clipping, vtx write
+    .dh 8      // old ucode only: used in tri write
+    .dh 0x7F00 // used in vtx write and pre-jump instrs to there, also 4 put here during point lighting
+    .dh -4     // used in clipping, vtx write
+    .dh 0x4000 // used in tri write, texgen
     .dh vertexBuffer // 0x420; used in tri write
-    .dh 0x7FFF // 32767; used in vtx write, tri write, lighting, point lighting
+    .dh 0x7FFF // used in vtx write, tri write, lighting, point lighting
 
 // 0x1C0: constants for register $v30
 .align 0x10 // loaded with lqv
@@ -231,14 +231,14 @@ v30Value:
 .if (UCODE_IS_206_OR_OLDER)
     .dh 0x01CC // used in tri write, vcr?
     .dh 0x0200 // not used!
-    .dh 0xFFF0 // used in tri write, some signed multiplier (-16)
+    .dh -16    // used in tri write, some signed multiplier
     .dh 0x0010 // used in tri write, some accumulator init value
     .dh 0x0020 // used in tri write, both signed and unsigned multipliers
     .dh 0x0100 // used in tri write, vertex color >>= 8; also in lighting
 .else
     .dh 0x1000 // used in tri write, some multiplier
     .dh 0x0100 // used in tri write, vertex color >>= 8 and vcr?; also in lighting and point lighting
-    .dh 0xFFF0 // used in tri write, some signed multiplier (-16)
+    .dh -16    // used in tri write, some signed multiplier
     .dh 0xFFF8 // used in tri write, mask away lower ST bits?
     .dh 0x0010 // used in tri write, some accumulator init value; value moved to elem 7 for point lighting
     .dh 0x0020 // used in tri write, both signed and unsigned multipliers; value moved from elem 6 from point lighting
@@ -249,7 +249,7 @@ linearGenerateCoefficients:
     .dh 0xC000
     .dh 0x44D3
     .dh 0x6CB3
-    .dh 0x0002
+    .dh 2
 
 // 0x01D8
     .db 0x00 // Padding to allow mvpValid to be written to as a 32-bit word
@@ -1061,7 +1061,7 @@ clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / o
     vmadn   $v10, $v6, $v3            // frac: - vtx off screen * clip ratio
     vmadh   $v11, $v7, $v3            // int:  - vtx off screen * clip ratio 11:10
     vaddc   $v8, $v8, $v8[0q]         // frac: y += x, w += z, vtx on screen only
-    lqv     $v25[0], (linearGenerateCoefficients)($zero) // Used just to load the value 0x0002
+    lqv     $v25[0], (linearGenerateCoefficients)($zero) // Used just to load the value 2
     vadd    $v9, $v9, $v9[0q]         // int:  y += x, w += z, vtx on screen only
     vaddc   $v10, $v10, $v10[0q]      // frac: y += x, w += z, vtx on screen - vtx off screen
     vadd    $v11, $v11, $v11[0q]      // int:  y += x, w += z, vtx on screen - vtx off screen
