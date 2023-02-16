@@ -725,8 +725,8 @@ start: // This is at IMEM 0x1080, not the start of IMEM
     lqv     $v31[0], (v31Value)($zero)
     lqv     $v30[0], (v30Value)($zero)
     li      rdpCmdBufPtr, rdpCmdBuffer1
-.if BUG_HARMLESS_EXTRA_INIT_VONE
-    vadd    vOne, vZero, vZero   // Harmless extra initialization of vOne (to zero)
+.if !BUG_FAIL_IF_CARRY_SET_AT_INIT
+    vadd    vOne, vZero, vZero   // Consume VCO (carry) value possibly set by the previous ucode, before vsub below
 .endif
     li      rdpCmdBufEnd, rdpCmdBuffer1End
     vsub    vOne, vZero, $v31[0]   // Vector of 1s

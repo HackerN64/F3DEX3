@@ -1,5 +1,5 @@
-F3DZEX_*/
-F3DEX2_*/
+build/
 .vscode
 *.exe
 *.bat
+custom.mk
