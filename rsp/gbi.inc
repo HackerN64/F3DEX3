@@ -1,14 +1,5 @@
 // GBI: Graphics Binary Interface
 
-// XBUS doesn't use the full yield data buffer, but does reference the full size,
-// so a definition for both sizes needs to exist.
-OS_YIELD_DATA_SIZE_TOTAL equ 0xC00
-.if UCODE_METHOD == METHOD_FIFO
-OS_YIELD_DATA_SIZE equ 0xC00
-.else // UCODE_METHOD == METHOD_XBUS
-OS_YIELD_DATA_SIZE equ 0x920
-.endif
-
 // Geometry mode flags
 // First byte gets OR'd with 0xC8 to form triangle opcode. So we can use 0x80,
 // 0x40, and 0x08 for other purposes while remaining forward compatible. (Of
