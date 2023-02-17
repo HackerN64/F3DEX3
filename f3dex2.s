@@ -365,9 +365,12 @@ jumpTableEntry G_MTX_end      // G_MTX (multiply)
 jumpTableEntry G_MOVEMEM_end  // G_MOVEMEM, G_MTX (load)
 
 // 0x0314-0x0370: RDP/Immediate Command Jump Table
+.if !MOD_GENERAL
+// Not actually used or supported--get rid of the DMEM for them
 jumpTableEntry G_SPECIAL_3_handler
 jumpTableEntry G_SPECIAL_2_handler
 jumpTableEntry G_SPECIAL_1_handler
+.endif
 jumpTableEntry G_DMA_IO_handler
 jumpTableEntry G_TEXTURE_handler
 jumpTableEntry G_POPMTX_handler
@@ -422,7 +425,10 @@ jumpTableEntry G_BRANCH_WZ_handler // different for F3DZEX
 jumpTableEntry G_TRI1_handler
 jumpTableEntry G_TRI2_handler
 jumpTableEntry G_QUAD_handler
+.if !MOD_GENERAL
+// Not actually used or supported--get rid of the DMEM
 jumpTableEntry G_LINE3D_handler
+.endif
 
 // 0x0380-0x03C4: vertex pointers
 vertexTable:
@@ -478,7 +484,7 @@ clipMaskList:
     .dw CLIP_PY   << CLIP_SHIFT_SCAL
     .dw CLIP_FAR  << CLIP_SHIFT_SCRN
     .dw CLIP_NEAR << CLIP_SHIFT_SCRN
-
+    
 // 0x0410-0x0420: Overlay 2/3 table
 overlayInfo2:
     OverlayEntry orga(ovl2_start), orga(ovl2_end), ovl2_start
@@ -506,6 +512,10 @@ inputBufferEnd:
 clipTempVerts:
 clipTempVertsCount equ 12 // Up to 2 temp verts can be created for each of the 6 clip conditions.
 clipTempVertsSize equ clipTempVertsCount * vtxSize
+
+.if MOD_GENERAL
+    .skip 8
+.endif
 
 // 0x09C8-0x09D0
     .skip 0x8 // should be .align 0x10, but this makes armips continue the output file to here
@@ -851,13 +861,17 @@ wait_for_dma_and_run_next_command:
 G_POPMTX_end:
 G_MOVEMEM_end:
     jal     while_wait_dma_busy                         // wait for the DMA read to finish
+.if !MOD_GENERAL
 G_LINE3D_handler:
+.endif
 G_SPNOOP_handler:
+.if !MOD_GENERAL
 .if !CFG_G_SPECIAL_1_IS_RECALC_MVP                      // F3DEX2 2.04H has this as a real command
 G_SPECIAL_1_handler:
 .endif
 G_SPECIAL_2_handler:
 G_SPECIAL_3_handler:
+.endif
 run_next_DL_command:
      mfc0   $1, SP_STATUS                               // load the status word into register $1
     lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // load the command word into cmd_w0
@@ -872,6 +886,9 @@ run_next_DL_command:
      addiu  inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
 
 .if CFG_G_SPECIAL_1_IS_RECALC_MVP // Microcodes besides F3DEX2 2.04H have this as a noop
+.if MOD_GENERAL
+    .error "MOD_GENERAL is incompatible with CFG_G_SPECIAL_1_IS_RECALC_MVP"
+.else
 G_SPECIAL_1_handler:    // Seems to be a manual trigger for mvp recalculation
     li      $ra, run_next_DL_command
     li      input_mtx_0, pMatrix
@@ -879,6 +896,7 @@ G_SPECIAL_1_handler:    // Seems to be a manual trigger for mvp recalculation
     li      output_mtx, mvpMatrix
     j       mtx_multiply
      sb     cmd_w0, mvpValid
+.endif
 .endif
 
 G_DMA_IO_handler:
