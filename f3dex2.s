@@ -1896,7 +1896,7 @@ ovl0_start:
 // If here, G_LOAD_UCODE was executed.
     lw      cmd_w1_dram, (inputBufferEnd - 0x04)(inputBufferPos) // word 1 = ucode code DRAM addr
     sw      taskDataPtr, OSTask + OSTask_data_ptr // Store where we are in the DL
-    sw      cmd_w1_dram, OSTask + OSTask_ucode // Store pointer to current ucode executing
+    sw      cmd_w1_dram, OSTask + OSTask_ucode // Store pointer to new ucode about to execute
     la      dmemAddr, start         // Beginning of overwritable part of IMEM
     jal     dma_read_write          // DMA DRAM read -> IMEM write
      li     dmaLen, (while_wait_dma_busy - start) - 1 // End of overwritable part of IMEM
@@ -2226,14 +2226,16 @@ vPairNZ equ $v5
 light_vtx:
     vadd    vPairNY, vZero, vPairRGBATemp[1h] // Move vertex normals Y to separate reg
 .if UCODE_HAS_POINT_LIGHTING
-    luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Load next light color (ambient)
+    luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Init to ambient light color
 .else
     lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next below transformed light direction as XYZ_XYZ_ for lights_dircoloraccum2
 .endif
     vadd    vPairNZ, vZero, vPairRGBATemp[2h] // Move vertex normals Z to separate reg
     luv     vPairRGBA[0], 8(inputVtxPos)      // Load both verts' XYZAXYZA as unsigned
     vne     $v4, $v31, $v31[3h]               // Set VCC to 11101110
-.if UCODE_HAS_POINT_LIGHTING
+.if !UCODE_HAS_POINT_LIGHTING
+    luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Init to ambient light color
+.else
     andi    $11, $5, G_LIGHTING_POSITIONAL_H  // check if point lighting is enabled in the geometry mode
     beqz    $11, directional_lighting         // If not enabled, use directional algorithm for everything
      li     curMatrix, mvpMatrix + 0x8000     // Set flag in negative to indicate cur mtx is MVP
@@ -2443,8 +2445,6 @@ light_point:
     j       after_dirorpoint_loop
 directional_lighting:
      lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Load next light transformed dir; this value is overwritten with the same thing
-.else // No point lighting
-    luv     ltColor[0], (ltBufOfs + lightSize + 0)(curLight) // Init to ambient light color
 .endif
 
 // Loop for dot product normals and multiply-add color for 2 lights
