@@ -10,8 +10,8 @@ default:
 	@echo 'Method 4) Custom microcode build via custom.mk file. Create a file custom.mk'
 	@echo 'with contents like this:'
 	@echo 'NAME := your_custom_ucode_name'
-	@echo 'GAMES := Your Romhack Name'
-	@echo 'ID_STR := Modded F3DZEX by LeEtHaCkEr64 / Real N64 or RSP LLE only. NO PROJECT64'
+	@echo 'DESCRIPTION := Your Romhack Name'
+	@echo 'ID_STR := Modded F3DZEX by _your_name_, real N64 hardware or RSP LLE is required'
 	@echo '          ^ (this must be the exact number of characters)'
 	@echo 'OPTIONS := CFG_NoN CFG_POINT_LIGHTING etc.'
 	@echo 'Then run `make your_custom_ucode_name`. See the Makefile for the list of options.'
@@ -31,12 +31,12 @@ ALL_OPTIONS := \
   CFG_EXTRA_0A_BEFORE_ID_STR \
   CFG_G_SPECIAL_1_IS_RECALC_MVP \
   CFG_CLIPPING_SUBDIVIDE_DESCENDING \
+  CFG_DONT_SKIP_FIRST_INSTR_NEW_UCODE \
   BUG_CLIPPING_FAIL_WHEN_SUM_ZERO \
   BUG_NO_CLAMP_SCREEN_Z_POSITIVE \
   BUG_TEXGEN_LINEAR_CLOBBER_S_T \
   BUG_WRONG_INIT_VZERO \
-  BUG_FAIL_IF_CARRY_SET_AT_INIT \
-  BUG_HARMLESS_TASKDONE_WRONG_ADDR
+  BUG_FAIL_IF_CARRY_SET_AT_INIT
   
 ARMIPS ?= armips
 PARENT_OUTPUT_DIR ?= ./build
@@ -75,7 +75,7 @@ ALL_OUTPUT_DIRS :=
 
 define reset_vars
   NAME := 
-  GAMES := (Not used in any retail games)
+  DESCRIPTION := (Not used in any retail games)
   ID_STR := Custom F3DEX2-based microcode, github.com/Mr-Wiseguy/f3dex2 & Nintendo
   ID_STR := RSP Gfx ucode F3DEX       fifo 2.04H Yoshitaka Yasumoto 1998 Nintendo.
   MD5_CODE := 
@@ -138,23 +138,18 @@ define ucode_rule
   # targeting CODE_FILE even though we also want DATA_FILE, because target-
   # specific variables may not work as expected with multiple targets from one
   # recipe.
-  $$(CODE_FILE): NAME:=$$(NAME)
-  $$(CODE_FILE): GAMES:=$$(GAMES)
-  $$(CODE_FILE): ID_STR:=$$(ID_STR)
   $$(CODE_FILE): ARMIPS_CMDLINE:=$$(ARMIPS_CMDLINE)
-  $$(CODE_FILE): MD5_CODE:=$$(MD5_CODE)
-  $$(CODE_FILE): MD5_DATA:=$$(MD5_DATA)
   $$(CODE_FILE): CODE_FILE:=$$(CODE_FILE)
   $$(CODE_FILE): DATA_FILE:=$$(DATA_FILE)
   # Target recipe
   $$(CODE_FILE): ./f3dex2.s ./rsp/* | $$(UCODE_OUTPUT_DIR)
-	@printf "$(INFO)Building microcode: $$(NAME) for $$(GAMES)$(NO_COL)\n"
-	@$(ARMIPS) -strequ ID_STR "$$(ID_STR)" $$(ARMIPS_CMDLINE)
-  ifneq ($$(MD5_CODE),)
-	@(printf "$$(MD5_CODE) $$(CODE_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$$(NAME) code matches$(NO_COL)\n" || printf "  $(FAILURE)$$(NAME) code differs$(NO_COL)\n"
-	@(printf "$$(MD5_DATA) $$(DATA_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$$(NAME) data matches$(NO_COL)\n" || printf "  $(FAILURE)$$(NAME) data differs$(NO_COL)\n"
+	@printf "$(INFO)Building microcode: $(NAME): $(DESCRIPTION)$(NO_COL)\n"
+	@$(ARMIPS) -strequ ID_STR "$(ID_STR)" $$(ARMIPS_CMDLINE)
+  ifneq ($(MD5_CODE),)
+	@(printf "$(MD5_CODE) $$(CODE_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) code matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) code differs$(NO_COL)\n"
+	@(printf "$(MD5_DATA) $$(DATA_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) data matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) data differs$(NO_COL)\n"
   else ifneq ($(1),1)
-	@printf "  $(WARNING)MD5 sums not in database for $$(NAME)$(NO_COL)\n"
+	@printf "  $(WARNING)MD5 sums not in database for $(NAME)$(NO_COL)\n"
   endif
   $$(eval $$(call reset_vars))
 endef
@@ -166,170 +161,7 @@ ifneq ("$(wildcard custom.mk)","")
   $(eval $(call ucode_rule))
 endif
 
-NAME := F3DEX2_2.04H
-GAMES := Kirby 64, Smash 64
-ID_STR := RSP Gfx ucode F3DEX       fifo 2.04H Yoshitaka Yasumoto 1998 Nintendo.
-MD5_CODE := d3a58568fa7cf042de370912a47c3b5f
-MD5_DATA := 6639b2fd15a73c5446aff592bb599983
-OPTIONS := \
-  CFG_OLD_TRI_WRITE \
-  CFG_EXTRA_0A_BEFORE_ID_STR \
-  CFG_G_SPECIAL_1_IS_RECALC_MVP \
-  CFG_CLIPPING_SUBDIVIDE_DESCENDING \
-  BUG_CLIPPING_FAIL_WHEN_SUM_ZERO \
-  BUG_NO_CLAMP_SCREEN_Z_POSITIVE \
-  BUG_TEXGEN_LINEAR_CLOBBER_S_T \
-  BUG_FAIL_IF_CARRY_SET_AT_INIT \
-  BUG_HARMLESS_TASKDONE_WRONG_ADDR
-$(eval $(call ucode_rule))
-
-NAME := F3DEX2_NoN_2.04H
-ID_STR := RSP Gfx ucode F3DEX.NoN   fifo 2.04H Yoshitaka Yasumoto 1998 Nintendo.
-OPTIONS := \
-  CFG_NoN \
-  CFG_OLD_TRI_WRITE \
-  CFG_EXTRA_0A_BEFORE_ID_STR \
-  CFG_G_SPECIAL_1_IS_RECALC_MVP \
-  CFG_CLIPPING_SUBDIVIDE_DESCENDING \
-  BUG_CLIPPING_FAIL_WHEN_SUM_ZERO \
-  BUG_NO_CLAMP_SCREEN_Z_POSITIVE \
-  BUG_TEXGEN_LINEAR_CLOBBER_S_T \
-  BUG_FAIL_IF_CARRY_SET_AT_INIT \
-  BUG_HARMLESS_TASKDONE_WRONG_ADDR
-$(eval $(call ucode_rule))
-
-NAME := F3DEX2_2.07
-GAMES := Rocket: Robot on Wheels
-ID_STR := RSP Gfx ucode F3DEX       fifo 2.07  Yoshitaka Yasumoto 1998 Nintendo.
-MD5_CODE := 1523b8e38a9eae698b48909a0c0c0279
-MD5_DATA := 25be72ec04e2e6a23dfa7666645f0662
-OPTIONS := \
-  BUG_FAIL_IF_CARRY_SET_AT_INIT
-$(eval $(call ucode_rule))
-
-NAME := F3DEX2_2.07_XBUS
-GAMES := Lode Runner 3-D
-ID_STR := RSP Gfx ucode F3DEX       xbus 2.07  Yoshitaka Yasumoto 1998 Nintendo.
-MD5_CODE := b882f402e115ffaf05a9ee44f354c441
-MD5_DATA := 71436bdc62d9263d5c2fefa783cffd4f
-OPTIONS := \
-  CFG_XBUS \
-  BUG_FAIL_IF_CARRY_SET_AT_INIT \
-  BUG_HARMLESS_TASKDONE_WRONG_ADDR
-$(eval $(call ucode_rule))
-
-NAME := F3DEX2_NoN_2.07
-ID_STR := RSP Gfx ucode F3DEX.NoN   fifo 2.07  Yoshitaka Yasumoto 1998 Nintendo.
-OPTIONS := \
-  CFG_NoN \
-  BUG_FAIL_IF_CARRY_SET_AT_INIT
-$(eval $(call ucode_rule))
-
-NAME := F3DEX2_2.08
-GAMES := Banjo-Tooie
-ID_STR := RSP Gfx ucode F3DEX       fifo 2.08  Yoshitaka Yasumoto 1999 Nintendo.
-MD5_CODE := 6ccf5fc392e440fb23bc7d7f7d71047c
-MD5_DATA := 3a3a406acb4295d33fa6e918dd3a7ae4
-OPTIONS := 
-$(eval $(call ucode_rule))
-
-NAME := F3DEX2_2.08_XBUS
-GAMES := Power Rangers
-ID_STR := RSP Gfx ucode F3DEX       xbus 2.08  Yoshitaka Yasumoto 1999 Nintendo.
-MD5_CODE := 38cbd8ef2cd168141347047cf7ec4fba
-MD5_DATA := dcb9a145381557d146683ddb853c6cfd
-OPTIONS := \
-  CFG_XBUS \
-  BUG_HARMLESS_TASKDONE_WRONG_ADDR
-$(eval $(call ucode_rule))
-
-NAME := F3DEX2_NoN_2.08
-ID_STR := RSP Gfx ucode F3DEX.NoN   fifo 2.08  Yoshitaka Yasumoto 1999 Nintendo.
-MD5_CODE := b5c366b55a032f232aa309cda21be3d7
-MD5_DATA := 2c8dedc1b1e2fe6405c9895c4290cf2b
-OPTIONS := \
-  CFG_NoN
-$(eval $(call ucode_rule))
-
-NAME := F3DEX2_2.08PL
-GAMES := Paper Mario
-ID_STR := RSP Gfx ucode F3DEX       fifo 2.08  Yoshitaka Yasumoto/Kawasedo 1999.
-MD5_CODE := 6a5117e62e51d87020fb81dc493efcb6
-MD5_DATA := 1a6b826322aab9c93da61356af5ead40
-OPTIONS := \
-  CFG_POINT_LIGHTING
-$(eval $(call ucode_rule))
-
-NAME := F3DEX2_NoN_2.08PL
-# ID_STR copied from nearclipping version above for emulator compatibility
-ID_STR := RSP Gfx ucode F3DEX       fifo 2.08  Yoshitaka Yasumoto/Kawasedo 1999.
-OPTIONS := \
-  CFG_NoN \
-  CFG_POINT_LIGHTING
-$(eval $(call ucode_rule))
-
-NAME := F3DZEX_2.06H
-# ID_STR copied from NoN version below for emulator compatibility
-ID_STR := RSP Gfx ucode F3DZEX.NoN  fifo 2.06H Yoshitaka Yasumoto 1998 Nintendo.
-OPTIONS := \
-  CFG_G_BRANCH_W \
-  CFG_OLD_TRI_WRITE \
-  BUG_WRONG_INIT_VZERO \
-  BUG_FAIL_IF_CARRY_SET_AT_INIT
-$(eval $(call ucode_rule))
-
-NAME := F3DZEX_NoN_2.06H
-GAMES := Ocarina of Time
-ID_STR := RSP Gfx ucode F3DZEX.NoN  fifo 2.06H Yoshitaka Yasumoto 1998 Nintendo.
-MD5_CODE := 96a1a7a8eab45e0882aab9e4d8ccbcc3
-MD5_DATA := e48c7679f1224b7c0947dcd5a4d0c713
-OPTIONS := \
-  CFG_G_BRANCH_W \
-  CFG_NoN \
-  CFG_OLD_TRI_WRITE \
-  BUG_WRONG_INIT_VZERO \
-  BUG_FAIL_IF_CARRY_SET_AT_INIT
-$(eval $(call ucode_rule))
-
-NAME := F3DZEX_2.08I
-# ID_STR copied from NoN version below for emulator compatibility
-ID_STR := RSP Gfx ucode F3DZEX.NoN  fifo 2.08I Yoshitaka Yasumoto/Kawasedo 1999.
-OPTIONS := \
-  CFG_G_BRANCH_W \
-  CFG_POINT_LIGHTING \
-  BUG_WRONG_INIT_VZERO
-$(eval $(call ucode_rule))
-
-NAME := F3DZEX_NoN_2.08I
-GAMES := Majora's Mask
-ID_STR := RSP Gfx ucode F3DZEX.NoN  fifo 2.08I Yoshitaka Yasumoto/Kawasedo 1999.
-MD5_CODE := ca0a31df36dbeda69f09e9850e68c7f7
-MD5_DATA := d31cea0e173c6a4a09e4dfe8f259c91b
-OPTIONS := \
-  CFG_G_BRANCH_W \
-  CFG_NoN \
-  CFG_POINT_LIGHTING \
-  BUG_WRONG_INIT_VZERO
-$(eval $(call ucode_rule))
-
-NAME := F3DZEX_2.08J
-# ID_STR copied from NoN version below for emulator compatibility
-ID_STR := RSP Gfx ucode F3DZEX.NoN  fifo 2.08J Yoshitaka Yasumoto/Kawasedo 1999.
-OPTIONS := \
-  CFG_G_BRANCH_W \
-  CFG_POINT_LIGHTING
-$(eval $(call ucode_rule))
-
-NAME := F3DZEX_NoN_2.08J
-GAMES := Animal Forest
-ID_STR := RSP Gfx ucode F3DZEX.NoN  fifo 2.08J Yoshitaka Yasumoto/Kawasedo 1999.
-MD5_CODE := a7f45433a67950cdd239ee40f1dd36c1
-MD5_DATA := f17544afa0dce84d589ec3d8c38254c7
-OPTIONS := \
-  CFG_G_BRANCH_W \
-  CFG_NoN \
-  CFG_POINT_LIGHTING
-$(eval $(call ucode_rule))
+include ucodes_database.mk
 
 .PHONY: default ok all clean
 

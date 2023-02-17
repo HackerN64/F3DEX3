@@ -1919,10 +1919,15 @@ ovl0_xbus_wait_for_rdp:
     jal     dma_read_write          // initate DMA read
      sub    dmaLen, dmaLen, dmemAddr // End that much before the end of DMEM
     j       while_wait_dma_busy
-.if BUG_HARMLESS_TASKDONE_WRONG_ADDR
+.if CFG_DONT_SKIP_FIRST_INSTR_NEW_UCODE
+    // Not sure why we skip the first instruction of the new ucode; in this ucode, it's
+    // zeroing vZero, but maybe it could be something else in other ucodes. But, starting
+    // actually at the beginning is only in 2.04H, so skipping is likely the intended
+    // behavior. Maybe some other ucodes use this for detecting whether they were run
+    // from scratch or called from another ucode?
      li     $ra, start
 .else
-     li     $ra, start + 4 // Not sure why we skip the first instruction of the new ucode
+     li     $ra, start + 4
 .endif
 
 .if . > start

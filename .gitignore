@@ -2,4 +2,3 @@ build/
 .vscode
 *.exe
 *.bat
-custom.mk
