@@ -81,6 +81,7 @@ define reset_vars
   MD5_CODE := 
   MD5_DATA := 
   OPTIONS := 
+  EXTRA_DEPS :=
 endef
 
 define ucode_rule
@@ -142,7 +143,7 @@ define ucode_rule
   $$(CODE_FILE): CODE_FILE:=$$(CODE_FILE)
   $$(CODE_FILE): DATA_FILE:=$$(DATA_FILE)
   # Target recipe
-  $$(CODE_FILE): ./f3dex2.s ./rsp/* | $$(UCODE_OUTPUT_DIR)
+  $$(CODE_FILE): ./f3dex2.s ./rsp/* ucodes_database.mk $(EXTRA_DEPS) | $$(UCODE_OUTPUT_DIR)
 	@printf "$(INFO)Building microcode: $(NAME): $(DESCRIPTION)$(NO_COL)\n"
 	@$(ARMIPS) -strequ ID_STR "$(ID_STR)" $$(ARMIPS_CMDLINE)
   ifneq ($(MD5_CODE),)
@@ -158,6 +159,7 @@ $(eval $(call reset_vars))
 
 ifneq ("$(wildcard custom.mk)","")
   include custom.mk
+  EXTRA_DEPS := custom.mk
   $(eval $(call ucode_rule))
 endif
 
