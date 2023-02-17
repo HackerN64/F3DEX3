@@ -516,7 +516,11 @@ clipTempVertsCount equ 12 // Up to 2 temp verts can be created for each of the 6
 
 // 0x09D0-0x0A10: Temp matrix for G_MTX multiplication mode, overlaps with clipTempVerts
 
+.if MOD_RDP_BUFS_2_TRIS
+RDP_CMD_BUFSIZE equ 0xB0
+.else
 RDP_CMD_BUFSIZE equ 0x158
+.endif
 RDP_CMD_BUFSIZE_EXCESS equ 0xB0 // Maximum size of an RDP triangle command
 RDP_CMD_BUFSIZE_TOTAL equ RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS
 // 0x0BA8-0x0D00: First RDP Command Buffer
@@ -531,6 +535,10 @@ rdpCmdBuffer2:
     .skip RDP_CMD_BUFSIZE
 rdpCmdBuffer2End:
     .skip RDP_CMD_BUFSIZE_EXCESS
+
+.if MOD_GENERAL
+totalDmemUse:
+.endif
 
 .if . > 0x00000FC0
     .error "Not enough room in DMEM"
