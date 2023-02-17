@@ -4,4 +4,5 @@ ID_STR := Modded F3DZEX by Sauraen, real N64 hardware or RSP LLE is required!!!!
 OPTIONS := \
 	CFG_G_BRANCH_W \
 	CFG_NoN \
+	CFG_POINT_LIGHTING \
 	MOD_GENERAL
