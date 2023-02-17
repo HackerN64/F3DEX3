@@ -1913,7 +1913,7 @@ ovl0_xbus_wait_for_rdp:
     jal     dma_read_write          // initate DMA read
      sub    dmaLen, dmaLen, dmemAddr // End that much before the end of DMEM
     j       while_wait_dma_busy
-.if (UCODE_IS_F3DEX2_204H || UCODE_METHOD == METHOD_XBUS /* ??? */)
+.if (UCODE_IS_F3DEX2_204H)
      li     $ra, start
 .else
      li     $ra, start + 4 // Not sure why we skip the first instruction of the new ucode
