@@ -1511,6 +1511,9 @@ tri_to_rdp_noinit:
     lw      $12, activeClipPlanes
     vmadh   $v29, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
     or      $5, $5, $6
+.if MOD_GENERAL
+    andi    $11, $11, G_CULL_BOTH >> 8  // Only look at culling bits, so we can use others for other mods
+.endif
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
     or      $5, $5, $7        // If any verts are past any clipping plane...
     vmrg    $v10, $v6, $v4    // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
@@ -1591,6 +1594,13 @@ shading_done:
     vec2 equ v22
 .endif
     vrcp    $v20[2], $v6[1]
+.if MOD_GENERAL
+    // Get rid of any other bits so they can be used for other mods.
+    // G_TEXTURE_ENABLE is defined as 0 in the F3DEX2 GBI, and whether the tri
+    // commands are sent to the RDP as textured or not is set via enabling or
+    // disabling the texture in SPTexture (textureSettings1 + 3 below).
+    andi    $6, $6, G_SHADE | G_ZBUFFER
+.endif
     vrcph   vPairST[2], $v6[1]
     lw      $5, VTX_INV_W_VEC($1)
     vrcp    $v20[3], $v8[1]
