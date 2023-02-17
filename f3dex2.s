@@ -338,9 +338,10 @@ overlayInfo1:
 
 // 0x02F0-0x02FE: Movemem table
 movememTable:
-    .dh tempMatrix        // G_MTX multiply temp matrix (model)
+    // Temporary matrix in clipTempVerts scratch space, aligned to 16 bytes
+    .dh (clipTempVerts + 15) & ~0xF // G_MTX multiply temp matrix (model)
     .dh mvMatrix          // G_MV_MMTX
-    .dh tempMatrix        // G_MTX multiply temp matrix (projection)
+    .dh (clipTempVerts + 15) & ~0xF // G_MTX multiply temp matrix (projection)
     .dh pMatrix           // G_MV_PMTX
     .dh viewport          // G_MV_VIEWPORT
     .dh lightBufferLookat // G_MV_LIGHT
@@ -505,17 +506,9 @@ inputBufferEnd:
 // 0x09C8-0x0BA8: Space for temporary verts for clipping code
 clipTempVerts:
 clipTempVertsCount equ 12 // Up to 2 temp verts can be created for each of the 6 clip conditions.
-clipTempVertsSize equ clipTempVertsCount * vtxSize
-
-// 0x09C8-0x09D0
-    .skip 0x8 // should be .align 0x10, but this makes armips continue the output file to here
+    .skip clipTempVertsCount * vtxSize
 
 // 0x09D0-0x0A10: Temp matrix for G_MTX multiplication mode, overlaps with clipTempVerts
-tempMatrix:
-    .skip 0x40
-
-// 0x0A50-0x0BA8: Remainder of clipTempVerts
-    .skip clipTempVertsSize - (. - clipTempVerts)
 
 RDP_CMD_BUFSIZE equ 0x158
 RDP_CMD_BUFSIZE_EXCESS equ 0xB0 // Maximum size of an RDP triangle command
