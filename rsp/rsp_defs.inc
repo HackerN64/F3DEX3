@@ -2,6 +2,9 @@
 
 // OSTask placed at end of DMEM (IMEM_START - sizeof(OSTask))
 .definelabel OSTask_addr, 0xFC0
+
+OS_YIELD_DATA_SIZE equ 0xC00
+
 // OSTask data member offsets
 OSTask_type             equ 0x0000
 OSTask_flags            equ 0x0004

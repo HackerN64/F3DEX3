@@ -489,6 +489,13 @@ overlayInfo3:
 vertexBuffer:
     .skip (vtxSize * 32) // 32 vertices
 
+.if . > OS_YIELD_DATA_SIZE - 8
+    // OS_YIELD_DATA_SIZE (0xC00) bytes of DMEM are saved; the last two words are
+    // the ucode and the DL pointer. Make sure anything past there is temporary.
+    // (Input buffer will be reloaded from next instruction in the source DL.)
+    .error "Important things in DMEM will not be saved at yield!"
+.endif
+
 // 0x0920-0x09C8: Input buffer
 inputBuffer:
 inputBufferLength equ 0xA8
@@ -593,8 +600,8 @@ clipPolyRead equ $17 // global
 // Must keep values during tri drawing.
 // They are also used throughout the codebase, but can be overwritten once their
 // use has been fulfilled for the specific command.
-cmd_w1_dram equ $24 // almost global, occasionally used locally
-cmd_w0      equ $25 // global
+cmd_w1_dram equ $24 // Command word 1, which is also DMA DRAM addr; almost global, occasionally used locally
+cmd_w0      equ $25 // Command word 0; almost global, occasionally used locally
 
 // Must keep values during the full vertex process: load, lighting, and vertex write
 // $1: count of remaining vertices
@@ -740,7 +747,7 @@ start: // This is at IMEM 0x1080, not the start of IMEM
     beqz    $12, calculate_overlay_addrs    // skip overlay address calculations if resumed from yield?
      sw     $zero, OSTask + OSTask_flags
     j       load_overlay1_init              // Skip the initialization and go straight to loading overlay 1
-     lw     taskDataPtr, OS_YIELD_DATA_SIZE - 8
+     lw     taskDataPtr, OS_YIELD_DATA_SIZE - 8  // Was previously saved here at yield time
 task_init:
     mfc0    $11, DPC_STATUS
     andi    $11, $11, DPC_STATUS_XBUS_DMA
@@ -785,7 +792,7 @@ wait_dpc_start_valid:
     beqz $12, f3dzex_xbus_0000111C
      sw $zero, OSTask + OSTask_flags
     j load_overlay1_init
-     lw taskDataPtr, OS_YIELD_DATA_SIZE_TOTAL - 8
+     lw taskDataPtr, OS_YIELD_DATA_SIZE - 8 // Was previously saved here at yield time
 .fill 16 * 4 // Bunch of nops here to make it the same size as the fifo code.
 f3dzex_xbus_0000111C:
 .endif
@@ -859,9 +866,9 @@ run_next_DL_command:
     sra     $12, cmd_w0, 24                             // extract DL command byte from command word
     sll     $11, $12, 1                                 // multiply command byte by 2 to get jump table offset
     lhu     $11, (commandJumpTable)($11)                // get command subroutine address from command jump table
-    bnez    $1, load_overlay_0_and_enter                // load and execute overlay 0 if yielding
+    bnez    $1, load_overlay_0_and_enter                // load and execute overlay 0 if yielding; $1 > 0
      lw     cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
-    jr      $11                                         // jump to the loaded command handler
+    jr      $11                                         // jump to the loaded command handler; $1 == 0
      addiu  inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
 
 .if CFG_G_SPECIAL_1_IS_RECALC_MVP // Microcodes besides F3DEX2 2.04H have this as a noop
@@ -893,7 +900,7 @@ G_GEOMETRYMODE_handler:
 
 G_ENDDL_handler:
     lbu     $1, displayListStackLength          // Load the DL stack index
-    beqz    $1, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing
+    beqz    $1, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
      addi   $1, $1, -4                          // Decrement the DL stack index
     j       f3dzex_ovl1_00001020                // has a different version in ovl1
      lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
@@ -977,7 +984,7 @@ f3dzex_000012BC:
      addi   rdpCmdBufPtr, rdpCmdBufEnd, -RDP_CMD_BUFSIZE
 .else // CFG_XBUS
 check_rdp_buffer_full:
-    addi $11, rdpCmdBufPtr, -0xF10
+    addi $11, rdpCmdBufPtr, -(OSTask - RDP_CMD_BUFSIZE_EXCESS)
     blez $11, ovl0_04001284
      mtc0 rdpCmdBufPtr, DPC_END
 ovl0_04001260:
@@ -995,7 +1002,7 @@ ovl0_04001284:
     mfc0 $11, DPC_CURRENT
     sub $11, $11, rdpCmdBufPtr
     blez $11, ovl0_0400129C
-     addi $11, $11, -0xB0
+     addi $11, $11, -RDP_CMD_BUFSIZE_EXCESS
     blez $11, ovl0_04001284
      nop
 ovl0_0400129C:
@@ -1784,26 +1791,28 @@ no_z_buffer:
     j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
      sdv    $v18[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
 
+vtxPtr    equ $25 // = cmd_w0
+endVtxPtr equ $24 // = cmd_w1_dram
 G_CULLDL_handler:
-    lhu     cmd_w0, (vertexTable)(cmd_w0)     // load start vertex address
-    lhu     cmd_w1_dram, (vertexTable)(cmd_w1_dram) // load end vertex address
+    lhu     vtxPtr, (vertexTable)(cmd_w0)     // load start vertex address
+    lhu     endVtxPtr, (vertexTable)(cmd_w1_dram) // load end vertex address
     addiu   $1, $zero, (CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY | CLIP_FAR | CLIP_NEAR)
-    lw      $11, VTX_CLIP(cmd_w0)             // read clip flags from vertex
+    lw      $11, VTX_CLIP(vtxPtr)             // read clip flags from vertex
 culldl_loop:
     and     $1, $1, $11
     beqz    $1, run_next_DL_command           // Some vertex is on the screen-side of all clipping planes; have to render
-     lw     $11, (vtxSize + VTX_CLIP)(cmd_w0) // next vertex clip flags
-    bne     cmd_w0, cmd_w1_dram, culldl_loop  // loop until reaching the last vertex
-     addiu  cmd_w0, cmd_w0, vtxSize           // advance to the next vertex
+     lw     $11, (vtxSize + VTX_CLIP)(vtxPtr) // next vertex clip flags
+    bne     vtxPtr, endVtxPtr, culldl_loop    // loop until reaching the last vertex
+     addiu  vtxPtr, vtxPtr, vtxSize           // advance to the next vertex
     j       G_ENDDL_handler                   // If got here, there's some clipping plane where all verts are outside it; skip DL
 G_BRANCH_WZ_handler:
-     lhu    cmd_w0, (vertexTable)(cmd_w0)     // get the address of the vertex being tested
+     lhu    vtxPtr, (vertexTable)(cmd_w0)     // get the address of the vertex being tested
 .if CFG_G_BRANCH_W                            // BRANCH_W/BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
-    lh      cmd_w0, VTX_W_INT(cmd_w0)         // read the w coordinate of the vertex (f3dzex)
+    lh      vtxPtr, VTX_W_INT(vtxPtr)         // read the w coordinate of the vertex (f3dzex)
 .else
-    lw      cmd_w0, VTX_SCR_Z(cmd_w0)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
+    lw      vtxPtr, VTX_SCR_Z(vtxPtr)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
 .endif
-    sub     $2, cmd_w0, cmd_w1_dram           // subtract the w/z value being tested
+    sub     $2, vtxPtr, cmd_w1_dram           // subtract the w/z value being tested
     bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
      lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
     j       branch_dl
@@ -1834,6 +1843,11 @@ load_overlay_and_enter:
     jal     dma_read_write                           // DMA the overlay
      lhu    dmemAddr, overlay_imem(ovlTableEntry)    // Set up overlay load address
     move    $ra, postOvlRA                // Set the return address to the passed in value
+
+.if . > 0x1FC8
+    .error "Constraints violated on what can be overwritten at end of ucode (relevant for G_LOAD_UCODE)"
+.endif
+
 while_wait_dma_busy:
     mfc0    ovlTableEntry, SP_DMA_BUSY    // Load the DMA_BUSY value into ovlTableEntry
 while_dma_busy:
@@ -1867,6 +1881,8 @@ dma_write:
 .headersize 0x00001000 - orga()
 
 // Overlay 0 controls the RDP and also stops the RSP when work is done
+// The action here is controlled by $1. If yielding, $1 > 0. If this was
+// G_LOAD_UCODE, $1 == 0. If we got to the end of the parent DL, $1 < 0.
 ovl0_start:
 .if !CFG_XBUS // FIFO version
     sub     $11, rdpCmdBufPtr, rdpCmdBufEnd
@@ -1875,37 +1891,42 @@ ovl0_start:
      nop
     jal     while_wait_dma_busy
      lw     $24, rdpFifoPos
-    bltz    $1, taskdone_and_break
+    bltz    $1, taskdone_and_break  // $1 < 0 = Got to the end of the parent DL
      mtc0   $24, DPC_END            // Set the end pointer of the RDP so that it starts the task
 .else // CFG_XBUS
-    bltz    $1, taskdone_and_break
+    bltz    $1, taskdone_and_break  // $1 < 0 = Got to the end of the parent DL
      nop
 .endif
-    bnez    $1, task_yield
-     add    taskDataPtr, taskDataPtr, inputBufferPos
-    lw      $24, 0x09C4(inputBufferPos) // Should this be (inputBufferEnd - 0x04)?
-    sw      taskDataPtr, OSTask + OSTask_data_ptr
-    sw      $24, OSTask + OSTask_ucode
-    la      dmemAddr, start         // DMA address
-    jal     dma_read_write          // initiate DMA read
-     li     dmaLen, 0x0F48 - 1
+    bnez    $1, task_yield          // $1 > 0 = CPU requested yield
+     add    taskDataPtr, taskDataPtr, inputBufferPos // inputBufferPos <= 0; taskDataPtr was where in the DL after the current chunk loaded
+// If here, G_LOAD_UCODE was executed.
+    lw      cmd_w1_dram, (inputBufferEnd - 0x04)(inputBufferPos) // word 1 = ucode code DRAM addr
+    sw      taskDataPtr, OSTask + OSTask_data_ptr // Store where we are in the DL
+    sw      cmd_w1_dram, OSTask + OSTask_ucode // Store pointer to current ucode executing
+    la      dmemAddr, start         // Beginning of overwritable part of IMEM
+    jal     dma_read_write          // DMA DRAM read -> IMEM write
+     li     dmaLen, (while_wait_dma_busy - start) - 1 // End of overwritable part of IMEM
 .if CFG_XBUS
 ovl0_xbus_wait_for_rdp:
     mfc0 $11, DPC_STATUS
     andi $11, $11, DPC_STATUS_DMA_BUSY
     bnez $11, ovl0_xbus_wait_for_rdp // Keep looping while RDP is busy.
 .endif
-    lw      cmd_w1_dram, rdpHalf1Val
-    la      dmemAddr, 0x0180        // DMA address; equal to but probably not actually spFxBase or clipRatio
-    andi    dmaLen, cmd_w0, 0x0FFF
-    add     cmd_w1_dram, cmd_w1_dram, dmemAddr
+    lw      cmd_w1_dram, rdpHalf1Val // Get DRAM address of ucode data from rdpHalf1Val
+    la      dmemAddr, spFxBase      // DMEM address is spFxBase
+    andi    dmaLen, cmd_w0, 0x0FFF  // Extract DMEM length from command word
+    add     cmd_w1_dram, cmd_w1_dram, dmemAddr // Start overwriting data from spFxBase
     jal     dma_read_write          // initate DMA read
-     sub    dmaLen, dmaLen, dmemAddr
+     sub    dmaLen, dmaLen, dmemAddr // End that much before the end of DMEM
     j       while_wait_dma_busy
 .if BUG_HARMLESS_TASKDONE_WRONG_ADDR
-     li     $ra, taskdone_and_break_wrong_addr // See here for more info
+     li     $ra, start
 .else
-     li     $ra, taskdone_and_break
+     li     $ra, start + 4 // Not sure why we skip the first instruction of the new ucode
+.endif
+
+.if . > start
+    .error "ovl0_start does not fit within the space before the start of the ucode loaded with G_LOAD_UCODE"
 .endif
 
 ucode equ $11
@@ -1917,24 +1938,28 @@ task_yield:
     sw      ucode, OS_YIELD_DATA_SIZE - 4
     li      status, SP_SET_SIG1 | SP_SET_SIG2   // yielded and task done signals
     lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
-    li      dmemAddr, 0x8000
+    li      dmemAddr, 0x8000 // 0, but negative = write
     li      dmaLen, OS_YIELD_DATA_SIZE - 1
 .else // CFG_XBUS
-    sw      taskDataPtr, OS_YIELD_DATA_SIZE
-    sw      ucode, OS_YIELD_DATA_SIZE + 4
+    // Instead of saving the whole first OS_YIELD_DATA_SIZE bytes of DMEM,
+    // XBUS saves only up to inputBuffer, as everything after that can be erased,
+    // and because the RDP may still be using the output buffer, which is where
+    // we'd have to write taskDataPtr and ucode.
+    sw      taskDataPtr, inputBuffer // save these values for below, somewhere outside
+    sw      ucode, inputBuffer + 4   // the area being written
     lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
-    li      dmemAddr, 0x8000
+    li      dmemAddr, 0x8000 // 0, but negative = write
     jal     dma_read_write
-     li     dmaLen, OS_YIELD_DATA_SIZE - 1
+     li     dmaLen, inputBuffer - 1
+    // At the end of the OS's yield buffer, write the taskDataPtr and ucode words.
     li      status, SP_SET_SIG1 | SP_SET_SIG2 // yielded and task done signals
-    addiu   cmd_w1_dram, cmd_w1_dram, OS_YIELD_DATA_SIZE_TOTAL - 8
-    li      dmemAddr, -0x76E0 // ???
-    li      dmaLen, 7
+    addiu   cmd_w1_dram, cmd_w1_dram, OS_YIELD_DATA_SIZE - 8
+    li      dmemAddr, 0x8000 | inputBuffer // where they were saved above
+    li      dmaLen, 8 - 1
 .endif
     j       dma_read_write
-// Harmless bug to jump here instead of next instr; state of $ra doesn't matter, about to stop
-taskdone_and_break_wrong_addr:
      li     $ra, break
+
 taskdone_and_break:
     li      status, SP_SET_SIG2   // task done signal
 break:
@@ -2061,7 +2086,7 @@ G_MTX_handler:
      li     dmaLen, 0x0040 - 1                          // Set the DMA length to the size of a matrix (minus 1 because DMA is inclusive)
     addi    cmd_w1_dram, cmd_w1_dram, 0x40              // Increase the matrix stack pointer by the size of one matrix
     sw      cmd_w1_dram, matrixStackPtr                 // Update the matrix stack pointer
-    lw      cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos)
+    lw      cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Load command word 1 again
 load_mtx:
     add     $12, $12, $2        // Add the load type to the command byte, selects the return address based on whether the matrix needs multiplying or just loading
     sw      $zero, mvpValid     // Mark the MVP matrix and light directions as being out of date (the word being written to contains both)
