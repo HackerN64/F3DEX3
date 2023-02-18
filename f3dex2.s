@@ -388,6 +388,7 @@ jumpTableEntry G_SETOTHERMODE_L_handler
 jumpTableEntry G_SETOTHERMODE_H_handler
 jumpTableEntry G_TEXRECT_handler
 jumpTableEntry G_TEXRECTFLIP_handler
+.if !MOD_CMD_JUMP_TABLE
 jumpTableEntry G_SYNC_handler    // G_RDPLOADSYNC
 jumpTableEntry G_SYNC_handler    // G_RDPPIPESYNC
 jumpTableEntry G_SYNC_handler    // G_RDPTILESYNC
@@ -395,11 +396,15 @@ jumpTableEntry G_SYNC_handler    // G_RDPFULLSYNC
 jumpTableEntry G_RDP_handler     // G_SETKEYGB
 jumpTableEntry G_RDP_handler     // G_SETKEYR
 jumpTableEntry G_RDP_handler     // G_SETCONVERT
+.else
+cmdJumpTableForwardBack:
+.endif
 jumpTableEntry G_SETSCISSOR_handler
 jumpTableEntry G_RDP_handler     // G_SETPRIMDEPTH
 jumpTableEntry G_RDPSETOTHERMODE_handler
 jumpTableEntry G_RDP_handler     // G_LOADTLUT
 jumpTableEntry G_RDPHALF_2_handler
+.if !MOD_CMD_JUMP_TABLE
 jumpTableEntry G_RDP_handler     // G_SETTILESIZE
 jumpTableEntry G_RDP_handler     // G_LOADBLOCK
 jumpTableEntry G_RDP_handler     // G_LOADTILE
@@ -417,6 +422,9 @@ jumpTableEntry G_SETxIMG_handler // G_SETCIMG
 
 commandJumpTable:
 jumpTableEntry G_NOOP_handler
+.else
+cmdJumpTablePositive:
+.endif
 
 // 0x0370-0x0380: DMA Command Jump Table
 jumpTableEntry G_VTX_handler
@@ -429,6 +437,10 @@ jumpTableEntry G_QUAD_handler
 .if !MOD_GENERAL
 // Not actually used or supported--get rid of the DMEM
 jumpTableEntry G_LINE3D_handler
+.endif
+
+.if MOD_CMD_JUMP_TABLE
+    .skip 22 * 2
 .endif
 
 // 0x0380-0x03C4: vertex pointers
@@ -464,6 +476,10 @@ gCullMagicNumbers:
 // bother drawing it at all. Guess they just wanted completeness, and it only
 // costs two bytes of DMEM.
 
+.if MOD_GENERAL
+    .align 4
+.endif
+
 activeClipPlanes:
     .dw ((CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY) << CLIP_SHIFT_SCAL) | ((CLIP_FAR | CLIP_NEAR) << CLIP_SHIFT_SCRN)
 
@@ -478,6 +494,10 @@ clipPoly2:         //  \ / \ / \ /
 // but there needs to be room for the terminating 0, and clipMaskList below needs
 // to be word-aligned. So this is why it's 10 each.
 
+.if MOD_GENERAL
+    .align 4
+.endif
+
 clipMaskList:
     .dw CLIP_NX   << CLIP_SHIFT_SCAL
     .dw CLIP_NY   << CLIP_SHIFT_SCAL
@@ -491,6 +511,10 @@ overlayInfo2:
     OverlayEntry orga(ovl2_start), orga(ovl2_end), ovl2_start
 overlayInfo3:
     OverlayEntry orga(ovl3_start), orga(ovl3_end), ovl3_start
+
+.if MOD_GENERAL
+    .align 8
+.endif
 
 // 0x0420-0x0920: Vertex buffer in RSP internal format
 vertexBuffer:
@@ -875,12 +899,45 @@ run_next_DL_command:
     beqz    inputBufferPos, displaylist_dma             // load more DL commands if none are left
      andi   $1, $1, SP_STATUS_SIG0                      // check if the task should yield
     sra     $12, cmd_w0, 24                             // extract DL command byte from command word
+.if !MOD_CMD_JUMP_TABLE
     sll     $11, $12, 1                                 // multiply command byte by 2 to get jump table offset
     lhu     $11, (commandJumpTable)($11)                // get command subroutine address from command jump table
+.endif
     bnez    $1, load_overlay_0_and_enter                // load and execute overlay 0 if yielding; $1 > 0
      lw     cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
+.if !MOD_CMD_JUMP_TABLE
     jr      $11                                         // jump to the loaded command handler; $1 == 0
+.endif
      addiu  inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
+.if MOD_CMD_JUMP_TABLE
+    // $12 must retain the command byte for load_mtx, and $11 must contain the handler called for G_SETOTHERMODE_H_handler
+    addiu   $2, $12, -G_VTX                             // If >= G_VTX, use jump table
+    bgez    $2, do_cmd_jump_table                       // $2 is the index
+     addiu  $11, $2, (cmdJumpTablePositive - cmdJumpTableForwardBack) / 2 // Will be interpreted relative to other jump table
+    addiu   $2, $2, G_VTX - (0xFF00 | G_SETTIMG)        // If >= G_SETTIMG, use handler; for G_NOOP, this puts
+    bgez    $2, G_SETxIMG_handler                       // garbage in second word, but normal handler does anyway
+     addiu  $3, $2, G_SETTIMG - G_SETTILESIZE           // If >= G_SETTILESIZE, use handler
+    bgez    $3, G_RDP_handler
+     addiu  $11, $3, G_SETTILESIZE - G_SETSCISSOR       // If >= G_SETSCISSOR, use jump table
+    bgez    $11, do_cmd_jump_table
+     nop
+    addiu   $11, $11, G_SETSCISSOR - G_RDPLOADSYNC      // If >= G_RDPLOADSYNC, use handler; for the syncs, this
+    bgez    $11, G_RDP_handler                          // stores the second command word, but that's fine
+do_cmd_jump_table:                                      // If fell through, $1 has cmdJumpTableForwardBack and $12 is negative pointing into it
+     sll    $11, $11, 1                                 // Multiply jump table index in $2 by 2 for addr offset
+    lhu     $11, cmdJumpTableForwardBack($11)           // Load address of handler from jump table
+    jr      $11                                         // Jump to handler
+.endif
+
+.if MOD_CMD_JUMP_TABLE
+    // Move this up here, so that the branch delay slot of the jr above is harmless.
+G_ENDDL_handler:
+    lbu     $1, displayListStackLength          // Load the DL stack index
+    beqz    $1, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
+     addi   $1, $1, -4                          // Decrement the DL stack index
+    j       f3dzex_ovl1_00001020                // has a different version in ovl1
+     lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
+.endif
 
 .if CFG_G_SPECIAL_1_IS_RECALC_MVP // Microcodes besides F3DEX2 2.04H have this as a noop
 .if MOD_GENERAL
@@ -913,12 +970,14 @@ G_GEOMETRYMODE_handler:
     j       run_next_DL_command     // run the next DL command
      sw     $11, geometryModeLabel  // update the geometry mode value
 
+.if !MOD_CMD_JUMP_TABLE             // Moved up to above for branch reasons.
 G_ENDDL_handler:
     lbu     $1, displayListStackLength          // Load the DL stack index
     beqz    $1, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
      addi   $1, $1, -4                          // Decrement the DL stack index
     j       f3dzex_ovl1_00001020                // has a different version in ovl1
      lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
+.endif
 
 G_RDPHALF_2_handler:
     ldv     $v29[0], (texrectWord1)($zero)
