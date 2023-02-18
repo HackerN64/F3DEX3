@@ -18,6 +18,10 @@ G_SHADE                 equ 0x00000004
 G_CULL_FRONT            equ 0x00000200
 G_CULL_BACK             equ 0x00000400
 G_CULL_BOTH             equ 0x00000600
+.if MOD_ATTR_OFFSETS
+G_ATTROFFSET_ST_ENABLE  equ 0x00000100
+G_ATTROFFSET_Z_ENABLE   equ 0x00000800
+.endif
 G_FOG                   equ 0x00010000
 G_LIGHTING              equ 0x00020000
 G_TEXTURE_GEN           equ 0x00040000

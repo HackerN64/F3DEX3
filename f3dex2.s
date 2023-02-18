@@ -272,6 +272,10 @@ numLightsx18:
     .db 11
     .db 7 * 0x18
 
+.if MOD_GENERAL
+    .align 4
+.endif
+
 // 0x01E0
 fogFactor:
     .dw 0x00000000
@@ -287,6 +291,20 @@ textureSettings2:
 // 0x01EC
 geometryModeLabel:
     .dw G_CLIPPING
+    
+.if MOD_GENERAL
+    .align 8
+.endif
+
+.if MOD_ATTR_OFFSETS
+attrOffsetST:
+    .dh 0x0100
+    .dh 0xFF00
+
+attrOffsetZ:
+    .dh 0x0002
+    .dh 0x0000
+.endif
 
 // excluding ambient light
 MAX_LIGHTS equ 7
@@ -358,6 +376,9 @@ movewordTable:
     .dh lightBufferMain  // G_MW_LIGHTCOL
     .dh mvpValid - 1     // G_MW_FORCEMTX
     .dh perspNorm - 2    // G_MW_PERSPNORM
+.if MOD_ATTR_OFFSETS
+    .dh attrOffsetST     // G_MW_ATTROFFSET
+.endif
 
 // 0x030E-0x0314: G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
 movememHandlerTable:
@@ -1427,7 +1448,12 @@ vertices_store:
     // so outputVtxPos is the first vertex and secondVtxPos is the second.
     sub     secondVtxPos, outputVtxPos, $11
     vmudl   $v29, $v21, $v5
-    cfc2    $10, $vcc                   // Load 16 bit screen space clip results, two verts
+.if MOD_GENERAL
+    rClipRes equ $19
+.else
+    rClipRes equ $10
+.endif
+    cfc2    rClipRes, $vcc               // Load 16 bit screen space clip results, two verts
     vmadm   $v29, $v2, $v5
     sdv     vPairMVPPosF[8],  (VTX_FRAC_VEC   - 1 * vtxSize)(secondVtxPos)
     vmadn   $v21, $v21, $v4
@@ -1453,22 +1479,25 @@ vertices_store:
     vmadn   $v5, $v26, $v4
     lsv     vPairMVPPosI[6],  (VTX_Z_INT      - 2 * vtxSize)(outputVtxPos) // load Z into W slot, will be for fog below
     vmadh   $v4, $v25, $v4
-    sh      $10,              (VTX_CLIP_SCRN  - 1 * vtxSize)(secondVtxPos) // XYZW/W second vtx results in bits 0xF0F0
+    sh      rClipRes,         (VTX_CLIP_SCRN  - 1 * vtxSize)(secondVtxPos) // XYZW/W second vtx results in bits 0xF0F0
     vmadh   $v2, $v2, $v31[7]           // Some extended precision thing? 0x7FFF times 0 or 0x7FFF
-    sll     $11, $10, 4                 // Shift first vtx screen space clip into positions 0xF0F0
+    sll     $11, rClipRes, 4            // Shift first vtx screen space clip into positions 0xF0F0
     vcl     $v29, vPairMVPPosF, $v7[3h] // Compare XYZZ to clip-ratio-scaled W (frac part)
-    cfc2    $10, $vcc                   // Load 16 bit clip-ratio-scaled results, two verts
+    cfc2    rClipRes, $vcc              // Load 16 bit clip-ratio-scaled results, two verts
     vmudl   $v29, vPairMVPPosF, $v5[3h] // Pos times inv W
     ssv     $v5[14],          (VTX_INV_W_FRAC - 1 * vtxSize)(secondVtxPos)
     vmadm   $v29, vPairMVPPosI, $v5[3h] // Pos times inv W
     addi    inputVtxPos, inputVtxPos, (2 * inputVtxSize) // Advance two positions forward in the input vertices
     vmadn   $v26, vPairMVPPosF, $v2[3h] // Pos times inv W extended precision thing?
-    sh      $10,              (VTX_CLIP_SCAL  - 1 * vtxSize)(secondVtxPos) // Clip scaled second vtx results in bits 0xF0F0
+    sh      rClipRes,         (VTX_CLIP_SCAL  - 1 * vtxSize)(secondVtxPos) // Clip scaled second vtx results in bits 0xF0F0
     vmadh   $v25, vPairMVPPosI, $v2[3h] // v25:v26 = pos times inv W
-    sll     $10, $10, 4                 // Shift first vtx scaled clip into positions 0xF0F0
+    sll     rClipRes, rClipRes, 4       // Shift first vtx scaled clip into positions 0xF0F0
     vmudm   $v3, vPairST, vVpMisc       // Scale ST for two verts, using TexSScl and TexTScl in elems 2, 3, 6, 7
     sh      $11,              (VTX_CLIP_SCRN  - 2 * vtxSize)(outputVtxPos) // Clip screen first vtx results
-    sh      $10,              (VTX_CLIP_SCAL  - 2 * vtxSize)(outputVtxPos) // Clip scaled first vtx results
+.if MOD_ATTR_OFFSETS
+    vmadh   $v3, vFogMask, vOne[0]      // + 1 * ST offset
+.endif
+    sh      rClipRes,         (VTX_CLIP_SCAL  - 2 * vtxSize)(outputVtxPos) // Clip scaled first vtx results
     vmudl   $v29, $v26, vVpMisc[4]      // Scale result by persp norm
     ssv     $v5[6],           (VTX_INV_W_FRAC - 2 * vtxSize)(outputVtxPos)
     vmadm   $v25, $v25, vVpMisc[4]      // Scale result by persp norm
@@ -1539,8 +1568,28 @@ load_spfx_global_values:
     jr      $ra
      addi   secondVtxPos, rdpCmdBufPtr, 0x50      // Pointer to currently unused memory in command buffer
 .else
+.if MOD_ATTR_OFFSETS
+    // vFogMask is ST offset
+    lhu     $8, (geometryModeLabel+2)($zero)      // $8 = secondVtxPos, about to be overwritten
+    // Byte addr in vector, undocumented behavior that this works for unaligned vector element
+    ldv     vFogMask[4], (attrOffsetST - spFxBase)(spFxBaseReg) // elems 2, 3, 4 = S, T, Z offset
+    vne     $v2, $v31, $v31[2h]                   // VCC = 11011101
+    andi    $11, $8, G_ATTROFFSET_Z_ENABLE
+    vmrg    $v2, vZero, vFogMask[4]               // all zeros except elems 2, 6 are Z offset
+    beqz    $11, after_attroffset_z
+     llv    vFogMask[12], (attrOffsetST - spFxBase)(spFxBaseReg) // elems 6, 7 = S, T offset
+    vadd    vVpFgOffset, vVpFgOffset, $v2         // add Z offset if enabled
+after_attroffset_z:
+    andi    $11, $8, G_ATTROFFSET_ST_ENABLE
+    vlt     $v2, $v31, $v31[3]                    // VCC = 11101110
+    bnez    $11, after_attroffset_st              // Branch if ST offset enabled
+     addi    secondVtxPos, rdpCmdBufPtr, 0x50     // Pointer to currently unused memory in command buffer
+    vclr    vFogMask                              // If disabled, clear ST offset
+after_attroffset_st:
+.else
     vlt     $v2, $v31, $v31[3]                    // VCC = 11101110
     addi    secondVtxPos, rdpCmdBufPtr, 0x50      // Pointer to currently unused memory in command buffer
+.endif
     vsub    $v2, vZero, vVpFgScale                // -vscale
     llv     vVpMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
     vmrg    vVpFgScale, vVpFgScale, $v29[0]       // Put fog multiplier in elements 3,7 of vscale
