@@ -439,10 +439,6 @@ jumpTableEntry G_QUAD_handler
 jumpTableEntry G_LINE3D_handler
 .endif
 
-.if MOD_CMD_JUMP_TABLE
-    .skip 22 * 2
-.endif
-
 // 0x0380-0x03C4: vertex pointers
 vertexTable:
 
@@ -668,6 +664,7 @@ spFxBaseReg equ $13  // global
 vVpFgScale  equ $v16 // All of these used locally elsewhere
 vVpFgOffset equ $v17
 vVpMisc     equ $v18
+// These two not used in MOD_GENERAL
 vFogMask    equ $v19
 vVpNegScale equ $v21
 
@@ -1347,7 +1344,9 @@ vertex_skip_recalc_mvp:
     jal     while_wait_dma_busy
      ldv    mxr2f[8], (mvpMatrix + 48)($zero)
     ldv     $v20[0], (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // load the position of the 1st vertex into v20's lower 8 bytes
+.if !MOD_GENERAL
     vmov    vVpFgScale[5], vVpNegScale[1]          // Finish building vVpFgScale
+.endif
     ldv     $v20[8], (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos) // load the position of the 2nd vertex into v20's upper 8 bytes
 
 vertices_process_pair:
@@ -1479,7 +1478,9 @@ vertices_store:
     slv     $v3[4],           (VTX_TC_VEC     - 1 * vtxSize)(secondVtxPos) // Store scaled S, T vertex 1
     vmudh   $v29, vVpFgOffset, vOne[0]  //   1 * vtrans (and fog offset in elems 3,7)
     slv     $v3[12],          (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos) // Store scaled S, T vertex 2
+.if !MOD_GENERAL
     vmadh   $v29, vFogMask, $v31[3]     // + 0x7F00 in fog elements (because auto-clamp to 0x7FFF, and will clamp to 0x7F00 below)
+.endif
     vmadn   $v26, $v26, vVpFgScale      // + pos frac * scale
     bgtz    $1, vertices_process_pair
      vmadh  $v25, $v25, vVpFgScale      // int part, v25:v26 is now screen space pos
@@ -1514,6 +1515,7 @@ load_spfx_global_values:
                        (element 5 written just before vertices_process_pair)
     v17 = vVpFgOffset = [vtrans[0], vtrans[1], vtrans[2], fogOffset, (repeat)]
     v18 = vVpMisc = [???, ???, TexSScl, TexTScl, perspNorm, clipRatio, TexSScl, TexTScl]
+    // Unused in MOD_GENERAL:
     v19 = vFogMask = [0x0000, 0x0000, 0x0000, 0x0001, 0x0000, 0x0000, 0x0000, 0x0001]
     v21 = vVpNegScale = -[vscale[0:3], vscale[0:3]]
     */
@@ -1523,6 +1525,7 @@ load_spfx_global_values:
     llv     $v29[0], (fogFactor - spFxBase)(spFxBaseReg) // Load fog multiplier and offset
     ldv     vVpFgOffset[0], (viewport + 8)($zero) // Load vtrans duplicated in 0-3 and 4-7
     ldv     vVpFgOffset[8], (viewport + 8)($zero)
+.if !MOD_GENERAL
     vlt     vFogMask, $v31, $v31[3]               // VCC = 11101110
     vsub    vVpNegScale, vZero, vVpFgScale        // -vscale
     llv     vVpMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
@@ -1535,6 +1538,21 @@ load_spfx_global_values:
     vmov    vVpFgScale[1], vVpNegScale[1]         // Negate vscale[1] because RDP top = y=0
     jr      $ra
      addi   secondVtxPos, rdpCmdBufPtr, 0x50      // Pointer to currently unused memory in command buffer
+.else
+    vlt     $v2, $v31, $v31[3]                    // VCC = 11101110
+    addi    secondVtxPos, rdpCmdBufPtr, 0x50      // Pointer to currently unused memory in command buffer
+    vsub    $v2, vZero, vVpFgScale                // -vscale
+    llv     vVpMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
+    vmrg    vVpFgScale, vVpFgScale, $v29[0]       // Put fog multiplier in elements 3,7 of vscale
+    llv     vVpMisc[12], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
+    vadd    $v29, $v29, $v31[3]                   // Add 0x7F00 to fog offset
+    llv     vVpMisc[8], (perspNorm)($zero)        // Perspective normalization long (actually short)
+    vmov    vVpFgScale[1], $v2[1]                 // Negate vscale[1] because RDP top = y=0
+    lsv     vVpMisc[10], (clipRatio + 6 - spFxBase)(spFxBaseReg) // Clip ratio (-x version, but normally +/- same in all dirs)
+    vmov    vVpFgScale[5], $v2[1]                 // Finish building vVpFgScale
+    jr      $ra
+     vmrg    vVpFgOffset, vVpFgOffset, $v29[1]    // Put fog offset in elements 3,7 of vtrans
+.endif
 
 G_TRI2_handler:
 G_QUAD_handler:
