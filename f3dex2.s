@@ -284,9 +284,19 @@ fogFactor:
 textureSettings1:
     .dw 0x00000000 // first word, has command byte, bowtie val, level, tile, and on
 
+.if MOD_CLIP_CHANGES
+    .align 8 // textureSettings2 and clipRatios loaded together
+.endif
+
 // 0x01E8
 textureSettings2:
     .dw 0x00000000 // second word, has s and t scale
+    
+.if MOD_CLIP_CHANGES
+clipRatios:
+    .dh 0x0002 // X
+    .dh 0x0002 // Y
+.endif
 
 // 0x01EC
 geometryModeLabel:
@@ -1402,12 +1412,20 @@ vertices_store:
     vge     $v3, $v25, vZero[0]            // Clamp Z to >= 0
 .endif
     addi    $1, $1, -4                     // Decrement vertex count by 2
+.if MOD_CLIP_CHANGES
+    vmudl   $v29, vPairMVPPosF, vFogMask[4] // Persp norm moved to here
+.else
     vmudl   $v29, vPairMVPPosF, vVpMisc[4] // Persp norm
+.endif
     // First time through, secondVtxPos is temp memory in the current RDP output buffer,
     // so these writes don't harm anything. On subsequent loops, this is finishing the
     // store of the previous two vertices.
     sub     $11, secondVtxPos, $7          // Points 8 above secondVtxPos if fog, else 0
+.if MOD_CLIP_CHANGES
+    vmadm   $v2, vPairMVPPosI, vFogMask[4] // Persp norm moved to here
+.else
     vmadm   $v2, vPairMVPPosI, vVpMisc[4]  // Persp norm
+.endif
     sbv     $v27[15],         (VTX_COLOR_A + 8 - 1 * vtxSize)($11) // In VTX_SCR_Y if fog disabled...
     vmadn   $v21, vZero, vZero[0]
     sbv     $v27[7],          (VTX_COLOR_A + 8 - 2 * vtxSize)($11) // ...which gets overwritten below
@@ -1415,13 +1433,22 @@ vertices_store:
     vmov    $v26[1], $v3[2]
     ssv     $v3[12],          (VTX_SCR_Z      - 1 * vtxSize)(secondVtxPos)
 .endif
+.if MOD_CLIP_CHANGES
+    vmudm   $v7, vVpMisc, vPairMVPPosF[3h] // W * clip ratios for X and Y, garbage for Z and W
+.else
     vmudn   $v7, vPairMVPPosF, vVpMisc[5]  // Clip ratio
+.endif
 .if BUG_NO_CLAMP_SCREEN_Z_POSITIVE
     sdv     $v25[8],          (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
 .else
     slv     $v25[8],          (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
 .endif
+.if MOD_CLIP_CHANGES
+    vmadh   $v6, vVpMisc, vPairMVPPosI[3h] // W * clip ratios for X and Y, garbage for Z and W
+    vmadn   $v7, vZero, vZero              // Extract the fractional part of the result
+.else
     vmadh   $v6, vPairMVPPosI, vVpMisc[5]  // Clip ratio
+.endif
     sdv     $v25[0],          (VTX_SCR_VEC    - 2 * vtxSize)(secondVtxPos)
     vrcph   $v29[0], $v2[3]
     ssv     $v26[12],         (VTX_SCR_Z_FRAC - 1 * vtxSize)(secondVtxPos)
@@ -1470,7 +1497,11 @@ vertices_store:
     sdv     vPairMVPPosI[0],  (VTX_INT_VEC    - 2 * vtxSize)(outputVtxPos)
     vmrg    $v2, vZero, $v31[7] // Set to 0 where positive, 0x7FFF where negative
     ldv     $v20[8], (VTX_IN_OB + 3 * inputVtxSize)(inputVtxPos) // Load pos of 2nd vector on next iteration
+.if MOD_CLIP_CHANGES
+    vch     $v29, vPairMVPPosI, $v6     // Compare XY to W * clip ratio for XY
+.else
     vch     $v29, vPairMVPPosI, $v6[3h] // Compare XYZZ to clip-ratio-scaled W (int part)
+.endif
     slv     $v3[0],           (VTX_COLOR_VEC  - 1 * vtxSize)(secondVtxPos) // Store RGBA for first vector
     vmudl   $v29, $v26, $v5
     lsv     vPairMVPPosI[14], (VTX_Z_INT      - 1 * vtxSize)(secondVtxPos) // load Z into W slot, will be for fog below
@@ -1482,25 +1513,51 @@ vertices_store:
     sh      rClipRes,         (VTX_CLIP_SCRN  - 1 * vtxSize)(secondVtxPos) // XYZW/W second vtx results in bits 0xF0F0
     vmadh   $v2, $v2, $v31[7]           // Some extended precision thing? 0x7FFF times 0 or 0x7FFF
     sll     $11, rClipRes, 4            // Shift first vtx screen space clip into positions 0xF0F0
+.if MOD_CLIP_CHANGES
+    vcl     $v29, vPairMVPPosF, $v7     // Compare XY to W * clip ratio for XY
+.else
     vcl     $v29, vPairMVPPosF, $v7[3h] // Compare XYZZ to clip-ratio-scaled W (frac part)
+.endif
     cfc2    rClipRes, $vcc              // Load 16 bit clip-ratio-scaled results, two verts
+.if MOD_CLIP_CHANGES
+    // We've done -W*crX <= X <= W*crX and -W*crY <= Y <= W*crY. But we want positive Y to use
+    // clip ratio X, we're only using the special larger one for negative Y.
+    vch     $v29, vPairMVPPosI, $v6[0h] // Compare Y to W * clip ratio for X
+    sh      $11,              (VTX_CLIP_SCRN  - 2 * vtxSize)(outputVtxPos) // Clip screen first vtx results
+    vcl     $v29, vPairMVPPosF, $v7[0h] // Compare Y to W * clip ratio for X
+    cfc2    $11, $vcc                   // Load results
+.endif
     vmudl   $v29, vPairMVPPosF, $v5[3h] // Pos times inv W
     ssv     $v5[14],          (VTX_INV_W_FRAC - 1 * vtxSize)(secondVtxPos)
     vmadm   $v29, vPairMVPPosI, $v5[3h] // Pos times inv W
     addi    inputVtxPos, inputVtxPos, (2 * inputVtxSize) // Advance two positions forward in the input vertices
     vmadn   $v26, vPairMVPPosF, $v2[3h] // Pos times inv W extended precision thing?
+.if MOD_CLIP_CHANGES
+    andi    $11, $11, 0x0022            // Only +Y components
+    or      rClipRes, rClipRes, $11     // Combine; if >= larger crY, then also >= smaller crX
+.endif
     sh      rClipRes,         (VTX_CLIP_SCAL  - 1 * vtxSize)(secondVtxPos) // Clip scaled second vtx results in bits 0xF0F0
     vmadh   $v25, vPairMVPPosI, $v2[3h] // v25:v26 = pos times inv W
     sll     rClipRes, rClipRes, 4       // Shift first vtx scaled clip into positions 0xF0F0
     vmudm   $v3, vPairST, vVpMisc       // Scale ST for two verts, using TexSScl and TexTScl in elems 2, 3, 6, 7
+.if !MOD_CLIP_CHANGES
     sh      $11,              (VTX_CLIP_SCRN  - 2 * vtxSize)(outputVtxPos) // Clip screen first vtx results
+.endif
 .if MOD_ATTR_OFFSETS
     vmadh   $v3, vFogMask, vOne[0]      // + 1 * ST offset
 .endif
     sh      rClipRes,         (VTX_CLIP_SCAL  - 2 * vtxSize)(outputVtxPos) // Clip scaled first vtx results
+.if MOD_CLIP_CHANGES
+    vmudl   $v29, $v26, vFogMask[4]     // Persp norm moved to here
+.else
     vmudl   $v29, $v26, vVpMisc[4]      // Scale result by persp norm
+.endif
     ssv     $v5[6],           (VTX_INV_W_FRAC - 2 * vtxSize)(outputVtxPos)
+.if MOD_CLIP_CHANGES
+    vmadm   $v25, $v25, vFogMask[4]     // Persp norm moved to here
+.else
     vmadm   $v25, $v25, vVpMisc[4]      // Scale result by persp norm
+.endif
     ssv     $v4[14],          (VTX_INV_W_INT  - 1 * vtxSize)(secondVtxPos)
     vmadn   $v26, vZero, vZero[0]       // Now v26:v25 = projected position
     ssv     $v4[6],           (VTX_INV_W_INT  - 2 * vtxSize)(outputVtxPos)
@@ -1547,6 +1604,9 @@ load_spfx_global_values:
     // Unused in MOD_GENERAL:
     v19 = vFogMask = [0x0000, 0x0000, 0x0000, 0x0001, 0x0000, 0x0000, 0x0000, 0x0001]
     v21 = vVpNegScale = -[vscale[0:3], vscale[0:3]]
+    // With all mods:
+    vVpMisc  = [clipX, clipY, TexSScl, TexYScl, clipX, clipY, TexSScl, TexYScl]
+    vFogMask = [???, ???, TexSOfs, TexTOfs, perspNorm, ???, TexSOfs, TexTOfs]
     */
     li      spFxBaseReg, spFxBase
     ldv     vVpFgScale[0], (viewport)($zero)      // Load vscale duplicated in 0-3 and 4-7
@@ -1590,12 +1650,23 @@ after_attroffset_st:
     vlt     $v2, $v31, $v31[3]                    // VCC = 11101110
     addi    secondVtxPos, rdpCmdBufPtr, 0x50      // Pointer to currently unused memory in command buffer
 .endif
+.if MOD_CLIP_CHANGES
+    llv     vVpMisc[0], (clipRatios - spFxBase)(spFxBaseReg) // Clip ratios
+.endif
     vsub    $v2, vZero, vVpFgScale                // -vscale
+.if MOD_CLIP_CHANGES
+    ldv     vVpMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale and clip ratios
+.else
     llv     vVpMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
+.endif
     vmrg    vVpFgScale, vVpFgScale, $v29[0]       // Put fog multiplier in elements 3,7 of vscale
     llv     vVpMisc[12], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
     vadd    $v29, $v29, $v31[3]                   // Add 0x7F00 to fog offset
+.if MOD_CLIP_CHANGES
+    llv     vFogMask[8], (perspNorm)($zero)       // Perspective normalization long (actually short)
+.else
     llv     vVpMisc[8], (perspNorm)($zero)        // Perspective normalization long (actually short)
+.endif
     vmov    vVpFgScale[1], $v2[1]                 // Negate vscale[1] because RDP top = y=0
     lsv     vVpMisc[10], (clipRatio + 6 - spFxBase)(spFxBaseReg) // Clip ratio (-x version, but normally +/- same in all dirs)
     vmov    vVpFgScale[5], $v2[1]                 // Finish building vVpFgScale
