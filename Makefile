@@ -98,9 +98,6 @@ define ucode_rule
    $$(error Microcode name not set!)
   endif
   UCODE_OUTPUT_DIR := $(PARENT_OUTPUT_DIR)/$(NAME)
-  ifeq ($(OS),Windows_NT)
-   UCODE_OUTPUT_DIR := $$(subst /,\,$$(UCODE_OUTPUT_DIR))
-  endif
   CODE_FILE := $$(UCODE_OUTPUT_DIR)/$(NAME).code
   DATA_FILE := $$(UCODE_OUTPUT_DIR)/$(NAME).data
   SYM_FILE  := $$(UCODE_OUTPUT_DIR)/$(NAME).sym
@@ -152,8 +149,8 @@ define ucode_rule
 	@printf "$(INFO)Building microcode: $(NAME): $(DESCRIPTION)$(NO_COL)\n"
 	@$(ARMIPS) -strequ ID_STR "$(ID_STR)" $$(ARMIPS_CMDLINE)
   ifneq ($(MD5_CODE),)
-	@(printf "$(MD5_CODE) $$(CODE_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) code matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) code differs$(NO_COL)\n"
-	@(printf "$(MD5_DATA) $$(DATA_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) data matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) data differs$(NO_COL)\n"
+	@(printf "$(MD5_CODE) *$$(CODE_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) code matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) code differs$(NO_COL)\n"
+	@(printf "$(MD5_DATA) *$$(DATA_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) data matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) data differs$(NO_COL)\n"
   else ifneq ($(1),1)
 	@printf "  $(WARNING)MD5 sums not in database for $(NAME)$(NO_COL)\n"
   endif
