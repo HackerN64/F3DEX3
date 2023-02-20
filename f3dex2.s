@@ -193,6 +193,7 @@ displayListStack:
 // at some point in development.
 spFxBase:
 
+.if !MOD_CLIP_CHANGES
 // 0x0180-0x1B0: clipping values
 clipRatio: // This is an array of 6 doublewords
 // G_MWO_CLIP_R** point to the second word of each of these, and end up setting
@@ -206,6 +207,7 @@ clipRatio: // This is an array of 6 doublewords
     .dw 0x00000000, 0x00000001 // 0 * all, 1 * w = no nearclipping
 .else
     .dw 0x00000000, 0x00010001 // 1 * z,   1 * w = nearclipping
+.endif
 .endif
 
 // 0x1B0: constants for register $v31
@@ -254,6 +256,7 @@ linearGenerateCoefficients:
     .dh 0x6CB3
     .dh 2
 
+.if !MOD_GENERAL
 // 0x01D8
     .db 0x00 // Padding to allow mvpValid to be written to as a 32-bit word
 mvpValid:
@@ -271,9 +274,10 @@ numLightsx18:
 
     .db 11
     .db 7 * 0x18
+.endif
 
-.if MOD_GENERAL
-    .align 4
+.if (. & 3) != 0
+.error "Wrong alignment before fogFactor"
 .endif
 
 // 0x01E0
@@ -284,8 +288,9 @@ fogFactor:
 textureSettings1:
     .dw 0x00000000 // first word, has command byte, bowtie val, level, tile, and on
 
-.if MOD_CLIP_CHANGES
-    .align 8 // textureSettings2 and clipRatios loaded together
+// textureSettings2 and clipRatios loaded together
+.if (. & 7) != 0
+.error "Wrong alignment before textureSettings2"
 .endif
 
 // 0x01E8
@@ -298,15 +303,10 @@ clipRatios:
     .dh 0x0002 // Y
 .endif
 
-// 0x01EC
-geometryModeLabel:
-    .dw G_CLIPPING
-    
-.if MOD_GENERAL
-    .align 8
-.endif
-
 .if MOD_ATTR_OFFSETS
+.if (. & 7) != 0
+.error "Wrong alignment before attrOffsetST"
+.endif
 attrOffsetST:
     .dh 0x0100
     .dh 0xFF00
@@ -314,6 +314,19 @@ attrOffsetST:
 attrOffsetZ:
     .dh 0x0002
     .dh 0x0000
+.endif
+
+.if MOD_GENERAL
+    .dh 0x0000 // TODO ambient occlusion
+    .dh 0x0000
+.endif
+
+// 0x01EC
+geometryModeLabel:
+    .dw G_CLIPPING
+
+.if (. & 7) != 0
+.error "Wrong alignment before lighting"
 .endif
 
 // excluding ambient light
@@ -364,6 +377,18 @@ overlayInfo0:
 overlayInfo1:
     OverlayEntry orga(ovl1_start), orga(ovl1_end), ovl1_start
 
+.if MOD_GENERAL
+    .db 0x00 // Padding to allow mvpValid to be written to as a 32-bit word
+mvpValid:
+    .db 0x01
+    .dh 0x0000 // Shared padding to allow mvpValid (probably lightsValid?) and
+               // numLightsx18 to both be written to as 32-bit words for moveword
+lightsValid:   // Gets overwritten with 0 when numLights is written with moveword.
+    .db 1
+numLightsx18:
+    .db 0
+.endif
+
 // 0x02F0-0x02FE: Movemem table
 movememTable:
     // Temporary matrix in clipTempVerts scratch space, aligned to 16 bytes
@@ -380,14 +405,18 @@ movememTable:
 movewordTable:
     .dh mvpMatrix        // G_MW_MATRIX
     .dh numLightsx18 - 3 // G_MW_NUMLIGHT
+.if MOD_CLIP_CHANGES
+    .dh clipTempVerts    // G_MW_CLIP; discard the data
+.else
     .dh clipRatio        // G_MW_CLIP
+.endif
     .dh segmentTable     // G_MW_SEGMENT
     .dh fogFactor        // G_MW_FOG
     .dh lightBufferMain  // G_MW_LIGHTCOL
     .dh mvpValid - 1     // G_MW_FORCEMTX
     .dh perspNorm - 2    // G_MW_PERSPNORM
 .if MOD_ATTR_OFFSETS
-    .dh attrOffsetST     // G_MW_ATTROFFSET
+    .dh clipRatios       // G_MW_MODS: 0 = clipRatios, 1 = attrOffsetST, 2 = attrOffsetZ, 3 = ambient occlusion
 .endif
 
 // 0x030E-0x0314: G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
@@ -503,9 +532,7 @@ gCullMagicNumbers:
 // bother drawing it at all. Guess they just wanted completeness, and it only
 // costs two bytes of DMEM.
 
-.if MOD_GENERAL
-    .align 4
-.endif
+.align 4
 
 activeClipPlanes:
 CLIP_ALL_SCAL equ ((CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY) << CLIP_SHIFT_SCAL)
@@ -527,10 +554,8 @@ clipPoly2:         //  \ / \ / \ /
 // but there needs to be room for the terminating 0, and clipMaskList below needs
 // to be word-aligned. So this is why it's 10 each.
 
-.if MOD_GENERAL
-    .align 4
-.endif
-
+.if !MOD_CLIP_CHANGES
+.align 4
 clipMaskList:
     .dw CLIP_NX   << CLIP_SHIFT_SCAL
     .dw CLIP_NY   << CLIP_SHIFT_SCAL
@@ -538,8 +563,7 @@ clipMaskList:
     .dw CLIP_PY   << CLIP_SHIFT_SCAL
     .dw CLIP_FAR  << CLIP_SHIFT_SCRN
     .dw CLIP_NEAR << CLIP_SHIFT_SCRN
-    
-.if MOD_CLIP_CHANGES
+.else
 clipCondShifts:
     .db CLIP_SHIFT_NY + CLIP_SHIFT_SCAL
     .db CLIP_SHIFT_PY + CLIP_SHIFT_SCRN
@@ -553,9 +577,7 @@ overlayInfo2:
 overlayInfo3:
     OverlayEntry orga(ovl3_start), orga(ovl3_end), ovl3_start
 
-.if MOD_GENERAL
-    .align 8
-.endif
+.align 8
 
 // 0x0420-0x0920: Vertex buffer in RSP internal format
 vertexBuffer:
@@ -1341,28 +1363,17 @@ vClFade2 equ $v2
 clipping_after_vtxwrite:
 // outputVtxPos has been incremented by 2 * vtxSize
 // Store last vertex attributes which were skipped by the early return
-// .if MOD_CLIP_CHANGES
-//     la      $11, 0x0040                   // Round colors to nearest
-//     mtc2    $11, $v29[0]
-//     vadd    $v29, vPairST, $v29[0]
-// .endif
 .if BUG_NO_CLAMP_SCREEN_Z_POSITIVE
     sdv     $v25[0],    (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
 .else
     slv     $v25[0],    (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
 .endif
     ssv     $v26[4],    (VTX_SCR_Z_FRAC - 2 * vtxSize)(outputVtxPos)
-// .if !MOD_CLIP_CHANGES
     suv     vPairST[0], (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
     slv     vPairST[8], (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos)
-// .endif
 .if !BUG_NO_CLAMP_SCREEN_Z_POSITIVE          // Not in F3DEX2 2.04H
     ssv     $v3[4],     (VTX_SCR_Z      - 2 * vtxSize)(outputVtxPos)
 .endif
-// .if MOD_CLIP_CHANGES
-//     suv     $v29[0],    (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
-//     slv     vPairST[8], (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos)
-// .endif
     addi    outputVtxPos, outputVtxPos, -vtxSize // back by 1 vtx so we are actually 1 ahead of where started
     addi    clipPolyWrite, clipPolyWrite, 2  // Original outputVtxPos was already written here; increment write ptr
 clipping_nextedge:
