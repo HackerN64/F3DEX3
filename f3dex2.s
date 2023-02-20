@@ -1341,17 +1341,28 @@ vClFade2 equ $v2
 clipping_after_vtxwrite:
 // outputVtxPos has been incremented by 2 * vtxSize
 // Store last vertex attributes which were skipped by the early return
+// .if MOD_CLIP_CHANGES
+//     la      $11, 0x0040                   // Round colors to nearest
+//     mtc2    $11, $v29[0]
+//     vadd    $v29, vPairST, $v29[0]
+// .endif
 .if BUG_NO_CLAMP_SCREEN_Z_POSITIVE
     sdv     $v25[0],    (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
 .else
     slv     $v25[0],    (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
 .endif
     ssv     $v26[4],    (VTX_SCR_Z_FRAC - 2 * vtxSize)(outputVtxPos)
+// .if !MOD_CLIP_CHANGES
     suv     vPairST[0], (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
     slv     vPairST[8], (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos)
+// .endif
 .if !BUG_NO_CLAMP_SCREEN_Z_POSITIVE          // Not in F3DEX2 2.04H
     ssv     $v3[4],     (VTX_SCR_Z      - 2 * vtxSize)(outputVtxPos)
 .endif
+// .if MOD_CLIP_CHANGES
+//     suv     $v29[0],    (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
+//     slv     vPairST[8], (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos)
+// .endif
     addi    outputVtxPos, outputVtxPos, -vtxSize // back by 1 vtx so we are actually 1 ahead of where started
     addi    clipPolyWrite, clipPolyWrite, 2  // Original outputVtxPos was already written here; increment write ptr
 clipping_nextedge:
