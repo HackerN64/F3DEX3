@@ -171,14 +171,22 @@ VTX_CLIP_SCRN   equ 0x26
 // vertex or zeros) and are not used. Also, the bits for comparisons to W in
 // clip ratio scaled clipping are actually for Z, but only X and Y are used in
 // clip ratio scaled clipping.
-CLIP_NX equ (1 << 4)
-CLIP_NY equ (1 << 5)
-CLIP_NZ equ (1 << 6)
-CLIP_NW equ (1 << 7)
-CLIP_PX equ (1 << 12)
-CLIP_PY equ (1 << 13)
-CLIP_PZ equ (1 << 14)
-CLIP_PW equ (1 << 15) // never used
+CLIP_SHIFT_NX equ 4
+CLIP_SHIFT_NY equ 5
+CLIP_SHIFT_NZ equ 6
+CLIP_SHIFT_NW equ 7
+CLIP_SHIFT_PX equ 12
+CLIP_SHIFT_PY equ 13
+CLIP_SHIFT_PZ equ 14
+CLIP_SHIFT_PW equ 15 // never used
+CLIP_NX equ (1 << CLIP_SHIFT_NX)
+CLIP_NY equ (1 << CLIP_SHIFT_NY)
+CLIP_NZ equ (1 << CLIP_SHIFT_NZ)
+CLIP_NW equ (1 << CLIP_SHIFT_NW)
+CLIP_PX equ (1 << CLIP_SHIFT_PX)
+CLIP_PY equ (1 << CLIP_SHIFT_PY)
+CLIP_PZ equ (1 << CLIP_SHIFT_PZ)
+CLIP_PW equ (1 << CLIP_SHIFT_PW) // never used
 // These values apply to either screen space clipping or clip ratio scaled
 // clipping, with appropriate shifts when used as one whole word.
 CLIP_SHIFT_SCAL equ 16

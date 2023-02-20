@@ -508,7 +508,13 @@ gCullMagicNumbers:
 .endif
 
 activeClipPlanes:
-    .dw ((CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY) << CLIP_SHIFT_SCAL) | ((CLIP_FAR | CLIP_NEAR) << CLIP_SHIFT_SCRN)
+CLIP_ALL_SCAL equ ((CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY) << CLIP_SHIFT_SCAL)
+.if MOD_CLIP_CHANGES
+CLIP_ALL_SCRN equ (CLIP_NEAR << CLIP_SHIFT_SCRN)
+.else
+CLIP_ALL_SCRN equ ((CLIP_FAR | CLIP_NEAR) << CLIP_SHIFT_SCRN)
+.endif
+    .dw CLIP_ALL_SCAL | CLIP_ALL_SCRN
 
 // 0x3D0: Clipping polygons, as lists of vertex addresses. When handling each
 // clipping condition, the polygon is read off one list and the modified polygon
@@ -533,6 +539,14 @@ clipMaskList:
     .dw CLIP_FAR  << CLIP_SHIFT_SCRN
     .dw CLIP_NEAR << CLIP_SHIFT_SCRN
     
+.if MOD_CLIP_CHANGES
+clipCondShifts:
+    .db CLIP_SHIFT_NY + CLIP_SHIFT_SCAL
+    .db CLIP_SHIFT_PY + CLIP_SHIFT_SCRN
+    .db CLIP_SHIFT_NX + CLIP_SHIFT_SCRN
+    .db CLIP_SHIFT_PX + CLIP_SHIFT_SCRN
+.endif
+
 // 0x0410-0x0420: Overlay 2/3 table
 overlayInfo2:
     OverlayEntry orga(ovl2_start), orga(ovl2_end), ovl2_start
@@ -1129,7 +1143,12 @@ ovl23_lighting_entrypoint_copy:  // same IMEM address as ovl23_lighting_entrypoi
 ovl23_clipping_entrypoint:
     move    savedRA, $ra
 ovl3_clipping_nosavera:
+.if MOD_CLIP_CHANGES
+    la      clipMaskIdx, 4
+    la      spFxBaseReg, spFxBase // Might not be initialized if came back from yield
+.else
     la      clipMaskIdx, 0x0014
+.endif
     la      clipPolySelect, 6  // Everything being indexed from 6 saves one instruction at the end of the loop
     la      outputVtxPos, clipTempVerts
     // Write the current three verts as the initial polygon
@@ -1138,8 +1157,16 @@ ovl3_clipping_nosavera:
     sh      $3, (clipPoly - 6 + 4)(clipPolySelect)
     sh      $zero, (clipPoly)(clipPolySelect) // Zero to mark end of polygon
     lw      savedActiveClipPlanes, activeClipPlanes
+.if MOD_CLIP_CHANGES
+.if !CFG_NoN
+    .error "MOD_CLIP_CHANGES requires CFG_NoN"
+.endif
+    la      $9, CLIP_NEAR << CLIP_SHIFT_SCRN         // Initial clip mask for no nearclipping
+.endif
 clipping_condlooptop: // Loop over six clipping conditions: near, far, +y, +x, -y, -x
+.if !MOD_CLIP_CHANGES
     lw      $9, (clipMaskList)(clipMaskIdx)          // Load clip mask
+.endif
     lw      clipFlags, VTX_CLIP($3)                  // Load flags for V3, which will be the final vertex of the last polygon
     and     clipFlags, clipFlags, $9                 // Mask V3's flags to current clip condition
     addi    clipPolyRead,   clipPolySelect, -6       // Start reading at the beginning of the old polygon
@@ -1161,90 +1188,152 @@ clipping_edgelooptop: // Loop over edges connecting verts, possibly subdivide th
 clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / on screen, $3 = vtx meeting clip cond / off screen
     // Interpolate between these two vertices; create a new vertex which is on the
     // clipping boundary (e.g. at the screen edge)
+vClBaseF equ $v8
+vClBaseI equ $v9
+vClDiffF equ $v10
+vClDiffI equ $v11
+.if !MOD_CLIP_CHANGES
     sll     $11, clipMaskIdx, 1  // clipMaskIdx counts by 4, so this is now by 8
     ldv     $v2[0], (clipRatio)($11) // Load four shorts holding clip ratio for this clip condition
+.endif
     ldv     $v4[0], VTX_FRAC_VEC($19) // Vtx on screen, frac pos
     ldv     $v5[0], VTX_INT_VEC ($19) // Vtx on screen, int pos
-    ldv     $v6[0], VTX_FRAC_VEC($3)  // Vtx off screen, frac pos
-    ldv     $v7[0], VTX_INT_VEC ($3)  // Vtx off screen, int pos
-    vmudh   $v3, $v2, $v31[0]         // v3 = -clipRatio
-    vmudn   $v8, $v4, $v2             // frac:   vtx on screen * clip ratio
-    vmadh   $v9, $v5, $v2             // int:  + vtx on screen * clip ratio   9:8
-    vmadn   $v10, $v6, $v3            // frac: - vtx off screen * clip ratio
-    vmadh   $v11, $v7, $v3            // int:  - vtx off screen * clip ratio 11:10
-    vaddc   $v8, $v8, $v8[0q]         // frac: y += x, w += z, vtx on screen only
+.if MOD_CLIP_CHANGES
+    /*
+    Five clip conditions (these are in a different order from vanilla):
+           vClBaseI/vClBaseF[3]     vClDiffI/vClDiffF[3]
+    4 W=0:             W1                 W1  -         W2
+    3 +X :      X1 -   W1         (X1 -   W1) - (X2 -   W2)
+    2 -X :      X1 +   W1         (X1 +   W1) - (X2 +   W2)
+    1 +Y :      Y1 -   W1         (Y1 -   W1) - (Y2 -   W2)
+    0 -Y :      Y1 + 6*W1         (Y1 + 6*W1) - (Y2 + 6*W2)  <- this 6 is clip ratio -Y (adjustable)
+    The idea is:
+    - Far clipping is removed (though rejection of tris where all three verts
+      are past the farplane still exists). The combination of the Z elements of
+      the VP matrix and viewport should be set so that no Z buffered content is
+      drawn past what would have been the farplane.
+    - We reject tris which are fully offscreen, then draw tris which are fully within
+      the box with clip ratio X (2) everywhere except -Y (6). Then for any remaining
+      tris, we clip them at the box with clip ratio 1 everywhere except -Y (6).
+    - Besides all of this, should be the same results in vClBaseI/F / vClDiffI/F as vanilla,
+      just not taking up 72 bytes of DMEM for clipRatio and clipMaskList. It's a few
+      more instructions here, though not a ton, and it's in the clipping overlay so the
+      size doesn't matter too much.
+    */
+    ldv     $v4[8], VTX_FRAC_VEC($3)  // Vtx off screen, frac pos
+    ldv     $v5[8], VTX_INT_VEC ($3)  // Vtx off screen, int pos
+    beqz    clipMaskIdx, clipping_mod_neg_y  // Will be overwritten if not -Y
+     lsv    $v29[0], (clipRatios+2 - spFxBase)(spFxBaseReg) // W factor = -Y clip ratio
+    ctc2    clipMaskIdx, $vcc                // Conditions 1 (+y) or 3 (+x) -> W factor is -1
+    vmrg    $v29, $v31, vOne                 // odd -> elem 0 = 1 -> $v31[0] = -1, else 1
+clipping_mod_neg_y:
+    andi    $11, clipMaskIdx, 2              // Conditions 2 (-x) or 3 (+x)
+    vor     $v6, $v4, $v4                    // Keep X
+    bnez    $11, clipping_mod_cond_x
+     vor    $v7, $v5, $v5
+    vor     $v6, vZero, $v4[1h]              // Move Y to X
+    vor     $v7, vZero, $v5[1h]
+clipping_mod_cond_x:
+    andi    $11, clipMaskIdx, 4              // Condition 4 (w)
+    vmudn   vClBaseF, $v4, $v29[0]           // W * W factor
+    bnez    $11, clipping_mod_nonear_noxy
+     vmadh   vClBaseI, $v5, $v29[0]
+    vmadn   vClBaseF, vOne, $v6[0h]          // + X or Y merged
+    vmadh   vClBaseI, vOne, $v7[0h]
+clipping_mod_nonear_noxy:
+    vsubc   vClDiffF, vClBaseF, vClBaseF[7]  // Vtx on screen - vtx off screen
     lqv     $v25[0], (linearGenerateCoefficients)($zero) // Used just to load the value 2
-    vadd    $v9, $v9, $v9[0q]         // int:  y += x, w += z, vtx on screen only
-    vaddc   $v10, $v10, $v10[0q]      // frac: y += x, w += z, vtx on screen - vtx off screen
-    vadd    $v11, $v11, $v11[0q]      // int:  y += x, w += z, vtx on screen - vtx off screen
-    vaddc   $v8, $v8, $v8[1h]         // frac: w += y (sum of all 4), vtx on screen only
-    vadd    $v9, $v9, $v9[1h]         // int:  w += y (sum of all 4), vtx on screen only
-    vaddc   $v10, $v10, $v10[1h]      // frac: w += y (sum of all 4), vtx on screen - vtx off screen
-    vadd    $v11, $v11, $v11[1h]      // int:  w += y (sum of all 4), vtx on screen - vtx off screen
+    vsub    vClDiffI, vClBaseI, vClBaseI[7]
+.else
+    ldv     $v6[0], VTX_FRAC_VEC($3)         // Vtx off screen, frac pos
+    ldv     $v7[0], VTX_INT_VEC ($3)         // Vtx off screen, int pos
+    vmudh   $v3, $v2, $v31[0]                // v3 = -clipRatio
+    vmudn   vClBaseF, $v4, $v2               // frac:   vtx on screen * clip ratio
+    vmadh   vClBaseI, $v5, $v2               // int:  + vtx on screen * clip ratio   9:8
+    vmadn   vClDiffF, $v6, $v3               // frac: - vtx off screen * clip ratio
+    vmadh   vClDiffI, $v7, $v3               // int:  - vtx off screen * clip ratio 11:10
+    vaddc   vClBaseF, vClBaseF, vClBaseF[0q] // frac: y += x, w += z, vtx on screen only
+    lqv     $v25[0], (linearGenerateCoefficients)($zero) // Used just to load the value 2
+    vadd    vClBaseI, vClBaseI, vClBaseI[0q] // int:  y += x, w += z, vtx on screen only
+    vaddc   vClDiffF, vClDiffF, vClDiffF[0q] // frac: y += x, w += z, vtx on screen - vtx off screen
+    vadd    vClDiffI, vClDiffI, vClDiffI[0q] // int:  y += x, w += z, vtx on screen - vtx off screen
+    vaddc   vClBaseF, vClBaseF, vClBaseF[1h] // frac: w += y (sum of all 4), vtx on screen only
+    vadd    vClBaseI, vClBaseI, vClBaseI[1h] // int:  w += y (sum of all 4), vtx on screen only
+    vaddc   vClDiffF, vClDiffF, vClDiffF[1h] // frac: w += y (sum of all 4), vtx on screen - vtx off screen
+    vadd    vClDiffI, vClDiffI, vClDiffI[1h] // int:  w += y (sum of all 4), vtx on screen - vtx off screen
+.endif
     // This algorithm below with the two reciprocals is probably some kind of Newton's
     // method to get a better precision result, cause the precision of the divide is awful.
-.if BUG_CLIPPING_FAIL_WHEN_SUM_ZERO   // Only in F3DEX2 2.04H
-    vrcph   $v29[0], $v11[3]          // int:  1 / (x+y+z+w), vtx on screen - vtx off screen
+.if BUG_CLIPPING_FAIL_WHEN_SUM_ZERO       // Only in F3DEX2 2.04H
+    vrcph   $v29[0], vClDiffI[3]          // int:  1 / (x+y+z+w), vtx on screen - vtx off screen
 .else
-    vor     $v29, $v11, vOne[0]       // round up int sum to odd; this ensures the value is not 0, otherwise v29 will be 0 instead of +/- 2
-    vrcph   $v3[3], $v11[3]
+    vor     $v29, vClDiffI, vOne[0]       // round up int sum to odd; this ensures the value is not 0, otherwise v29 will be 0 instead of +/- 2
+    vrcph   $v3[3], vClDiffI[3]
 .endif
-    vrcpl   $v2[3], $v10[3]           // frac: 1 / (x+y+z+w), vtx on screen - vtx off screen
-    vrcph   $v3[3], vZero[0]          // get int result of reciprocal
-.if BUG_CLIPPING_FAIL_WHEN_SUM_ZERO   // Only in F3DEX2 2.04H
-    vabs    $v29, $v11, $v25[3] // 0x0002 // v29 = +/- 2 based on sum positive or negative (Bug: or 0 if sum is 0)
+    vrcpl   $v2[3], vClDiffF[3]           // frac: 1 / (x+y+z+w), vtx on screen - vtx off screen
+    vrcph   $v3[3], vZero[0]              // get int result of reciprocal
+.if BUG_CLIPPING_FAIL_WHEN_SUM_ZERO       // Only in F3DEX2 2.04H
+    vabs    $v29, vClDiffI, $v25[3]       // 0x0002 // v29 = +/- 2 based on sum positive or negative (Bug: or 0 if sum is 0)
 .else
-    vabs    $v29, $v29, $v25[3] // 0x0002 // v29 = +/- 2 based on sum positive (incl. zero) or negative
+    vabs    $v29, $v29, $v25[3]           // 0x0002 // v29 = +/- 2 based on sum positive (incl. zero) or negative
 .endif
-    vmudn   $v2, $v2, $v29[3]         // multiply reciprocal by +/- 2
+    vmudn   $v2, $v2, $v29[3]             // multiply reciprocal by +/- 2
     vmadh   $v3, $v3, $v29[3]
-    veq     $v3, $v3, vZero[0]        // if reciprocal high is 0
-    vmrg    $v2, $v2, $v31[0]         // keep reciprocal low, otherwise set to -1
-    vmudl   $v29, $v10, $v2[3]        // sum frac * reciprocal, discard
-    vmadm   $v11, $v11, $v2[3]        // sum int * reciprocal, frac out
-    vmadn   $v10, vZero, vZero[0]     // get int out
-    vrcph   $v13[3], $v11[3]          // reciprocal again (discard result)
-    vrcpl   $v12[3], $v10[3]          // frac part
-    vrcph   $v13[3], vZero[0]         // int part
-    vmudl   $v29, $v12, $v10          // self * own reciprocal? frac*frac discard
-    vmadm   $v29, $v13, $v10          // self * own reciprocal? int*frac discard
-    vmadn   $v10, $v12, $v11          // self * own reciprocal? frac out
-    vmadh   $v11, $v13, $v11          // self * own reciprocal? int out
-    vmudh   $v29, vOne, $v31[1]       // 4 (int part)
-    vmadn   $v10, $v10, $v31[4]       // - 4 * prev result frac part
-    vmadh   $v11, $v11, $v31[4]       // - 4 * prev result frac part
-    vmudl   $v29, $v12, $v10          // * own reciprocal again? frac*frac discard
-    vmadm   $v29, $v13, $v10          // * own reciprocal again? int*frac discard
-    vmadn   $v12, $v12, $v11          // * own reciprocal again? frac out
-    vmadh   $v13, $v13, $v11          // * own reciprocal again? int out
-    vmudl   $v29, $v8, $v12
-    luv     $v26[0], VTX_COLOR_VEC($3)  // Vtx off screen, RGBA
-    vmadm   $v29, $v9, $v12
-    llv     $v26[8], VTX_TC_VEC   ($3)  // Vtx off screen, ST
-    vmadn   $v10, $v8, $v13
-    luv     $v25[0], VTX_COLOR_VEC($19) // Vtx on screen, RGBA
-    vmadh   $v11, $v9, $v13           // 11:10 = vtx on screen sum * prev calculated value
-    llv     $v25[8], VTX_TC_VEC   ($19) // Vtx on screen, RGBA
-    vmudl   $v29, $v10, $v2[3]
-    vmadm   $v11, $v11, $v2[3]
-    vmadn   $v10, $v10, vZero[0]      // * one of the reciprocals above
+    veq     $v3, $v3, vZero[0]            // if reciprocal high is 0
+    vmrg    $v2, $v2, $v31[0]             // keep reciprocal low, otherwise set to -1
+    vmudl   $v29, vClDiffF, $v2[3]        // sum frac * reciprocal, discard
+    vmadm   vClDiffI, vClDiffI, $v2[3]    // sum int * reciprocal, frac out
+    vmadn   vClDiffF, vZero, vZero[0]     // get int out
+    vrcph   $v13[3], vClDiffI[3]          // reciprocal again (discard result)
+    vrcpl   $v12[3], vClDiffF[3]          // frac part
+    vrcph   $v13[3], vZero[0]             // int part
+    vmudl   $v29, $v12, vClDiffF          // self * own reciprocal? frac*frac discard
+    vmadm   $v29, $v13, vClDiffF          // self * own reciprocal? int*frac discard
+    vmadn   vClDiffF, $v12, vClDiffI      // self * own reciprocal? frac out
+    vmadh   vClDiffI, $v13, vClDiffI      // self * own reciprocal? int out
+    vmudh   $v29, vOne, $v31[1]           // 4 (int part)
+    vmadn   vClDiffF, vClDiffF, $v31[4]   // - 4 * prev result frac part
+    vmadh   vClDiffI, vClDiffI, $v31[4]   // - 4 * prev result frac part
+    vmudl   $v29, $v12, vClDiffF          // * own reciprocal again? frac*frac discard
+    vmadm   $v29, $v13, vClDiffF          // * own reciprocal again? int*frac discard
+    vmadn   $v12, $v12, vClDiffI          // * own reciprocal again? frac out
+    vmadh   $v13, $v13, vClDiffI          // * own reciprocal again? int out
+    vmudl   $v29, vClBaseF, $v12
+    luv     $v26[0], VTX_COLOR_VEC($3)    // Vtx off screen, RGBA
+    vmadm   $v29, vClBaseI, $v12
+    llv     $v26[8], VTX_TC_VEC   ($3)    // Vtx off screen, ST
+    vmadn   vClDiffF, vClBaseF, $v13
+    luv     $v25[0], VTX_COLOR_VEC($19)   // Vtx on screen, RGBA
+    vmadh   vClDiffI, vClBaseI, $v13      // 11:10 = vtx on screen sum * prev calculated value
+    llv     $v25[8], VTX_TC_VEC   ($19)   // Vtx on screen, RGBA
+    vmudl   $v29, vClDiffF, $v2[3]
+.if MOD_CLIP_CHANGES
+    ldv     $v6[0], VTX_FRAC_VEC($3)      // Vtx off screen, frac pos
+.endif
+    vmadm   vClDiffI, vClDiffI, $v2[3]
+.if MOD_CLIP_CHANGES
+    ldv     $v7[0], VTX_INT_VEC ($3)      // Vtx off screen, int pos
+.endif
+    vmadn   vClDiffF, vClDiffF, vZero[0]  // * one of the reciprocals above
     // Clamp fade factor
-    vlt     $v11, $v11, vOne[0]       // If integer part of factor less than 1,
-    vmrg    $v10, $v10, $v31[0]       // keep frac part of factor, else set to 0xFFFF (max val)
-    vsubc   $v29, $v10, vOne[0]       // frac part - 1 for carry
-    vge     $v11, $v11, vZero[0]      // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
-    vmrg    $v10, $v10, vOne[0]       // keep frac part of factor, else set to 1 (min val)
-    vmudn   $v2, $v10, $v31[0]        // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
+    vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
+    vmrg    vClDiffF, vClDiffF, $v31[0]   // keep frac part of factor, else set to 0xFFFF (max val)
+    vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
+    vge     vClDiffI, vClDiffI, vZero[0]  // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
+vClFade1 equ $v10 // = vClDiffF
+vClFade2 equ $v2
+    vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
+    vmudn   vClFade2, vClFade1, $v31[0]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
     // Fade between attributes for on screen and off screen vert
-    vmudl   $v29, $v6, $v10[3]        //   Fade factor for off screen vert * off screen vert pos frac
-    vmadm   $v29, $v7, $v10[3]        // + Fade factor for off screen vert * off screen vert pos int
-    vmadl   $v29, $v4, $v2[3]         // + Fade factor for on  screen vert * on  screen vert pos frac
-    vmadm   vPairMVPPosI, $v5, $v2[3] // + Fade factor for on  screen vert * on  screen vert pos int
+    vmudl   $v29, $v6, vClFade1[3]        //   Fade factor for off screen vert * off screen vert pos frac
+    vmadm   $v29, $v7, vClFade1[3]        // + Fade factor for off screen vert * off screen vert pos int
+    vmadl   $v29, $v4, vClFade2[3]        // + Fade factor for on  screen vert * on  screen vert pos frac
+    vmadm   vPairMVPPosI, $v5, vClFade2[3] //+ Fade factor for on  screen vert * on  screen vert pos int
     vmadn   vPairMVPPosF, vZero, vZero[0] // Load resulting frac pos
-    vmudm   $v29, $v26, $v10[3]       //   Fade factor for off screen vert * off screen vert color and TC
-    vmadm   vPairST, $v25, $v2[3]     // + Fade factor for on  screen vert * on  screen vert color and TC
-    li      $7, 0x0000 // Set no fog
-    li      $1, 0x0002 // Set vertex count to 1, so will only write one
+    vmudm   $v29, $v26, vClFade1[3]       //   Fade factor for off screen vert * off screen vert color and TC
+    vmadm   vPairST, $v25, vClFade2[3]    // + Fade factor for on  screen vert * on  screen vert color and TC
+    li      $7, 0x0000                    // Set no fog
+    li      $1, 0x0002                    // Set vertex count to 1, so will only write one
     sh      outputVtxPos, (clipPoly)(clipPolyWrite) // Add the address of the new vert to the output polygon
     j       load_spfx_global_values // Goes to load_spfx_global_values, then to vertices_store, then
      li   $ra, vertices_store + 0x8000 // comes back here, via bltz $ra, clipping_after_vtxwrite
@@ -1277,8 +1366,17 @@ clipping_nextcond:
     bltz    $11, clipping_done                 // If so, degenerate result, quit
      sh     $zero, (clipPoly)(clipPolyWrite)   // Terminate the output polygon with a 0
     lhu     $3, (clipPoly - 2)(clipPolyWrite)  // Initialize the edge start (V3) to the last vert
+.if MOD_CLIP_CHANGES
+    lbu     $11, (clipCondShifts - 1)(clipMaskIdx) // Load next clip condition shift amount
+    la      $9, 1
+    sllv    $9, $9, $11                        // $9 is clip mask
+.endif
     bnez    clipMaskIdx, clipping_condlooptop  // Done with clipping conditions?
+.if MOD_CLIP_CHANGES
+     addiu  clipMaskIdx, clipMaskIdx, -1
+.else
      addi   clipMaskIdx, clipMaskIdx, -0x0004  // Point to next condition
+.endif
     sw      $zero, activeClipPlanes            // Disable all clipping planes while drawing tris
 clipping_draw_tris_loop:
     // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
