@@ -1237,7 +1237,7 @@ clipping_mod_cond_x:
     andi    $11, clipMaskIdx, 4              // Condition 4 (w)
     vmudn   vClBaseF, $v4, $v29[0]           // W * W factor
     bnez    $11, clipping_mod_nonear_noxy
-     vmadh   vClBaseI, $v5, $v29[0]
+     vmadh  vClBaseI, $v5, $v29[0]
     vmadn   vClBaseF, vOne, $v6[0h]          // + X or Y merged
     vmadh   vClBaseI, vOne, $v7[0h]
 clipping_mod_nonear_noxy:
@@ -1766,7 +1766,9 @@ after_attroffset_st:
     llv     vVpMisc[8], (perspNorm)($zero)        // Perspective normalization long (actually short)
 .endif
     vmov    vVpFgScale[1], $v2[1]                 // Negate vscale[1] because RDP top = y=0
+.if !MOD_CLIP_CHANGES
     lsv     vVpMisc[10], (clipRatio + 6 - spFxBase)(spFxBaseReg) // Clip ratio (-x version, but normally +/- same in all dirs)
+.endif
     vmov    vVpFgScale[5], $v2[1]                 // Finish building vVpFgScale
     jr      $ra
      vmrg    vVpFgOffset, vVpFgOffset, $v29[1]    // Put fog offset in elements 3,7 of vtrans
