@@ -288,7 +288,7 @@ fogFactor:
 textureSettings1:
     .dw 0x00000000 // first word, has command byte, bowtie val, level, tile, and on
 
-// textureSettings2 and clipRatios loaded together
+// textureSettings2 and modClipRatio loaded together
 .if (. & 7) != 0
 .error "Wrong alignment before textureSettings2"
 .endif
@@ -298,9 +298,10 @@ textureSettings2:
     .dw 0x00000000 // second word, has s and t scale
     
 .if MOD_CLIP_CHANGES
-clipRatios:
-    .dh 0x0002 // X
-    .dh 0x0002 // Y
+mwModsStart:
+    .dh 0 // currently unused
+modClipRatio:
+    .dh 0x0002
 .endif
 
 .if MOD_ATTR_OFFSETS
@@ -387,6 +388,16 @@ lightsValid:   // Gets overwritten with 0 when numLights is written with movewor
     .db 1
 numLightsx18:
     .db 0
+    
+modSaveRA:
+    // Store original $ra here during clipping instead of globally occupying
+    // $30 = savedRA.
+    .skip 2
+modSaveFlatR4:
+    // Store value of $4 here during clipping subdivision, so it can be used as
+    // a local. It's the first vertex of three in the original tri, for loading
+    // vertex colors from for flat shading.
+    .skip 2
 .endif
 
 // 0x02F0-0x02FE: Movemem table
@@ -406,7 +417,7 @@ movewordTable:
     .dh mvpMatrix        // G_MW_MATRIX
     .dh numLightsx18 - 3 // G_MW_NUMLIGHT
 .if MOD_CLIP_CHANGES
-    .dh clipTempVerts    // G_MW_CLIP; discard the data
+    .dh clipTempVerts    // G_MW_CLIP; discard writes to here
 .else
     .dh clipRatio        // G_MW_CLIP
 .endif
@@ -416,7 +427,7 @@ movewordTable:
     .dh mvpValid - 1     // G_MW_FORCEMTX
     .dh perspNorm - 2    // G_MW_PERSPNORM
 .if MOD_ATTR_OFFSETS
-    .dh clipRatios       // G_MW_MODS: 0 = clipRatios, 1 = attrOffsetST, 2 = attrOffsetZ, 3 = ambient occlusion
+    .dh mwModsStart      // G_MW_MODS: 0 = modClipRatio, 1 = attrOffsetST, 2 = attrOffsetZ, 3 = ambient occlusion
 .endif
 
 // 0x030E-0x0314: G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
@@ -566,9 +577,9 @@ clipMaskList:
 .else
 clipCondShifts:
     .db CLIP_SHIFT_NY + CLIP_SHIFT_SCAL
-    .db CLIP_SHIFT_PY + CLIP_SHIFT_SCRN
-    .db CLIP_SHIFT_NX + CLIP_SHIFT_SCRN
-    .db CLIP_SHIFT_PX + CLIP_SHIFT_SCRN
+    .db CLIP_SHIFT_PY + CLIP_SHIFT_SCAL
+    .db CLIP_SHIFT_NX + CLIP_SHIFT_SCAL
+    .db CLIP_SHIFT_PX + CLIP_SHIFT_SCAL
 .endif
 
 // 0x0410-0x0420: Overlay 2/3 table
@@ -680,7 +691,7 @@ vOne  equ $v1  // global
 clipPolySelect        equ $18 // global
 clipPolyWrite         equ $21 // also input_mtx_0
 savedActiveClipPlanes equ $29 // global
-savedRA               equ $30 // global
+savedRA               equ $30 // global (mods: got rid of, now available)
 
 // Must keep values during the first part of the clipping process only: polygon
 // subdivision and vertex write.
@@ -754,13 +765,13 @@ postOvlRA     equ $12 // Commonly used locally
 // $1: vertex 1 addr, count of remaining vertices, pointer to store texture coefficients, local
 // $2: vertex 2 addr, vertex at end of edge in clipping, pointer to store shade coefficients, local
 // $3: vertex 3 addr, vertex at start of edge in clipping, local
-// $4: pre-shuffle vertex 1 addr for flat shading, local
+// $4: pre-shuffle vertex 1 addr for flat shading (mods: got rid of, available local), local
 // $5: clipMaskIdx, geometry mode high short during vertex load / lighting, local
 // $6: topLightPtr, geometry mode low byte during tri write, local
 // $7: fog flag in vtx write, local
 // $8: secondVtxPos
 // $9: curLight, local
-// $10: briefly used local in vtx write
+// $10: briefly used local in vtx write (mods: got rid of, not used!)
 // $11: ovlTableEntry, very common local
 // $12: postOvlRA, curMatrix, local
 // $13: spFxBaseReg
@@ -780,7 +791,7 @@ postOvlRA     equ $12 // Commonly used locally
 // $27: inputBufferPos
 // $28: not used!
 // $29: savedActiveClipPlanes
-// $30: savedRA
+// $30: savedRA (mods, got rid of, not used!)
 // $ra: Return address for jal, b*al
 // $v0: vZero (every element 0)
 // $v1: vOne (every element 1)
@@ -1163,8 +1174,15 @@ ovl23_lighting_entrypoint_copy:  // same IMEM address as ovl23_lighting_entrypoi
 // Jump here to do clipping. If overlay 3 is loaded (this code), directly starts
 // the clipping code.
 ovl23_clipping_entrypoint:
+.if MOD_GENERAL
+    sh      $ra, modSaveRA
+.else
     move    savedRA, $ra
+.endif
 ovl3_clipping_nosavera:
+.if MOD_GENERAL
+    sh      $4, modSaveFlatR4
+.endif
 .if MOD_CLIP_CHANGES
     la      clipMaskIdx, 4
     la      spFxBaseReg, spFxBase // Might not be initialized if came back from yield
@@ -1183,6 +1201,7 @@ ovl3_clipping_nosavera:
 .if !CFG_NoN
     .error "MOD_CLIP_CHANGES requires CFG_NoN"
 .endif
+    ldv     vVpMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Puts clip ratio in element 5
     la      $9, CLIP_NEAR << CLIP_SHIFT_SCRN         // Initial clip mask for no nearclipping
 .endif
 clipping_condlooptop: // Loop over six clipping conditions: near, far, +y, +x, -y, -x
@@ -1225,44 +1244,38 @@ vClDiffI equ $v11
     Five clip conditions (these are in a different order from vanilla):
            vClBaseI/vClBaseF[3]     vClDiffI/vClDiffF[3]
     4 W=0:             W1                 W1  -         W2
-    3 +X :      X1 -   W1         (X1 -   W1) - (X2 -   W2)
-    2 -X :      X1 +   W1         (X1 +   W1) - (X2 +   W2)
-    1 +Y :      Y1 -   W1         (Y1 -   W1) - (Y2 -   W2)
-    0 -Y :      Y1 + 6*W1         (Y1 + 6*W1) - (Y2 + 6*W2)  <- this 6 is clip ratio -Y (adjustable)
+    3 +X :      X1 - 2*W1         (X1 - 2*W1) - (X2 - 2*W2) <- the 2 is clip ratio, can be changed
+    2 -X :      X1 + 2*W1         (X1 + 2*W1) - (X2 + 2*W2)
+    1 +Y :      Y1 - 2*W1         (Y1 - 2*W1) - (Y2 - 2*W2)
+    0 -Y :      Y1 + 2*W1         (Y1 + 2*W1) - (Y2 + 2*W2)
     The idea is:
     - Far clipping is removed (though rejection of tris where all three verts
       are past the farplane still exists). The combination of the Z elements of
       the VP matrix and viewport should be set so that no Z buffered content is
       drawn past what would have been the farplane.
-    - We reject tris which are fully offscreen, then draw tris which are fully within
-      the box with clip ratio X (2) everywhere except -Y (6). Then for any remaining
-      tris, we clip them at the box with clip ratio 1 everywhere except -Y (6).
-    - Besides all of this, should be the same results in vClBaseI/F / vClDiffI/F as vanilla,
-      just not taking up 72 bytes of DMEM for clipRatio and clipMaskList. It's a few
+    - Taking a total of 6-8 bytes instead of 72 bytes of DMEM. It's a few
       more instructions here, though not a ton, and it's in the clipping overlay so the
       size doesn't matter too much.
     */
-    ldv     $v4[8], VTX_FRAC_VEC($3)  // Vtx off screen, frac pos
-    ldv     $v5[8], VTX_INT_VEC ($3)  // Vtx off screen, int pos
-    beqz    clipMaskIdx, clipping_mod_neg_y  // Will be overwritten if not -Y
-     lsv    $v29[0], (clipRatios+2 - spFxBase)(spFxBaseReg) // W factor = -Y clip ratio
-    ctc2    clipMaskIdx, $vcc                // Conditions 1 (+y) or 3 (+x) -> W factor is -1
-    vmrg    $v29, $v31, vOne                 // odd -> elem 0 = 1 -> $v31[0] = -1, else 1
-clipping_mod_neg_y:
+    vmudh   $v29, $v31, vVpMisc[5]           // v29[0] = -clipRatio
+    ldv     $v4[8], VTX_FRAC_VEC($3)         // Vtx off screen, frac pos
+    ctc2    clipMaskIdx, $vcc                // Conditions 1 (+y) or 3 (+x) -> vcc[0] = 1
+    ldv     $v5[8], VTX_INT_VEC ($3)         // Vtx off screen, int pos
+    vmrg    $v29, $v29, vVpMisc[5]           // vcc[0] = 1 -> v29[0] = -clipRatio, else clipRatio
+    andi    $11, clipMaskIdx, 4              // W condition
+    vor     vClBaseF, vZero, $v4             // Result is just W
+    bnez    $11, clipping_mod_skipxy
+     vor    vClBaseI, vZero, $v5
     andi    $11, clipMaskIdx, 2              // Conditions 2 (-x) or 3 (+x)
-    vor     $v6, $v4, $v4                    // Keep X
-    bnez    $11, clipping_mod_cond_x
-     vor    $v7, $v5, $v5
-    vor     $v6, vZero, $v4[1h]              // Move Y to X
-    vor     $v7, vZero, $v5[1h]
-clipping_mod_cond_x:
-    andi    $11, clipMaskIdx, 4              // Condition 4 (w)
-    vmudn   vClBaseF, $v4, $v29[0]           // W * W factor
-    bnez    $11, clipping_mod_nonear_noxy
-     vmadh  vClBaseI, $v5, $v29[0]
-    vmadn   vClBaseF, vOne, $v6[0h]          // + X or Y merged
-    vmadh   vClBaseI, vOne, $v7[0h]
-clipping_mod_nonear_noxy:
+    vmudm   vClBaseF, vOne, $v4[0h]          // Set accumulator (care about 3, 7) to X
+    bnez    $11, clipping_mod_skipy
+     vmadh  vClBaseI, vOne, $v5[0h]
+    vmudm   vClBaseF, vOne, $v4[1h]          // Discard that and set accumulator 3, 7 to Y
+    vmadh   vClBaseI, vOne, $v5[1h]
+clipping_mod_skipy:
+    vmadn   vClBaseF, $v4, $v29[0]           // + W * +/- clipRatio
+    vmadh   vClBaseI, $v5, $v29[0]
+clipping_mod_skipxy:
     vsubc   vClDiffF, vClBaseF, vClBaseF[7]  // Vtx on screen - vtx off screen
     lqv     $v25[0], (linearGenerateCoefficients)($zero) // Used just to load the value 2
     vsub    vClDiffI, vClBaseI, vClBaseI[7]
@@ -1400,6 +1413,9 @@ clipping_nextcond:
      addi   clipMaskIdx, clipMaskIdx, -0x0004  // Point to next condition
 .endif
     sw      $zero, activeClipPlanes            // Disable all clipping planes while drawing tris
+.if MOD_GENERAL
+    lhu     $4, modSaveFlatR4                  // Pointer to original first vertex for flat shading
+.endif
 clipping_draw_tris_loop:
     // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
 .if CFG_CLIPPING_SUBDIVIDE_DESCENDING
@@ -1423,7 +1439,12 @@ clipping_draw_tris_loop:
     bne     clipPolyWrite, clipPolySelect, clipping_draw_tris_loop
      addi   reg1, reg1, val1
 clipping_done:
+.if MOD_GENERAL
+    lhu     $ra, modSaveRA
+    jr      $ra
+.else
     jr      savedRA  // This will be G_TRI1_handler if was first tri of pair, else run_next_DL_command
+.endif
      sw     savedActiveClipPlanes, activeClipPlanes
 
 .align 8
@@ -1532,20 +1553,12 @@ vertices_store:
     vge     $v3, $v25, vZero[0]            // Clamp Z to >= 0
 .endif
     addi    $1, $1, -4                     // Decrement vertex count by 2
-.if MOD_CLIP_CHANGES
-    vmudl   $v29, vPairMVPPosF, vFogMask[4] // Persp norm moved to here
-.else
     vmudl   $v29, vPairMVPPosF, vVpMisc[4] // Persp norm
-.endif
     // First time through, secondVtxPos is temp memory in the current RDP output buffer,
     // so these writes don't harm anything. On subsequent loops, this is finishing the
     // store of the previous two vertices.
     sub     $11, secondVtxPos, $7          // Points 8 above secondVtxPos if fog, else 0
-.if MOD_CLIP_CHANGES
-    vmadm   $v2, vPairMVPPosI, vFogMask[4] // Persp norm moved to here
-.else
     vmadm   $v2, vPairMVPPosI, vVpMisc[4]  // Persp norm
-.endif
     sbv     $v27[15],         (VTX_COLOR_A + 8 - 1 * vtxSize)($11) // In VTX_SCR_Y if fog disabled...
     vmadn   $v21, vZero, vZero[0]
     sbv     $v27[7],          (VTX_COLOR_A + 8 - 2 * vtxSize)($11) // ...which gets overwritten below
@@ -1553,22 +1566,13 @@ vertices_store:
     vmov    $v26[1], $v3[2]
     ssv     $v3[12],          (VTX_SCR_Z      - 1 * vtxSize)(secondVtxPos)
 .endif
-.if MOD_CLIP_CHANGES
-    vmudm   $v7, vVpMisc, vPairMVPPosF[3h] // W * clip ratios for X and Y, garbage for Z and W
-.else
     vmudn   $v7, vPairMVPPosF, vVpMisc[5]  // Clip ratio
-.endif
 .if BUG_NO_CLAMP_SCREEN_Z_POSITIVE
     sdv     $v25[8],          (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
 .else
     slv     $v25[8],          (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
 .endif
-.if MOD_CLIP_CHANGES
-    vmadh   $v6, vVpMisc, vPairMVPPosI[3h] // W * clip ratios for X and Y, garbage for Z and W
-    vmadn   $v7, vZero, vZero              // Extract the fractional part of the result
-.else
     vmadh   $v6, vPairMVPPosI, vVpMisc[5]  // Clip ratio
-.endif
     sdv     $v25[0],          (VTX_SCR_VEC    - 2 * vtxSize)(secondVtxPos)
     vrcph   $v29[0], $v2[3]
     ssv     $v26[12],         (VTX_SCR_Z_FRAC - 1 * vtxSize)(secondVtxPos)
@@ -1617,11 +1621,7 @@ vertices_store:
     sdv     vPairMVPPosI[0],  (VTX_INT_VEC    - 2 * vtxSize)(outputVtxPos)
     vmrg    $v2, vZero, $v31[7] // Set to 0 where positive, 0x7FFF where negative
     ldv     $v20[8], (VTX_IN_OB + 3 * inputVtxSize)(inputVtxPos) // Load pos of 2nd vector on next iteration
-.if MOD_CLIP_CHANGES
-    vch     $v29, vPairMVPPosI, $v6     // Compare XY to W * clip ratio for XY
-.else
     vch     $v29, vPairMVPPosI, $v6[3h] // Compare XYZZ to clip-ratio-scaled W (int part)
-.endif
     slv     $v3[0],           (VTX_COLOR_VEC  - 1 * vtxSize)(secondVtxPos) // Store RGBA for first vector
     vmudl   $v29, $v26, $v5
     lsv     vPairMVPPosI[14], (VTX_Z_INT      - 1 * vtxSize)(secondVtxPos) // load Z into W slot, will be for fog below
@@ -1633,51 +1633,25 @@ vertices_store:
     sh      rClipRes,         (VTX_CLIP_SCRN  - 1 * vtxSize)(secondVtxPos) // XYZW/W second vtx results in bits 0xF0F0
     vmadh   $v2, $v2, $v31[7]           // Some extended precision thing? 0x7FFF times 0 or 0x7FFF
     sll     $11, rClipRes, 4            // Shift first vtx screen space clip into positions 0xF0F0
-.if MOD_CLIP_CHANGES
-    vcl     $v29, vPairMVPPosF, $v7     // Compare XY to W * clip ratio for XY
-.else
     vcl     $v29, vPairMVPPosF, $v7[3h] // Compare XYZZ to clip-ratio-scaled W (frac part)
-.endif
     cfc2    rClipRes, $vcc              // Load 16 bit clip-ratio-scaled results, two verts
-.if MOD_CLIP_CHANGES
-    // We've done -W*crX <= X <= W*crX and -W*crY <= Y <= W*crY. But we want positive Y to use
-    // clip ratio X, we're only using the special larger one for negative Y.
-    vch     $v29, vPairMVPPosI, $v6[0h] // Compare Y to W * clip ratio for X
-    sh      $11,              (VTX_CLIP_SCRN  - 2 * vtxSize)(outputVtxPos) // Clip screen first vtx results
-    vcl     $v29, vPairMVPPosF, $v7[0h] // Compare Y to W * clip ratio for X
-    cfc2    $11, $vcc                   // Load results
-.endif
     vmudl   $v29, vPairMVPPosF, $v5[3h] // Pos times inv W
     ssv     $v5[14],          (VTX_INV_W_FRAC - 1 * vtxSize)(secondVtxPos)
     vmadm   $v29, vPairMVPPosI, $v5[3h] // Pos times inv W
     addi    inputVtxPos, inputVtxPos, (2 * inputVtxSize) // Advance two positions forward in the input vertices
     vmadn   $v26, vPairMVPPosF, $v2[3h] // Pos times inv W extended precision thing?
-.if MOD_CLIP_CHANGES
-    andi    $11, $11, 0x0022            // Only +Y components
-    or      rClipRes, rClipRes, $11     // Combine; if >= larger crY, then also >= smaller crX
-.endif
     sh      rClipRes,         (VTX_CLIP_SCAL  - 1 * vtxSize)(secondVtxPos) // Clip scaled second vtx results in bits 0xF0F0
     vmadh   $v25, vPairMVPPosI, $v2[3h] // v25:v26 = pos times inv W
     sll     rClipRes, rClipRes, 4       // Shift first vtx scaled clip into positions 0xF0F0
     vmudm   $v3, vPairST, vVpMisc       // Scale ST for two verts, using TexSScl and TexTScl in elems 2, 3, 6, 7
-.if !MOD_CLIP_CHANGES
     sh      $11,              (VTX_CLIP_SCRN  - 2 * vtxSize)(outputVtxPos) // Clip screen first vtx results
-.endif
 .if MOD_ATTR_OFFSETS
     vmadh   $v3, vFogMask, vOne[0]      // + 1 * ST offset
 .endif
     sh      rClipRes,         (VTX_CLIP_SCAL  - 2 * vtxSize)(outputVtxPos) // Clip scaled first vtx results
-.if MOD_CLIP_CHANGES
-    vmudl   $v29, $v26, vFogMask[4]     // Persp norm moved to here
-.else
     vmudl   $v29, $v26, vVpMisc[4]      // Scale result by persp norm
-.endif
     ssv     $v5[6],           (VTX_INV_W_FRAC - 2 * vtxSize)(outputVtxPos)
-.if MOD_CLIP_CHANGES
-    vmadm   $v25, $v25, vFogMask[4]     // Persp norm moved to here
-.else
     vmadm   $v25, $v25, vVpMisc[4]      // Scale result by persp norm
-.endif
     ssv     $v4[14],          (VTX_INV_W_INT  - 1 * vtxSize)(secondVtxPos)
     vmadn   $v26, vZero, vZero[0]       // Now v26:v25 = projected position
     ssv     $v4[6],           (VTX_INV_W_INT  - 2 * vtxSize)(outputVtxPos)
@@ -1724,9 +1698,8 @@ load_spfx_global_values:
     // Unused in MOD_GENERAL:
     v19 = vFogMask = [0x0000, 0x0000, 0x0000, 0x0001, 0x0000, 0x0000, 0x0000, 0x0001]
     v21 = vVpNegScale = -[vscale[0:3], vscale[0:3]]
-    // With all mods:
-    vVpMisc  = [clipX, clipY, TexSScl, TexYScl, clipX, clipY, TexSScl, TexYScl]
-    vFogMask = [???, ???, TexSOfs, TexTOfs, perspNorm, ???, TexSOfs, TexTOfs]
+    // With MOD_ATTR_OFFSETS:
+    v19 = vFogMask = [???, ???, TexSOfs, TexTOfs, ???, ???, TexSOfs, TexTOfs]
     */
     li      spFxBaseReg, spFxBase
     ldv     vVpFgScale[0], (viewport)($zero)      // Load vscale duplicated in 0-3 and 4-7
@@ -1770,25 +1743,23 @@ after_attroffset_st:
     vlt     $v2, $v31, $v31[3]                    // VCC = 11101110
     addi    secondVtxPos, rdpCmdBufPtr, 0x50      // Pointer to currently unused memory in command buffer
 .endif
-.if MOD_CLIP_CHANGES
-    llv     vVpMisc[0], (clipRatios - spFxBase)(spFxBaseReg) // Clip ratios
-.endif
     vsub    $v2, vZero, vVpFgScale                // -vscale
 .if MOD_CLIP_CHANGES
-    ldv     vVpMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale and clip ratios
+    ldv     vVpMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale and clip ratio
+    lhu     $11, (perspNorm)($zero)               // Can't load this as a short because not enough reach
 .else
     llv     vVpMisc[4], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
 .endif
     vmrg    vVpFgScale, vVpFgScale, $v29[0]       // Put fog multiplier in elements 3,7 of vscale
     llv     vVpMisc[12], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale
     vadd    $v29, $v29, $v31[3]                   // Add 0x7F00 to fog offset
-.if MOD_CLIP_CHANGES
-    llv     vFogMask[8], (perspNorm)($zero)       // Perspective normalization long (actually short)
-.else
+.if !MOD_CLIP_CHANGES
     llv     vVpMisc[8], (perspNorm)($zero)        // Perspective normalization long (actually short)
 .endif
     vmov    vVpFgScale[1], $v2[1]                 // Negate vscale[1] because RDP top = y=0
-.if !MOD_CLIP_CHANGES
+.if MOD_CLIP_CHANGES
+    mtc2    $11, vVpMisc[8]
+.else
     lsv     vVpMisc[10], (clipRatio + 6 - spFxBase)(spFxBaseReg) // Clip ratio (-x version, but normally +/- same in all dirs)
 .endif
     vmov    vVpFgScale[5], $v2[1]                 // Finish building vVpFgScale
@@ -2480,7 +2451,11 @@ ovl23_lighting_entrypoint:
      lbu    topLightPtr, numLightsx18
 
 ovl23_clipping_entrypoint_copy:  // same IMEM address as ovl23_clipping_entrypoint
+.if MOD_GENERAL
+    sh      $ra, modSaveRA
+.else
     move    savedRA, $ra
+.endif
     li      ovlTableEntry, overlayInfo3       // set up a load of overlay 3
     j       load_overlay_and_enter            // load overlay 3
      li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
