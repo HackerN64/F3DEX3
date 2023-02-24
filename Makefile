@@ -1,199 +1,173 @@
-# Selects the microcode to assemble. Options are F3DEX2 and F3DZEX
-UCODE ?= F3DEX2
+MAKEFLAGS += --no-builtin-rules
+MAKEFLAGS += --no-builtin-variables
+.SUFFIXES:
 
-# Set to 1 to enable NoN(No Nearclipping). Note that no official F3DZEX exists without NoN.
-NoN ?= 0
+default:
+	@echo 'How to use this Makefile'
+	@echo 'Method 1) Select a microcode, just run e.g. `make F3DZEX_NoN_2.06H`'
+	@echo 'Method 2) `make ok`, builds all ucodes which have MD5 sums, to check if :OK:'
+	@echo 'Method 3) `make all`, builds all ucodes in database'
+	@echo 'Method 4) Custom microcode build via custom.mk file. Create a file custom.mk'
+	@echo 'with contents like this:'
+	@echo 'NAME := your_custom_ucode_name'
+	@echo 'DESCRIPTION := Your Romhack Name'
+	@echo 'ID_STR := Modded F3DZEX by _your_name_, real N64 hardware or RSP LLE is required'
+	@echo '          ^ (this must be the exact number of characters)'
+	@echo 'OPTIONS := CFG_NoN CFG_POINT_LIGHTING etc.'
+	@echo 'Then run `make your_custom_ucode_name`. See the Makefile for the list of options.'
 
-# Selects which version of a given microcode to build:
-# F3DEX2:
-#  2.08  (Banjo-Tooie)
-#  2.08_XBUS (Power Rangers)
-#  2.07  (Rocket: Robot on Wheels)
-#  2.07_XBUS (Lode Runner 3-D)
-#  2.04H (Kirby 64, Smash 64)
-#  2.08PL (Paper Mario, F3DEX2.08 with point lighting added)
-#  
-# F3DZEX:
-#  2.08J (Animal Forest) (Recommended over 2.08I due to a change properly zeroes out $v0)
-#  2.08I (Majora's Mask)
-#  2.06H (Ocarina of Time)
-VERSION ?= 2.08
-
+# With the defaults--all of these options unset--you get 2.08 (Banjo-Tooie),
+# which has none of the bugs / the latest versions of everything, except
+# G_BRANCH_Z (F3DEX2), no point lighting, and no NoN. Enabling the different
+# BUG_ options *gives* you the bugs--the default is always with the bugs fixed.
+# If you are modding and adding options, you just have to add them here, and
+# in the options list for your custom configuration.
+ALL_OPTIONS := \
+  CFG_G_BRANCH_W \
+  CFG_XBUS \
+  CFG_NoN \
+  CFG_POINT_LIGHTING \
+  CFG_OLD_TRI_WRITE \
+  CFG_EXTRA_0A_BEFORE_ID_STR \
+  CFG_G_SPECIAL_1_IS_RECALC_MVP \
+  CFG_CLIPPING_SUBDIVIDE_DESCENDING \
+  CFG_DONT_SKIP_FIRST_INSTR_NEW_UCODE \
+  BUG_CLIPPING_FAIL_WHEN_SUM_ZERO \
+  BUG_NO_CLAMP_SCREEN_Z_POSITIVE \
+  BUG_TEXGEN_LINEAR_CLOBBER_S_T \
+  BUG_WRONG_INIT_VZERO \
+  BUG_FAIL_IF_CARRY_SET_AT_INIT
+  
 ARMIPS ?= armips
-
-OUTPUT_DIR ?= ./
-
-# List of all microcodes buildable with this codebase
-UCODES := F3DEX2_2.08 F3DEX2_2.08_XBUS F3DEX2_2.07 F3DEX2_2.07_XBUS F3DEX2_2.04H \
-          F3DEX2_2.08PL F3DEX2_NoN_2.08 F3DEX2_NoN_2.07 F3DEX2_NoN_2.04H \
-          F3DEX2_NoN_2.08PL F3DZEX_2.08J F3DZEX_2.08I F3DZEX_2.06H \
-		      F3DZEX_NoN_2.08J F3DZEX_NoN_2.08I F3DZEX_NoN_2.06H
-
-# F3DEX2
-MD5_CODE_F3DEX2_2.08      := 6ccf5fc392e440fb23bc7d7f7d71047c
-MD5_DATA_F3DEX2_2.08      := 3a3a406acb4295d33fa6e918dd3a7ae4
-MD5_CODE_F3DEX2_2.08_XBUS := 38cbd8ef2cd168141347047cf7ec4fba
-MD5_DATA_F3DEX2_2.08_XBUS := dcb9a145381557d146683ddb853c6cfd
-MD5_CODE_F3DEX2_2.08PL    := 6a5117e62e51d87020fb81dc493efcb6
-MD5_DATA_F3DEX2_2.08PL    := 1a6b826322aab9c93da61356af5ead40
-MD5_CODE_F3DEX2_2.07      := 1523b8e38a9eae698b48909a0c0c0279
-MD5_DATA_F3DEX2_2.07      := 25be72ec04e2e6a23dfa7666645f0662
-MD5_CODE_F3DEX2_2.07_XBUS := b882f402e115ffaf05a9ee44f354c441
-MD5_DATA_F3DEX2_2.07_XBUS := 71436bdc62d9263d5c2fefa783cffd4f
-MD5_CODE_F3DEX2_NoN_2.08  := b5c366b55a032f232aa309cda21be3d7
-MD5_DATA_F3DEX2_NoN_2.08  := 2c8dedc1b1e2fe6405c9895c4290cf2b
-MD5_CODE_F3DEX2_2.04H     := d3a58568fa7cf042de370912a47c3b5f
-MD5_DATA_F3DEX2_2.04H     := 6639b2fd15a73c5446aff592bb599983
-# F3DZEX
-MD5_CODE_F3DZEX_NoN_2.08J := a7f45433a67950cdd239ee40f1dd36c1
-MD5_DATA_F3DZEX_NoN_2.08J := f17544afa0dce84d589ec3d8c38254c7
-MD5_CODE_F3DZEX_NoN_2.08I := ca0a31df36dbeda69f09e9850e68c7f7
-MD5_DATA_F3DZEX_NoN_2.08I := d31cea0e173c6a4a09e4dfe8f259c91b
-MD5_CODE_F3DZEX_NoN_2.06H := 96a1a7a8eab45e0882aab9e4d8ccbcc3
-MD5_DATA_F3DZEX_NoN_2.06H := e48c7679f1224b7c0947dcd5a4d0c713
-
-# Microcode strings
-# F3DEX2
-NAME_F3DEX2_2.08       := RSP Gfx ucode F3DEX       fifo 2.08  Yoshitaka Yasumoto 1999 Nintendo.
-NAME_F3DEX2_2.08_XBUS  := RSP Gfx ucode F3DEX       xbus 2.08  Yoshitaka Yasumoto 1999 Nintendo.
-NAME_F3DEX2_2.07       := RSP Gfx ucode F3DEX       fifo 2.07  Yoshitaka Yasumoto 1998 Nintendo.
-NAME_F3DEX2_2.07_XBUS  := RSP Gfx ucode F3DEX       xbus 2.07  Yoshitaka Yasumoto 1998 Nintendo.
-NAME_F3DEX2_2.04H      := RSP Gfx ucode F3DEX       fifo 2.04H Yoshitaka Yasumoto 1998 Nintendo.
-NAME_F3DEX2_2.08PL     := RSP Gfx ucode F3DEX       fifo 2.08  Yoshitaka Yasumoto/Kawasedo 1999.
-NAME_F3DEX2_NoN_2.08   := RSP Gfx ucode F3DEX.NoN   fifo 2.08  Yoshitaka Yasumoto 1999 Nintendo.
-NAME_F3DEX2_NoN_2.07   := RSP Gfx ucode F3DEX.NoN   fifo 2.07  Yoshitaka Yasumoto 1998 Nintendo.
-NAME_F3DEX2_NoN_2.04H  := RSP Gfx ucode F3DEX.NoN   fifo 2.04H Yoshitaka Yasumoto 1998 Nintendo.
-# Use the same name as no NoN so that emulators recognize it since there was no F3DEX2PL with NoN
-NAME_F3DEX2_NoN_2.08PL := RSP Gfx ucode F3DEX       fifo 2.08  Yoshitaka Yasumoto/Kawasedo 1999.
-# F3DZEX
-NAME_F3DZEX_2.08J      := RSP Gfx ucode F3DZEX.NoN  fifo 2.08J Yoshitaka Yasumoto/Kawasedo 1999.
-NAME_F3DZEX_2.08I      := RSP Gfx ucode F3DZEX.NoN  fifo 2.08I Yoshitaka Yasumoto/Kawasedo 1999.
-NAME_F3DZEX_2.06H      := RSP Gfx ucode F3DZEX.NoN  fifo 2.06H Yoshitaka Yasumoto 1998 Nintendo.
-# Use the same name as NoN so that emulators recognize it since there was no F3DZEX without NoN
-NAME_F3DZEX_NoN_2.08J  := RSP Gfx ucode F3DZEX.NoN  fifo 2.08J Yoshitaka Yasumoto/Kawasedo 1999.
-NAME_F3DZEX_NoN_2.08I  := RSP Gfx ucode F3DZEX.NoN  fifo 2.08I Yoshitaka Yasumoto/Kawasedo 1999.
-NAME_F3DZEX_NoN_2.06H  := RSP Gfx ucode F3DZEX.NoN  fifo 2.06H Yoshitaka Yasumoto 1998 Nintendo.
-
-ID_F3DEX2_2.04H  := 0
-ID_F3DEX2_2.07   := 1
-ID_F3DEX2_2.08   := 2
-ID_F3DEX2_2.08PL := 3
-
-ID_F3DZEX_2.06H := 0
-ID_F3DZEX_2.08I := 1
-ID_F3DZEX_2.08J := 2
-
-TYPE_F3DEX2 := 0
-TYPE_F3DZEX := 1
-
-# FIFO is the preferred method
-METHOD_FIFO := 0
-METHOD_XBUS := 1
+PARENT_OUTPUT_DIR ?= ./build
+ifeq ($(PARENT_OUTPUT_DIR),.)
+  $(error Cannot build directly in repo directory; see Makefile for details.)
+  # The problem is that we want to be able to have targets like F3DEX2_2.08,
+  # but this would also be the directory itself, whose existence and possible
+  # modification needs to be handled by the Makefile. It is possible to write
+  # the Makefile where the directory is the main target for that microcode, but
+  # this has worse behavior in case of modification to the directory. Worse, if
+  # it was done this way, then it would break if the user tried to set
+  # PARENT_OUTPUT_DIR anywhere else. So, better to support building everywhere
+  # but here than to support only building here.
+endif
 
 NO_COL := \033[0m
-BOLD   := # \033[1m
 RED    := \033[0;31m
 GREEN  := \033[0;32m
 YELLOW := \033[0;33m
 BLUE   := \033[0;34m
-
-INFO    := $(NO_COL)
+INFO    := $(BLUE)
 SUCCESS := $(GREEN)
 FAILURE := $(RED)
 WARNING := $(YELLOW)
 
-# Sets up the variables for a microcode rule
-define set_vars
-  FULL_UCODE := $(1)
-  # These need to be eval'd to use their values in this same function
-  CUR_UCODE_WITHOUT_SUFFIX := $(subst _XBUS,,$(subst _NoN,,$(1)))
-  CUR_VERSION := $$(subst F3DZEX_,,$$(subst F3DEX2_,,$$(CUR_UCODE_WITHOUT_SUFFIX)))
-  CUR_UCODE := $$(patsubst %_$$(CUR_VERSION),%,$$(CUR_UCODE_WITHOUT_SUFFIX))
-  FULL_OUTPUT_DIR := $$(OUTPUT_DIR)/$(1)
+$(PARENT_OUTPUT_DIR):
+	@printf "$(INFO)Creating parent output directory$(NO_COL)\n"
 ifeq ($(OS),Windows_NT)
-  FULL_OUTPUT_DIR := $$(subst /,\,$$(FULL_OUTPUT_DIR))
+	mkdir $@
+else
+	mkdir -p $@
 endif
-  CODE_FILE := $$(FULL_OUTPUT_DIR)/$(1).code
-  DATA_FILE := $$(FULL_OUTPUT_DIR)/$(1).data
-  SYM_FILE  := $$(FULL_OUTPUT_DIR)/$(1).sym
-  TEMP_FILE := $$(FULL_OUTPUT_DIR)/$(1).tmp.s
+ALL_UCODES :=
+ALL_UCODES_WITH_MD5S :=
+ALL_OUTPUT_DIRS :=
 
-  ifeq ($(findstring _NoN,$(1)),)
-    CUR_NoN := 0
-  else
-    CUR_NoN := 1
-  endif
-  
-  ifneq ($(findstring _XBUS,$(1)),)
-    METHOD := $(METHOD_XBUS)
-  else
-    METHOD := $(METHOD_FIFO)
-  endif
-
-  NAME := $(NAME_$(1))
-  ID := $$(ID_$$(CUR_UCODE_WITHOUT_SUFFIX))
-  TYPE := $$(TYPE_$$(CUR_UCODE))
-  CODE_MD5 := $$(MD5_CODE_$(1))
-  DATA_MD5 := $$(MD5_DATA_$(1))
+define reset_vars
+  NAME := 
+  DESCRIPTION := (Not used in any retail games)
+  ID_STR := Custom F3DEX2-based microcode, github.com/Mr-Wiseguy/f3dex2 & Nintendo
+  ID_STR := RSP Gfx ucode F3DEX       fifo 2.04H Yoshitaka Yasumoto 1998 Nintendo.
+  MD5_CODE := 
+  MD5_DATA := 
+  OPTIONS := 
+  EXTRA_DEPS :=
 endef
 
-# Sets up the microcode make rules
 define ucode_rule
-  $(eval $(call set_vars,$(1)))
-
-  $(CODE_FILE) $(DATA_FILE) $(SYM_FILE) $(SYM2_FILE) $(TEMP_FILE): ./f3dex2.s ./rsp/* $(FULL_OUTPUT_DIR)
-	@printf "$(INFO)Building microcode: $(FULL_UCODE)$(NO_COL)\n"
-	@$(ARMIPS) -strequ DATA_FILE $(DATA_FILE) -strequ CODE_FILE $(CODE_FILE) -strequ NAME "$(NAME)" -equ UCODE_TYPE $(TYPE) -equ UCODE_METHOD $(METHOD) -equ UCODE_ID $(ID) -equ NoN $(CUR_NoN) f3dex2.s -sym2 $(SYM_FILE) -temp $(TEMP_FILE)
-  ifeq ($(CODE_MD5),)
-	@printf "  $(WARNING)Nothing to compare $(1) to!$(NO_COL)\n"
-  else
-	@(printf "$(CODE_MD5) *$(CODE_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(1) code matches$(NO_COL)\n" || printf "  $(FAILURE)$(1) code differs$(NO_COL)\n"
-	@(printf "$(DATA_MD5) *$(DATA_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(1) data matches$(NO_COL)\n" || printf "  $(FAILURE)$(1) data differs$(NO_COL)\n"
-
+  # Variables defined outside the function need one dollar sign, whereas
+  # variables defined within the function need two. This is because make first
+  # expands all this text, substituting single-dollar-sign variables, and then
+  # executes all of it, causing all the assignments to actually happen.
+  ifeq ($(NAME),)
+   $$(error Microcode name not set!)
   endif
-
-  $(FULL_OUTPUT_DIR): | $(OUTPUT_DIR)
-	@printf "$(INFO)Creating directory: $(FULL_OUTPUT_DIR)$(NO_COL)\n"
-ifeq ($(OS),Windows_NT)
-	@mkdir $(FULL_OUTPUT_DIR)
-else
-	@mkdir -p $(FULL_OUTPUT_DIR)
-endif
-
-  FULL_OUTPUT_DIRS += $(FULL_OUTPUT_DIR)
-  CODE_FILES += $(CODE_FILE)
+  UCODE_OUTPUT_DIR := $(PARENT_OUTPUT_DIR)/$(NAME)
+  CODE_FILE := $$(UCODE_OUTPUT_DIR)/$(NAME).code
+  DATA_FILE := $$(UCODE_OUTPUT_DIR)/$(NAME).data
+  SYM_FILE  := $$(UCODE_OUTPUT_DIR)/$(NAME).sym
+  TEMP_FILE := $$(UCODE_OUTPUT_DIR)/$(NAME).tmp.s
+  ALL_UCODES += $(NAME)
+  ifneq ($(MD5_CODE),)
+   ALL_UCODES_WITH_MD5S += $(NAME)
+  endif
+  ALL_OUTPUT_DIRS += $$(UCODE_OUTPUT_DIR)
+  OFF_OPTIONS := $(filter-out $(OPTIONS),$(ALL_OPTIONS))
+  OPTIONS_EQU := 
+  $$(foreach option,$(OPTIONS),$$(eval OPTIONS_EQU += -equ $$(option) 1))
+  OFF_OPTIONS_EQU := 
+  $$(foreach o2,$$(OFF_OPTIONS),$$(eval OFF_OPTIONS_EQU += -equ $$(o2) 0))
+  ARMIPS_CMDLINE := \
+   -strequ CODE_FILE $$(CODE_FILE) \
+   -strequ DATA_FILE $$(DATA_FILE) \
+   $$(OPTIONS_EQU) \
+   $$(OFF_OPTIONS_EQU) \
+   f3dex2.s \
+   -sym2 $$(SYM_FILE) \
+   -temp $$(TEMP_FILE)
+  # Microcode target
+  .PHONY: $(NAME)
+  $(NAME): $$(CODE_FILE)
+  # Directory target variables, see below.
+  $$(UCODE_OUTPUT_DIR): UCODE_OUTPUT_DIR:=$$(UCODE_OUTPUT_DIR)
+  # Directory target recipe
+  $$(UCODE_OUTPUT_DIR):
+	@printf "$(INFO)Creating directory $$(UCODE_OUTPUT_DIR)$(NO_COL)\n"
+  ifeq ($(OS),Windows_NT)
+	@mkdir $$(subst /,\,$$(UCODE_OUTPUT_DIR))
+  else
+	@mkdir -p $$(UCODE_OUTPUT_DIR)
+  endif
+  # Code file target variables. make does not expand variables within recipes
+  # until the recipe is executed, meaning that all the parts of the recipe would
+  # have the values from the very last microcode in the file. Here, we set
+  # target-specific variables--effectively local variables within the recipe--
+  # to the values from the global variables have right now. We are only
+  # targeting CODE_FILE even though we also want DATA_FILE, because target-
+  # specific variables may not work as expected with multiple targets from one
+  # recipe.
+  $$(CODE_FILE): ARMIPS_CMDLINE:=$$(ARMIPS_CMDLINE)
+  $$(CODE_FILE): CODE_FILE:=$$(CODE_FILE)
+  $$(CODE_FILE): DATA_FILE:=$$(DATA_FILE)
+  # Target recipe
+  $$(CODE_FILE): ./f3dex2.s ./rsp/* ucodes_database.mk $(EXTRA_DEPS) | $$(UCODE_OUTPUT_DIR)
+	@printf "$(INFO)Building microcode: $(NAME): $(DESCRIPTION)$(NO_COL)\n"
+	@$(ARMIPS) -strequ ID_STR "$(ID_STR)" $$(ARMIPS_CMDLINE)
+  ifneq ($(MD5_CODE),)
+	@(printf "$(MD5_CODE) *$$(CODE_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) code matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) code differs$(NO_COL)\n"
+	@(printf "$(MD5_DATA) *$$(DATA_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) data matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) data differs$(NO_COL)\n"
+  else ifneq ($(1),1)
+	@printf "  $(WARNING)MD5 sums not in database for $(NAME)$(NO_COL)\n"
+  endif
+  $$(eval $$(call reset_vars))
 endef
 
-ifeq ($(NoN),1)
-  SUFFIX := _NoN
-else
-  SUFFIX := 
+$(eval $(call reset_vars))
+
+ifneq ("$(wildcard custom.mk)","")
+  include custom.mk
+  EXTRA_DEPS := custom.mk
+  $(eval $(call ucode_rule))
 endif
-INPUT_UCODE := $(UCODE)$(SUFFIX)_$(VERSION)
-FULL_OUTPUT_DIR := $(OUTPUT_DIR)/$(INPUT_UCODE)
-ifeq ($(OS),Windows_NT)
-  FULL_OUTPUT_DIR := $(subst /,\,$(FULL_OUTPUT_DIR))
-endif
-CODE_FILE := $(FULL_OUTPUT_DIR)/$(INPUT_UCODE).code
-DATA_FILE := $(FULL_OUTPUT_DIR)/$(INPUT_UCODE).data
 
+include ucodes_database.mk
 
-default: $(CODE_FILE) $(DATA_FILE)
+.PHONY: default ok all clean
 
-$(foreach ucode,$(UCODES),$(eval $(call ucode_rule,$(ucode))))
+all: $(ALL_UCODES)
 
-all: $(CODE_FILES)
-
-$(OUTPUT_DIR):
-	@printf "$(INFO)Creating output directory$(NO_COL)\n"
-ifeq ($(OS),Windows_NT)
-	@mkdir $@
-else
-	@mkdir -p $@
-endif
+ok: $(ALL_UCODES_WITH_MD5S)
 
 clean:
 	@printf "$(WARNING)Deleting all built microcode files$(NO_COL)\n"
-	@rm -rf $(FULL_OUTPUT_DIRS)
-
-.PHONY: default check all clean
+	@rm -rf $(ALL_OUTPUT_DIRS)

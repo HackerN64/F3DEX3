@@ -181,7 +181,7 @@ CLIP_SHIFT_SCAL equ 16
 CLIP_SHIFT_SCRN equ 0
 // Values used for far and near clipping.
 CLIP_FAR equ CLIP_PZ
-.if NoN == 1
+.if CFG_NoN
     // No Nearclipping uses -w instead of -z
     CLIP_NEAR equ CLIP_NW
 .else
