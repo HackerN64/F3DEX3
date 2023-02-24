@@ -122,9 +122,9 @@ define ucode_rule
   $$(UCODE_OUTPUT_DIR): UCODE_OUTPUT_DIR:=$$(UCODE_OUTPUT_DIR)
   # Directory target recipe
   $$(UCODE_OUTPUT_DIR):
-	@echo "$(INFO)Creating directory $$(UCODE_OUTPUT_DIR)$(NO_COL)"
+	@printf "$(INFO)Creating directory $$(UCODE_OUTPUT_DIR)$(NO_COL)\n"
   ifeq ($(OS),Windows_NT)
-	@mkdir $$(UCODE_OUTPUT_DIR)
+	@mkdir $$(subst /,\,$$(UCODE_OUTPUT_DIR))
   else
 	@mkdir -p $$(UCODE_OUTPUT_DIR)
   endif
