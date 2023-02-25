@@ -750,8 +750,8 @@ vFogMask    equ $v19 // Used in MOD_ATTR_OFFSETS
 vVpNegScale equ $v21
 
 // Arguments to mtx_multiply
-output_mtx  equ $19 // also dmaLen, also used by itself
-input_mtx_1 equ $20 // also dmemAddr and xfrmLtPtr
+output_mtx  equ $19 // also dmaLen, also used by itself (mods: also rClipRes)
+input_mtx_1 equ $20 // also dmemAddr and xfrmLtPtr (mods: also rClipRes)
 input_mtx_0 equ $21 // also clipPolyWrite
 
 // Arguments to dma_read_write
@@ -783,8 +783,8 @@ postOvlRA     equ $12 // Commonly used locally
 // $16: clipFlags
 // $17: clipPolyRead
 // $18: clipPolySelect
-// $19: dmaLen, output_mtx, briefly used local
-// $20: dmemAddr, input_mtx_1, xfrmLtPtr
+// $19: dmaLen, output_mtx, briefly used local (mods: also rClipRes)
+// $20: dmemAddr, input_mtx_1, xfrmLtPtr (mods: also rClipRes)
 // $21: clipPolyWrite, input_mtx_0
 // $22: rdpCmdBufEnd
 // $23: rdpCmdBufPtr
@@ -1212,7 +1212,7 @@ ovl3_clipping_nosavera:
 .if MOD_CLIP_CHANGES
     la      $9, CLIP_NEAR << CLIP_SHIFT_SCRN         // Initial clip mask for no nearclipping
 .endif
-// Other available locals here: $1, $7
+// Other available locals here: $1, $7, $20
 clipping_condlooptop: // Loop over six clipping conditions: near, far, +y, +x, -y, -x
 .if !MOD_CLIP_CHANGES
     lw      $9, (clipMaskList)(clipMaskIdx)          // Load clip mask
@@ -1475,11 +1475,11 @@ clipping_mod_skipfixcolor:
     ssv     $v3[4],     (VTX_SCR_Z      - 2 * vtxSize)(outputVtxPos)
 .endif
 .if MOD_CLIP_CHANGES
-    //beqz    $4, clipping_mod_endedge         // Did screen clipping, done
+    beqz    $4, clipping_mod_endedge         // Did screen clipping, done
      addi   outputVtxPos, outputVtxPos, -2*vtxSize // back by 2 vertices because this was incremented
-    //la      $4, 0                            // Change from scaled clipping to screen clipping
-    //j       clipping_interpolate
-    // move   $3, outputVtxPos                 // Off-screen vertex is now the one we just wrote
+    la      $4, 0                            // Change from scaled clipping to screen clipping
+    j       clipping_interpolate
+     move   $3, outputVtxPos                 // Off-screen vertex is now the one we just wrote
 clipping_mod_endedge:
     sh      outputVtxPos, (clipPoly)(clipPolyWrite) // Write generated vertex to polygon
 .else
@@ -1699,7 +1699,9 @@ vertices_store:
     // so outputVtxPos is the first vertex and secondVtxPos is the second.
     sub     secondVtxPos, outputVtxPos, $11
     vmudl   $v29, $v21, $v5
-.if MOD_GENERAL
+.if MOD_CLIP_CHANGES
+    rClipRes equ $20
+.elseif MOD_GENERAL
     rClipRes equ $19
 .else
     rClipRes equ $10
