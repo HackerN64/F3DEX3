@@ -299,9 +299,10 @@ textureSettings2:
     
 .if MOD_CLIP_CHANGES
 mwModsStart:
-    .dh 0 // currently unused
+modClipLargeTriThresh:
+    .dh 120 << 2 // Number of quarter-scanlines high a triangle is to be considered large
 modClipRatio:
-    .dh 0x0002
+    .dh 0x0002 // Clip ratio; strongly recommend keeping as 2
 .endif
 
 .if MOD_ATTR_OFFSETS
@@ -1504,14 +1505,37 @@ clipping_nextcond:
      sh     $zero, (clipPoly)(clipPolyWrite)   // Terminate the output polygon with a 0
     lhu     $3, (clipPoly - 2)(clipPolyWrite)  // Initialize the edge start (V3) to the last vert
 .if MOD_CLIP_CHANGES
-    lbu     $11, (clipCondShifts - 1)(clipMaskIdx) // Load next clip condition shift amount
+clipping_mod_nextcond_skip:
+    beqz    clipMaskIdx, clipping_mod_draw_tris
+     lbu    $11, (clipCondShifts - 1)(clipMaskIdx) // Load next clip condition shift amount
     la      $9, 1
     sllv    $9, $9, $11                        // $9 is clip mask
-.endif
-    bnez    clipMaskIdx, clipping_condlooptop  // Done with clipping conditions?
-.if MOD_CLIP_CHANGES
-     addiu  clipMaskIdx, clipMaskIdx, -1
+    addiu   clipMaskIdx, clipMaskIdx, -1
+    // Compare all verts to clip mask. If any are outside scaled, run the clipping.
+    // Also see if there are at least two outside the screen; if none, obviously don't
+    // do clipping, and if one, clipping would produce another tri, so better to let
+    // this part be scissored.
+    // Available locals here: $11, $1, $7, $20, $24, $12
+    sll     $7, $9, 4                          // Scaled version of current clip mask
+    addi    clipPolyRead,   clipPolySelect, -6 // Start reading from beginning of current poly
+    move    $12, $9                            // Counts down how many outside screen, starts as 1*mask
+clipping_mod_checkcond_loop:
+    lhu     $2, (clipPoly)(clipPolyRead)       // Load vertex address
+    lhu     $1, VTX_CLIP($2)                   // Load clip flags
+    and     $11, $1, $7                        // Mask to outside scaled
+    bnez    $11, clipping_condlooptop          // If any vert outside scaled, run the clipping
+     and    $1, $1, $9                         // Mask to outside screen
+    addiu   clipPolyRead, clipPolyRead, 2      // Going to read next vertex
+    blt     clipPolyRead, clipPolyWrite, clipping_mod_checkcond_loop
+     sub    $12, $12, $1                       // Subtract 1*mask for each outside screen
+    // Loop done. If $12 is negative, there are at least two verts outside screen.
+    bltz    $12, clipping_condlooptop
+     nop    // Could optimize this to branch one instr later and put a copy of the first instr here.
+    j       clipping_mod_nextcond_skip         // Otherwise go to next clip condition.
+    // Next instruction is OK to clobber $4 here when jumping.
+clipping_mod_draw_tris:
 .else
+    bnez    clipMaskIdx, clipping_condlooptop  // Done with clipping conditions?
      addi   clipMaskIdx, clipMaskIdx, -0x0004  // Point to next condition
 .endif
 .if !MOD_CLIP_CHANGES
@@ -2013,10 +2037,11 @@ tri_mod_skip_check_backface:
     andi    $12, $5, CLIP_MOD_MASK_SCRN_ALL // If any vertex outside screen bounds...
     vsub    $v12, $v14, $v10  // VH - VL (negative)
     mfc2    $11, $v12[2]      // Y value of VH - VL (negative)
-    addi    $11, $11, 30 << 2 // Is triangle more than 30 scanlines high?
+    lhu     $6, modClipLargeTriThresh
+    add     $11, $11, $6      // Is triangle more than a certain number of scanlines high?
     sra     $11, $11, 31      // All 1s if tri is large, all 0s if it is small
     and     $12, $12, $11     // Large tri and partly outside screen bounds
-    bnez    $12, ovl23_clipping_entrypoint // Do clipping; TODO enabling this worsens the performance
+    bnez    $12, ovl23_clipping_entrypoint // Do clipping
      vmudn  $v4, $v14, $v31[5]
     mfc2    $1, $v14[12]      // $v14 = lowest Y value = highest on screen (x, y, addr)
 .else
