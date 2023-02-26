@@ -543,19 +543,13 @@ gCullMagicNumbers:
 // bother drawing it at all. Guess they just wanted completeness, and it only
 // costs two bytes of DMEM.
 
+.if !MOD_CLIP_CHANGES
 .align 4
-
 activeClipPlanes:
 CLIP_ALL_SCAL equ ((CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY) << CLIP_SHIFT_SCAL)
-.if MOD_CLIP_CHANGES
-.if !CFG_NoN
-    .error "MOD_CLIP_CHANGES requires CFG_NoN"
-.endif
-CLIP_ALL_SCRN equ (CLIP_NEAR << CLIP_SHIFT_SCRN)
-.else
 CLIP_ALL_SCRN equ ((CLIP_FAR | CLIP_NEAR) << CLIP_SHIFT_SCRN)
-.endif
     .dw CLIP_ALL_SCAL | CLIP_ALL_SCRN
+.endif
 
 // 0x3D0: Clipping polygons, as lists of vertex addresses. When handling each
 // clipping condition, the polygon is read off one list and the modified polygon
@@ -568,7 +562,16 @@ clipPoly2:         //  \ / \ / \ /
 // but there needs to be room for the terminating 0, and clipMaskList below needs
 // to be word-aligned. So this is why it's 10 each.
 
-.if !MOD_CLIP_CHANGES
+.if MOD_CLIP_CHANGES
+.if !CFG_NoN
+    .error "MOD_CLIP_CHANGES requires CFG_NoN"
+.endif
+clipCondShifts:
+    .db CLIP_SHIFT_NY - 4
+    .db CLIP_SHIFT_PY - 4
+    .db CLIP_SHIFT_NX - 4
+    .db CLIP_SHIFT_PX - 4
+.else
 .align 4
 clipMaskList:
     .dw CLIP_NX   << CLIP_SHIFT_SCAL
@@ -577,12 +580,6 @@ clipMaskList:
     .dw CLIP_PY   << CLIP_SHIFT_SCAL
     .dw CLIP_FAR  << CLIP_SHIFT_SCRN
     .dw CLIP_NEAR << CLIP_SHIFT_SCRN
-.else
-clipCondShifts:
-    .db CLIP_SHIFT_NY + CLIP_SHIFT_SCRN
-    .db CLIP_SHIFT_PY + CLIP_SHIFT_SCRN
-    .db CLIP_SHIFT_NX + CLIP_SHIFT_SCRN
-    .db CLIP_SHIFT_PX + CLIP_SHIFT_SCRN
 .endif
 
 // 0x0410-0x0420: Overlay 2/3 table
@@ -693,7 +690,7 @@ vOne  equ $v1  // global
 // write, tri drawing.
 clipPolySelect        equ $18 // global
 clipPolyWrite         equ $21 // also input_mtx_0
-savedActiveClipPlanes equ $29 // global
+savedActiveClipPlanes equ $29 // global (mods: got rid of, now available)
 savedRA               equ $30 // global (mods: got rid of, now available)
 
 // Must keep values during the first part of the clipping process only: polygon
@@ -793,8 +790,8 @@ postOvlRA     equ $12 // Commonly used locally
 // $26: taskDataPtr
 // $27: inputBufferPos
 // $28: not used!
-// $29: savedActiveClipPlanes
-// $30: savedRA (mods, got rid of, not used!)
+// $29: savedActiveClipPlanes (mods, got rid of, not used!)
+// $30: savedRA (unused in MOD_GENERAL, used in MOD_CLIP_CHANGES)
 // $ra: Return address for jal, b*al
 // $v0: vZero (every element 0)
 // $v1: vOne (every element 1)
@@ -1208,16 +1205,20 @@ ovl3_clipping_nosavera:
     sh      $2, (clipPoly - 6 + 2)(clipPolySelect)
     sh      $3, (clipPoly - 6 + 4)(clipPolySelect)
     sh      $zero, (clipPoly)(clipPolySelect) // Zero to mark end of polygon
-    lw      savedActiveClipPlanes, activeClipPlanes
-.if MOD_CLIP_CHANGES
-    la      $9, CLIP_NEAR << CLIP_SHIFT_SCRN         // Initial clip mask for no nearclipping
-.endif
-// Other available locals here: $1, $7, $20
-clipping_condlooptop: // Loop over six clipping conditions: near, far, +y, +x, -y, -x
 .if !MOD_CLIP_CHANGES
-    lw      $9, (clipMaskList)(clipMaskIdx)          // Load clip mask
+    lw      savedActiveClipPlanes, activeClipPlanes
 .endif
+.if MOD_CLIP_CHANGES
+    la      $9, CLIP_NEAR >> 4                       // Initial clip mask for no nearclipping
+.endif
+// Available locals here: $11, $1, $7, $20, $24, $12
+clipping_condlooptop: // Loop over six clipping conditions: near, far, +y, +x, -y, -x
+.if MOD_CLIP_CHANGES
+    lhu     clipFlags, VTX_CLIP($3)                  // Load flags for V3, which will be the final vertex of the last polygon
+.else
+    lw      $9, (clipMaskList)(clipMaskIdx)          // Load clip mask
     lw      clipFlags, VTX_CLIP($3)                  // Load flags for V3, which will be the final vertex of the last polygon
+.endif
     and     clipFlags, clipFlags, $9                 // Mask V3's flags to current clip condition
     addi    clipPolyRead,   clipPolySelect, -6       // Start reading at the beginning of the old polygon
     xori    clipPolySelect, clipPolySelect, 6 ^ (clipPoly2 + 6 - clipPoly) // Swap to the other polygon memory
@@ -1227,7 +1228,11 @@ clipping_edgelooptop: // Loop over edges connecting verts, possibly subdivide th
     lhu     $2, (clipPoly)(clipPolyRead)       // Read next vertex of input polygon as V2 (end of edge)
     addi    clipPolyRead, clipPolyRead, 0x0002 // Increment read pointer
     beqz    $2, clipping_nextcond              // If V2 is 0, done with input polygon
+.if MOD_CLIP_CHANGES
+     lhu    $11, VTX_CLIP($2)                  // Load flags for V2
+.else
      lw     $11, VTX_CLIP($2)                  // Load flags for V2
+.endif
     and     $11, $11, $9                       // Mask V2's flags to current clip condition
     beq     $11, clipFlags, clipping_nextedge  // Both set or both clear = both off screen or both on screen, no subdivision
      move   clipFlags, $11                     // clipFlags = masked V2's flags
@@ -1248,8 +1253,8 @@ clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / o
     andi    $11, clipMaskIdx, 4
     bnez    $11, clipping_interpolate          // If W, screen clipping
      la     $4, 0
-    lw      $11, VTX_CLIP($3)                  // Load flags for offscreen vertex
-    srl     $11, $11, CLIP_SHIFT_SCAL          // Look at scaled rather than screen clipping
+    lhu     $11, VTX_CLIP($3)                  // Load flags for offscreen vertex
+    srl     $11, $11, 4                        // Look at scaled rather than screen clipping
     and     $4, $11, $9                        // Mask to current clip condition; $4 is nonzero if outside scaled box
 clipping_interpolate:
 .endif
@@ -1509,7 +1514,9 @@ clipping_nextcond:
 .else
      addi   clipMaskIdx, clipMaskIdx, -0x0004  // Point to next condition
 .endif
+.if !MOD_CLIP_CHANGES
     sw      $zero, activeClipPlanes            // Disable all clipping planes while drawing tris
+.endif
 .if MOD_GENERAL
     lhu     $4, modSaveFlatR4                  // Pointer to original first vertex for flat shading
 .endif
@@ -1536,16 +1543,18 @@ clipping_draw_tris_loop:
     bne     clipPolyWrite, clipPolySelect, clipping_draw_tris_loop
      addi   reg1, reg1, val1
 clipping_done:
-.if MOD_CLIP_CHANGES
-    la      $30, -1  // Back to normal tri drawing mode (check clip masks)
-.endif
+
 .if MOD_GENERAL
     lhu     $ra, modSaveRA
     jr      $ra
 .else
     jr      savedRA  // This will be G_TRI1_handler if was first tri of pair, else run_next_DL_command
 .endif
+.if MOD_CLIP_CHANGES
+     la     $30, -1  // Back to normal tri drawing mode (check clip masks)
+.else
      sw     savedActiveClipPlanes, activeClipPlanes
+.endif
 
 .align 8
 
@@ -1732,9 +1741,21 @@ vertices_store:
     vmadn   $v5, $v26, $v4
     lsv     vPairMVPPosI[6],  (VTX_Z_INT      - 2 * vtxSize)(outputVtxPos) // load Z into W slot, will be for fog below
     vmadh   $v4, $v25, $v4
+.if MOD_CLIP_CHANGES
+    // $12 = final value for first vertex
+    // $24 = final value for second vertex
+    // $11, rClipRes = temps
+    srl     $24, rClipRes, 4            // Shift second vertex screen clipping to first slots
+    andi    $12, rClipRes, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
+.else
     sh      rClipRes,         (VTX_CLIP_SCRN  - 1 * vtxSize)(secondVtxPos) // XYZW/W second vtx results in bits 0xF0F0
+.endif
     vmadh   $v2, $v2, $v31[7]           // Some extended precision thing? 0x7FFF times 0 or 0x7FFF
+.if MOD_CLIP_CHANGES
+    andi    $24, $24, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
+.else
     sll     $11, rClipRes, 4            // Shift first vtx screen space clip into positions 0xF0F0
+.endif
     vcl     $v29, vPairMVPPosF, $v7[3h] // Compare XYZZ to clip-ratio-scaled W (frac part)
     cfc2    rClipRes, $vcc              // Load 16 bit clip-ratio-scaled results, two verts
     vmudl   $v29, vPairMVPPosF, $v5[3h] // Pos times inv W
@@ -1742,15 +1763,34 @@ vertices_store:
     vmadm   $v29, vPairMVPPosI, $v5[3h] // Pos times inv W
     addi    inputVtxPos, inputVtxPos, (2 * inputVtxSize) // Advance two positions forward in the input vertices
     vmadn   $v26, vPairMVPPosF, $v2[3h] // Pos times inv W extended precision thing?
+.if MOD_CLIP_CHANGES
+    sll     $11, rClipRes, 4            // Shift first vertex scaled clipping to second slots
+    andi    rClipRes, rClipRes, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
+.else
     sh      rClipRes,         (VTX_CLIP_SCAL  - 1 * vtxSize)(secondVtxPos) // Clip scaled second vtx results in bits 0xF0F0
+.endif
     vmadh   $v25, vPairMVPPosI, $v2[3h] // v25:v26 = pos times inv W
+.if MOD_CLIP_CHANGES
+    andi    $11, $11, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
+    or      $24, $24, rClipRes          // Combine final results for second vertex
+.else
     sll     rClipRes, rClipRes, 4       // Shift first vtx scaled clip into positions 0xF0F0
+.endif
     vmudm   $v3, vPairST, vVpMisc       // Scale ST for two verts, using TexSScl and TexTScl in elems 2, 3, 6, 7
+.if MOD_CLIP_CHANGES
+    or      $12, $12, $11               // Combine final results for first vertex
+    sh      $24,              (VTX_CLIP       - 1 * vtxSize)(secondVtxPos) // Store second vertex results
+.else
     sh      $11,              (VTX_CLIP_SCRN  - 2 * vtxSize)(outputVtxPos) // Clip screen first vtx results
+.endif
 .if MOD_ATTR_OFFSETS
     vmadh   $v3, vFogMask, vOne[0]      // + 1 * ST offset
 .endif
+.if MOD_CLIP_CHANGES
+    sh      $12,              (VTX_CLIP       - 2 * vtxSize)(outputVtxPos) // Store first vertex results
+.else
     sh      rClipRes,         (VTX_CLIP_SCAL  - 2 * vtxSize)(outputVtxPos) // Clip scaled first vtx results
+.endif
     vmudl   $v29, $v26, vVpMisc[4]      // Scale result by persp norm
     ssv     $v5[6],           (VTX_INV_W_FRAC - 2 * vtxSize)(outputVtxPos)
     vmadm   $v25, $v25, vVpMisc[4]      // Scale result by persp norm
@@ -1902,13 +1942,29 @@ tri_to_rdp_noinit:
     vmov    $v6[6], $v2[5]          // elem 6 of v6 = vertex 1 addr
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
     vnxor   $v9, vZero, $v31[7]     // v9 = 0x8000
+.if MOD_CLIP_CHANGES
+    lhu     $5, VTX_CLIP($1)
+.else
     lw      $5, VTX_CLIP($1)
+.endif
     vmov    $v8[6], $v2[7]          // elem 6 of v8 = vertex 3 addr
+.if MOD_CLIP_CHANGES
+    lhu     $6, VTX_CLIP($2)
+.else
     lw      $6, VTX_CLIP($2)
+.endif
     vadd    $v2, vZero, $v6[1] // v2 all elems = y-coord of vertex 1
+.if MOD_CLIP_CHANGES
+    lhu     $7, VTX_CLIP($3)
+.else
     lw      $7, VTX_CLIP($3)
+.endif
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
+.if MOD_CLIP_CHANGES
+    andi    $11, $5, CLIP_MOD_MASK_SCRN_ALL
+.else
     andi    $11, $5, (CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY | CLIP_FAR | CLIP_NEAR) << CLIP_SHIFT_SCRN
+.endif
     vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
     and     $11, $6, $11
     vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
@@ -1918,37 +1974,71 @@ tri_to_rdp_noinit:
     bnez    $11, return_routine // ...whole tri is offscreen, cull.
      lbu    $11, geometryModeLabel + 2  // Loads the geometry mode byte that contains face culling settings
     vmudh   $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
+.if MOD_CLIP_CHANGES
+    sra     $12, $30, 31      // All 1s if $30 is negative, meaning clipping allowed
+.else
     lw      $12, activeClipPlanes
+.endif
     vmadh   $v29, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
     or      $5, $5, $6
-.if MOD_GENERAL
+.if MOD_GENERAL && !MOD_CLIP_CHANGES
     andi    $11, $11, G_CULL_BOTH >> 8  // Only look at culling bits, so we can use others for other mods
 .endif
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
     or      $5, $5, $7        // If any verts are past any clipping plane...
     vmrg    $v10, $v6, $v4    // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
+.if MOD_CLIP_CHANGES
+    andi    $11, $11, G_CULL_BOTH >> 8  // Only look at culling bits, so we can use others for other mods
+.else
     lw      $11, (gCullMagicNumbers)($11)
+.endif
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
     mfc2    $6, $v29[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    $v4, $v14, $v8    // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     and     $5, $5, $12       // ...which is in the set of currently enabled clipping planes (scaled for XY, screen for ZW)...
     vmrg    $v14, $v8, $v14   // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
+.if MOD_CLIP_CHANGES
+    andi    $12, $5, CLIP_NEAR >> 4 // If tri crosses camera plane, backface info is garbage
+    bnez    $12, tri_mod_skip_check_backface
+     lw     $11, (gCullMagicNumbers)($11)
+    beqz    $6, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
+     add    $11, $6, $11        // Add magic number; see description at gCullMagicNumbers
+    bgez    $11, return_routine // If sign bit is clear, cull.
+tri_mod_skip_check_backface:
+    vlt     $v6, $v6, $v2     // v6 (thrown out), VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
+    andi    $12, $5, CLIP_MOD_MASK_SCAL_ALL // If any outside scaled bounds, do clipping
+    vmrg    $v2, $v4, $v10   // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
+    bnez    $12, ovl23_clipping_entrypoint
+     vmrg   $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
+    andi    $12, $5, CLIP_MOD_MASK_SCRN_ALL // If any vertex outside screen bounds...
+    vsub    $v12, $v14, $v10  // VH - VL (negative)
+    mfc2    $11, $v12[2]      // Y value of VH - VL (negative)
+    addi    $11, $11, 30 << 2 // Is triangle more than 30 scanlines high?
+    sra     $11, $11, 31      // All 1s if tri is large, all 0s if it is small
+    and     $12, $12, $11     // Large tri and partly outside screen bounds
+    bnez    $12, ovl23_clipping_entrypoint // Do clipping; TODO enabling this worsens the performance
+     vmudn  $v4, $v14, $v31[5]
+    mfc2    $1, $v14[12]      // $v14 = lowest Y value = highest on screen (x, y, addr)
+.else
     bnez    $5, ovl23_clipping_entrypoint // ...then run overlay 3 for clipping, either directly or via overlay 2 loading overlay 3.
-     add     $11, $6, $11     // Add magic number; see description at gCullMagicNumbers
+     add    $11, $6, $11     // Add magic number; see description at gCullMagicNumbers
     vlt     $v6, $v6, $v2     // v6 (thrown out), VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
     bgez    $11, return_routine // If sign bit is clear, cull.
-     vmrg    $v2, $v4, $v10   // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
+     vmrg   $v2, $v4, $v10   // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     vmrg    $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
-    mfc2    $1, $v14[12]
+    mfc2    $1, $v14[12]      // $v14 = lowest Y value = highest on screen (x, y, addr)
     vmudn   $v4, $v14, $v31[5]
     beqz    $6, return_routine // If cross product is 0, tri is degenerate (zero area), cull.
+.endif
      vsub    $v6, $v2, $v14
-    mfc2    $2, $v2[12]
+    mfc2    $2, $v2[12]       // $v2 = mid vertex (x, y, addr)
     vsub    $v8, $v10, $v14
-    mfc2    $3, $v10[12]
+    mfc2    $3, $v10[12]      // $v10 = highest Y value = lowest on screen (x, y, addr)
     vsub    $v11, $v14, $v2
     lw      $6, geometryModeLabel
-    vsub    $v12, $v14, $v10
+.if !MOD_CLIP_CHANGES
+    vsub    $v12, $v14, $v10  // VH - VL (negative)
+.endif
     llv     $v13[0], VTX_INV_W_VEC($1)
     vsub    $v15, $v10, $v2
     llv     $v13[8], VTX_INV_W_VEC($2)
@@ -2216,12 +2306,21 @@ endVtxPtr equ $24 // = cmd_w1_dram
 G_CULLDL_handler:
     lhu     vtxPtr, (vertexTable)(cmd_w0)     // load start vertex address
     lhu     endVtxPtr, (vertexTable)(cmd_w1_dram) // load end vertex address
-    addiu   $1, $zero, (CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY | CLIP_FAR | CLIP_NEAR)
+.if MOD_CLIP_CHANGES
+    la      $1, CLIP_MOD_MASK_SCRN_ALL
+    lhu     $11, VTX_CLIP(vtxPtr)
+.else
+    la      $1, (CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY | CLIP_FAR | CLIP_NEAR)
     lw      $11, VTX_CLIP(vtxPtr)             // read clip flags from vertex
+.endif
 culldl_loop:
     and     $1, $1, $11
     beqz    $1, run_next_DL_command           // Some vertex is on the screen-side of all clipping planes; have to render
+.if MOD_CLIP_CHANGES
+     lhu    $11, (vtxSize + VTX_CLIP)(vtxPtr) // next vertex clip flags
+.else
      lw     $11, (vtxSize + VTX_CLIP)(vtxPtr) // next vertex clip flags
+.endif
     bne     vtxPtr, endVtxPtr, culldl_loop    // loop until reaching the last vertex
      addiu  vtxPtr, vtxPtr, vtxSize           // advance to the next vertex
     j       G_ENDDL_handler                   // If got here, there's some clipping plane where all verts are outside it; skip DL
@@ -2650,7 +2749,7 @@ continue_light_dir_xfrm:
     j       @@loop
      vmadh  $v15, $v15, $v30[i1]        // 0x0100; scale results to become bytes
 
-curMatrix equ $12 // Overwritten during texgen, but with a value which is 0 or positive, so means cur matrix is MV
+curMatrix equ $12 // Value only matters during light_vtx for a single pair of vertices
 ltColor equ $v29
 vPairRGBA equ $v27
 vPairAlpha37 equ $v28 // Same as mvTc1f, but alpha values are left in elems 3, 7

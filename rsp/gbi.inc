@@ -199,3 +199,10 @@ CLIP_FAR equ CLIP_PZ
 .else
     CLIP_NEAR equ CLIP_NZ
 .endif
+
+.if MOD_CLIP_CHANGES
+    // Could add CLIP_NZ and CLIP_PZ to SCRN if desired, even though not clipping there.
+    CLIP_MOD_MASK_SCRN_ALL equ ((CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY | CLIP_NEAR) >> 4)
+    CLIP_MOD_MASK_SCAL_ALL equ  (CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY)
+    CLIP_MOD_VTX_USED equ CLIP_PZ // won't ever be used for other things
+.endif
