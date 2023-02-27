@@ -297,12 +297,16 @@ textureSettings1:
 textureSettings2:
     .dw 0x00000000 // second word, has s and t scale
     
-.if MOD_CLIP_CHANGES
+.if MOD_GENERAL
 mwModsStart:
+.if MOD_CLIP_CHANGES
 modClipLargeTriThresh:
     .dh 120 << 2 // Number of quarter-scanlines high a triangle is to be considered large
 modClipRatio:
     .dh 0x0002 // Clip ratio; strongly recommend keeping as 2
+.else
+    .dw 0 //TODO
+.endif
 .endif
 
 .if MOD_ATTR_OFFSETS
