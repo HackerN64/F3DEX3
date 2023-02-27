@@ -698,7 +698,7 @@ savedRA               equ $30 // global (mods: got rid of, now available)
 // subdivision and vertex write.
 // $2: vertex at end of edge
 clipMaskIdx  equ $5
-secondVtxPos equ $8  // global
+secondVtxPos equ $8
 outputVtxPos equ $15 // global
 clipFlags    equ $16 // global
 clipPolyRead equ $17 // global
@@ -770,7 +770,7 @@ postOvlRA     equ $12 // Commonly used locally
 // $5: clipMaskIdx, geometry mode high short during vertex load / lighting, local
 // $6: topLightPtr, geometry mode low byte during tri write, local
 // $7: fog flag in vtx write, local
-// $8: secondVtxPos
+// $8: secondVtxPos, local in tri write
 // $9: curLight, local
 // $10: briefly used local in vtx write (mods: got rid of, not used!)
 // $11: ovlTableEntry, very common local
@@ -1544,8 +1544,91 @@ clipping_mod_draw_tris:
 .if MOD_GENERAL
     lhu     $4, modSaveFlatR4                  // Pointer to original first vertex for flat shading
 .endif
+// Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
+.if MOD_CLIP_CHANGES
+    addiu   clipPolySelect, clipPolySelect, -6 // = Pointer to first vertex
+    addiu   clipPolyWrite, clipPolyWrite, -2   // = Pointer to last vertex
+    // Available locals: most registers ($5, $6, $7, $8, $9, $11, $12, etc.)
+    // Available regs which won't get clobbered by tri write: 
+    // clipPolySelect, clipPolyWrite, $14 (inputVtxPos), $15 (outputVtxPos), (more)
+    // Find vertex highest on screen (lowest screen Y)
+    la      $5, 0x7FFF                // current best value
+    move    $7, clipPolySelect        // initial vertex pointer
+    lhu     $12, (clipPoly)($7)       // Load vertex address
+clipping_mod_search_highest_loop:
+    lh      $11, VTX_SCR_Y($12)       // Load screen Y
+    bge     $11, $5, clipping_mod_search_skip_better
+     addiu  $7, $7, 2                 // Next vertex
+    addiu   $14, $7, -2               // Save pointer to best/current vertex
+    move    $5, $11                   // Save best value
+clipping_mod_search_skip_better:
+    bge     clipPolyWrite, $7, clipping_mod_search_highest_loop
+     lhu    $12, (clipPoly)($7)       // Next vertex address
+    // Find next closest vertex, from the two on either side
+    bne     $14, clipPolySelect, @@skip1
+     addiu  $6, $14, -2               // $6 = previous vertex
+    move    $6, clipPolyWrite
+@@skip1:
+    lhu     $7, (clipPoly)($6)
+    bne     $14, clipPolyWrite, @@skip2
+     addiu  $8, $14, 2                // $8 = next vertex
+    move    $8, clipPolySelect
+@@skip2:
+    lhu     $9, (clipPoly)($8)
+    lh      $7, VTX_SCR_Y($7)
+    lh      $9, VTX_SCR_Y($9)
+    bge     $7, $9, clipping_mod_draw_loop // If value from prev vtx >= value from next, use next
+     move   $15, $8                   // $14 is first, $8 -> $15 is next
+    move    $15, $14                  // $14 -> $15 is next
+    move    $14, $6                   // $6 -> $14 is first
+clipping_mod_draw_loop:
+    // Current edge is $14 - $15 (pointers to clipPoly). We can either draw
+    // (previous) - $14 - $15, or we can draw $14 - $15 - (next). We want the
+    // one where the lower edge covers the fewest scanlines. This edge is
+    // (previous) - $15 or $14 - (next).
+    // $1, $2, $3, $5 are vertices at $11=prev, $14, $15, $12=next
+    bne     $14, clipPolySelect, @@skip1
+     addiu  $11, $14, -2
+    move    $11, clipPolyWrite
+@@skip1:
+    beq     $11, $15, clipping_done // If previous is $15, we only have two verts left, done
+     lhu    $1, (clipPoly)($11)     // From the group below, need something in the delay slot
+    bne     $15, clipPolyWrite, @@skip2
+     addiu  $12, $15, 2
+    move    $12, clipPolySelect
+@@skip2:
+    lhu     $2, (clipPoly)($14)
+    lhu     $3, (clipPoly)($15)
+    lhu     $5, (clipPoly)($12)
+    lsv     $v5[0], (VTX_SCR_Y)($1)
+    lsv     $v5[4], (VTX_SCR_Y)($2)
+    lsv     $v5[2], (VTX_SCR_Y)($3)
+    lsv     $v5[6], (VTX_SCR_Y)($5)
+    vsub    $v5, $v5, $v5[1q]  // Y(prev) - Y($15) in elem 0, Y($14) - Y(next) in elem 2
+    move    $8, $14            // Temp copy of $14, will be overwritten
+    vabs    $v5, $v5, $v5      // abs of each
+    vlt     $v29, $v5, $v5[0h] // Elem 2: second difference less than first difference
+    cfc2    $9, $vcc           // Get comparison results
+    andi    $9, $9, 4          // Look at only vector element 2
+    beqz    $9, clipping_mod_final_draw // Skip the change if second diff greater than or equal to first diff
+     move   $14, $11           // If skipping, drawing prev-$14-$15, so update $14 to be prev
+    move    $1, $2             // Drawing $14, $15, next
+    move    $2, $3
+    move    $3, $5
+    move    $14, $8            // Restore overwritten $14
+    move    $15, $12           // Update $15 to be next
+clipping_mod_final_draw:
+    mtc2    $1, $v2[10]               // Addresses go in vector regs too
+    vor     $v3, vZero, $v31[5]       // Not sure what this is, was in init code before tri_to_rdp_noinit
+    mtc2    $2, $v4[12]
+    mtc2    $3, $v2[14]
+    j       tri_to_rdp_noinit         // Draw tri
+     la     $ra, clipping_mod_draw_loop // When done, return to top of loop
+    // armips requires everything to be defined on all .if-paths
+    reg1 equ $zero  // garbage value
+    val1 equ 0x1337 // garbage value
+.else
 clipping_draw_tris_loop:
-    // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
 .if CFG_CLIPPING_SUBDIVIDE_DESCENDING
     // Draws verts in pattern like 0-4-3, 0-3-2, 0-2-1
     reg1 equ clipPolyWrite
@@ -1566,6 +1649,7 @@ clipping_draw_tris_loop:
      mtc2   $3, $v2[14]
     bne     clipPolyWrite, clipPolySelect, clipping_draw_tris_loop
      addi   reg1, reg1, val1
+.endif
 clipping_done:
 
 .if MOD_GENERAL
@@ -2131,7 +2215,7 @@ shading_done:
     vrcp    $v20[3], $v8[1]
     lw      $7, VTX_INV_W_VEC($2)
     vrcph   vPairST[3], $v8[1]
-    lw      secondVtxPos, VTX_INV_W_VEC($3)
+    lw      $8, VTX_INV_W_VEC($3)
     // v30[i1] is 0x0100
     vmudl   $v18, $v18, $v30[i1] // vertex color 1 >>= 8
     lbu     $9, textureSettings1 + 3
@@ -2144,7 +2228,7 @@ shading_done:
     vmudl   $v29, $v20, $vec1[i2]
     sub     $5, $5, $11
     vmadm   vPairST, vPairST, $vec1[i2]
-    sub     $11, $5, secondVtxPos
+    sub     $11, $5, $8
     vmadn   $v20, vZero, vZero[0]
     sra     $12, $11, 31
     vmudm   $v25, $v15, $vec1[i3]
