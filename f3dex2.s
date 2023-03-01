@@ -1676,6 +1676,193 @@ ovl3_end:
 
 ovl23_end:
 
+
+.if MOD_VL_REWRITE
+
+G_VTX_handler:
+    TODO
+    lw      $5, (geometryModeLabel)($zero)
+    srl     $5, $5, 8 // Middle 2 bytes
+
+vl_mod_matrix_load:
+    // M matrix is $v0-$v7, VP matrix is $v8-$v15
+    lqv     $v0,     (mvMatrix + 0x00)($zero)
+    lqv     $v2,     (mvMatrix + 0x10)($zero)
+    lqv     $v4,     (mvMatrix + 0x20)($zero)
+    lqv     $v6,     (mvMatrix + 0x30)($zero)
+    lqv     $v8,     (pMatrix  + 0x00)($zero)
+    vor     $v1,  $v0,  $v0
+    lqv     $v10,    (pMatrix  + 0x10)($zero)
+    vor     $v3,  $v2,  $v2
+    lqv     $v12,    (pMatrix  + 0x20)($zero)
+    vor     $v5,  $v4,  $v4
+    lqv     $v14,    (pMatrix  + 0x30)($zero)
+    vor     $v7,  $v6,  $v6
+    ldv     $v1[0],  (mvMatrix + 0x08)($zero)
+    vor     $v9,  $v8,  $v8
+    ldv     $v3[0],  (mvMatrix + 0x18)($zero)
+    vor     $v11, $v10, $v10
+    ldv     $v5[0],  (mvMatrix + 0x28)($zero)
+    vor     $v13, $v12, $v12
+    ldv     $v7[0],  (mvMatrix + 0x38)($zero)
+    vor     $v15, $v14, $v14
+    ldv     $v0[8],  (mvMatrix + 0x10)($zero)
+    ldv     $v2[8],  (mvMatrix + 0x10)($zero)
+    ldv     $v4[8],  (mvMatrix + 0x10)($zero)
+    ldv     $v6[8],  (mvMatrix + 0x10)($zero)
+    ldv     $v9[0],  (pMatrix  + 0x08)($zero)
+    ldv     $v11[0], (pMatrix  + 0x18)($zero)
+    ldv     $v13[0], (pMatrix  + 0x28)($zero)
+    ldv     $v15[0], (pMatrix  + 0x38)($zero)
+    ldv     $v8[8],  (pMatrix  + 0x10)($zero)
+    ldv     $v10[8], (pMatrix  + 0x10)($zero)
+    ldv     $v12[8], (pMatrix  + 0x10)($zero)
+    ldv     $v14[8], (pMatrix  + 0x10)($zero)
+vl_mod_setup_constants:
+/*
+$v16 = vVpFgScale  = [vscale[0], -vscale[1], vscale[2], fogMult,   (repeat)]
+$v17 = vVpFgOffset = [vtrans[0],  vtrans[1], vtrans[2], fogOffset, (repeat)]
+$v18 = vVpMisc     = [TexSScl,   TexTScl,    perspNorm, 4,         TexSScl,   TexTScl, clipRatio, 4     ]
+$v19 = vFogMask    = [TexSOfs,   TexTOfs,    aoAmb,     0,         TexSOfs,   TexTOfs, aoDir,     0     ]
+$v31 =               [-4,        -1,         1,         0x0010,    0x0100,    0x4000,  0x7F00,    0x7FFF]
+aoAmb, aoDir set to 0 if ambient occlusion disabled
+*/
+    TODO
+    
+vl_mod_vtx_load_loop:
+    ldv     $v20[0],    (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
+    vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
+    ldv     $v20[8],    (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
+    vmudn   $v29, $v7, $v31[2]  // 1
+    addiu   $11, inputVtxPos, VTX_IN_CN
+    vmadh   $v29, $v3, $v31[2]
+    luv     vPairRGBA,  (0         + inputVtxSize * 0)($11)         // Colors as unsigned, lower 4
+    vmadn   $v29, $v4, $v20[0h]
+    luv     $v25,       (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
+    vmadh   $v29, $v0, $v20[0h]
+    lpv     $v28,       (0         + inputVtxSize * 0)($11)         // Normals as signed, lower 4
+    vmadn   $v29, $v5, $v20[1h]
+    luv     $v26,       (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
+    vmadh   $v29, $v1, $v20[1h]
+    llv     vPairST[0], (VTX_IN_ST + inputVtxSize * 0)(inputVtxPos) // ST in 0:1
+    vmadn   $v21, $v6, $v20[2h]
+    llv     vPairST[8], (VTX_IN_ST + inputVtxSize * 1)(inputVtxPos) // ST in 4:5
+    vmadh   $v20, $v2, $v20[2h] // $v20:$v21 = vertices world coords
+    addiu   $11, inputVtxPos, 6
+    vmrg    vPairRGBA, vPairRGBA, $v25 // Merge colors
+    addiu   $12, inputVtxPos, 2
+    vmudn   $v29, $v15, $v31[2] // 1
+    lpv     $v30,       (0         + inputVtxSize * 0)($11)         // Packed normals as signed, lower 2
+    vmadh   $v29, $v11, $v31[2] // 1
+    lpv     $v25,       (0         + inputVtxSize * 1)($12)         // Upper 2 in 4:5
+    vmadl   $v29, $v12, $v21[0h]
+    vmadm   $v29, $v8,  $v21[0h]
+    vmadn   $v29, $v12, $v20[0h]
+    vmadh   $v29, $v8,  $v20[0h]
+    vmadl   $v29, $v13, $v21[1h]
+    vmadm   $v29, $v9,  $v21[1h]
+    vmadn   $v29, $v13, $v20[1h]
+    vmadh   $v29, $v9,  $v20[1h]
+    vmadl   $v29, $v14, $v21[2h]
+    vmadm   $v29, $v10, $v21[2h]
+    andi    $11, $5, G_LIGHTING >> 8
+    vmadn   vPairMVPPosF, $v14, $v20[2h]
+    bnez    $11, vl_mod_lighting
+     vmadh  vPairMVPPosI, $v10, $v20[2h]
+vl_mod_return_from_lighting:
+    vmudm   $v29, vPairST, vVpMisc     // Scale ST; must be after texgen
+    vmadh   vPairST, vFogMask, $v31[2] // + 1 * ST offset
+vl_mod_vtx_store:
+    // Inputs: vPairMVPPosI, vPairMVPPosF, vPairST, vPairRGBA
+    // Locals: $v20, $v21, $v25, $v26, $v28, $v30 ($v29 is temp)
+    // Alive at end for clipping: $v30:$v28 = 1/W, vPairRGBA
+    vmudl   $v29, vPairMVPPosF, vVpMisc[2] // Persp norm
+    sdv     vPairMVPPosF[8],  (VTX_FRAC_VEC   - 1 * vtxSize)(secondVtxPos)
+    vmadm   $v20, vPairMVPPosI, vVpMisc[2] // Persp norm
+    sdv     vPairMVPPosF[0],  (VTX_FRAC_VEC   - 2 * vtxSize)(outputVtxPos)
+    vmadn   $v21, vFogMask, vFogMask[3] // Zero
+    sdv     vPairMVPPosI[8],  (VTX_INT_VEC    - 1 * vtxSize)(secondVtxPos)
+    vch     $v29, vPairMVPPosI, vPairMVPPosI[3h] // Clip screen high
+    sdv     vPairMVPPosI[0],  (VTX_INT_VEC    - 2 * vtxSize)(outputVtxPos)
+    vcl     $v29, vPairMVPPosF, vPairMVPPosF[3h] // Clip screen low
+    suv     vPairRGBA[8],     (VTX_INT_VEC    - 1 * vtxSize)(secondVtxPos)
+    vmudn   $v26, vPairMVPPosF, vVpMisc[6] // Clip ratio
+    suv     vPairRGBA[0],     (VTX_INT_VEC    - 2 * vtxSize)(outputVtxPos)
+    vmadh   $v25, vPairMVPPosI, vVpMisc[6] // Clip ratio
+    slv     vPairST[0],       (VTX_TC_VEC     - 1 * vtxSize)(secondVtxPos)
+    vrcph   $v29[0], $v20[3]
+    slv     vPairST[8],       (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos)
+    vrcpl   $v28[3], $v21[3]
+    lsv     vPairMVPPosF[14], (VTX_Z_FRAC     - 1 * vtxSize)(secondVtxPos) // load Z into W slot, will be for fog below
+    vrcph   $v30[3], $v20[7]
+    lsv     vPairMVPPosF[6],  (VTX_Z_FRAC     - 2 * vtxSize)(outputVtxPos) // load Z into W slot, will be for fog below
+    vrcpl   $v28[7], $v21[7]
+    cfc2    $20, $vcc
+    vrcph   $v30[7], vFogMask[3] // Zero
+    srl     $24, rClipRes, 4            // Shift second vertex screen clipping to first slots
+    vch     $v29, vPairMVPPosI, $v25[3h] // Clip scaled high
+    andi    $12, rClipRes, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
+    vcl     $v29, vPairMVPPosF, $v26[3h] // Clip scaled low
+    andi    $24, $24, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
+    vmudl   $v29, $v21, $v28
+    lsv     vPairMVPPosI[14], (VTX_Z_INT      - 1 * vtxSize)(secondVtxPos) // load Z into W slot, will be for fog below
+    vmadm   $v29, $v20, $v28
+    lsv     vPairMVPPosI[6],  (VTX_Z_INT      - 2 * vtxSize)(outputVtxPos) // load Z into W slot, will be for fog below
+    vmadn   $v21, $v21, $v30
+    cfc2    rClipRes, $vcc
+    vmadh   $v20, $v20, $v30
+    sll     $11, rClipRes, 4            // Shift first vertex scaled clipping to second slots
+    vge     $v29, vPairMVPPosI, vFogMask[3] // Zero; vcc set if w >= 0
+    andi    rClipRes, rClipRes, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
+    vmudh   $v29, vVpMisc, $v31[2] // 4 * 1 in elems 3, 7
+    andi    $11, $11, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
+    vmadn   $v21, $v21, $v31[0] // -4
+    or      $24, $24, rClipRes          // Combine final results for second vertex
+    vmadh   $v20, $v20, $v31[0] // -4
+    or      $12, $12, $11               // Combine final results for first vertex
+    vmrg    $v25, vFogMask, $v31[7] // 0 or 0x7FFF in elems 3, 7, latter if w < 0
+    vmudl   $v29, $v21, $v28
+    vmadm   $v29, $v20, $v28
+    sh      $24,              (VTX_CLIP       - 1 * vtxSize)(secondVtxPos) // Store second vertex results
+    vmadn   $v28, $v21, $v30
+    sh      $12,              (VTX_CLIP       - 2 * vtxSize)(outputVtxPos) // Store first vertex results
+    vmadh   $v30, $v20, $v30    // $v30:$v28 is 1/W
+    vmadh   $v25, $v25, $v31[7] // 0x7FFF; $v25:$v28 is 1/W but large number if W negative
+    vmudl   $v29, vPairMVPPosF, $v28[3h]
+    vmadm   $v29, vPairMVPPosI, $v28[3h]
+    vmadn   vPairMVPPosF, vPairMVPPosF, $v25[3h]
+    ssv     $v28[14],         (VTX_INV_W_FRAC - 1 * vtxSize)(secondVtxPos)
+    vmadh   vPairMVPPosI, vPairMVPPosI, $v25[3h] // pos * 1/W
+    ssv     $v28[6],          (VTX_INV_W_FRAC - 2 * vtxSize)(outputVtxPos)
+    vmudl   $v29, vPairMVPPosF, vVpMisc[2] // Persp norm
+    ssv     $v30[14],         (VTX_INV_W_INT  - 1 * vtxSize)(secondVtxPos)
+    vmadm   vPairMVPPosI, vPairMVPPosI, vVpMisc[2] // Persp norm
+    ssv     $v30[6],          (VTX_INV_W_INT  - 2 * vtxSize)(outputVtxPos)
+    vmadn   vPairMVPPosF, vFogMask, vFogMask[3] // Zero
+    vmudh   $v29, vVpFgOffset, $v31[2] // offset * 1
+    vmadn   vPairMVPPosF, vPairMVPPosF, vVpFgScale // + XYZ * scale
+    vmadh   vPairMVPPosI, vPairMVPPosI, vVpFgScale
+    vge     $v21, vPairMVPPosI, $v31[6] // 0x7F00; clamp fog to >= 0 (low byte only)
+    slv     vPairMVPPosI[8],  (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
+    vge     $v20, vPairMVPPosI, vFogMask[3] // Zero; clamp Z to >= 0
+    slv     vPairMVPPosI[0],  (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
+    ssv     vPairMVPPosF[12], (VTX_SCR_Z_FRAC - 1 * vtxSize)(secondVtxPos)
+    beqz    $7, vl_mod_skip_fog
+     ssv    vPairMVPPosF[4],  (VTX_SCR_Z_FRAC - 2 * vtxSize)(outputVtxPos)
+    sbv     $v21[15],         (VTX_COLOR_A    - 1 * vtxSize)(secondVtxPos)
+    sbv     $v21[7],          (VTX_COLOR_A    - 2 * vtxSize)(outputVtxPos)
+vl_mod_skip_fog:
+    ssv     $v20[12],         (VTX_SCR_Z      - 1 * vtxSize)(secondVtxPos)
+    jr      $ra
+     ssv    $v20[4],          (VTX_SCR_Z      - 2 * vtxSize)(outputVtxPos)
+    
+    
+.endif
+
+
+
+
+
 vPairRGBATemp equ $v7
 
 G_VTX_handler:
@@ -2760,6 +2947,59 @@ ovl1_end:
 .endif
 
 .headersize ovl23_start - orga()
+
+.if MOD_VL_REWRITE
+
+vl_mod_lighting:
+    // Inputs (after merges): vPairRGBA, $v28 normals, $v30 packed normals,
+    // $v20 vertices world int, vPairST
+    // Outputs: vPairRGBA, vPairST
+    // Locals: $v21, $v25, $v26, ($v29 temp), and whichever of $v28 / $v30 not used
+    andi    $11, $5, G_PACKED_NORMALS
+    vmrg    $v28, $v28, $v26          // Merge normals     
+    beqz    $11, vl_mod_skip_packed_normals
+     vmrg   $v30, $v30, $v25          // Merge packed normals
+    // TODO packed normals algorithm; overwrite initial state of $v28
+vl_mod_skip_packed_normals:
+    // Normals now in $v28
+    vmudn   $v29, $v4, $v28[0h] // Transform normals
+    vmadh   $v29, $v0, $v28[0h]
+    vmadn   $v29, $v5, $v28[1h]
+    vmadh   $v29, $v1, $v28[1h]
+    vmadn   $v26, $v6, $v28[2h]
+    vmadh   $v25, $v2, $v28[2h]
+    // TODO normalize result, ensure 3, 7 components are zero
+    lbu     curLight, numLightsx18
+    addi    curLight, curLight, lightBufferMain
+    luv     $v30, (0)(curLight) // $v30 = Total light level
+    vsub    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF
+    // Ambient occlusion: light *= (factor * (alpha - 1) + 1); in s.15 format
+    vmulf   $v29, vPairRGBA, vFogMask[2]  // aoAmb factor
+    vadd    $v29, $v29, $v31[7] // 0x7FFF = 1 in s.15
+    vmulf   $v30, $v30, $v29[3h]
+vl_mod_light_loop:
+    ldv     $v21[0], (8)(curLight) // Light position or direction
+    ldv     $v21[8], (8)(curLight)
+    blez    curLight, vl_mod_lighting_done
+     lbu    $11, (3)(curLight) // Light type / constant attenuation
+    bnez    $11, vl_mod_point_light
+     vmulu  $v25, $v21, $v28 // Light dir * normalized normals, clamp to 0
+    vand    $v25, $v25, $v31[7] // vmulu produces 0xFFFF if 0x8000 * 0x8000; make this 0x7FFF instead
+    vmulf   $v29, vPairRGBA, vFogMask[6] // aoDir factor
+    luv     $v26,    (0)(curLight) // Light color
+    vadd    $v25, $v25, $v25[1q] // Sum elements for dot product
+    vadd    $v29, $v29, $v31[7] // 0x7FFF
+    vadd    $v25, $v25, $v25[2h]
+    vmulf   $v26, $v26, $v29[3h] // light color *= ambient factor
+    addiu   curLight, curLight, -lightSize
+    vmulf   $v29, $v30, $v31[7] // 0x7FFF; Total light level * 1 in s.15
+    j       vl_mod_light_loop
+     vmacf  $v30, $v26, $v25[0h] // + light color * dot product
+vl_mod_lighting_done:
+    vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
+    // multiply by $v30
+
+.endif
 
 ovl2_start:
 ovl23_lighting_entrypoint:
