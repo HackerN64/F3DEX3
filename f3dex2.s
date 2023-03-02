@@ -1730,31 +1730,32 @@ aoAmb, aoDir set to 0 if ambient occlusion disabled
     TODO
     
 vl_mod_vtx_load_loop:
-    ldv     $v20[0],    (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
+    ldv     $v20[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
     vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
-    ldv     $v20[8],    (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
+    ldv     $v20[8],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
     vmudn   $v29, $v7, $v31[2]  // 1
-    addiu   $11, inputVtxPos, VTX_IN_CN
+    // Element access wraps in lpv/luv
+    luv     vPairRGBA[4], (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Colors as unsigned, lower 4
     vmadh   $v29, $v3, $v31[2]
-    luv     vPairRGBA,  (0         + inputVtxSize * 0)($11)         // Colors as unsigned, lower 4
+    luv     $v25[0],      (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
     vmadn   $v29, $v4, $v20[0h]
-    luv     $v25,       (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
+    lpv     $v28[4],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Normals as signed, lower 4
     vmadh   $v29, $v0, $v20[0h]
-    lpv     $v28,       (0         + inputVtxSize * 0)($11)         // Normals as signed, lower 4
+    lpv     $v26[0],      (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
     vmadn   $v29, $v5, $v20[1h]
-    luv     $v26,       (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
+    llv     vPairST[0],   (VTX_IN_ST + inputVtxSize * 0)(inputVtxPos) // ST in 0:1
     vmadh   $v29, $v1, $v20[1h]
-    llv     vPairST[0], (VTX_IN_ST + inputVtxSize * 0)(inputVtxPos) // ST in 0:1
+    llv     vPairST[8],   (VTX_IN_ST + inputVtxSize * 1)(inputVtxPos) // ST in 4:5
     vmadn   $v21, $v6, $v20[2h]
-    llv     vPairST[8], (VTX_IN_ST + inputVtxSize * 1)(inputVtxPos) // ST in 4:5
+    andi    $11, $5, G_LIGHTING >> 8
     vmadh   $v20, $v2, $v20[2h] // $v20:$v21 = vertices world coords
-    addiu   $11, inputVtxPos, 6
+    lpv     $v30[2],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Packed normals as signed, lower 2
     vmrg    vPairRGBA, vPairRGBA, $v25 // Merge colors
-    addiu   $12, inputVtxPos, 2
+    bnez    $11, vl_mod_lighting
+     lpv    $v25[6],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos) // Upper 2 in 4:5
+ vl_mod_return_from_lighting:
     vmudn   $v29, $v15, $v31[2] // 1
-    lpv     $v30,       (0         + inputVtxSize * 0)($11)         // Packed normals as signed, lower 2
     vmadh   $v29, $v11, $v31[2] // 1
-    lpv     $v25,       (0         + inputVtxSize * 1)($12)         // Upper 2 in 4:5
     vmadl   $v29, $v12, $v21[0h]
     vmadm   $v29, $v8,  $v21[0h]
     vmadn   $v29, $v12, $v20[0h]
@@ -1765,11 +1766,8 @@ vl_mod_vtx_load_loop:
     vmadh   $v29, $v9,  $v20[1h]
     vmadl   $v29, $v14, $v21[2h]
     vmadm   $v29, $v10, $v21[2h]
-    andi    $11, $5, G_LIGHTING >> 8
     vmadn   vPairMVPPosF, $v14, $v20[2h]
-    bnez    $11, vl_mod_lighting
-     vmadh  vPairMVPPosI, $v10, $v20[2h]
-vl_mod_return_from_lighting:
+    vmadh   vPairMVPPosI, $v10, $v20[2h]
     vmudm   $v29, vPairST, vVpMisc     // Scale ST; must be after texgen
     vmadh   vPairST, vFogMask, $v31[2] // + 1 * ST offset
 vl_mod_vtx_store:
@@ -2951,54 +2949,90 @@ ovl1_end:
 .if MOD_VL_REWRITE
 
 vl_mod_lighting:
-    // Inputs (after merges): vPairRGBA, $v28 normals, $v30 packed normals,
-    // $v20 vertices world int, vPairST
-    // Outputs: vPairRGBA, vPairST
-    // Locals: $v21, $v25, $v26, ($v29 temp), and whichever of $v28 / $v30 not used
-    andi    $11, $5, G_PACKED_NORMALS
+    // Inputs: $v20:$v21 vertices pos world int:frac, vPairRGBA, vPairST,
+    // $v28:$v26 (to be merged) normals, $v30:$v25 (to be merged) packed normals
+    // Outputs: vPairRGBA, vPairST, must leave alone $v20:$v21
+    // Locals: $v29 temp, $v23 (will be vPairMVPPosF), $v24 (will be vPairMVPPosI),
+    // $v25 after merge, $v26 after merge, whichever of $v28 or $v30 is unused
     vmrg    $v28, $v28, $v26          // Merge normals     
+    andi    $11, $5, G_PACKED_NORMALS >> 8
+    vmrg    $v30, $v30, $v25          // Merge packed normals
     beqz    $11, vl_mod_skip_packed_normals
-     vmrg   $v30, $v30, $v25          // Merge packed normals
-    // TODO packed normals algorithm; overwrite initial state of $v28
+    
+    
 vl_mod_skip_packed_normals:
     // Normals now in $v28
-    vmudn   $v29, $v4, $v28[0h] // Transform normals
+    // Transform normals by M matrix and normalize
+    // Also set up ambient occlusion: light *= (factor * (alpha - 1) + 1)
+    vmudn   $v29, $v4, $v28[0h]
+    lbu     curLight, numLightsx18
     vmadh   $v29, $v0, $v28[0h]
     vmadn   $v29, $v5, $v28[1h]
     vmadh   $v29, $v1, $v28[1h]
-    vmadn   $v26, $v6, $v28[2h]
-    vmadh   $v25, $v2, $v28[2h]
-    // TODO normalize result, ensure 3, 7 components are zero
-    lbu     curLight, numLightsx18
-    addi    curLight, curLight, lightBufferMain
-    luv     $v30, (0)(curLight) // $v30 = Total light level
-    vsub    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF
-    // Ambient occlusion: light *= (factor * (alpha - 1) + 1); in s.15 format
-    vmulf   $v29, vPairRGBA, vFogMask[2]  // aoAmb factor
-    vadd    $v29, $v29, $v31[7] // 0x7FFF = 1 in s.15
-    vmulf   $v30, $v30, $v29[3h]
+    addi    curLight, curLight, spFxBase - lightSize // Point to first non-ambient light
+    vmadn   $v29, $v6, $v28[2h]
+    vmadh   $v28, $v2, $v28[2h] // Single precision should be plenty
+    vsub    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; offset alpha, will be fixed later
+    vne     $v29, $v31, $v31[3h] // Set VCC to 11101110
+    vmrg    $v28, $v28, vFogMask[3] // 0; set elems 3, 7 to 0
+    vmudh   $v29, $v28, $v28 // Transformed normal squared
+    vsar    $v23, $v31, $v31[ACC_UPPER] // Load high component
+    vmulf   $v26, vPairRGBA, vFogMask[2]  // aoAmb factor
+    luv     $v30, (ltBufOfs + lightSize + 0)(curLight) // Total light level, init to ambient
+    vadd    $v23, $v23, $v23[1q] // Sum components
+    vadd    $v26, $v26, $v31[7] // 0x7FFF = 1 in s.15
+    vadd    $v23, $v23, $v23[2h]
+    vmulf   $v28, $v28, $v31[5] // 0x4000 * transformed normal, effectively / 2
+    vmulf   $v30, $v30, $v26[3h] // light color *= ambient factor
+    vrsqh   $v25[2], $v23[0] // High input, garbage output
+    vrsql   $v25[1], vFogMask[3] // 0 input, low output
+    vrsqh   $v25[0], $v23[4] // High input, high output
+    vrsql   $v25[5], vFogMask[3] // 0 input, low output
+    vrsqh   $v25[4], vFogMask[3] // High output, 0 input
+    sll     $12, $5, 17 // G_LIGHTING_POSITIONAL = 0x00400000; $5 is middle 16 bits so 0x00004000
+    vmudm   $v29, $v28, $v25[1h] // Normal * frac scaling
+    sra     $12, $12, 31 // All 1s if point lighting enabled, else all 0s
+    vmadh   $v28, $v28, $v25[0h] // Normal * int scaling
+    // $v28: normalized world space normals, $v30: total light level
 vl_mod_light_loop:
-    ldv     $v21[0], (8)(curLight) // Light position or direction
-    ldv     $v21[8], (8)(curLight)
-    blez    curLight, vl_mod_lighting_done
+    ldv     $v23[0], (ltBufOfs + 8)(curLight) // Light position or direction
+    ldv     $v23[8], (ltBufOfs + 8)(curLight)
+    bge     spFxBaseReg, curLight, vl_mod_lighting_done
      lbu    $11, (3)(curLight) // Light type / constant attenuation
-    bnez    $11, vl_mod_point_light
-     vmulu  $v25, $v21, $v28 // Light dir * normalized normals, clamp to 0
-    vand    $v25, $v25, $v31[7] // vmulu produces 0xFFFF if 0x8000 * 0x8000; make this 0x7FFF instead
     vmulf   $v29, vPairRGBA, vFogMask[6] // aoDir factor
-    luv     $v26,    (0)(curLight) // Light color
-    vadd    $v25, $v25, $v25[1q] // Sum elements for dot product
+    and     $11, $11, $12 // Mask away if point lighting disabled
+    vmulu   $v25, $v23, $v28 // Light dir * normalized normals, clamp to 0
+    bnez    $11, vl_mod_point_light
+     luv    $v26,    (ltBufOfs + 0)(curLight) // Light color
+    vand    $v25, $v25, $v31[7] // vmulu produces 0xFFFF if 0x8000 * 0x8000; make this 0x7FFF instead
     vadd    $v29, $v29, $v31[7] // 0x7FFF
-    vadd    $v25, $v25, $v25[2h]
+    vadd    $v25, $v25, $v25[1q] // Sum elements for dot product
     vmulf   $v26, $v26, $v29[3h] // light color *= ambient factor
+    vadd    $v25, $v25, $v25[2h]
+vl_mod_finish_light:
     addiu   curLight, curLight, -lightSize
     vmulf   $v29, $v30, $v31[7] // 0x7FFF; Total light level * 1 in s.15
     j       vl_mod_light_loop
      vmacf  $v30, $v26, $v25[0h] // + light color * dot product
 vl_mod_lighting_done:
     vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
-    // multiply by $v30
-
+    andi    $11, $5, G_LIGHTTOALPHA >> 8
+    andi    $12, $5, G_PACKED_NORMALS >> 8
+    vmulf   $v25, vPairRGBA, $v30     // Base output is RGB * light
+    beqz    $11, vl_mod_skip_cel
+     vmrg   $v26, vFogMask, vPairRGBA // $v26 = alpha output = vtx alpha (only 3, 7 matter)
+    vmrg    $v26, vFogMask, $v30[1h]  //                     = light green
+    vor     $v25, vPairRGBA, vPairRGBA // Base output is just RGB
+vl_mod_skip_cel:
+    bnez    $12, vl_mod_skip_novtxcolor
+     nop    // can put start of texgen here
+    vor     $v25, $v30, $v30 // Base output is just light
+vl_mod_skip_novtxcolor:
+    vmrg    vPairRGBA, $v25, $v26 // Merge base output and alpha output
+    
+    
+    j       vl_mod_return_from_lighting
+    
 .endif
 
 ovl2_start:
