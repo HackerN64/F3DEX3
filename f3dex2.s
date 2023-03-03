@@ -216,10 +216,10 @@ clipRatio: // This is an array of 6 doublewords
 // veq xxx, $v31, $v31[3h] = 00010001 in lighting
 v31Value:
     .dh -1     // used in init, clipping
-    .dh 4      // used in clipping, vtx write
+    .dh 4      // used in clipping, vtx write for Newton-Raphson reciprocal
     .dh 8      // old ucode only: used in tri write
     .dh 0x7F00 // used in vtx write and pre-jump instrs to there, also 4 put here during point lighting
-    .dh -4     // used in clipping, vtx write
+    .dh -4     // used in clipping, vtx write for Newton-Raphson reciprocal
     .dh 0x4000 // used in tri write, texgen
     .dh vertexBuffer // 0x420; used in tri write
     .dh 0x7FFF // used in vtx write, tri write, lighting, point lighting
@@ -230,22 +230,32 @@ v31Value:
 // vge xxx, $v30, $v30[7] = 11110001 in tri write
 v30Value:
     .dh 0x7FFC // not used!
-    .dh vtxSize << 7 // 0x1400; used in tri write for vtx index to addr
+    .dh vtxSize << 7 // 0x1400; it's not 0x2800 because vertex indices are *2; used in tri write for vtx index to addr
 .if CFG_OLD_TRI_WRITE // See discussion in tri write where v30 values used
     .dh 0x01CC // used in tri write, vcr?
     .dh 0x0200 // not used!
-    .dh -16    // used in tri write, some signed multiplier
-    .dh 0x0010 // used in tri write, some accumulator init value
+    .dh -16    // used in tri write for Newton-Raphson reciprocal 
+    .dh 0x0010 // used in tri write for Newton-Raphson reciprocal
     .dh 0x0020 // used in tri write, both signed and unsigned multipliers
     .dh 0x0100 // used in tri write, vertex color >>= 8; also in lighting
 .else
     .dh 0x1000 // used in tri write, some multiplier
     .dh 0x0100 // used in tri write, vertex color >>= 8 and vcr?; also in lighting and point lighting
-    .dh -16    // used in tri write, some signed multiplier
+    .dh -16    // used in tri write for Newton-Raphson reciprocal 
     .dh 0xFFF8 // used in tri write, mask away lower ST bits?
-    .dh 0x0010 // used in tri write, some accumulator init value; value moved to elem 7 for point lighting
+    .dh 0x0010 // used in tri write for Newton-Raphson reciprocal; value moved to elem 7 for point lighting
     .dh 0x0020 // used in tri write, both signed and unsigned multipliers; value moved from elem 6 from point lighting
 .endif
+
+/*
+Quick note on Newton-Raphson:
+https://en.wikipedia.org/wiki/Division_algorithm#Newton%E2%80%93Raphson_division
+Given input D, we want to find the reciprocal R. The base formula for refining
+the estimate of R is R_new = R*(2 - D*R). However, since the RSP reciprocal
+instruction moves the radix point 1 to the left, the result has to be multiplied
+by 2. So it's 2*R*(2 - D*2*R) = R*(4 - 4*D*R) = R*(1*4 + D*R*-4). This is where
+the 4 and -4 come from.
+*/
 
 .align 0x10 // loaded with lqv
 linearGenerateCoefficients:
@@ -260,8 +270,10 @@ mvpValid:
     .db 0x01
 
 // 0x01DA
-    .dh 0x0000 // Shared padding to allow mvpValid (probably lightsValid?) and
-               // numLightsx18 to both be written to as 32-bit words for moveword
+    .dh 0x0000 // Shared padding so that:
+               // -- mvpValid can be written on its own for G_MW_FORCEMTX
+               // -- Writing numLightsx18 with G_MW_NUMLIGHT sets lightsValid to 0
+               // -- do_popmtx and load_mtx can invalidate both with one zero word write
 
 // 0x01DC
 lightsValid:   // Gets overwritten with 0 when numLights is written with moveword.
