@@ -189,8 +189,10 @@ displayListStack:
 
 // Base address for RSP effects DMEM region (see discussion in lighting below).
 // Could pick a better name, basically a global fixed DMEM pointer used with
-// fixed offsets to things in this region. Perhaps had to do with DMEM overlays
-// at some point in development.
+// fixed offsets to things in this region. It seems potentially data below this
+// could be shared by different running microcodes whereas data after this is
+// only used by the current microcode. Also this is used for a base address in
+// vtx write / lighting because vector load offsets can't reach all of DMEM.
 spFxBase:
 
 .if !MOD_CLIP_CHANGES
@@ -218,10 +220,10 @@ clipRatio: // This is an array of 6 doublewords
 // veq xxx, $v31, $v31[3h] = 00010001 in lighting
 v31Value:
     .dh -1     // used in init, clipping
-    .dh 4      // used in clipping, vtx write
+    .dh 4      // used in clipping, vtx write for Newton-Raphson reciprocal
     .dh 8      // old ucode only: used in tri write
     .dh 0x7F00 // used in vtx write and pre-jump instrs to there, also 4 put here during point lighting
-    .dh -4     // used in clipping, vtx write
+    .dh -4     // used in clipping, vtx write for Newton-Raphson reciprocal
     .dh 0x4000 // used in tri write, texgen
     .dh vertexBuffer // 0x420; used in tri write
     .dh 0x7FFF // used in vtx write, tri write, lighting, point lighting
@@ -232,22 +234,33 @@ v31Value:
 // vge xxx, $v30, $v30[7] = 11110001 in tri write
 v30Value:
     .dh 0x7FFC // not used!
-    .dh vtxSize << 7 // 0x1400; used in tri write for vtx index to addr
+    .dh vtxSize << 7 // 0x1400; it's not 0x2800 because vertex indices are *2; used in tri write for vtx index to addr
 .if CFG_OLD_TRI_WRITE // See discussion in tri write where v30 values used
     .dh 0x01CC // used in tri write, vcr?
     .dh 0x0200 // not used!
-    .dh -16    // used in tri write, some signed multiplier
-    .dh 0x0010 // used in tri write, some accumulator init value
+    .dh -16    // used in tri write for Newton-Raphson reciprocal 
+    .dh 0x0010 // used in tri write for Newton-Raphson reciprocal
     .dh 0x0020 // used in tri write, both signed and unsigned multipliers
     .dh 0x0100 // used in tri write, vertex color >>= 8; also in lighting
 .else
     .dh 0x1000 // used in tri write, some multiplier
     .dh 0x0100 // used in tri write, vertex color >>= 8 and vcr?; also in lighting and point lighting
-    .dh -16    // used in tri write, some signed multiplier
+    .dh -16    // used in tri write for Newton-Raphson reciprocal 
     .dh 0xFFF8 // used in tri write, mask away lower ST bits?
-    .dh 0x0010 // used in tri write, some accumulator init value; value moved to elem 7 for point lighting
+    .dh 0x0010 // used in tri write for Newton-Raphson reciprocal; value moved to elem 7 for point lighting
     .dh 0x0020 // used in tri write, both signed and unsigned multipliers; value moved from elem 6 from point lighting
 .endif
+
+/*
+Quick note on Newton-Raphson:
+https://en.wikipedia.org/wiki/Division_algorithm#Newton%E2%80%93Raphson_division
+Given input D, we want to find the reciprocal R. The base formula for refining
+the estimate of R is R_new = R*(2 - D*R). However, since the RSP reciprocal
+instruction moves the radix point 1 to the left, the result has to be multiplied
+by 2. So it's 2*R*(2 - D*2*R) = R*(4 - 4*D*R) = R*(1*4 + D*R*-4). This is where
+the 4 and -4 come from. For tri write, the result needs to be multiplied by 4
+for subpixels, so it's 16 and -16.
+*/
 
 .align 0x10 // loaded with lqv
 linearGenerateCoefficients:
@@ -263,8 +276,10 @@ mvpValid:
     .db 0x01
 
 // 0x01DA
-    .dh 0x0000 // Shared padding to allow mvpValid (probably lightsValid?) and
-               // numLightsx18 to both be written to as 32-bit words for moveword
+    .dh 0x0000 // Shared padding so that:
+               // -- mvpValid can be written on its own for G_MW_FORCEMTX
+               // -- Writing numLightsx18 with G_MW_NUMLIGHT sets lightsValid to 0
+               // -- do_popmtx and load_mtx can invalidate both with one zero word write
 
 // 0x01DC
 lightsValid:   // Gets overwritten with 0 when numLights is written with moveword.
@@ -726,9 +741,9 @@ mxr0f        equ $v12
 mxr1f        equ $v13
 mxr2f        equ $v14
 mxr3f        equ $v15
-vPairST      equ $v22 // global
-vPairMVPPosF equ $v23 // global
-vPairMVPPosI equ $v24 // global
+vPairST      equ $v22
+vPairMVPPosF equ $v23
+vPairMVPPosI equ $v24
 // v25: prev vertex screen pos
 // v26: prev vertex screen Z
 // For point lighting
@@ -774,7 +789,7 @@ postOvlRA     equ $12 // Commonly used locally
 // $5: clipMaskIdx, geometry mode high short during vertex load / lighting, local
 // $6: topLightPtr, geometry mode low byte during tri write, local
 // $7: fog flag in vtx write, local
-// $8: secondVtxPos, local in tri write
+// $8: secondVtxPos, local
 // $9: curLight, local
 // $10: briefly used local in vtx write (mods: got rid of, not used!)
 // $11: ovlTableEntry, very common local
@@ -820,14 +835,14 @@ postOvlRA     equ $12 // Commonly used locally
 // $v19: vFogMask, local
 // $v20: local
 // $v21: mvTc1i, vVpNegScale, local
-// $v22: vPairST
-// $v23: vPairMVPPosF
-// $v24: vPairMVPPosI
+// $v22: vPairST, local
+// $v23: vPairMVPPosF, local
+// $v24: vPairMVPPosI, local
 // $v25: prev vertex data, local
 // $v26: prev vertex data, local
 // $v27: vPairRGBA, local
 // $v28: mvTc1f, vPairAlpha37, local
-// $v29: very common local
+// $v29: register to write to discard results, local
 // $v30: mvTc2i, constant values for tri write
 // $v31: mvTc2f, general constant values
 
@@ -943,7 +958,7 @@ load_overlay1_init:
 // which is displaylist_dma. So the padding has to be before these two instructions,
 // so that this is immediately before displaylist_dma; otherwise the return address
 // will be in the last few instructions of overlay 1. However, this was unnecessary--
-// it could have been a jump and then `addiu postOvlRA, $zero, displaylist_dma`,
+// it could have been a jump and then `la postOvlRA, displaylist_dma`,
 // and the padding put after this.
     jal     load_overlay_and_enter  // load overlay 1 and enter
      move   postOvlRA, $ra          // set up the return address, since load_overlay_and_enter returns to postOvlRA
@@ -1328,8 +1343,7 @@ clipping_mod_skipxy:
     vaddc   vClDiffF, vClDiffF, vClDiffF[1h] // frac: w += y (sum of all 4), vtx on screen - vtx off screen
     vadd    vClDiffI, vClDiffI, vClDiffI[1h] // int:  w += y (sum of all 4), vtx on screen - vtx off screen
 .endif
-    // This algorithm below with the two reciprocals is probably some kind of Newton's
-    // method to get a better precision result, cause the precision of the divide is awful.
+    // Not sure what the first reciprocal is for.
 .if BUG_CLIPPING_FAIL_WHEN_SUM_ZERO       // Only in F3DEX2 2.04H
     vrcph   $v29[0], vClDiffI[3]          // int:  1 / (x+y+z+w), vtx on screen - vtx off screen
 .else
@@ -1357,7 +1371,7 @@ clipping_mod_skipxy:
     vmadm   $v29, $v13, vClDiffF          // self * own reciprocal? int*frac discard
     vmadn   vClDiffF, $v12, vClDiffI      // self * own reciprocal? frac out
     vmadh   vClDiffI, $v13, vClDiffI      // self * own reciprocal? int out
-    vmudh   $v29, vOne, $v31[1]           // 4 (int part)
+    vmudh   $v29, vOne, $v31[1]           // 4 (int part), Newton-Raphson algorithm
     vmadn   vClDiffF, vClDiffF, $v31[4]   // - 4 * prev result frac part
     vmadh   vClDiffI, vClDiffI, $v31[4]   // - 4 * prev result frac part
     vmudl   $v29, $v12, vClDiffF          // * own reciprocal again? frac*frac discard
@@ -1634,7 +1648,8 @@ clipping_mod_final_draw:
 .else
 clipping_draw_tris_loop:
 .if CFG_CLIPPING_SUBDIVIDE_DESCENDING
-    // Draws verts in pattern like 0-4-3, 0-3-2, 0-2-1
+    // Draws verts in pattern like 0-4-3, 0-3-2, 0-2-1. This also draws them with
+    // the opposite winding as they were originally drawn with, possibly a bug?
     reg1 equ clipPolyWrite
     val1 equ -0x0002
 .else
@@ -1862,7 +1877,7 @@ vertices_store:
 .else
     sh      rClipRes,         (VTX_CLIP_SCRN  - 1 * vtxSize)(secondVtxPos) // XYZW/W second vtx results in bits 0xF0F0
 .endif
-    vmadh   $v2, $v2, $v31[7]           // Some extended precision thing? 0x7FFF times 0 or 0x7FFF
+    vmadh   $v2, $v2, $v31[7]           // Makes screen coords a large number if W < 0
 .if MOD_CLIP_CHANGES
     andi    $24, $24, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
 .else
@@ -1874,7 +1889,7 @@ vertices_store:
     ssv     $v5[14],          (VTX_INV_W_FRAC - 1 * vtxSize)(secondVtxPos)
     vmadm   $v29, vPairMVPPosI, $v5[3h] // Pos times inv W
     addi    inputVtxPos, inputVtxPos, (2 * inputVtxSize) // Advance two positions forward in the input vertices
-    vmadn   $v26, vPairMVPPosF, $v2[3h] // Pos times inv W extended precision thing?
+    vmadn   $v26, vPairMVPPosF, $v2[3h] // Makes screen coords a large number if W < 0
 .if MOD_CLIP_CHANGES
     sll     $11, rClipRes, 4            // Shift first vertex scaled clipping to second slots
     andi    rClipRes, rClipRes, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
@@ -2167,19 +2182,19 @@ tri_mod_skip_check_backface:
     lpv     $v19[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
     vrcp    $v20[0], $v15[1]
     lpv     $v21[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
-    vrcph   vPairST[0], $v17[1]
-    vrcpl   vPairMVPPosF[1], $v16[1]
+    vrcph   $v22[0], $v17[1]
+    vrcpl   $v23[1], $v16[1]
     j       shading_done
-     vrcph   vPairMVPPosI[1], vZero[0]
+     vrcph   $v24[1], vZero[0]
 no_smooth_shading:
     lpv     $v18[0], VTX_COLOR_VEC($4)
     vrcp    $v20[0], $v15[1]
     lbv     $v18[6], VTX_COLOR_A($1)
-    vrcph   vPairST[0], $v17[1]
+    vrcph   $v22[0], $v17[1]
     lpv     $v19[0], VTX_COLOR_VEC($4)
-    vrcpl   vPairMVPPosF[1], $v16[1]
+    vrcpl   $v23[1], $v16[1]
     lbv     $v19[6], VTX_COLOR_A($2)
-    vrcph   vPairMVPPosI[1], vZero[0]
+    vrcph   $v24[1], vZero[0]
     lpv     $v21[0], VTX_COLOR_VEC($4)
     vmov    $v15[2], $v6[0]
     lbv     $v21[6], VTX_COLOR_A($3)
@@ -2214,11 +2229,11 @@ shading_done:
     // disabling the texture in SPTexture (textureSettings1 + 3 below).
     andi    $6, $6, G_SHADE | G_ZBUFFER
 .endif
-    vrcph   vPairST[2], $v6[1]
+    vrcph   $v22[2], $v6[1]
     lw      $5, VTX_INV_W_VEC($1)
     vrcp    $v20[3], $v8[1]
     lw      $7, VTX_INV_W_VEC($2)
-    vrcph   vPairST[3], $v8[1]
+    vrcph   $v22[3], $v8[1]
     lw      $8, VTX_INV_W_VEC($3)
     // v30[i1] is 0x0100
     vmudl   $v18, $v18, $v30[i1] // vertex color 1 >>= 8
@@ -2231,7 +2246,7 @@ shading_done:
     and     $11, $11, $12
     vmudl   $v29, $v20, $vec1[i2]
     sub     $5, $5, $11
-    vmadm   vPairST, vPairST, $vec1[i2]
+    vmadm   $v22, $v22, $vec1[i2]
     sub     $11, $5, $8
     vmadn   $v20, vZero, vZero[0]
     sra     $12, $11, 31
@@ -2247,20 +2262,20 @@ shading_done:
     mfc2    $5, $v17[1]
     vmadl   $v29, $v15, $v20
     lbu     $7, textureSettings1 + 2
-    vmadn   $v20, $v15, vPairST
+    vmadn   $v20, $v15, $v22
     lsv     $v19[14], VTX_SCR_Z($2)
-    vmadh   $v15, $v25, vPairST
+    vmadh   $v15, $v25, $v22
     lsv     $v21[14], VTX_SCR_Z($3)
-    vmudl   $v29, vPairMVPPosF, $v16
+    vmudl   $v29, $v23, $v16
     lsv     $v7[14], VTX_SCR_Z_FRAC($2)
-    vmadm   $v29, vPairMVPPosI, $v16
+    vmadm   $v29, $v24, $v16
     lsv     $v9[14], VTX_SCR_Z_FRAC($3)
-    vmadn   $v16, vPairMVPPosF, $v17
+    vmadn   $v16, $v23, $v17
     ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
-    vmadh   $v17, vPairMVPPosI, $v17
+    vmadh   $v17, $v24, $v17
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
 .if !CFG_OLD_TRI_WRITE
-    vand    vPairST, $v20, $v30[5]
+    vand    $v22, $v20, $v30[5]
 .endif
     vcr     $v15, $v15, $v30[i4]
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
@@ -2283,24 +2298,24 @@ shading_done:
     vrcpl   $v10[0], $v27[1]
     vadd    $v14, vZero, $v13[1q]
     vrcph   $v27[0], vZero[0]
-    vor     vPairST, vZero, $v31[7]
+    vor     $v22, vZero, $v31[7]
     vmudm   $v29, $v13, $v10[0]
     vmadl   $v29, $v14, $v10[0]
-    llv     vPairST[0], VTX_TC_VEC($1)
+    llv     $v22[0], VTX_TC_VEC($1)
     vmadn   $v14, $v14, $v27[0]
-    llv     vPairST[8], VTX_TC_VEC($2)
+    llv     $v22[8], VTX_TC_VEC($2)
     vmadh   $v13, $v13, $v27[0]
     vor     $v10, vZero, $v31[7]
     vge     $v29, $v30, $v30[7]
     llv     $v10[8], VTX_TC_VEC($3)
-    vmudm   $v29, vPairST, $v14[0h]
-    vmadh   vPairST, vPairST, $v13[0h]
+    vmudm   $v29, $v22, $v14[0h]
+    vmadh   $v22, $v22, $v13[0h]
     vmadn   $v25, vZero, vZero[0]
     vmudm   $v29, $v10, $v14[6]     // acc = (v10 * v14[6]); v29 = mid(clamp(acc))
     vmadh   $v10, $v10, $v13[6]     // acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
     vmadn   $v13, vZero, vZero[0]   // v13 = lo(clamp(acc))
-    sdv     vPairST[0], 0x0020(rdpCmdBufPtr)
-    vmrg    $v19, $v19, vPairST
+    sdv     $v22[0], 0x0020(rdpCmdBufPtr)
+    vmrg    $v19, $v19, $v22
     sdv     $v25[0], 0x0028(rdpCmdBufPtr) // 8
     vmrg    $v7, $v7, $v25
     ldv     $v18[8], 0x0020(rdpCmdBufPtr) // 8
@@ -2308,13 +2323,13 @@ shading_done:
     ldv     $v5[8], 0x0028(rdpCmdBufPtr) // 8
     vmrg    $v9, $v9, $v13
 no_textures:
-    vmudl   $v29, $v16, vPairMVPPosF
+    vmudl   $v29, $v16, $v23
     lsv     $v5[14], VTX_SCR_Z_FRAC($1)
-    vmadm   $v29, $v17, vPairMVPPosF
+    vmadm   $v29, $v17, $v23
     lsv     $v18[14], VTX_SCR_Z($1)
-    vmadn   vPairMVPPosF, $v16, vPairMVPPosI
+    vmadn   $v23, $v16, $v24
     lh      $1, VTX_SCR_VEC($2)
-    vmadh   vPairMVPPosI, $v17, vPairMVPPosI
+    vmadh   $v24, $v17, $v24
     addiu   $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
     vsubc   $v10, $v9, $v5
     andi    $3, $6, G_SHADE
@@ -2348,19 +2363,19 @@ no_textures:
     add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
     vreadacc $v7, ACC_UPPER
     sll     $11, $9, 5              // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
-    vmudl   $v29, $v2, vPairMVPPosF[1]
+    vmudl   $v29, $v2, $v23[1]
     add     rdpCmdBufPtr, $1, $11            // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
-    vmadm   $v29, $v3, vPairMVPPosF[1]
+    vmadm   $v29, $v3, $v23[1]
     andi    $6, $6, G_ZBUFFER       // Get the value of G_ZBUFFER from the current geometry mode
-    vmadn   $v2, $v2, vPairMVPPosI[1]
+    vmadn   $v2, $v2, $v24[1]
     sll     $11, $6, 4              // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
-    vmadh   $v3, $v3, vPairMVPPosI[1]
+    vmadh   $v3, $v3, $v24[1]
     add     rdpCmdBufPtr, rdpCmdBufPtr, $11           // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
-    vmudl   $v29, $v6, vPairMVPPosF[1]
-    vmadm   $v29, $v7, vPairMVPPosF[1]
-    vmadn   $v6, $v6, vPairMVPPosI[1]
+    vmudl   $v29, $v6, $v23[1]
+    vmadm   $v29, $v7, $v23[1]
+    vmadn   $v6, $v6, $v24[1]
     sdv     $v2[0], 0x0018($2)      // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
-    vmadh   $v7, $v7, vPairMVPPosI[1]
+    vmadh   $v7, $v7, $v24[1]
     sdv     $v3[0], 0x0008($2)      // Store DrDx, DgDx, DbDx, DaDx shade coefficients (integer)
     vmadl   $v29, $v2, $v20[3]
     sdv     $v2[8], 0x0018($1)      // Store DsDx, DtDx, DwDx texture coefficients (fractional)
@@ -2909,7 +2924,7 @@ next_light_dirorpoint:
 .if !MOD_GENERAL
     vmrg    ltColor, ltColor, vPairAlpha37    // Select original alpha
 .endif
-    vand    $v20, $v20, $v31[7]               // 0x7FFF; not sure why AND rather than clamp
+    vand    $v20, $v20, $v31[7]               // 0x7FFF; vmulu/vmacu produces 0xFFFF when 0x8000*0x8000, change this to 0x7FFF
 .if !MOD_GENERAL
     vmrg    $v2, $v2, vZero[0]                // Set elements 3 and 7 of light RGB to 0
 .endif
@@ -3089,7 +3104,7 @@ light_point:
     lbu     $11, (ltBufOfs + 0x7)(curLight) // Linear attenuation factor byte from point light props
     vmacu   $v2, vPairNZ, $v20[2h]       // Z * Z
     sll     $24, $24, 5
-    vand    $v20, $v2, $v31[7]           // 0x7FFF; not sure why AND rather than clamp
+    vand    $v20, $v2, $v31[7]           // 0x7FFF; vmulu/vmacu produces 0xFFFF when 0x8000*0x8000, change this to 0x7FFF
     mtc2    $24, $v20[14]                // 0xE << 5 -> v20 elem 7
     vrcph   $v29[0], $v29[2]             // rcp(rsqrt()) = sqrt = length of vert-to-light
     vrcpl   $v29[0], $v29[3]             // For vertex 1 in v29[0]
@@ -3113,13 +3128,13 @@ light_point:
 .if !MOD_GENERAL
     luv     ltColor[0], 0x0008(inputVtxPos) // Get current RGBARGBA for two verts
 .endif
-    vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
+    vand    $v2, $v2, $v31[7]            // 0x7FFF; vrcp produces 0xFFFF when 1/0, change this to 0x7FFF
     vmulf   $v2, $v2, $v20               // Inverse dist factor * dot product (elems 0, 4)
     luv     $v20[0], (ltBufOfs + 0)(curLight) // Light color RGB_RGB_
 .if !MOD_GENERAL
     vmrg    ltColor, ltColor, vPairAlpha37 // Select orig alpha; vPairAlpha37 = v28 = mvTc1f, but alphas were not overwritten
 .endif
-    vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
+    vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure what this is for, both inputs to the multiply are always positive
 .if !MOD_GENERAL
     vmrg    $v20, $v20, vZero[0]         // Zero elements 3 and 7 of light color
 .endif
@@ -3155,9 +3170,9 @@ lights_dircoloraccum2:
     vmrg    $v3, $v3, vZero[0]           // light 2n color components 3,7 = 0
     mtc2    $zero, $v4[14]               // light 2n+1 color comp 7 = 0 (to not interfere with alpha)
 .endif
-    vand    $v21, $v21, $v31[7]          // 0x7FFF; not sure why AND rather than clamp
+    vand    $v21, $v21, $v31[7]          // 0x7FFF; vmulu/vmacu produces 0xFFFF when 0x8000*0x8000, change this to 0x7FFF
     lpv     $v2[0], (ltBufOfs + 0x10)(curLight) // Normal for light or lookat next slot down, 2n+1
-    vand    $v28, $v28, $v31[7]          // 0x7FFF; not sure why AND rather than clamp
+    vand    $v28, $v28, $v31[7]          // 0x7FFF; vmulu/vmacu produces 0xFFFF when 0x8000*0x8000, change this to 0x7FFF
     lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Normal two slots down, 2n
     vmulf   ltColor, ltColor, $v31[7]    // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
     vmacf   ltColor, $v4, $v21[0h]       // + color 2n+1 * dot product
@@ -3219,7 +3234,7 @@ lights_finishone:
     vmrg    ltColor, ltColor, vPairRGBA // select orig alpha
     vmrg    $v4, $v4, vZero[0]          // clear alpha component of color
 .endif
-    vand    $v21, $v21, $v31[7]         // 0x7FFF; not sure why AND rather than clamp
+    vand    $v21, $v21, $v31[7]         // 0x7FFF; vmulu/vmacu produces 0xFFFF when 0x8000*0x8000, change this to 0x7FFF
 .if !MOD_GENERAL
     veq     $v3, $v31, $v31[3h]         // set VCC to 00010001, opposite of 2 light case
 .endif
