@@ -189,8 +189,10 @@ displayListStack:
 
 // Base address for RSP effects DMEM region (see discussion in lighting below).
 // Could pick a better name, basically a global fixed DMEM pointer used with
-// fixed offsets to things in this region. Perhaps had to do with DMEM overlays
-// at some point in development.
+// fixed offsets to things in this region. It seems potentially data below this
+// could be shared by different running microcodes whereas data after this is
+// only used by the current microcode. Also this is used for a base address in
+// vtx write / lighting because vector load offsets can't reach all of DMEM.
 spFxBase:
 
 // 0x0180-0x1B0: clipping values
@@ -254,7 +256,8 @@ Given input D, we want to find the reciprocal R. The base formula for refining
 the estimate of R is R_new = R*(2 - D*R). However, since the RSP reciprocal
 instruction moves the radix point 1 to the left, the result has to be multiplied
 by 2. So it's 2*R*(2 - D*2*R) = R*(4 - 4*D*R) = R*(1*4 + D*R*-4). This is where
-the 4 and -4 come from.
+the 4 and -4 come from. For tri write, the result needs to be multiplied by 4
+for subpixels, so it's 16 and -16.
 */
 
 .align 0x10 // loaded with lqv
@@ -597,7 +600,7 @@ savedRA               equ $30 // global
 // subdivision and vertex write.
 // $2: vertex at end of edge
 clipMaskIdx  equ $5
-secondVtxPos equ $8  // global
+secondVtxPos equ $8
 outputVtxPos equ $15 // global
 clipFlags    equ $16 // global
 clipPolyRead equ $17 // global
@@ -621,9 +624,9 @@ mxr0f        equ $v12
 mxr1f        equ $v13
 mxr2f        equ $v14
 mxr3f        equ $v15
-vPairST      equ $v22 // global
-vPairMVPPosF equ $v23 // global
-vPairMVPPosI equ $v24 // global
+vPairST      equ $v22
+vPairMVPPosF equ $v23
+vPairMVPPosI equ $v24
 // v25: prev vertex screen pos
 // v26: prev vertex screen Z
 // For point lighting
@@ -668,7 +671,7 @@ postOvlRA     equ $12 // Commonly used locally
 // $5: clipMaskIdx, geometry mode high short during vertex load / lighting, local
 // $6: topLightPtr, geometry mode low byte during tri write, local
 // $7: fog flag in vtx write, local
-// $8: secondVtxPos
+// $8: secondVtxPos, local
 // $9: curLight, local
 // $10: briefly used local in vtx write
 // $11: ovlTableEntry, very common local
@@ -714,14 +717,14 @@ postOvlRA     equ $12 // Commonly used locally
 // $v19: vFogMask, local
 // $v20: local
 // $v21: mvTc1i, vVpNegScale, local
-// $v22: vPairST
-// $v23: vPairMVPPosF
-// $v24: vPairMVPPosI
+// $v22: vPairST, local
+// $v23: vPairMVPPosF, local
+// $v24: vPairMVPPosI, local
 // $v25: prev vertex data, local
 // $v26: prev vertex data, local
 // $v27: vPairRGBA, local
 // $v28: mvTc1f, vPairAlpha37, local
-// $v29: very common local
+// $v29: register to write to discard results, local
 // $v30: mvTc2i, constant values for tri write
 // $v31: mvTc2f, general constant values
 
@@ -837,7 +840,7 @@ load_overlay1_init:
 // which is displaylist_dma. So the padding has to be before these two instructions,
 // so that this is immediately before displaylist_dma; otherwise the return address
 // will be in the last few instructions of overlay 1. However, this was unnecessary--
-// it could have been a jump and then `addiu postOvlRA, $zero, displaylist_dma`,
+// it could have been a jump and then `la postOvlRA, displaylist_dma`,
 // and the padding put after this.
     jal     load_overlay_and_enter  // load overlay 1 and enter
      move   postOvlRA, $ra          // set up the return address, since load_overlay_and_enter returns to postOvlRA
@@ -1084,8 +1087,7 @@ clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / o
     vadd    $v9, $v9, $v9[1h]         // int:  w += y (sum of all 4), vtx on screen only
     vaddc   $v10, $v10, $v10[1h]      // frac: w += y (sum of all 4), vtx on screen - vtx off screen
     vadd    $v11, $v11, $v11[1h]      // int:  w += y (sum of all 4), vtx on screen - vtx off screen
-    // This algorithm below with the two reciprocals is probably some kind of Newton's
-    // method to get a better precision result, cause the precision of the divide is awful.
+    // Not sure what the first reciprocal is for.
 .if BUG_CLIPPING_FAIL_WHEN_SUM_ZERO   // Only in F3DEX2 2.04H
     vrcph   $v29[0], $v11[3]          // int:  1 / (x+y+z+w), vtx on screen - vtx off screen
 .else
@@ -1113,7 +1115,7 @@ clipping_skipswap23: // After possible swap, $19 = vtx not meeting clip cond / o
     vmadm   $v29, $v13, $v10          // self * own reciprocal? int*frac discard
     vmadn   $v10, $v12, $v11          // self * own reciprocal? frac out
     vmadh   $v11, $v13, $v11          // self * own reciprocal? int out
-    vmudh   $v29, vOne, $v31[1]       // 4 (int part)
+    vmudh   $v29, vOne, $v31[1]       // 4 (int part), Newton-Raphson algorithm
     vmadn   $v10, $v10, $v31[4]       // - 4 * prev result frac part
     vmadh   $v11, $v11, $v31[4]       // - 4 * prev result frac part
     vmudl   $v29, $v12, $v10          // * own reciprocal again? frac*frac discard
@@ -1186,7 +1188,8 @@ clipping_nextcond:
 clipping_draw_tris_loop:
     // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
 .if CFG_CLIPPING_SUBDIVIDE_DESCENDING
-    // Draws verts in pattern like 0-4-3, 0-3-2, 0-2-1
+    // Draws verts in pattern like 0-4-3, 0-3-2, 0-2-1. This also draws them with
+    // the opposite winding as they were originally drawn with, possibly a bug?
     reg1 equ clipPolyWrite
     val1 equ -0x0002
 .else
@@ -1386,7 +1389,7 @@ vertices_store:
     lsv     vPairMVPPosI[6],  (VTX_Z_INT      - 2 * vtxSize)(outputVtxPos) // load Z into W slot, will be for fog below
     vmadh   $v4, $v25, $v4
     sh      $10,              (VTX_CLIP_SCRN  - 1 * vtxSize)(secondVtxPos) // XYZW/W second vtx results in bits 0xF0F0
-    vmadh   $v2, $v2, $v31[7]           // Some extended precision thing? 0x7FFF times 0 or 0x7FFF
+    vmadh   $v2, $v2, $v31[7]           // Makes screen coords a large number if W < 0
     sll     $11, $10, 4                 // Shift first vtx screen space clip into positions 0xF0F0
     vcl     $v29, vPairMVPPosF, $v7[3h] // Compare XYZZ to clip-ratio-scaled W (frac part)
     cfc2    $10, $vcc                   // Load 16 bit clip-ratio-scaled results, two verts
@@ -1394,7 +1397,7 @@ vertices_store:
     ssv     $v5[14],          (VTX_INV_W_FRAC - 1 * vtxSize)(secondVtxPos)
     vmadm   $v29, vPairMVPPosI, $v5[3h] // Pos times inv W
     addi    inputVtxPos, inputVtxPos, (2 * inputVtxSize) // Advance two positions forward in the input vertices
-    vmadn   $v26, vPairMVPPosF, $v2[3h] // Pos times inv W extended precision thing?
+    vmadn   $v26, vPairMVPPosF, $v2[3h] // Makes screen coords a large number if W < 0
     sh      $10,              (VTX_CLIP_SCAL  - 1 * vtxSize)(secondVtxPos) // Clip scaled second vtx results in bits 0xF0F0
     vmadh   $v25, vPairMVPPosI, $v2[3h] // v25:v26 = pos times inv W
     sll     $10, $10, 4                 // Shift first vtx scaled clip into positions 0xF0F0
@@ -1556,19 +1559,19 @@ tri_to_rdp_noinit:
     lpv     $v19[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
     vrcp    $v20[0], $v15[1]
     lpv     $v21[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
-    vrcph   vPairST[0], $v17[1]
-    vrcpl   vPairMVPPosF[1], $v16[1]
+    vrcph   $v22[0], $v17[1]
+    vrcpl   $v23[1], $v16[1]
     j       shading_done
-     vrcph   vPairMVPPosI[1], vZero[0]
+     vrcph   $v24[1], vZero[0]
 no_smooth_shading:
     lpv     $v18[0], VTX_COLOR_VEC($4)
     vrcp    $v20[0], $v15[1]
     lbv     $v18[6], VTX_COLOR_A($1)
-    vrcph   vPairST[0], $v17[1]
+    vrcph   $v22[0], $v17[1]
     lpv     $v19[0], VTX_COLOR_VEC($4)
-    vrcpl   vPairMVPPosF[1], $v16[1]
+    vrcpl   $v23[1], $v16[1]
     lbv     $v19[6], VTX_COLOR_A($2)
-    vrcph   vPairMVPPosI[1], vZero[0]
+    vrcph   $v24[1], vZero[0]
     lpv     $v21[0], VTX_COLOR_VEC($4)
     vmov    $v15[2], $v6[0]
     lbv     $v21[6], VTX_COLOR_A($3)
@@ -1596,12 +1599,12 @@ shading_done:
     vec2 equ v22
 .endif
     vrcp    $v20[2], $v6[1]
-    vrcph   vPairST[2], $v6[1]
+    vrcph   $v22[2], $v6[1]
     lw      $5, VTX_INV_W_VEC($1)
     vrcp    $v20[3], $v8[1]
     lw      $7, VTX_INV_W_VEC($2)
-    vrcph   vPairST[3], $v8[1]
-    lw      secondVtxPos, VTX_INV_W_VEC($3)
+    vrcph   $v22[3], $v8[1]
+    lw      $8, VTX_INV_W_VEC($3)
     // v30[i1] is 0x0100
     vmudl   $v18, $v18, $v30[i1] // vertex color 1 >>= 8
     lbu     $9, textureSettings1 + 3
@@ -1613,8 +1616,8 @@ shading_done:
     and     $11, $11, $12
     vmudl   $v29, $v20, $vec1[i2]
     sub     $5, $5, $11
-    vmadm   vPairST, vPairST, $vec1[i2]
-    sub     $11, $5, secondVtxPos
+    vmadm   $v22, $v22, $vec1[i2]
+    sub     $11, $5, $8
     vmadn   $v20, vZero, vZero[0]
     sra     $12, $11, 31
     vmudm   $v25, $v15, $vec1[i3]
@@ -1629,20 +1632,20 @@ shading_done:
     mfc2    $5, $v17[1]
     vmadl   $v29, $v15, $v20
     lbu     $7, textureSettings1 + 2
-    vmadn   $v20, $v15, vPairST
+    vmadn   $v20, $v15, $v22
     lsv     $v19[14], VTX_SCR_Z($2)
-    vmadh   $v15, $v25, vPairST
+    vmadh   $v15, $v25, $v22
     lsv     $v21[14], VTX_SCR_Z($3)
-    vmudl   $v29, vPairMVPPosF, $v16
+    vmudl   $v29, $v23, $v16
     lsv     $v7[14], VTX_SCR_Z_FRAC($2)
-    vmadm   $v29, vPairMVPPosI, $v16
+    vmadm   $v29, $v24, $v16
     lsv     $v9[14], VTX_SCR_Z_FRAC($3)
-    vmadn   $v16, vPairMVPPosF, $v17
+    vmadn   $v16, $v23, $v17
     ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
-    vmadh   $v17, vPairMVPPosI, $v17
+    vmadh   $v17, $v24, $v17
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
 .if !CFG_OLD_TRI_WRITE
-    vand    vPairST, $v20, $v30[5]
+    vand    $v22, $v20, $v30[5]
 .endif
     vcr     $v15, $v15, $v30[i4]
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
@@ -1665,24 +1668,24 @@ shading_done:
     vrcpl   $v10[0], $v27[1]
     vadd    $v14, vZero, $v13[1q]
     vrcph   $v27[0], vZero[0]
-    vor     vPairST, vZero, $v31[7]
+    vor     $v22, vZero, $v31[7]
     vmudm   $v29, $v13, $v10[0]
     vmadl   $v29, $v14, $v10[0]
-    llv     vPairST[0], VTX_TC_VEC($1)
+    llv     $v22[0], VTX_TC_VEC($1)
     vmadn   $v14, $v14, $v27[0]
-    llv     vPairST[8], VTX_TC_VEC($2)
+    llv     $v22[8], VTX_TC_VEC($2)
     vmadh   $v13, $v13, $v27[0]
     vor     $v10, vZero, $v31[7]
     vge     $v29, $v30, $v30[7]
     llv     $v10[8], VTX_TC_VEC($3)
-    vmudm   $v29, vPairST, $v14[0h]
-    vmadh   vPairST, vPairST, $v13[0h]
+    vmudm   $v29, $v22, $v14[0h]
+    vmadh   $v22, $v22, $v13[0h]
     vmadn   $v25, vZero, vZero[0]
     vmudm   $v29, $v10, $v14[6]     // acc = (v10 * v14[6]); v29 = mid(clamp(acc))
     vmadh   $v10, $v10, $v13[6]     // acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
     vmadn   $v13, vZero, vZero[0]   // v13 = lo(clamp(acc))
-    sdv     vPairST[0], 0x0020(rdpCmdBufPtr)
-    vmrg    $v19, $v19, vPairST
+    sdv     $v22[0], 0x0020(rdpCmdBufPtr)
+    vmrg    $v19, $v19, $v22
     sdv     $v25[0], 0x0028(rdpCmdBufPtr) // 8
     vmrg    $v7, $v7, $v25
     ldv     $v18[8], 0x0020(rdpCmdBufPtr) // 8
@@ -1690,13 +1693,13 @@ shading_done:
     ldv     $v5[8], 0x0028(rdpCmdBufPtr) // 8
     vmrg    $v9, $v9, $v13
 no_textures:
-    vmudl   $v29, $v16, vPairMVPPosF
+    vmudl   $v29, $v16, $v23
     lsv     $v5[14], VTX_SCR_Z_FRAC($1)
-    vmadm   $v29, $v17, vPairMVPPosF
+    vmadm   $v29, $v17, $v23
     lsv     $v18[14], VTX_SCR_Z($1)
-    vmadn   vPairMVPPosF, $v16, vPairMVPPosI
+    vmadn   $v23, $v16, $v24
     lh      $1, VTX_SCR_VEC($2)
-    vmadh   vPairMVPPosI, $v17, vPairMVPPosI
+    vmadh   $v24, $v17, $v24
     addiu   $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
     vsubc   $v10, $v9, $v5
     andi    $3, $6, G_SHADE
@@ -1730,19 +1733,19 @@ no_textures:
     add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
     vreadacc $v7, ACC_UPPER
     sll     $11, $9, 5              // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
-    vmudl   $v29, $v2, vPairMVPPosF[1]
+    vmudl   $v29, $v2, $v23[1]
     add     rdpCmdBufPtr, $1, $11            // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
-    vmadm   $v29, $v3, vPairMVPPosF[1]
+    vmadm   $v29, $v3, $v23[1]
     andi    $6, $6, G_ZBUFFER       // Get the value of G_ZBUFFER from the current geometry mode
-    vmadn   $v2, $v2, vPairMVPPosI[1]
+    vmadn   $v2, $v2, $v24[1]
     sll     $11, $6, 4              // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
-    vmadh   $v3, $v3, vPairMVPPosI[1]
+    vmadh   $v3, $v3, $v24[1]
     add     rdpCmdBufPtr, rdpCmdBufPtr, $11           // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
-    vmudl   $v29, $v6, vPairMVPPosF[1]
-    vmadm   $v29, $v7, vPairMVPPosF[1]
-    vmadn   $v6, $v6, vPairMVPPosI[1]
+    vmudl   $v29, $v6, $v23[1]
+    vmadm   $v29, $v7, $v23[1]
+    vmadn   $v6, $v6, $v24[1]
     sdv     $v2[0], 0x0018($2)      // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
-    vmadh   $v7, $v7, vPairMVPPosI[1]
+    vmadh   $v7, $v7, $v24[1]
     sdv     $v3[0], 0x0008($2)      // Store DrDx, DgDx, DbDx, DaDx shade coefficients (integer)
     vmadl   $v29, $v2, $v20[3]
     sdv     $v2[8], 0x0018($1)      // Store DsDx, DtDx, DwDx texture coefficients (fractional)
@@ -2270,7 +2273,7 @@ next_light_dirorpoint:
     vmacu   $v20, vPairNZ, $v2[2h]            // + Vtx Z * light Z; only elements 0, 4 matter
     luv     $v2[0], (ltBufOfs + 0)(curLight)  // Load light RGB
     vmrg    ltColor, ltColor, vPairAlpha37    // Select original alpha
-    vand    $v20, $v20, $v31[7]               // 0x7FFF; not sure why AND rather than clamp
+    vand    $v20, $v20, $v31[7]               // 0x7FFF; vmulu/vmacu produces 0xFFFF when 0x8000*0x8000, change this to 0x7FFF
     vmrg    $v2, $v2, vZero[0]                // Set elements 3 and 7 of light RGB to 0
     vmulf   ltColor, ltColor, $v31[7]         // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
     vmacf   ltColor, $v2, $v20[0h]            // + light color * dot product
@@ -2429,7 +2432,7 @@ light_point:
     lbu     $11, (ltBufOfs + 0x7)(curLight) // Linear attenuation factor byte from point light props
     vmacu   $v2, vPairNZ, $v20[2h]       // Z * Z
     sll     $24, $24, 5
-    vand    $v20, $v2, $v31[7]           // 0x7FFF; not sure why AND rather than clamp
+    vand    $v20, $v2, $v31[7]           // 0x7FFF; vmulu/vmacu produces 0xFFFF when 0x8000*0x8000, change this to 0x7FFF
     mtc2    $24, $v20[14]                // 0xE << 5 -> v20 elem 7
     vrcph   $v29[0], $v29[2]             // rcp(rsqrt()) = sqrt = length of vert-to-light
     vrcpl   $v29[0], $v29[3]             // For vertex 1 in v29[0]
@@ -2447,11 +2450,11 @@ light_point:
     vrcph   $v2[4], $v2[4]
     vrcpl   $v2[4], $v29[4]
     luv     ltColor[0], 0x0008(inputVtxPos) // Get current RGBARGBA for two verts
-    vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
+    vand    $v2, $v2, $v31[7]            // 0x7FFF; vrcp produces 0xFFFF when 1/0, change this to 0x7FFF
     vmulf   $v2, $v2, $v20               // Inverse dist factor * dot product (elems 0, 4)
     luv     $v20[0], (ltBufOfs + 0)(curLight) // Light color RGB_RGB_
     vmrg    ltColor, ltColor, vPairAlpha37 // Select orig alpha; vPairAlpha37 = v28 = mvTc1f, but alphas were not overwritten
-    vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure why AND rather than clamp
+    vand    $v2, $v2, $v31[7]            // 0x7FFF; not sure what this is for, both inputs to the multiply are always positive
     vmrg    $v20, $v20, vZero[0]         // Zero elements 3 and 7 of light color
     vmulf   ltColor, ltColor, $v31[7]    // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
     vmacf   ltColor, $v20, $v2[0h]       // + light color * light amount
@@ -2481,9 +2484,9 @@ lights_dircoloraccum2:
     mtc2    $zero, $v4[6]                // light 2n+1 color comp 3 = 0 (to not interfere with alpha)
     vmrg    $v3, $v3, vZero[0]           // light 2n color components 3,7 = 0
     mtc2    $zero, $v4[14]               // light 2n+1 color comp 7 = 0 (to not interfere with alpha)
-    vand    $v21, $v21, $v31[7]          // 0x7FFF; not sure why AND rather than clamp
+    vand    $v21, $v21, $v31[7]          // 0x7FFF; vmulu/vmacu produces 0xFFFF when 0x8000*0x8000, change this to 0x7FFF
     lpv     $v2[0], (ltBufOfs + 0x10)(curLight) // Normal for light or lookat next slot down, 2n+1
-    vand    $v28, $v28, $v31[7]          // 0x7FFF; not sure why AND rather than clamp
+    vand    $v28, $v28, $v31[7]          // 0x7FFF; vmulu/vmacu produces 0xFFFF when 0x8000*0x8000, change this to 0x7FFF
     lpv     $v20[0], (ltBufOfs - lightSize + 0x10)(curLight) // Normal two slots down, 2n
     vmulf   ltColor, ltColor, $v31[7]    // Load light color to accumulator (0x7FFF = 0.5 b/c unsigned?)
     vmacf   ltColor, $v4, $v21[0h]       // + color 2n+1 * dot product
@@ -2531,7 +2534,7 @@ lights_texgenmain:
 lights_finishone:
     vmrg    ltColor, ltColor, vPairRGBA // select orig alpha
     vmrg    $v4, $v4, vZero[0]          // clear alpha component of color
-    vand    $v21, $v21, $v31[7]         // 0x7FFF; not sure why AND rather than clamp
+    vand    $v21, $v21, $v31[7]         // 0x7FFF; vmulu/vmacu produces 0xFFFF when 0x8000*0x8000, change this to 0x7FFF
     veq     $v3, $v31, $v31[3h]         // set VCC to 00010001, opposite of 2 light case
     lpv     $v2[0], (ltBufOfs - 2 * lightSize + 0x10)(curLight) // Load second dir down, lookat 0, for texgen
     vmrg    $v3, vZero, $v31[5]         // INSTR 3 OPPOSITE: Setup for texgen: 0x4000 in 0,1,2,4,5,6
