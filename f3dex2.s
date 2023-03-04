@@ -215,10 +215,21 @@ clipRatio: // This is an array of 6 doublewords
 // 0x1B0: constants for register $v31
 .align 0x10 // loaded with lqv
 // VCC patterns used:
-// vlt xxx, $v31, $v31[3]  = 11101110 in load_spfx_global_values
+// vlt xxx, $v31, $v31[3]  = 11101110 in load_spfx_global_values (uses vne in mods)
 // vne xxx, $v31, $v31[3h] = 11101110 in lighting
 // veq xxx, $v31, $v31[3h] = 00010001 in lighting
 v31Value:
+.if MOD_VL_REWRITE
+// v31 must go from lowest to highest (signed) values. 
+    .dh -4     // used in clipping, vtx write for Newton-Raphson reciprocal
+    .dh -1     // used in init, clipping
+    .dh 1      // used to load accumulator in many places, replaces vOne
+    .dh 0x0010 // used in tri write for Newton-Raphson reciprocal, and point lighting
+    .dh 0x0100 // used in tri write, vertex color >>= 8 and vcr?; also in lighting and point lighting
+    .dh 0x4000 // used in tri write, texgen
+    .dh 0x7F00 // used in vtx write and pre-jump instrs to there, also normals unpacking
+    .dh 0x7FFF // used in vtx write, tri write, lighting, point lighting
+.else
     .dh -1     // used in init, clipping
     .dh 4      // used in clipping, vtx write for Newton-Raphson reciprocal
     .dh 8      // old ucode only: used in tri write
@@ -227,13 +238,18 @@ v31Value:
     .dh 0x4000 // used in tri write, texgen
     .dh vertexBuffer // 0x420; used in tri write
     .dh 0x7FFF // used in vtx write, tri write, lighting, point lighting
+.endif
 
 // 0x1C0: constants for register $v30
 .align 0x10 // loaded with lqv
 // VCC patterns used:
 // vge xxx, $v30, $v30[7] = 11110001 in tri write
 v30Value:
+.if MOD_VL_REWRITE
+    .dh vertexBuffer // 0x420; used in tri write
+.else
     .dh 0x7FFC // not used!
+.endif
     .dh vtxSize << 7 // 0x1400; it's not 0x2800 because vertex indices are *2; used in tri write for vtx index to addr
 .if CFG_OLD_TRI_WRITE // See discussion in tri write where v30 values used
     .dh 0x01CC // used in tri write, vcr?
@@ -701,10 +717,10 @@ inputBufferPos equ $27   // global
 // certain values, but you're free to overwrite them as long as you
 // reconstruct the normal values after you're done (in fact point lighting does
 // this for $v30 and $v31).
-vZero equ $v0  // global
-vOne  equ $v1  // global
-//        $v30 // global
-//        $v31 // global
+vZero equ $v0  // global (not in MOD_VL_REWRITE)
+vOne  equ $v1  // global (not in MOD_VL_REWRITE)
+//        $v30 // global except in point lighting (not in MOD_VL_REWRITE)
+//        $v31 // global except in point lighting (actually global in MOD_VL_REWRITE)
 
 // Must keep values during the full clipping process: clipping overlay, vertex
 // write, tri drawing.
@@ -862,7 +878,11 @@ start: // This is at IMEM 0x1080, not the start of IMEM
     vadd    vOne, vZero, vZero   // Consume VCO (carry) value possibly set by the previous ucode, before vsub below
 .endif
     li      rdpCmdBufEnd, rdpCmdBuffer1End
+.if MOD_VL_REWRITE
+    vsub    vOne, vZero, $v31[1]   // -1
+.else
     vsub    vOne, vZero, $v31[0]   // Vector of 1s
+.endif
 .if !CFG_XBUS // FIFO version
     lw      $11, rdpFifoPos
     lw      $12, OSTask + OSTask_flags
@@ -1300,6 +1320,9 @@ vClDiffI equ $v11
     1 +Y :      Y1 - 2*W1         (Y1 - 2*W1) - (Y2 - 2*W2)
     0 -Y :      Y1 + 2*W1         (Y1 + 2*W1) - (Y2 + 2*W2)
     */
+.if MOD_VL_REWRITE
+    .error "This needs to be updated!"
+.endif
     vmudh   $v29, $v31, vVpMisc[5]           // v29[0] = -clipRatio (v31[0] = -1)
     ldv     $v4[8], VTX_FRAC_VEC($3)         // Vtx off screen, frac pos
     ctc2    clipMaskIdx, $vcc                // Conditions 1 (+y) or 3 (+x) -> vcc[0] = 1
@@ -1328,7 +1351,11 @@ clipping_mod_skipxy:
 .else
     ldv     $v6[0], VTX_FRAC_VEC($3)         // Vtx off screen, frac pos
     ldv     $v7[0], VTX_INT_VEC ($3)         // Vtx off screen, int pos
+.if MOD_VL_REWRITE
+    vmudh   $v3, $v2, $v31[1]                // -1; v3 = -clipRatio
+.else
     vmudh   $v3, $v2, $v31[0]                // v3 = -clipRatio
+.endif
     vmudn   vClBaseF, $v4, $v2               // frac:   vtx on screen * clip ratio
     vmadh   vClBaseI, $v5, $v2               // int:  + vtx on screen * clip ratio   9:8
     vmadn   vClDiffF, $v6, $v3               // frac: - vtx off screen * clip ratio
@@ -1360,7 +1387,11 @@ clipping_mod_skipxy:
     vmudn   $v2, $v2, $v29[3]             // multiply reciprocal by +/- 2
     vmadh   $v3, $v3, $v29[3]
     veq     $v3, $v3, vZero[0]            // if reciprocal high is 0
+.if MOD_VL_REWRITE
+    vmrg    $v2, $v2, $v31[1]             // keep reciprocal low, otherwise set to -1
+.else
     vmrg    $v2, $v2, $v31[0]             // keep reciprocal low, otherwise set to -1
+.endif
     vmudl   $v29, vClDiffF, $v2[3]        // sum frac * reciprocal, discard
     vmadm   vClDiffI, vClDiffI, $v2[3]    // sum int * reciprocal, frac out
     vmadn   vClDiffF, vZero, vZero[0]     // get int out
@@ -1371,9 +1402,15 @@ clipping_mod_skipxy:
     vmadm   $v29, $v13, vClDiffF          // self * own reciprocal? int*frac discard
     vmadn   vClDiffF, $v12, vClDiffI      // self * own reciprocal? frac out
     vmadh   vClDiffI, $v13, vClDiffI      // self * own reciprocal? int out
+.if MOD_VL_REWRITE
+    vmudh   $v29, vOne, vVpMisc[3]        // 4 (int part), Newton-Raphson algorithm
+    vmadn   vClDiffF, vClDiffF, $v31[0]   // - 4 * prev result frac part
+    vmadh   vClDiffI, vClDiffI, $v31[0]   // - 4 * prev result frac part
+.else
     vmudh   $v29, vOne, $v31[1]           // 4 (int part), Newton-Raphson algorithm
     vmadn   vClDiffF, vClDiffF, $v31[4]   // - 4 * prev result frac part
     vmadh   vClDiffI, vClDiffI, $v31[4]   // - 4 * prev result frac part
+.endif
     vmudl   $v29, $v12, vClDiffF          // * own reciprocal again? frac*frac discard
     vmadm   $v29, $v13, vClDiffF          // * own reciprocal again? int*frac discard
     vmadn   $v12, $v12, vClDiffI          // * own reciprocal again? frac out
@@ -1416,13 +1453,21 @@ clipping_mod_skipxy:
     vmadn   vClDiffF, vClDiffF, vZero[0]  // * one of the reciprocals above
     // Clamp fade factor
     vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
+.if MOD_VL_REWRITE
+    vmrg    vClDiffF, vClDiffF, $v31[1]   // keep frac part of factor, else set to 0xFFFF (max val)
+.else
     vmrg    vClDiffF, vClDiffF, $v31[0]   // keep frac part of factor, else set to 0xFFFF (max val)
+.endif
     vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
     vge     vClDiffI, vClDiffI, vZero[0]  // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
 vClFade1 equ $v10 // = vClDiffF
 vClFade2 equ $v2
     vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
+.if MOD_VL_REWRITE
+    vmudn   vClFade2, vClFade1, $v31[1]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
+.else
     vmudn   vClFade2, vClFade1, $v31[0]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
+.endif
     // Fade between attributes for on screen and off screen vert
 .if MOD_CLIP_CHANGES
     // Save on-screen fade factor * on screen W in $v9:$v8.
@@ -1472,13 +1517,16 @@ clipping_after_vtxwrite:
     vmadm   $v29, $v9, $v5
     vmadn   vClDiffF, $v8, $v4
     vmadh   vClDiffI, $v9, $v4
+.if !MOD_VL_REWRITE
+    .error "This part requires the rewrite"
+.endif
     // Clamp fade factor (same code as above, except the input and therefore vClFade1 is for on screen vert)
     vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
-    vmrg    vClDiffF, vClDiffF, $v31[0]   // keep frac part of factor, else set to 0xFFFF (max val)
+    vmrg    vClDiffF, vClDiffF, $v31[1]   // keep frac part of factor, else set to 0xFFFF (max val)
     vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
     vge     vClDiffI, vClDiffI, vZero[0]  // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
     vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
-    vmudn   vClFade2, vClFade1, $v31[0]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for off screen vert
+    vmudn   vClFade2, vClFade1, $v31[1]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for off screen vert
     // Interpolate colors
     vmudm   $v29, $v12, vClFade2[3]       //   Fade factor for off screen vert * off screen vert color and TC
     vmadm   $v8, $v13, vClFade1[3]        // + Fade factor for on  screen vert * on  screen vert color and TC
@@ -1740,8 +1788,6 @@ $v17 = vVpFgOffset = [vtrans[0],  vtrans[1], vtrans[2], fogOffset, (repeat)]
 $v18 = vVpMisc     = [TexSScl,   TexTScl,    perspNorm, 4,         TexSScl,   TexTScl, clipRatio, 4     ]
 $v19 = vFogMask    = [TexSOfs,   TexTOfs,    aoAmb,     0,         TexSOfs,   TexTOfs, aoDir,     0     ]
 $v31 =               [-4,        -1,         1,         0x0010,    0x0100,    0x4000,  0x7F00,    0x7FFF]
-In tri write (not here):
-$v30 =               [vertexBuffer, vtxSize << 7, 0x1000, free,    -16,       0xFFF8,  free,      0x0020]
 aoAmb, aoDir set to 0 if ambient occlusion disabled
 */
     TODO
@@ -1874,11 +1920,9 @@ vl_mod_skip_fog:
     
 .endif
 
-
-
-
-
 vPairRGBATemp equ $v7
+
+.if !MOD_VL_REWRITE
 
 G_VTX_handler:
     lhu     dmemAddr, (vertexTable)(cmd_w0) // Load the address of the provided vertex array
@@ -2178,6 +2222,9 @@ load_spfx_global_values:
      addi   secondVtxPos, rdpCmdBufPtr, 0x50      // Pointer to currently unused memory in command buffer
 .else
 .if MOD_ATTR_OFFSETS
+.if MOD_VL_REWRITE
+    .error "This part not updated yet!"
+.endif
     // vFogMask is ST offset
     lhu     $8, (geometryModeLabel+2)($zero)      // $8 = secondVtxPos, about to be overwritten
     // Byte addr in vector, undocumented behavior that this works for unaligned vector element
@@ -2190,13 +2237,13 @@ load_spfx_global_values:
     vadd    vVpFgOffset, vVpFgOffset, $v2         // add Z offset if enabled
 after_attroffset_z:
     andi    $11, $8, G_ATTROFFSET_ST_ENABLE
-    vlt     $v2, $v31, $v31[3]                    // VCC = 11101110
+    vne     $v2, $v31, $v31[3h]                   // VCC = 11101110
     bnez    $11, after_attroffset_st              // Branch if ST offset enabled
      addi    secondVtxPos, rdpCmdBufPtr, 0x50     // Pointer to currently unused memory in command buffer
     vclr    vFogMask                              // If disabled, clear ST offset
 after_attroffset_st:
 .else
-    vlt     $v2, $v31, $v31[3]                    // VCC = 11101110
+    vne     $v2, $v31, $v31[3h]                   // VCC = 11101110
     addi    secondVtxPos, rdpCmdBufPtr, 0x50      // Pointer to currently unused memory in command buffer
 .endif
     vsub    $v2, vZero, vVpFgScale                // -vscale
@@ -2223,6 +2270,8 @@ after_attroffset_st:
      vmrg    vVpFgOffset, vVpFgOffset, $v29[1]    // Put fog offset in elements 3,7 of vtrans
 .endif
 
+.endif // MOD_VL_REWRITE
+
 G_TRI2_handler:
 G_QUAD_handler:
     jal     tri_to_rdp                   // Send second tri; return here for first tri
@@ -2231,14 +2280,25 @@ G_TRI1_handler:
     li      $ra, run_next_DL_command     // After done with this tri, run next cmd
     sw      cmd_w0, 4(rdpCmdBufPtr)      // Put first tri indices in temp memory
 tri_to_rdp:
+.if MOD_VL_REWRITE
+    vxor    vZero, vZero, vZero
+    lqv     $v30, v30Value($zero)
+.endif
     lpv     $v2[0], 0(rdpCmdBufPtr)      // Load tri indexes to vector unit for shuffling
     // read the three vertex indices from the stored command word
     lbu     $1, 0x0005(rdpCmdBufPtr)     // $1 = vertex 1 index
     lbu     $2, 0x0006(rdpCmdBufPtr)     // $2 = vertex 2 index
+.if MOD_VL_REWRITE
+    vsub    vOne, vZero, $v31[1]
+.endif
     lbu     $3, 0x0007(rdpCmdBufPtr)     // $3 = vertex 3 index
     vor     $v3, vZero, $v31[5]
     lhu     $1, (vertexTable)($1) // convert vertex 1's index to its address
+.if MOD_VL_REWRITE
+    vmudn   $v4, vOne, $v30[0]    // Move address of vertex buffer to accumulator mid
+.else
     vmudn   $v4, vOne, $v31[6]    // Move address of vertex buffer to accumulator mid
+.endif
     lhu     $2, (vertexTable)($2) // convert vertex 2's index to its address
     vmadl   $v2, $v2, $v30[1]     // Multiply vtx indices times length and add addr
     lhu     $3, (vertexTable)($3) // convert vertex 3's index to its address
@@ -2390,6 +2450,9 @@ shading_done:
     // or a way to improve the fractional precision sent to the RDP.
     // Hopefully this will become clear once tri write is documented.
 .if CFG_OLD_TRI_WRITE
+.if MOD_VL_REWRITE
+    .error "Rewrite not compatible with old tri write!"
+.endif
     i1 equ 7 // v30[7] is 0x0100
     i2 equ 2 // v31[2] is 0x0008
     i3 equ 5 // v31[5] is 0x4000
@@ -2880,6 +2943,9 @@ G_MTX_end: // Multiplies the loaded model matrix into the model stack
     // The second input matrix will correspond to the address that memory was moved into, which will be tempMtx for G_MTX
 
 mtx_multiply:
+.if MOD_VL_REWRITE
+    vxor    vZero, vZero, vZero
+.endif
     addi    $12, input_mtx_1, 0x0018
 @@loop:
     vmadn   $v9, vZero, vZero[0]
@@ -2963,26 +3029,50 @@ ovl1_end:
 
 .headersize ovl23_start - orga()
 
+ovl2_start:
+ovl23_lighting_entrypoint:
+.if MOD_VL_REWRITE
+vl_mod_lighting:
+    vmrg    vNormals, $v28, $v26          // Merge normals
+    j       vl_mod_continue_lighting
+     andi   $11, $5, G_PACKED_NORMALS >> 8
+.else
+    lbu     $11, lightsValid
+    j       continue_light_dir_xfrm
+     lbu    topLightPtr, numLightsx18
+.endif
+
+ovl23_clipping_entrypoint_copy:  // same IMEM address as ovl23_clipping_entrypoint
+.if MOD_GENERAL
+    sh      $ra, modSaveRA
+.else
+    move    savedRA, $ra
+.endif
+    li      ovlTableEntry, overlayInfo3       // set up a load of overlay 3
+    j       load_overlay_and_enter            // load overlay 3
+     li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
+
+// Locals for vl_mod_lighting, but armips requires them to be defined on all codepaths.
+vNormals equ $v28
+vnPosXY equ $v23
+vnZ equ $v24
+vLtLvl equ $v30
+
 .if MOD_VL_REWRITE
 
-vl_mod_lighting:
-vNormals equ $v28
+vl_mod_continue_lighting:
     // Inputs: $v20:$v21 vertices pos world int:frac, vPairRGBA, vPairST,
-    // $v28:$v26 (to be merged) normals, $v30:$v25 (to be merged) packed normals
+    // $v28 vNormals, $v30:$v25 (to be merged) packed normals
     // Outputs: vPairRGBA, vPairST, must leave alone $v20:$v21
     // Locals: $v29 temp, $v23 (will be vPairMVPPosF), $v24 (will be vPairMVPPosI),
     // $v25 after merge, $v26 after merge, whichever of $v28 or $v30 is unused
-    vmrg    vNormals, $v28, $v26          // Merge normals     
-    andi    $11, $5, G_PACKED_NORMALS >> 8
     vmrg    $v30, $v30, $v25          // Merge packed normals
     beqz    $11, vl_mod_skip_packed_normals
     // Packed normals algorithm. This produces a vector (one for each input vertex)
     // in vNormals such that |X| + |Y| + |Z| = 0x7F00 (called L1 norm), in the
     // same direction as the standard normal vector. The length is not "correct"
     // compared to the standard normal, but it's is normalized anyway after the M
-    // matrix trasnform.
-vnPosXY equ $v23
-vnZ equ $v24
+    // matrix transform.
      vand   vnPosXY, $v30, $v31[6] // 0x7F00; positive X, Y
     vxor    $v29, $v29, $v29 // Zero
     vaddc   vnZ, vnPosXY, vnPosXY[1q] // elem 0, 4: pos X + pos Y, no clamping
@@ -3012,7 +3102,6 @@ vl_mod_skip_packed_normals:
     vmudh   $v29, vNormals, vNormals // Transformed normal squared
     vsar    $v23, $v31, $v31[ACC_UPPER] // Load high component
     vmulf   $v26, vPairRGBA, vFogMask[2]  // aoAmb factor
-vLtLvl equ $v30
     luv     vLtLvl, (ltBufOfs + lightSize + 0)(curLight) // Total light level, init to ambient
     vadd    $v23, $v23, $v23[1q] // Sum components
     vadd    $v26, $v26, $v31[7] // 0x7FFF = 1 in s.15
@@ -3048,6 +3137,12 @@ vl_mod_finish_light:
     vmulf   $v29, vLtLvl, $v31[7] // 0x7FFF; Total light level * 1 in s.15
     j       vl_mod_light_loop
      vmacf  vLtLvl, $v26, $v25[0h] // + light color * dot product
+
+vl_mod_point_light:
+    // TODO replace this with real implementation
+    j       vl_mod_finish_light
+     vand   $v25, $v25, $v31[7] // for now, X component of dot product
+
 vl_mod_lighting_done:
     vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
     ldv     $v24[0], (ltBufOfs - lightSize + 8)(curLight) // Lookat dir 0
@@ -3094,24 +3189,9 @@ vl_mod_skip_novtxcolor:
     vmacf   vPairST, vPairST, $v2[1] // + ST * 0x44D3
     j       vl_mod_return_from_lighting
      vmacf  vPairST, $v26, $v25 // + ST squared * (ST + ST * coeff)
-.endif
 
-ovl2_start:
-ovl23_lighting_entrypoint:
-    lbu     $11, lightsValid
-    j       continue_light_dir_xfrm
-     lbu    topLightPtr, numLightsx18
+.else // MOD_VL_REWRITE
 
-ovl23_clipping_entrypoint_copy:  // same IMEM address as ovl23_clipping_entrypoint
-.if MOD_GENERAL
-    sh      $ra, modSaveRA
-.else
-    move    savedRA, $ra
-.endif
-    li      ovlTableEntry, overlayInfo3       // set up a load of overlay 3
-    j       load_overlay_and_enter            // load overlay 3
-     li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
-     
 continue_light_dir_xfrm:
     // Transform light directions from camera space to model space, by
     // multiplying by modelview transpose, then normalize and store the results
@@ -3571,6 +3651,8 @@ lights_finishone:
     j       lights_texgenpre
 .endif
      vmacf  ltColor, $v4, $v21[0h]      // + light color * dot product
+
+.endif // MOD_VL_REWRITE
 
 .align 8
 ovl2_end:
