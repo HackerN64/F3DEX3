@@ -354,7 +354,9 @@ attrOffsetZ:
 .endif
 
 .if MOD_GENERAL
+aoAmbientFactor:
     .dh 0x0000 // TODO ambient occlusion
+aoDirectionalFactor:
     .dh 0x0000
 .endif
 
@@ -1743,55 +1745,27 @@ ovl23_end:
 .if MOD_VL_REWRITE
 
 G_VTX_handler:
-    TODO
-    lw      $5, (geometryModeLabel)($zero)
-    srl     $5, $5, 8 // Middle 2 bytes
-
-vl_mod_matrix_load:
-    // M matrix is $v0-$v7, VP matrix is $v8-$v15
-    lqv     $v0,     (mvMatrix + 0x00)($zero)
-    lqv     $v2,     (mvMatrix + 0x10)($zero)
-    lqv     $v4,     (mvMatrix + 0x20)($zero)
-    lqv     $v6,     (mvMatrix + 0x30)($zero)
-    lqv     $v8,     (pMatrix  + 0x00)($zero)
-    vor     $v1,  $v0,  $v0
-    lqv     $v10,    (pMatrix  + 0x10)($zero)
-    vor     $v3,  $v2,  $v2
-    lqv     $v12,    (pMatrix  + 0x20)($zero)
-    vor     $v5,  $v4,  $v4
-    lqv     $v14,    (pMatrix  + 0x30)($zero)
-    vor     $v7,  $v6,  $v6
-    ldv     $v1[0],  (mvMatrix + 0x08)($zero)
-    vor     $v9,  $v8,  $v8
-    ldv     $v3[0],  (mvMatrix + 0x18)($zero)
-    vor     $v11, $v10, $v10
-    ldv     $v5[0],  (mvMatrix + 0x28)($zero)
-    vor     $v13, $v12, $v12
-    ldv     $v7[0],  (mvMatrix + 0x38)($zero)
-    vor     $v15, $v14, $v14
-    ldv     $v0[8],  (mvMatrix + 0x10)($zero)
-    ldv     $v2[8],  (mvMatrix + 0x10)($zero)
-    ldv     $v4[8],  (mvMatrix + 0x10)($zero)
-    ldv     $v6[8],  (mvMatrix + 0x10)($zero)
-    ldv     $v9[0],  (pMatrix  + 0x08)($zero)
-    ldv     $v11[0], (pMatrix  + 0x18)($zero)
-    ldv     $v13[0], (pMatrix  + 0x28)($zero)
-    ldv     $v15[0], (pMatrix  + 0x38)($zero)
-    ldv     $v8[8],  (pMatrix  + 0x10)($zero)
-    ldv     $v10[8], (pMatrix  + 0x10)($zero)
-    ldv     $v12[8], (pMatrix  + 0x10)($zero)
-    ldv     $v14[8], (pMatrix  + 0x10)($zero)
-vl_mod_setup_constants:
-/*
-$v16 = vVpFgScale  = [vscale[0], -vscale[1], vscale[2], fogMult,   (repeat)]
-$v17 = vVpFgOffset = [vtrans[0],  vtrans[1], vtrans[2], fogOffset, (repeat)]
-$v18 = vVpMisc     = [TexSScl,   TexTScl,    perspNorm, 4,         TexSScl,   TexTScl, clipRatio, 4     ]
-$v19 = vFogMask    = [TexSOfs,   TexTOfs,    aoAmb,     0,         TexSOfs,   TexTOfs, aoDir,     0     ]
-$v31 =               [-4,        -1,         1,         0x0010,    0x0100,    0x4000,  0x7F00,    0x7FFF]
-aoAmb, aoDir set to 0 if ambient occlusion disabled
-*/
-    TODO
-    
+    jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
+     lhu    $1, (inputBufferEnd - 0x07)(inputBufferPos) // Size in inputVtxSize units
+    srl     $2, cmd_w0, 11                     // n << 1
+    addiu   $11, inputBufferPos, inputBufferEnd - 0x08 // Out of reach of offset
+    sub     $2, cmd_w0, $2                     // v0 << 1
+    sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
+    lpv     $v27[0], (0)($11)                  // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3
+    j       vtx_indices_to_addr
+     la     $11, vtx_return_from_addrs
+vtx_return_from_addrs:
+    mfc2    $3, $v27[6]                        // Address of end in vtxSize units
+    sub     dmemAddr, $3, $1
+    jal     dma_read_write
+     addi   dmaLen, $1, -1                     // DMA length is always offset by -1
+    mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
+    move    inputVtxPos, dmemAddr
+    jal     vl_mod_matrix_load
+     lhu    $5, (geometryModeLabel + 1)($zero) // Middle 2 bytes
+    addiu   outputVtxPos, outputVtxPos, -2*vtxSize // Going to increment this by 2 verts below
+    jal     while_wait_dma_busy
+     andi   $7, $5, G_FOG >> 8                 // Nonzero if fog enabled
 vl_mod_vtx_load_loop:
     ldv     $v20[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
     vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
@@ -1818,14 +1792,25 @@ vl_mod_vtx_load_loop:
      lpv    $v25[6],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos) // Upper 2 in 4:5
  vl_mod_return_from_lighting:
     vmudn   $v29, $v15, $v31[2] // 1
+    addiu   inputVtxPos, inputVtxPos, 2*inputVtxSize
     vmadh   $v29, $v11, $v31[2] // 1
+    addiu   outputVtxPos, outputVtxPos, 2*vtxSize
     vmadl   $v29, $v12, $v21[0h]
+    addiu   $1, $1, -2*inputVtxSize // Counter of remaining verts * inputVtxSize
     vmadm   $v29, $v8,  $v21[0h]
+    addiu   secondVtxPos, outputVtxPos, vtxSize
     vmadn   $v29, $v12, $v20[0h]
-    vmadh   $v29, $v8,  $v20[0h]
+    bgez    $1, @@skip1
+     vmadh  $v29, $v8,  $v20[0h]
+    move    secondVtxPos, outputVtxPos
+@@skip1:
     vmadl   $v29, $v13, $v21[1h]
+    la      $ra, vl_mod_vtx_load_loop
     vmadm   $v29, $v9,  $v21[1h]
-    vmadn   $v29, $v13, $v20[1h]
+    bgtz    $1, @@skip2
+     vmadn  $v29, $v13, $v20[1h]
+    la      $ra, run_next_DL_command
+@@skip2:
     vmadh   $v29, $v9,  $v20[1h]
     vmadl   $v29, $v14, $v21[2h]
     vmadm   $v29, $v10, $v21[2h]
@@ -1837,26 +1822,28 @@ vl_mod_vtx_store:
     // Inputs: vPairMVPPosI, vPairMVPPosF, vPairST, vPairRGBA
     // Locals: $v20, $v21, $v25, $v26, $v28, $v30 ($v29 is temp)
     // Alive at end for clipping: $v30:$v28 = 1/W, vPairRGBA
+    // Scalar regs: secondVtxPos, outputVtxPos; set to the same thing if only write 1 vtx
+    // $7 != 0 if fog; temps $11, $12, $20, $24
     vmudl   $v29, vPairMVPPosF, vVpMisc[2] // Persp norm
-    sdv     vPairMVPPosF[8],  (VTX_FRAC_VEC   - 1 * vtxSize)(secondVtxPos)
+    sdv     vPairMVPPosF[8],  (VTX_FRAC_VEC  )(secondVtxPos)
     vmadm   $v20, vPairMVPPosI, vVpMisc[2] // Persp norm
-    sdv     vPairMVPPosF[0],  (VTX_FRAC_VEC   - 2 * vtxSize)(outputVtxPos)
+    sdv     vPairMVPPosF[0],  (VTX_FRAC_VEC  )(outputVtxPos)
     vmadn   $v21, vFogMask, vFogMask[3] // Zero
-    sdv     vPairMVPPosI[8],  (VTX_INT_VEC    - 1 * vtxSize)(secondVtxPos)
+    sdv     vPairMVPPosI[8],  (VTX_INT_VEC   )(secondVtxPos)
     vch     $v29, vPairMVPPosI, vPairMVPPosI[3h] // Clip screen high
-    sdv     vPairMVPPosI[0],  (VTX_INT_VEC    - 2 * vtxSize)(outputVtxPos)
+    sdv     vPairMVPPosI[0],  (VTX_INT_VEC   )(outputVtxPos)
     vcl     $v29, vPairMVPPosF, vPairMVPPosF[3h] // Clip screen low
-    suv     vPairRGBA[8],     (VTX_INT_VEC    - 1 * vtxSize)(secondVtxPos)
+    suv     vPairRGBA[8],     (VTX_INT_VEC   )(secondVtxPos)
     vmudn   $v26, vPairMVPPosF, vVpMisc[6] // Clip ratio
-    suv     vPairRGBA[0],     (VTX_INT_VEC    - 2 * vtxSize)(outputVtxPos)
+    suv     vPairRGBA[0],     (VTX_INT_VEC   )(outputVtxPos)
     vmadh   $v25, vPairMVPPosI, vVpMisc[6] // Clip ratio
-    slv     vPairST[0],       (VTX_TC_VEC     - 1 * vtxSize)(secondVtxPos)
+    slv     vPairST[0],       (VTX_TC_VEC    )(secondVtxPos)
     vrcph   $v29[0], $v20[3]
-    slv     vPairST[8],       (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos)
+    slv     vPairST[8],       (VTX_TC_VEC    )(outputVtxPos)
     vrcpl   $v28[3], $v21[3]
-    lsv     vPairMVPPosF[14], (VTX_Z_FRAC     - 1 * vtxSize)(secondVtxPos) // load Z into W slot, will be for fog below
+    lsv     vPairMVPPosF[14], (VTX_Z_FRAC    )(secondVtxPos) // load Z into W slot, will be for fog below
     vrcph   $v30[3], $v20[7]
-    lsv     vPairMVPPosF[6],  (VTX_Z_FRAC     - 2 * vtxSize)(outputVtxPos) // load Z into W slot, will be for fog below
+    lsv     vPairMVPPosF[6],  (VTX_Z_FRAC    )(outputVtxPos) // load Z into W slot, will be for fog below
     vrcpl   $v28[7], $v21[7]
     cfc2    $20, $vcc
     vrcph   $v30[7], vFogMask[3] // Zero
@@ -1878,9 +1865,9 @@ vl_mod_vtx_store:
     vmudh   $v29, vVpMisc, $v31[2] // 4 * 1 in elems 3, 7
     or      $12, $12, $11               // Combine final results for first vertex
     vmadn   $v21, $v21, $v31[0] // -4
-    lsv     vPairMVPPosI[14], (VTX_Z_INT      - 1 * vtxSize)(secondVtxPos) // load Z into W slot, will be for fog below
+    lsv     vPairMVPPosI[14], (VTX_Z_INT     )(secondVtxPos) // load Z into W slot, will be for fog below
     vmadh   $v20, $v20, $v31[0] // -4
-    lsv     vPairMVPPosI[6],  (VTX_Z_INT      - 2 * vtxSize)(outputVtxPos) // load Z into W slot, will be for fog below
+    lsv     vPairMVPPosI[6],  (VTX_Z_INT     )(outputVtxPos) // load Z into W slot, will be for fog below
     vmrg    $v25, vFogMask, $v31[7] // 0 or 0x7FFF in elems 3, 7, latter if w < 0
     vmudl   $v29, $v21, $v28
     vmadm   $v29, $v20, $v28
@@ -1888,36 +1875,121 @@ vl_mod_vtx_store:
     vmadh   $v30, $v20, $v30    // $v30:$v28 is 1/W
     vmadh   $v25, $v25, $v31[7] // 0x7FFF; $v25:$v28 is 1/W but large number if W negative
     vmudl   $v29, vPairMVPPosF, $v28[3h]
-    sh      $24,              (VTX_CLIP       - 1 * vtxSize)(secondVtxPos) // Store second vertex results
+    sh      $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex results
     vmadm   $v29, vPairMVPPosI, $v28[3h]
-    sh      $12,              (VTX_CLIP       - 2 * vtxSize)(outputVtxPos) // Store first vertex results
+    sh      $12,              (VTX_CLIP      )(outputVtxPos) // Store first vertex results
     vmadn   vPairMVPPosF, vPairMVPPosF, $v25[3h]
-    ssv     $v28[14],         (VTX_INV_W_FRAC - 1 * vtxSize)(secondVtxPos)
+    ssv     $v28[14],         (VTX_INV_W_FRAC)(secondVtxPos)
     vmadh   vPairMVPPosI, vPairMVPPosI, $v25[3h] // pos * 1/W
-    ssv     $v28[6],          (VTX_INV_W_FRAC - 2 * vtxSize)(outputVtxPos)
+    ssv     $v28[6],          (VTX_INV_W_FRAC)(outputVtxPos)
     vmudl   $v29, vPairMVPPosF, vVpMisc[2] // Persp norm
-    ssv     $v30[14],         (VTX_INV_W_INT  - 1 * vtxSize)(secondVtxPos)
+    ssv     $v30[14],         (VTX_INV_W_INT )(secondVtxPos)
     vmadm   vPairMVPPosI, vPairMVPPosI, vVpMisc[2] // Persp norm
-    ssv     $v30[6],          (VTX_INV_W_INT  - 2 * vtxSize)(outputVtxPos)
+    ssv     $v30[6],          (VTX_INV_W_INT )(outputVtxPos)
     vmadn   vPairMVPPosF, vFogMask, vFogMask[3] // Zero
     vmudh   $v29, vVpFgOffset, $v31[2] // offset * 1
     vmadn   vPairMVPPosF, vPairMVPPosF, vVpFgScale // + XYZ * scale
     vmadh   vPairMVPPosI, vPairMVPPosI, vVpFgScale
     vge     $v21, vPairMVPPosI, $v31[6] // 0x7F00; clamp fog to >= 0 (low byte only)
-    slv     vPairMVPPosI[8],  (VTX_SCR_VEC    - 1 * vtxSize)(secondVtxPos)
+    slv     vPairMVPPosI[8],  (VTX_SCR_VEC   )(secondVtxPos)
     vge     $v20, vPairMVPPosI, vFogMask[3] // Zero; clamp Z to >= 0
-    slv     vPairMVPPosI[0],  (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
-    ssv     vPairMVPPosF[12], (VTX_SCR_Z_FRAC - 1 * vtxSize)(secondVtxPos)
+    slv     vPairMVPPosI[0],  (VTX_SCR_VEC   )(outputVtxPos)
+    ssv     vPairMVPPosF[12], (VTX_SCR_Z_FRAC)(secondVtxPos)
     beqz    $7, vl_mod_skip_fog
-     ssv    vPairMVPPosF[4],  (VTX_SCR_Z_FRAC - 2 * vtxSize)(outputVtxPos)
-    sbv     $v21[15],         (VTX_COLOR_A    - 1 * vtxSize)(secondVtxPos)
-    sbv     $v21[7],          (VTX_COLOR_A    - 2 * vtxSize)(outputVtxPos)
+     ssv    vPairMVPPosF[4],  (VTX_SCR_Z_FRAC)(outputVtxPos)
+    sbv     $v21[15],         (VTX_COLOR_A   )(secondVtxPos)
+    sbv     $v21[7],          (VTX_COLOR_A   )(outputVtxPos)
 vl_mod_skip_fog:
-    ssv     $v20[12],         (VTX_SCR_Z      - 1 * vtxSize)(secondVtxPos)
+    ssv     $v20[12],         (VTX_SCR_Z     )(secondVtxPos)
     jr      $ra
-     ssv    $v20[4],          (VTX_SCR_Z      - 2 * vtxSize)(outputVtxPos)
-    
-    
+     ssv    $v20[4],          (VTX_SCR_Z     )(outputVtxPos)
+
+ vl_mod_matrix_load:
+     // M matrix is $v0-$v7, VP matrix is $v8-$v15
+     lqv     $v0,     (mvMatrix + 0x00)($zero)
+     lqv     $v2,     (mvMatrix + 0x10)($zero)
+     lqv     $v4,     (mvMatrix + 0x20)($zero)
+     lqv     $v6,     (mvMatrix + 0x30)($zero)
+     lqv     $v8,     (pMatrix  + 0x00)($zero)
+     vor     $v1,  $v0,  $v0
+     lqv     $v10,    (pMatrix  + 0x10)($zero)
+     vor     $v3,  $v2,  $v2
+     lqv     $v12,    (pMatrix  + 0x20)($zero)
+     vor     $v5,  $v4,  $v4
+     lqv     $v14,    (pMatrix  + 0x30)($zero)
+     vor     $v7,  $v6,  $v6
+     ldv     $v1[0],  (mvMatrix + 0x08)($zero)
+     vor     $v9,  $v8,  $v8
+     ldv     $v3[0],  (mvMatrix + 0x18)($zero)
+     vor     $v11, $v10, $v10
+     ldv     $v5[0],  (mvMatrix + 0x28)($zero)
+     vor     $v13, $v12, $v12
+     ldv     $v7[0],  (mvMatrix + 0x38)($zero)
+     vor     $v15, $v14, $v14
+     ldv     $v0[8],  (mvMatrix + 0x10)($zero)
+     ldv     $v2[8],  (mvMatrix + 0x10)($zero)
+     ldv     $v4[8],  (mvMatrix + 0x10)($zero)
+     ldv     $v6[8],  (mvMatrix + 0x10)($zero)
+     ldv     $v9[0],  (pMatrix  + 0x08)($zero)
+     ldv     $v11[0], (pMatrix  + 0x18)($zero)
+     ldv     $v13[0], (pMatrix  + 0x28)($zero)
+     ldv     $v15[0], (pMatrix  + 0x38)($zero)
+     ldv     $v8[8],  (pMatrix  + 0x10)($zero)
+     ldv     $v10[8], (pMatrix  + 0x10)($zero)
+     ldv     $v12[8], (pMatrix  + 0x10)($zero)
+     ldv     $v14[8], (pMatrix  + 0x10)($zero)
+ vl_mod_setup_constants:
+ /*
+ $v16 = vVpFgScale  = [vscale[0], -vscale[1], vscale[2], fogMult,   (repeat)]
+ $v17 = vVpFgOffset = [vtrans[0],  vtrans[1], vtrans[2], fogOffset, (repeat)]
+ $v18 = vVpMisc     = [TexSScl,   TexTScl,    perspNorm, 4,         TexSScl,   TexTScl, clipRatio, 4     ]
+ $v19 = vFogMask    = [TexSOfs,   TexTOfs,    aoAmb,     0,         TexSOfs,   TexTOfs, aoDir,     0     ]
+ $v31 =               [-4,        -1,         1,         0x0010,    0x0100,    0x4000,  0x7F00,    0x7FFF]
+ aoAmb, aoDir set to 0 if ambient occlusion disabled
+ */
+    li      spFxBaseReg, spFxBase
+    vne     $v29, $v31, $v31[2h]                  // VCC = 11011101
+    ldv     vFogMask[0], (attrOffsetST - spFxBase)(spFxBaseReg) // elems 0, 1, 2 = S, T, Z offset
+    vxor    $v21, $v21, $v21                      // Zero
+    ldv     vVpFgOffset[0], (viewport + 8)($zero) // Load vtrans duplicated in 0-3 and 4-7
+    ldv     vVpFgOffset[8], (viewport + 8)($zero)
+    lhu     $12, (geometryModeLabel+2)($zero)
+    lhu     $24, (perspNorm)($zero)               // Can't load this as a short because not enough reach
+    vmrg    $v29, $v21, vFogMask[2]               // all zeros except elems 2, 6 are Z offset
+    ldv     vFogMask[8], (attrOffsetST - spFxBase)(spFxBaseReg) // Duplicated in 4-6
+    vsub    $v22, $v21, $v31[0]                   // Vector of 4s = 0 - -4
+    andi    $11, $12, G_ATTROFFSET_Z_ENABLE
+    beqz    $11, @@skipz                          // Skip if Z offset disabled
+     llv    $v20[4], (aoAmbientFactor - spFxBase)(spFxBaseReg) // Load aoAmb 2 and aoDir 3
+    vadd    vVpFgOffset, vVpFgOffset, $v29        // add Z offset if enabled
+@@skipz:
+    andi    $11, $12, G_ATTROFFSET_ST_ENABLE
+    bnez    $11, @@skipst                         // Skip if ST offset enabled
+     ldv    vVpMisc[0], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale in 0, 1, clipRatio in 2
+    vxor    vFogMask, vFogMask, vFogMask          // If disabled, clear ST offset
+@@skipst:
+    andi    $11, $12, G_AMBOCCLUSION
+    vmov    $v20[6], $v20[3]                      // move aoDir to 6
+    bnez    $11, @@skipao                         // Skip if ambient occlusion enabled
+     ldv    vVpMisc[8], (textureSettings2 - spFxBase)(spFxBaseReg) // Duplicated in 4-6
+    vor     $v20, $v21, $v21                      // Set aoAmb and aoDir to 0
+@@skipao:
+    ldv     vVpFgScale[0], (viewport)($zero)      // Load vscale duplicated in 0-3 and 4-7
+    ldv     vVpFgScale[8], (viewport)($zero)
+    llv     $v23[0], (fogFactor - spFxBase)(spFxBaseReg) // Load fog multiplier 0 and offset 1
+    mtc2    $24, vVpMisc[4]                       // perspNorm
+    vmrg    vFogMask, vFogMask, $v20              // move aoAmb and aoDir into vFogMask
+    vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
+    vsub    $v20, $v21, vVpFgScale                // -vscale
+    vmrg    vVpFgScale, vVpFgScale, $v23[0]       // Put fog multiplier in elements 3,7 of vscale
+    vadd    $v23, $v23, $v31[6]                   // Add 0x7F00 to fog offset
+    vmrg    vVpMisc, vVpMisc, $v22                // Put 4s in elements 3,7
+    vmrg    vFogMask, vFogMask, $v21              // Put 0s in elements 3,7
+    vmov    vVpFgScale[1], $v20[1]                // Negate vscale[1] because RDP top = y=0
+    vmov    vVpFgScale[5], $v20[1]                // Same for second half
+    jr      $ra
+     vmrg    vVpFgOffset, vVpFgOffset, $v23[1]    // Put fog offset in elements 3,7 of vtrans
+
 .endif
 
 vPairRGBATemp equ $v7
@@ -2272,6 +2344,17 @@ after_attroffset_st:
 
 .endif // MOD_VL_REWRITE
 
+.if MOD_VL_REWRITE
+vtx_indices_to_addr:
+    // Input and output in $v27
+    vxor    $v28, $v28, $v28  // Zero
+    lqv     $v30, v30Value($zero)
+    vsub    $v28, $v28, $v31[1]   // One = 0 - -1
+    vmudl   $v29, $v27, $v30[1]   // Multiply vtx indices times length and add addr
+    jr      $11
+     vmadn  $v27, $v28, $v30[0]   // Add address of vertex buffer to accumulator mid
+.endif
+
 G_TRI2_handler:
 G_QUAD_handler:
     jal     tri_to_rdp                   // Send second tri; return here for first tri
@@ -2281,27 +2364,29 @@ G_TRI1_handler:
     sw      cmd_w0, 4(rdpCmdBufPtr)      // Put first tri indices in temp memory
 tri_to_rdp:
 .if MOD_VL_REWRITE
+    lpv     $v27[0], 0(rdpCmdBufPtr)     // Load tri indexes to 5,6,7
     vxor    vZero, vZero, vZero
-    lqv     $v30, v30Value($zero)
-.endif
+    j       vtx_indices_to_addr
+     la     $11, tri_return_from_addrs
+ tri_return_from_addrs:
+    mfc2    $1, $v27[10]
+    vor     vOne, $v28, $v28             // 1 set up in function
+    mfc2    $2, $v27[12]
+    vor     $v3, vZero, $v31[5]
+    mfc2    $3, $v27[14]
+.else
     lpv     $v2[0], 0(rdpCmdBufPtr)      // Load tri indexes to vector unit for shuffling
     // read the three vertex indices from the stored command word
     lbu     $1, 0x0005(rdpCmdBufPtr)     // $1 = vertex 1 index
     lbu     $2, 0x0006(rdpCmdBufPtr)     // $2 = vertex 2 index
-.if MOD_VL_REWRITE
-    vsub    vOne, vZero, $v31[1]
-.endif
     lbu     $3, 0x0007(rdpCmdBufPtr)     // $3 = vertex 3 index
     vor     $v3, vZero, $v31[5]
     lhu     $1, (vertexTable)($1) // convert vertex 1's index to its address
-.if MOD_VL_REWRITE
-    vmudn   $v4, vOne, $v30[0]    // Move address of vertex buffer to accumulator mid
-.else
     vmudn   $v4, vOne, $v31[6]    // Move address of vertex buffer to accumulator mid
-.endif
     lhu     $2, (vertexTable)($2) // convert vertex 2's index to its address
     vmadl   $v2, $v2, $v30[1]     // Multiply vtx indices times length and add addr
     lhu     $3, (vertexTable)($3) // convert vertex 3's index to its address
+.endif
     vmadn   $v4, vZero, vZero[0]  // Load accumulator again (addresses) to v4; need vertex 2 addr in elem 6
     move    $4, $1                // Save original vertex 1 addr (pre-shuffle) for flat shading
 .if MOD_CLIP_CHANGES
@@ -2313,7 +2398,11 @@ tri_to_rdp_noinit:
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
     vnxor   $v7, vZero, $v31[7]     // v7 = 0x8000
     llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
+.if MOD_VL_REWRITE
+    vmov    $v6[6], $v27[5]         // elem 6 of v6 = vertex 1 addr
+.else
     vmov    $v6[6], $v2[5]          // elem 6 of v6 = vertex 1 addr
+.endif
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
     vnxor   $v9, vZero, $v31[7]     // v9 = 0x8000
 .if MOD_CLIP_CHANGES
@@ -2321,7 +2410,11 @@ tri_to_rdp_noinit:
 .else
     lw      $5, VTX_CLIP($1)
 .endif
+.if MOD_VL_REWRITE
+    vmov    $v8[6], $v27[7]         // elem 6 of v8 = vertex 3 addr
+.else
     vmov    $v8[6], $v2[7]          // elem 6 of v8 = vertex 3 addr
+.endif
 .if MOD_CLIP_CHANGES
     lhu     $6, VTX_CLIP($2)
 .else
