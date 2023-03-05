@@ -771,6 +771,9 @@ mxr3f        equ $v15
 vPairST      equ $v22
 vPairMVPPosF equ $v23
 vPairMVPPosI equ $v24
+// Mods:
+vPairRGBA equ $v27
+
 // v25: prev vertex screen pos
 // v26: prev vertex screen Z
 // For point lighting
@@ -1236,6 +1239,7 @@ ovl3_clipping_nosavera:
 .endif
 .if MOD_CLIP_CHANGES
 .if MOD_VL_REWRITE
+    j       clipping_done // TODO testing
     vxor    vZero, vZero, vZero
     jal     vl_mod_setup_constants
 .else
@@ -1339,7 +1343,6 @@ vClDiffI equ $v11
     1 +Y :      Y1 - 2*W1         (Y1 - 2*W1) - (Y2 - 2*W2)
     0 -Y :      Y1 + 2*W1         (Y1 + 2*W1) - (Y2 + 2*W2)
     */
-    TODO
 .if MOD_VL_REWRITE
     ctc2    clipMaskIdx, $vcc                // Conditions 1 (+y) or 3 (+x) -> vcc[0] = 1
     ldv     $v4[8], VTX_FRAC_VEC($3)         // Vtx off screen, frac pos
@@ -1591,7 +1594,7 @@ clipping_after_vtxwrite:
     vmudm   $v29, $v12, vClFade2[3]       //   Fade factor for off screen vert * off screen vert color and TC
     vmadm   $v8, $v13, vClFade1[3]        // + Fade factor for on  screen vert * on  screen vert color and TC
 .if MOD_VL_REWRITE
-    suv     $v8[0],     (VTX_INT_VEC   )(outputVtxPos)
+    suv     $v8[0],     (VTX_COLOR_VEC )(outputVtxPos)
 .else
     suv     $v8[0],     (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
 .endif
@@ -1842,15 +1845,15 @@ vl_mod_vtx_load_loop:
     vmadh   $v29, $v0, $v20[0h]
     lpv     $v26[0],      (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
     vmadn   $v29, $v5, $v20[1h]
-    llv     vPairST[0],   (VTX_IN_ST + inputVtxSize * 0)(inputVtxPos) // ST in 0:1
+    llv     vPairST[0],   (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // ST in 0:1
     vmadh   $v29, $v1, $v20[1h]
-    llv     vPairST[8],   (VTX_IN_ST + inputVtxSize * 1)(inputVtxPos) // ST in 4:5
+    llv     vPairST[8],   (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // ST in 4:5
     vmadn   $v21, $v6, $v20[2h]
     andi    $11, $5, G_LIGHTING >> 8
     vmadh   $v20, $v2, $v20[2h] // $v20:$v21 = vertices world coords
     lpv     $v30[2],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Packed normals as signed, lower 2
     vmrg    vPairRGBA, vPairRGBA, $v25 // Merge colors
-    bnez    $11, vl_mod_lighting
+    //bnez    $11, vl_mod_lighting // TODO testing
      lpv    $v25[6],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos) // Upper 2 in 4:5
  vl_mod_return_from_lighting:
     vmudn   $v29, $v15, $v31[2] // 1
@@ -1895,9 +1898,9 @@ vl_mod_vtx_store:
     vch     $v29, vPairMVPPosI, vPairMVPPosI[3h] // Clip screen high
     sdv     vPairMVPPosI[0],  (VTX_INT_VEC   )(outputVtxPos)
     vcl     $v29, vPairMVPPosF, vPairMVPPosF[3h] // Clip screen low
-    suv     vPairRGBA[8],     (VTX_INT_VEC   )(secondVtxPos)
+    suv     vPairRGBA[8],     (VTX_COLOR_VEC )(secondVtxPos)
     vmudn   $v26, vPairMVPPosF, vVpMisc[6] // Clip ratio
-    suv     vPairRGBA[0],     (VTX_INT_VEC   )(outputVtxPos)
+    suv     vPairRGBA[0],     (VTX_COLOR_VEC )(outputVtxPos)
     vmadh   $v25, vPairMVPPosI, vVpMisc[6] // Clip ratio
     slv     vPairST[0],       (VTX_TC_VEC    )(secondVtxPos)
     vrcph   $v29[0], $v20[3]
@@ -1909,21 +1912,21 @@ vl_mod_vtx_store:
     vrcpl   $v28[7], $v21[7]
     cfc2    $20, $vcc
     vrcph   $v30[7], vFogMask[3] // Zero
-    srl     $24, rClipRes, 4            // Shift second vertex screen clipping to first slots
+    srl     $24, $20, 4            // Shift second vertex screen clipping to first slots
     vch     $v29, vPairMVPPosI, $v25[3h] // Clip scaled high
-    andi    $12, rClipRes, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
+    andi    $12, $20, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
     vcl     $v29, vPairMVPPosF, $v26[3h] // Clip scaled low
     andi    $24, $24, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
     vmudl   $v29, $v21, $v28
-    cfc2    rClipRes, $vcc
+    cfc2    $20, $vcc
     vmadm   $v29, $v20, $v28
-    sll     $11, rClipRes, 4            // Shift first vertex scaled clipping to second slots
+    sll     $11, $20, 4            // Shift first vertex scaled clipping to second slots
     vmadn   $v21, $v21, $v30
-    andi    rClipRes, rClipRes, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
+    andi    $20, $20, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
     vmadh   $v20, $v20, $v30
     andi    $11, $11, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
     vge     $v29, vPairMVPPosI, vFogMask[3] // Zero; vcc set if w >= 0
-    or      $24, $24, rClipRes          // Combine final results for second vertex
+    or      $24, $24, $20          // Combine final results for second vertex
     vmudh   $v29, vVpMisc, $v31[2] // 4 * 1 in elems 3, 7
     or      $12, $12, $11               // Combine final results for first vertex
     vmadn   $v21, $v21, $v31[0] // -4
@@ -1988,18 +1991,18 @@ vl_mod_skip_fog:
      vor     $v13, $v12, $v12
      ldv     $v7[0],  (mvMatrix + 0x38)($zero)
      vor     $v15, $v14, $v14
-     ldv     $v0[8],  (mvMatrix + 0x10)($zero)
+     ldv     $v0[8],  (mvMatrix + 0x00)($zero)
      ldv     $v2[8],  (mvMatrix + 0x10)($zero)
-     ldv     $v4[8],  (mvMatrix + 0x10)($zero)
-     ldv     $v6[8],  (mvMatrix + 0x10)($zero)
+     ldv     $v4[8],  (mvMatrix + 0x20)($zero)
+     ldv     $v6[8],  (mvMatrix + 0x30)($zero)
      ldv     $v9[0],  (pMatrix  + 0x08)($zero)
      ldv     $v11[0], (pMatrix  + 0x18)($zero)
      ldv     $v13[0], (pMatrix  + 0x28)($zero)
      ldv     $v15[0], (pMatrix  + 0x38)($zero)
-     ldv     $v8[8],  (pMatrix  + 0x10)($zero)
+     ldv     $v8[8],  (pMatrix  + 0x00)($zero)
      ldv     $v10[8], (pMatrix  + 0x10)($zero)
-     ldv     $v12[8], (pMatrix  + 0x10)($zero)
-     ldv     $v14[8], (pMatrix  + 0x10)($zero)
+     ldv     $v12[8], (pMatrix  + 0x20)($zero)
+     ldv     $v14[8], (pMatrix  + 0x30)($zero)
  vl_mod_setup_constants:
  /*
  $v16 = vVpFgScale  = [vscale[0], -vscale[1], vscale[2], fogMult,   (repeat)]
@@ -2055,6 +2058,14 @@ vl_mod_skip_fog:
 .endif
 
 vPairRGBATemp equ $v7
+
+.if MOD_CLIP_CHANGES
+    rClipRes equ $20
+.elseif MOD_GENERAL
+    rClipRes equ $19
+.else
+    rClipRes equ $10
+.endif
 
 .if !MOD_VL_REWRITE
 
@@ -2200,13 +2211,6 @@ vertices_store:
     // so outputVtxPos is the first vertex and secondVtxPos is the second.
     sub     secondVtxPos, outputVtxPos, $11
     vmudl   $v29, $v21, $v5
-.if MOD_CLIP_CHANGES
-    rClipRes equ $20
-.elseif MOD_GENERAL
-    rClipRes equ $19
-.else
-    rClipRes equ $10
-.endif
     cfc2    rClipRes, $vcc               // Load 16 bit screen space clip results, two verts
     vmadm   $v29, $v2, $v5
     sdv     vPairMVPPosF[8],  (VTX_FRAC_VEC   - 1 * vtxSize)(secondVtxPos)
@@ -3184,6 +3188,21 @@ ovl1_end:
 
 .headersize ovl23_start - orga()
 
+// Locals for vl_mod_lighting, but armips requires them to be defined on all codepaths.
+vNormals equ $v28
+vnPosXY equ $v23
+vnZ equ $v24
+vLtLvl equ $v30
+
+// Locals for original code
+xfrmLtPtr equ $20 // also input_mtx_1 and dmemAddr
+curMatrix equ $12 // Value only matters during light_vtx for a single pair of vertices
+ltColor equ $v29
+vPairAlpha37 equ $v28 // Same as mvTc1f, but alpha values are left in elems 3, 7
+vPairNX equ $v7 // also named vPairRGBATemp; with name vPairNX, uses X components = elems 0, 4
+vPairNY equ $v6
+vPairNZ equ $v5
+
 ovl2_start:
 ovl23_lighting_entrypoint:
 .if MOD_VL_REWRITE
@@ -3206,12 +3225,6 @@ ovl23_clipping_entrypoint_copy:  // same IMEM address as ovl23_clipping_entrypoi
     li      ovlTableEntry, overlayInfo3       // set up a load of overlay 3
     j       load_overlay_and_enter            // load overlay 3
      li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
-
-// Locals for vl_mod_lighting, but armips requires them to be defined on all codepaths.
-vNormals equ $v28
-vnPosXY equ $v23
-vnZ equ $v24
-vLtLvl equ $v30
 
 .if MOD_VL_REWRITE
 
@@ -3329,7 +3342,7 @@ vl_mod_skip_novtxcolor:
     vadd    $v24, $v24, $v24[3h] // Second part of summing dot product for dir 0 -> 1,5
     lqv     $v30[0], (linearGenerateCoefficients)($zero)
     vsub    $v28, $v28, $v31[1] // -1; $v28 = 1
-    andi    $11, 5, G_TEXTURE_GEN_LINEAR >> 8
+    andi    $11, $5, G_TEXTURE_GEN_LINEAR >> 8
     vne     $v29, $v31, $v31[1h] // Set VCC to 10111011
     vmrg    $v23, $v23, $v24     // Dot products in elements 0, 1, 4, 5
     vmudh   $v29, $v28, $v31[5]  // 1 * 0x4000
@@ -3382,7 +3395,6 @@ continue_light_dir_xfrm:
     lsv     mxr2i[4], (mvMatrix + 0x14)($zero)
     vmov    mxr2f[0], mxr0f[2]
     // With ltBufOfs immediate add, points two lights behind lightBufferMain, i.e. lightBufferLookat.
-    xfrmLtPtr equ $20 // also input_mtx_1 and dmemAddr
     li      xfrmLtPtr, spFxBase - 2 * lightSize
     vmov    mxr2i[0], mxr0i[2]                   
     lpv     $v7[0], (ltBufOfs + 0x8)(xfrmLtPtr) // Load light direction
@@ -3431,14 +3443,6 @@ continue_light_dir_xfrm:
     vmudn   $v11, $v11, $v30[i1]        // 0x0100; scale results to become bytes
     j       @@loop
      vmadh  $v15, $v15, $v30[i1]        // 0x0100; scale results to become bytes
-
-curMatrix equ $12 // Value only matters during light_vtx for a single pair of vertices
-ltColor equ $v29
-vPairRGBA equ $v27
-vPairAlpha37 equ $v28 // Same as mvTc1f, but alpha values are left in elems 3, 7
-vPairNX equ $v7 // also named vPairRGBATemp; with name vPairNX, uses X components = elems 0, 4
-vPairNY equ $v6
-vPairNZ equ $v5
 
 light_vtx:
     vadd    vPairNY, vZero, vPairRGBATemp[1h] // Move vertex normals Y to separate reg
