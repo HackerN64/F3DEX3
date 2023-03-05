@@ -23,9 +23,18 @@
 .endmacro
 
 // Vector macros
+.if MOD_GENERAL
+// This version doesn't depend on $v0, which may not exist in mods, and also
+// doesn't get corrupted if $vco is set / consume $vco which may be needed for
+// a subsequent instruction.
+.macro vcopy, dst, src
+    vor dst, src, src
+.endmacro
+.else
 .macro vcopy, dst, src
     vadd dst, src, $v0[0]
 .endmacro
+.endif
 
 .macro vclr, dst
     vxor dst, dst, dst
@@ -355,9 +364,9 @@ attrOffsetZ:
 
 .if MOD_GENERAL
 aoAmbientFactor:
-    .dh 0x0000 // TODO ambient occlusion
+    .dh 0xFFFF
 aoDirectionalFactor:
-    .dh 0x0000
+    .dh 0xA000
 .endif
 
 // 0x01EC
@@ -1226,10 +1235,18 @@ ovl3_clipping_nosavera:
     sh      $4, modSaveFlatR4
 .endif
 .if MOD_CLIP_CHANGES
+.if MOD_VL_REWRITE
+    vxor    vZero, vZero, vZero
+    jal     vl_mod_setup_constants
+.else
     jal     load_spfx_global_values
+.endif
      la     clipMaskIdx, 4
 .else
     la      clipMaskIdx, 0x0014
+.endif
+.if MOD_VL_REWRITE
+    vsub    vOne, vZero, $v31[1] // -1; 1 = 0 - -1
 .endif
     la      clipPolySelect, 6  // Everything being indexed from 6 saves one instruction at the end of the loop
 .if MOD_CLIP_CHANGES
@@ -1322,9 +1339,15 @@ vClDiffI equ $v11
     1 +Y :      Y1 - 2*W1         (Y1 - 2*W1) - (Y2 - 2*W2)
     0 -Y :      Y1 + 2*W1         (Y1 + 2*W1) - (Y2 + 2*W2)
     */
+    TODO
 .if MOD_VL_REWRITE
-    .error "This needs to be updated!"
-.endif
+    ctc2    clipMaskIdx, $vcc                // Conditions 1 (+y) or 3 (+x) -> vcc[0] = 1
+    ldv     $v4[8], VTX_FRAC_VEC($3)         // Vtx off screen, frac pos
+    vmrg    $v29, vOne, $v31[1]              // elem 0 is 1 if positive, -1 if negative
+    beqz    $4, clipping_mod_skipnoclipratio // If $4 = 0 (screen clipping), branch and use -1 or 1
+     ldv    $v5[8], VTX_INT_VEC ($3)         // Vtx off screen, int pos
+    vmudh   $v29, $v29, vVpMisc[6]           // elem 0 is 1 or -1 * clipRatio
+.else
     vmudh   $v29, $v31, vVpMisc[5]           // v29[0] = -clipRatio (v31[0] = -1)
     ldv     $v4[8], VTX_FRAC_VEC($3)         // Vtx off screen, frac pos
     ctc2    clipMaskIdx, $vcc                // Conditions 1 (+y) or 3 (+x) -> vcc[0] = 1
@@ -1332,6 +1355,7 @@ vClDiffI equ $v11
     bnez    $4, clipping_mod_skipnoclipratio // If $4 = 0, don't branch and use -1 or 1
      vmrg   $v29, $v29, vVpMisc[5]           // vcc[0] = 1 -> v29[0] = -clipRatio, else clipRatio
     vmrg    $v29, $v31, vOne                 // vcc[0] = 1 -> v29[0] = -1, else 1
+.endif
 clipping_mod_skipnoclipratio:
     andi    $11, clipMaskIdx, 4              // W condition
     vor     vClBaseF, vZero, $v4             // Result is just W
@@ -1439,7 +1463,9 @@ clipping_mod_skipxy:
     luv     $v25[0], VTX_COLOR_VEC($19)   // Vtx on screen, RGBA
 .endif
     vmadh   vClDiffI, vClBaseI, $v13      // 11:10 = vtx on screen sum * prev calculated value
-.if MOD_CLIP_CHANGES
+.if MOD_VL_REWRITE
+    llv     $v14[0], VTX_TC_VEC   ($3)    // Vtx off screen, ST
+.elseif MOD_CLIP_CHANGES
     llv     $v12[8], VTX_TC_VEC   ($3)    // Vtx off screen, ST
 .else
     llv     $v25[8], VTX_TC_VEC   ($19)   // Vtx on screen, ST
@@ -1449,7 +1475,9 @@ clipping_mod_skipxy:
     luv     $v13[0], VTX_COLOR_VEC($19)   // Vtx on screen, RGBA
 .endif
     vmadm   vClDiffI, vClDiffI, $v2[3]
-.if MOD_CLIP_CHANGES
+.if MOD_VL_REWRITE
+    llv     vPairST[0], VTX_TC_VEC   ($19)   // Vtx on screen, ST
+.elseif MOD_CLIP_CHANGES
     llv     $v13[8], VTX_TC_VEC   ($19)   // Vtx on screen, ST
 .endif
     vmadn   vClDiffF, vClDiffF, vZero[0]  // * one of the reciprocals above
@@ -1480,8 +1508,15 @@ vClFade2 equ $v2
     vmadl   $v29, $v6, vClFade1[3]        // + Fade factor for off screen vert * off screen vert pos frac
     vmadm   vPairMVPPosI, $v7, vClFade1[3] // + Fade factor for off screen vert * off screen vert pos int
     vmadn   vPairMVPPosF, vZero, vZero[0] // Load resulting frac pos
+.if MOD_VL_REWRITE
+    vmudm   $v29, $v14, vClFade1[3]       //   Fade factor for off screen vert * off screen vert TC
+    vmadm   vPairST, vPairST, vClFade2[3] // + Fade factor for on  screen vert * on  screen vert TC
+    vmudm   $v29, $v12, vClFade1[3]       //   Fade factor for off screen vert * off screen vert color
+    vmadm   vPairRGBA, $v13, vClFade2[3]  // + Fade factor for on  screen vert * on  screen vert color
+.else
     vmudm   $v29, $v12, vClFade1[3]       //   Fade factor for off screen vert * off screen vert color and TC
     vmadm   vPairST, $v13, vClFade2[3]    // + Fade factor for on  screen vert * on  screen vert color and TC
+.endif
 .else
     vmudl   $v29, $v6, vClFade1[3]        //   Fade factor for off screen vert * off screen vert pos frac
     vmadm   $v29, $v7, vClFade1[3]        // + Fade factor for off screen vert * off screen vert pos int
@@ -1492,6 +1527,10 @@ vClFade2 equ $v2
     vmadm   vPairST, $v25, vClFade2[3]    // + Fade factor for on  screen vert * on  screen vert color and TC
 .endif
     li      $7, 0x0000                    // Set no fog
+.if MOD_VL_REWRITE
+    jal     vl_mod_vtx_store
+     move   secondVtxPos, outputVtxPos
+.else
     li      $1, 0x0002                    // Set vertex count to 1, so will only write one
 .if MOD_CLIP_CHANGES
     addi    secondVtxPos, rdpCmdBufPtr, 2*vtxSize // Second vertex is unused memory in command buffer
@@ -1502,39 +1541,63 @@ vClFade2 equ $v2
     j       load_spfx_global_values // Goes to load_spfx_global_values, then to vertices_store, then
      li     $ra, vertices_store + 0x8000 // comes back here, via bltz $ra, clipping_after_vtxwrite
 .endif
+.endif
 
 clipping_after_vtxwrite:
 // outputVtxPos has been incremented by 2 * vtxSize
 // Store last vertex attributes which were skipped by the early return
 .if MOD_CLIP_CHANGES
     // (On screen interp * on screen W) * persp norm * 1/(interpolated W)
+.if MOD_VL_REWRITE
+    vmudl   $v29, $v8, vVpMisc[2]         // interp * W * persp norm
+    andi    $11, clipMaskIdx, 4           // Is W?
+    vmadm   $v9, $v9, vVpMisc[2]
+.else
     vmudl   $v29, $v8, vVpMisc[4]         // interp * W * persp norm
     andi    $11, clipMaskIdx, 4           // Is W?
     vmadm   $v9, $v9, vVpMisc[4]
+.endif
     or      $11, $11, $4                  // Or scaled clipping?
     vmadn   $v8, vZero, vZero
     bnez    $11, clipping_mod_skipfixcolor // Don't do perspective-incorrect color interpolation
+.if MOD_VL_REWRITE
+     vmudl  $v29, $v8, $v28               // $v30:$v28 still contains computed 1/W
+    vmadm   $v29, $v9, $v28
+    vmadn   vClDiffF, $v8, $v30
+    vmadh   vClDiffI, $v9, $v30
+.else
      suv    vPairST[0], (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos) // Store linearly interpolated color
     vmudl   $v29, $v8, $v5                // $v4:$v5 still contains computed 1/W
     vmadm   $v29, $v9, $v5
     vmadn   vClDiffF, $v8, $v4
     vmadh   vClDiffI, $v9, $v4
-.if !MOD_VL_REWRITE
-    .error "This part requires the rewrite"
 .endif
     // Clamp fade factor (same code as above, except the input and therefore vClFade1 is for on screen vert)
     vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
+.if MOD_VL_REWRITE
     vmrg    vClDiffF, vClDiffF, $v31[1]   // keep frac part of factor, else set to 0xFFFF (max val)
+.else
+    vmrg    vClDiffF, vClDiffF, $v31[0]   // keep frac part of factor, else set to 0xFFFF (max val)
+.endif
     vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
     vge     vClDiffI, vClDiffI, vZero[0]  // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
     vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
+.if MOD_VL_REWRITE
     vmudn   vClFade2, vClFade1, $v31[1]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for off screen vert
+.else
+    vmudn   vClFade2, vClFade1, $v31[0]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for off screen vert
+.endif
     // Interpolate colors
     vmudm   $v29, $v12, vClFade2[3]       //   Fade factor for off screen vert * off screen vert color and TC
     vmadm   $v8, $v13, vClFade1[3]        // + Fade factor for on  screen vert * on  screen vert color and TC
+.if MOD_VL_REWRITE
+    suv     $v8[0],     (VTX_INT_VEC   )(outputVtxPos)
+.else
     suv     $v8[0],     (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
+.endif
 clipping_mod_skipfixcolor:
 .endif
+.if !MOD_VL_REWRITE
 .if BUG_NO_CLAMP_SCREEN_Z_POSITIVE
     sdv     $v25[0],    (VTX_SCR_VEC    - 2 * vtxSize)(outputVtxPos)
 .else
@@ -1547,6 +1610,7 @@ clipping_mod_skipfixcolor:
     slv     vPairST[8], (VTX_TC_VEC     - 2 * vtxSize)(outputVtxPos)
 .if !BUG_NO_CLAMP_SCREEN_Z_POSITIVE          // Not in F3DEX2 2.04H
     ssv     $v3[4],     (VTX_SCR_Z      - 2 * vtxSize)(outputVtxPos)
+.endif
 .endif
 .if MOD_CLIP_CHANGES
     beqz    $4, clipping_mod_endedge         // Did screen clipping, done
@@ -1720,7 +1784,6 @@ clipping_draw_tris_loop:
      addi   reg1, reg1, val1
 .endif
 clipping_done:
-
 .if MOD_GENERAL
     lhu     $ra, modSaveRA
     jr      $ra
@@ -1740,7 +1803,6 @@ clipping_done:
 ovl3_end:
 
 ovl23_end:
-
 
 .if MOD_VL_REWRITE
 
@@ -2350,9 +2412,9 @@ vtx_indices_to_addr:
     vxor    $v28, $v28, $v28  // Zero
     lqv     $v30, v30Value($zero)
     vsub    $v28, $v28, $v31[1]   // One = 0 - -1
-    vmudl   $v29, $v27, $v30[1]   // Multiply vtx indices times length and add addr
+    vmudl   $v29, $v27, $v30[1]   // Multiply vtx indices times length
     jr      $11
-     vmadn  $v27, $v28, $v30[0]   // Add address of vertex buffer to accumulator mid
+     vmadn  $v27, $v28, $v30[0]   // Add address of vertex buffer
 .endif
 
 G_TRI2_handler:
