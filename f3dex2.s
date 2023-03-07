@@ -1239,7 +1239,6 @@ ovl3_clipping_nosavera:
 .endif
 .if MOD_CLIP_CHANGES
 .if MOD_VL_REWRITE
-    j       clipping_done // TODO testing
     vxor    vZero, vZero, vZero
     jal     vl_mod_setup_constants
 .else
@@ -1595,6 +1594,7 @@ clipping_after_vtxwrite:
     vmadm   $v8, $v13, vClFade1[3]        // + Fade factor for on  screen vert * on  screen vert color and TC
 .if MOD_VL_REWRITE
     suv     $v8[0],     (VTX_COLOR_VEC )(outputVtxPos)
+    slv     vPairST[0], (VTX_TC_VEC    )(outputVtxPos)
 .else
     suv     $v8[0],     (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
 .endif
@@ -1617,7 +1617,9 @@ clipping_mod_skipfixcolor:
 .endif
 .if MOD_CLIP_CHANGES
     beqz    $4, clipping_mod_endedge         // Did screen clipping, done
+.if !MOD_VL_REWRITE
      addi   outputVtxPos, outputVtxPos, -2*vtxSize // back by 2 vertices because this was incremented
+.endif
     la      $4, 0                            // Change from scaled clipping to screen clipping
     j       clipping_interpolate
      move   $3, outputVtxPos                 // Off-screen vertex is now the one we just wrote
@@ -1675,6 +1677,9 @@ clipping_mod_draw_tris:
 .endif
 .if !MOD_CLIP_CHANGES
     sw      $zero, activeClipPlanes            // Disable all clipping planes while drawing tris
+.endif
+.if MOD_VL_REWRITE
+    lqv     $v30, v30Value($zero)
 .endif
 .if MOD_GENERAL
     lhu     $4, modSaveFlatR4                  // Pointer to original first vertex for flat shading
@@ -1753,10 +1758,18 @@ clipping_mod_draw_loop:
     move    $14, $8            // Restore overwritten $14
     move    $15, $12           // Update $15 to be next
 clipping_mod_final_draw:
+.if MOD_VL_REWRITE
+    mtc2    $1, $v27[10]              // Addresses go in vector regs too
+.else
     mtc2    $1, $v2[10]               // Addresses go in vector regs too
+.endif
     vor     $v3, vZero, $v31[5]       // Not sure what this is, was in init code before tri_to_rdp_noinit
     mtc2    $2, $v4[12]
+.if MOD_VL_REWRITE
+    mtc2    $3, $v27[14]
+.else
     mtc2    $3, $v2[14]
+.endif
     j       tri_to_rdp_noinit         // Draw tri
      la     $ra, clipping_mod_draw_loop // When done, return to top of loop
     // armips requires everything to be defined on all .if-paths
@@ -1898,13 +1911,13 @@ vl_mod_vtx_store:
     vch     $v29, vPairMVPPosI, vPairMVPPosI[3h] // Clip screen high
     sdv     vPairMVPPosI[0],  (VTX_INT_VEC   )(outputVtxPos)
     vcl     $v29, vPairMVPPosF, vPairMVPPosF[3h] // Clip screen low
-    suv     vPairRGBA[8],     (VTX_COLOR_VEC )(secondVtxPos)
+    suv     vPairRGBA[4],     (VTX_COLOR_VEC )(secondVtxPos)
     vmudn   $v26, vPairMVPPosF, vVpMisc[6] // Clip ratio
     suv     vPairRGBA[0],     (VTX_COLOR_VEC )(outputVtxPos)
     vmadh   $v25, vPairMVPPosI, vVpMisc[6] // Clip ratio
-    slv     vPairST[0],       (VTX_TC_VEC    )(secondVtxPos)
+    slv     vPairST[8],       (VTX_TC_VEC    )(secondVtxPos)
     vrcph   $v29[0], $v20[3]
-    slv     vPairST[8],       (VTX_TC_VEC    )(outputVtxPos)
+    slv     vPairST[0],       (VTX_TC_VEC    )(outputVtxPos)
     vrcpl   $v28[3], $v21[3]
     lsv     vPairMVPPosF[14], (VTX_Z_FRAC    )(secondVtxPos) // load Z into W slot, will be for fog below
     vrcph   $v30[3], $v20[7]
@@ -2438,8 +2451,9 @@ tri_to_rdp:
     mfc2    $1, $v27[10]
     vor     vOne, $v28, $v28             // 1 set up in function
     mfc2    $2, $v27[12]
-    vor     $v3, vZero, $v31[5]
+    vor     $v4, $v27, $v27              // Need vtx 2 addr in elem 6
     mfc2    $3, $v27[14]
+    vor     $v3, vZero, $v31[5]
 .else
     lpv     $v2[0], 0(rdpCmdBufPtr)      // Load tri indexes to vector unit for shuffling
     // read the three vertex indices from the stored command word
@@ -2452,8 +2466,8 @@ tri_to_rdp:
     lhu     $2, (vertexTable)($2) // convert vertex 2's index to its address
     vmadl   $v2, $v2, $v30[1]     // Multiply vtx indices times length and add addr
     lhu     $3, (vertexTable)($3) // convert vertex 3's index to its address
-.endif
     vmadn   $v4, vZero, vZero[0]  // Load accumulator again (addresses) to v4; need vertex 2 addr in elem 6
+.endif
     move    $4, $1                // Save original vertex 1 addr (pre-shuffle) for flat shading
 .if MOD_CLIP_CHANGES
     la      $30, -1               // Normal tri drawing mode (check clip masks)
