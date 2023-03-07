@@ -1343,12 +1343,13 @@ vClDiffI equ $v11
     0 -Y :      Y1 + 2*W1         (Y1 + 2*W1) - (Y2 + 2*W2)
     */
 .if MOD_VL_REWRITE
-    ctc2    clipMaskIdx, $vcc                // Conditions 1 (+y) or 3 (+x) -> vcc[0] = 1
+    xori    $11, clipMaskIdx, 1              // Invert sign of condition
+    ctc2    $11, $vcc                        // Conditions 1 (+y) or 3 (+x) -> vcc[0] = 0
     ldv     $v4[8], VTX_FRAC_VEC($3)         // Vtx off screen, frac pos
-    vmrg    $v29, vOne, $v31[1]              // elem 0 is 1 if positive, -1 if negative
-    beqz    $4, clipping_mod_skipnoclipratio // If $4 = 0 (screen clipping), branch and use -1 or 1
+    vmrg    $v29, vOne, $v31[1]              // elem 0 is 1 if W or neg cond, -1 if pos cond
+    beqz    $4, clipping_mod_skipnoclipratio // If $4 = 0 (screen clipping), branch and use 1 or -1
      ldv    $v5[8], VTX_INT_VEC ($3)         // Vtx off screen, int pos
-    vmudh   $v29, $v29, vVpMisc[6]           // elem 0 is 1 or -1 * clipRatio
+    vmudh   $v29, $v29, vVpMisc[6]           // elem 0 is (1 or -1) * clipRatio
 .else
     vmudh   $v29, $v31, vVpMisc[5]           // v29[0] = -clipRatio (v31[0] = -1)
     ldv     $v4[8], VTX_FRAC_VEC($3)         // Vtx off screen, frac pos
@@ -1654,7 +1655,7 @@ clipping_mod_nextcond_skip:
     // this part be scissored.
     // Available locals here: $11, $1, $7, $20, $24, $12
     sll     $7, $9, 4                          // Scaled version of current clip mask
-    addi    clipPolyRead,   clipPolySelect, -6 // Start reading from beginning of current poly
+    addi    clipPolyRead, clipPolySelect, -6   // Start reading from beginning of current poly
     move    $12, $9                            // Counts down how many outside screen, starts as 1*mask
 clipping_mod_checkcond_loop:
     lhu     $2, (clipPoly)(clipPolyRead)       // Load vertex address
@@ -1678,11 +1679,11 @@ clipping_mod_draw_tris:
 .if !MOD_CLIP_CHANGES
     sw      $zero, activeClipPlanes            // Disable all clipping planes while drawing tris
 .endif
-.if MOD_VL_REWRITE
-    lqv     $v30, v30Value($zero)
-.endif
 .if MOD_GENERAL
     lhu     $4, modSaveFlatR4                  // Pointer to original first vertex for flat shading
+.endif
+.if MOD_VL_REWRITE
+    lqv     $v30, v30Value($zero)
 .endif
 // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
 .if MOD_CLIP_CHANGES
