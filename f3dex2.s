@@ -340,10 +340,10 @@ textureSettings2:
 .if MOD_GENERAL
 mwModsStart:
 .if MOD_CLIP_CHANGES
-modClipLargeTriThresh:
-    .dh 120 << 2 // Number of quarter-scanlines high a triangle is to be considered large
 modClipRatio:
     .dh 0x0002 // Clip ratio; strongly recommend keeping as 2
+modClipLargeTriThresh:
+    .dh 120 << 2 // Number of quarter-scanlines high a triangle is to be considered large
 .else
     .dw 0 //TODO
 .endif
@@ -474,7 +474,8 @@ movewordTable:
     .dh mvpValid - 1     // G_MW_FORCEMTX
     .dh perspNorm - 2    // G_MW_PERSPNORM
 .if MOD_ATTR_OFFSETS
-    .dh mwModsStart      // G_MW_MODS: 0 = modClipRatio, 1 = attrOffsetST, 2 = attrOffsetZ, 3 = ambient occlusion
+    .dh mwModsStart      // G_MW_MODS: 0 = large tri thresh and clip ratio,
+                         // 1 = attrOffsetST, 2 = attrOffsetZ, 3 = ambient occlusion
 .endif
 
 // 0x030E-0x0314: G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
@@ -1550,7 +1551,13 @@ clipping_after_vtxwrite:
 // outputVtxPos has been incremented by 2 * vtxSize
 // Store last vertex attributes which were skipped by the early return
 .if MOD_CLIP_CHANGES
+    /*
+    // TODO XXX
+    lui     $11, 0xFF01
+    addiu   $11, $11, 0xFF00
+    sw      $11, (VTX_COLOR_VEC )(outputVtxPos)
     // (On screen interp * on screen W) * persp norm * 1/(interpolated W)
+    */
 .if MOD_VL_REWRITE
     vmudl   $v29, $v8, vVpMisc[2]         // interp * W * persp norm
     andi    $11, clipMaskIdx, 4           // Is W?
@@ -1920,11 +1927,9 @@ vl_mod_vtx_store:
     vrcph   $v29[0], $v20[3]
     slv     vPairST[0],       (VTX_TC_VEC    )(outputVtxPos)
     vrcpl   $v28[3], $v21[3]
-    lsv     vPairMVPPosF[14], (VTX_Z_FRAC    )(secondVtxPos) // load Z into W slot, will be for fog below
-    vrcph   $v30[3], $v20[7]
-    lsv     vPairMVPPosF[6],  (VTX_Z_FRAC    )(outputVtxPos) // load Z into W slot, will be for fog below
-    vrcpl   $v28[7], $v21[7]
     cfc2    $20, $vcc
+    vrcph   $v30[3], $v20[7]
+    vrcpl   $v28[7], $v21[7]
     vrcph   $v30[7], vFogMask[3] // Zero
     srl     $24, $20, 4            // Shift second vertex screen clipping to first slots
     vch     $v29, vPairMVPPosI, $v25[3h] // Clip scaled high
@@ -1934,21 +1939,23 @@ vl_mod_vtx_store:
     vmudl   $v29, $v21, $v28
     cfc2    $20, $vcc
     vmadm   $v29, $v20, $v28
-    sll     $11, $20, 4            // Shift first vertex scaled clipping to second slots
+    lsv     vPairMVPPosF[14], (VTX_Z_FRAC    )(secondVtxPos) // load Z into W slot, will be for fog below
     vmadn   $v21, $v21, $v30
-    andi    $20, $20, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
+    lsv     vPairMVPPosF[6],  (VTX_Z_FRAC    )(outputVtxPos) // load Z into W slot, will be for fog below
     vmadh   $v20, $v20, $v30
-    andi    $11, $11, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
+    sll     $11, $20, 4            // Shift first vertex scaled clipping to second slots
     vge     $v29, vPairMVPPosI, vFogMask[3] // Zero; vcc set if w >= 0
-    or      $24, $24, $20          // Combine final results for second vertex
+    andi    $20, $20, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
     vmudh   $v29, vVpMisc, $v31[2] // 4 * 1 in elems 3, 7
-    or      $12, $12, $11               // Combine final results for first vertex
+    andi    $11, $11, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
     vmadn   $v21, $v21, $v31[0] // -4
-    lsv     vPairMVPPosI[14], (VTX_Z_INT     )(secondVtxPos) // load Z into W slot, will be for fog below
+    or      $24, $24, $20          // Combine final results for second vertex
     vmadh   $v20, $v20, $v31[0] // -4
-    lsv     vPairMVPPosI[6],  (VTX_Z_INT     )(outputVtxPos) // load Z into W slot, will be for fog below
+    or      $12, $12, $11               // Combine final results for first vertex
     vmrg    $v25, vFogMask, $v31[7] // 0 or 0x7FFF in elems 3, 7, latter if w < 0
+    lsv     vPairMVPPosI[14], (VTX_Z_INT     )(secondVtxPos) // load Z into W slot, will be for fog below
     vmudl   $v29, $v21, $v28
+    lsv     vPairMVPPosI[6],  (VTX_Z_INT     )(outputVtxPos) // load Z into W slot, will be for fog below
     vmadm   $v29, $v20, $v28
     vmadn   $v28, $v21, $v30
     vmadh   $v30, $v20, $v30    // $v30:$v28 is 1/W
@@ -2558,10 +2565,10 @@ tri_mod_skip_check_backface:
     vmrg    $v2, $v4, $v10   // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     bnez    $12, ovl23_clipping_entrypoint
      vmrg   $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
-    andi    $12, $5, CLIP_MOD_MASK_SCRN_ALL // If any vertex outside screen bounds...
+    lhu     $6, modClipLargeTriThresh
     vsub    $v12, $v14, $v10  // VH - VL (negative)
     mfc2    $11, $v12[2]      // Y value of VH - VL (negative)
-    lhu     $6, modClipLargeTriThresh
+    andi    $12, $5, CLIP_MOD_MASK_SCRN_ALL // If any vertex outside screen bounds...
     add     $11, $11, $6      // Is triangle more than a certain number of scanlines high?
     sra     $11, $11, 31      // All 1s if tri is large, all 0s if it is small
     and     $12, $12, $11     // Large tri and partly outside screen bounds
