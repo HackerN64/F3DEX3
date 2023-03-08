@@ -1551,13 +1551,6 @@ clipping_after_vtxwrite:
 // outputVtxPos has been incremented by 2 * vtxSize
 // Store last vertex attributes which were skipped by the early return
 .if MOD_CLIP_CHANGES
-    /*
-    // TODO XXX
-    lui     $11, 0xFF01
-    addiu   $11, $11, 0xFF00
-    sw      $11, (VTX_COLOR_VEC )(outputVtxPos)
-    // (On screen interp * on screen W) * persp norm * 1/(interpolated W)
-    */
 .if MOD_VL_REWRITE
     vmudl   $v29, $v8, vVpMisc[2]         // interp * W * persp norm
     andi    $11, clipMaskIdx, 4           // Is W?
@@ -1857,12 +1850,16 @@ vl_mod_vtx_load_loop:
     vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
     ldv     $v20[8],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
     vmudn   $v29, $v7, $v31[2]  // 1
-    // Element access wraps in lpv/luv
-    luv     vPairRGBA[4], (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Colors as unsigned, lower 4
+    // Element access wraps in lpv/luv, but not intuitively. Basically the named
+    // element and above do get the values at the specified address, but the earlier
+    // elements get the values before that, except masked to 0xF. So for example here,
+    // elems 4-7 get bytes 0-3 of the vertex as it looks like they should, but elems
+    // 0-3 get bytes C-F of the vertex (which is what we want).
+    luv     vPairRGBA[4], (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Colors as unsigned, lower 4
     vmadh   $v29, $v3, $v31[2]
     luv     $v25[0],      (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
     vmadn   $v29, $v4, $v20[0h]
-    lpv     $v28[4],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Normals as signed, lower 4
+    lpv     $v28[4],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Normals as signed, lower 4
     vmadh   $v29, $v0, $v20[0h]
     lpv     $v26[0],      (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
     vmadn   $v29, $v5, $v20[1h]
@@ -1872,10 +1869,12 @@ vl_mod_vtx_load_loop:
     vmadn   $v21, $v6, $v20[2h]
     andi    $11, $5, G_LIGHTING >> 8
     vmadh   $v20, $v2, $v20[2h] // $v20:$v21 = vertices world coords
-    lpv     $v30[2],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Packed normals as signed, lower 2
+    // Elems 0-1 get bytes 6-7 of the following vertex (0)
+    lpv     $v30[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
     vmrg    vPairRGBA, vPairRGBA, $v25 // Merge colors
     //bnez    $11, vl_mod_lighting // TODO testing
-     lpv    $v25[6],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos) // Upper 2 in 4:5
+     // Elems 4-5 get bytes 6-7 of the following vertex (1)
+     lpv    $v25[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
  vl_mod_return_from_lighting:
     vmudn   $v29, $v15, $v31[2] // 1
     addiu   inputVtxPos, inputVtxPos, 2*inputVtxSize
