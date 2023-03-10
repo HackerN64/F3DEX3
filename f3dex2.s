@@ -1547,6 +1547,9 @@ clipping_mod_nextcond_skip:
     la      $9, 1
     sllv    $9, $9, $11                        // $9 is clip mask
     addiu   clipMaskIdx, clipMaskIdx, -1
+    j       clipping_condlooptop
+     nop
+    /*
     // Compare all verts to clip mask. If any are outside scaled, run the clipping.
     // Also see if there are at least two outside the screen; if none, obviously don't
     // do clipping, and if one, clipping would produce another tri, so better to let
@@ -1562,13 +1565,14 @@ clipping_mod_checkcond_loop:
     bnez    $11, clipping_condlooptop          // If any vert outside scaled, run the clipping
      and    $1, $1, $9                         // Mask to outside screen
     addiu   clipPolyRead, clipPolyRead, 2      // Going to read next vertex
-    blt     clipPolyRead, clipPolyWrite, clipping_mod_checkcond_loop
+    bne     clipPolyRead, clipPolyWrite, clipping_mod_checkcond_loop
      sub    $12, $12, $1                       // Subtract 1*mask for each outside screen
     // Loop done. If $12 is negative, there are at least two verts outside screen.
     bltz    $12, clipping_condlooptop
      nop    // Could optimize this to branch one instr later and put a copy of the first instr here.
     j       clipping_mod_nextcond_skip         // Otherwise go to next clip condition.
     // Next instruction is OK to clobber $4 here when jumping.
+    */
 clipping_mod_draw_tris:
 .else
     bnez    clipMaskIdx, clipping_condlooptop  // Done with clipping conditions?
@@ -1581,9 +1585,8 @@ clipping_mod_draw_tris:
     lhu     $4, modSaveFlatR4                  // Pointer to original first vertex for flat shading
 .endif
 // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
-.if MOD_CLIP_CHANGES
+.if MOD_CLIP_SUBDIVIDE
     addiu   clipPolySelect, clipPolySelect, -6 // = Pointer to first vertex
-    addiu   clipPolyWrite, clipPolyWrite, -2   // = Pointer to last vertex
     // Available locals: most registers ($5, $6, $7, $8, $9, $11, $12, etc.)
     // Available regs which won't get clobbered by tri write: 
     // clipPolySelect, clipPolyWrite, $14 (inputVtxPos), $15 (outputVtxPos), (more)
@@ -1592,14 +1595,16 @@ clipping_mod_draw_tris:
     move    $7, clipPolySelect        // initial vertex pointer
     lhu     $12, (clipPoly)($7)       // Load vertex address
 clipping_mod_search_highest_loop:
-    lh      $11, VTX_SCR_Y($12)       // Load screen Y
-    bge     $11, $5, clipping_mod_search_skip_better
+    lh      $9, VTX_SCR_Y($12)        // Load screen Y
+    sub     $11, $9, $5               // Branch if new vtx Y >= best vtx Y
+    bgez    $11, clipping_mod_search_skip_better
      addiu  $7, $7, 2                 // Next vertex
     addiu   $14, $7, -2               // Save pointer to best/current vertex
-    move    $5, $11                   // Save best value
+    move    $5, $9                    // Save best value
 clipping_mod_search_skip_better:
-    bge     clipPolyWrite, $7, clipping_mod_search_highest_loop
+    bne     clipPolyWrite, $7, clipping_mod_search_highest_loop
      lhu    $12, (clipPoly)($7)       // Next vertex address
+    addiu   clipPolyWrite, clipPolyWrite, -2   // = Pointer to last vertex
     // Find next closest vertex, from the two on either side
     bne     $14, clipPolySelect, @@skip1
      addiu  $6, $14, -2               // $6 = previous vertex
@@ -1613,7 +1618,8 @@ clipping_mod_search_skip_better:
     lhu     $9, (clipPoly)($8)
     lh      $7, VTX_SCR_Y($7)
     lh      $9, VTX_SCR_Y($9)
-    bge     $7, $9, clipping_mod_draw_loop // If value from prev vtx >= value from next, use next
+    sub     $11, $7, $9               // If value from prev vtx >= value from next, use next
+    bgez    $11, clipping_mod_draw_loop
      move   $15, $8                   // $14 is first, $8 -> $15 is next
     move    $15, $14                  // $14 -> $15 is next
     move    $14, $6                   // $6 -> $14 is first
