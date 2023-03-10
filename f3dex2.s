@@ -1547,9 +1547,6 @@ clipping_mod_nextcond_skip:
     la      $9, 1
     sllv    $9, $9, $11                        // $9 is clip mask
     addiu   clipMaskIdx, clipMaskIdx, -1
-    j       clipping_condlooptop
-     nop
-    /*
     // Compare all verts to clip mask. If any are outside scaled, run the clipping.
     // Also see if there are at least two outside the screen; if none, obviously don't
     // do clipping, and if one, clipping would produce another tri, so better to let
@@ -1572,7 +1569,6 @@ clipping_mod_checkcond_loop:
      nop    // Could optimize this to branch one instr later and put a copy of the first instr here.
     j       clipping_mod_nextcond_skip         // Otherwise go to next clip condition.
     // Next instruction is OK to clobber $4 here when jumping.
-    */
 clipping_mod_draw_tris:
 .else
     bnez    clipMaskIdx, clipping_condlooptop  // Done with clipping conditions?
@@ -2149,20 +2145,18 @@ tri_to_rdp_noinit:
     and     $5, $5, $12       // ...which is in the set of currently enabled clipping planes (scaled for XY, screen for ZW)...
     vmrg    $v14, $v8, $v14   // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
 .if MOD_CLIP_CHANGES
-    andi    $12, $5, CLIP_NEAR >> 4 // If tri crosses camera plane, backface info is garbage
-    bnez    $12, tri_mod_skip_check_backface
-     lw     $11, (gCullMagicNumbers)($11)
-    beqz    $6, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
-     add    $11, $6, $11        // Add magic number; see description at gCullMagicNumbers
-    bgez    $11, return_routine // If sign bit is clear, cull.
-tri_mod_skip_check_backface:
+    // If tri crosses camera plane or scaled bounds, go directly to clipping
+    andi    $12, $5, CLIP_MOD_MASK_SCAL_ALL | (CLIP_NEAR >> 4)
     vlt     $v6, $v6, $v2     // v6 (thrown out), VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
-    andi    $12, $5, CLIP_MOD_MASK_SCAL_ALL // If any outside scaled bounds, do clipping
+    bnez    $12, ovl23_clipping_entrypoint // Backface info is garbage, don't check it
+     lw     $11, (gCullMagicNumbers)($11)
     vmrg    $v2, $v4, $v10   // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
-    bnez    $12, ovl23_clipping_entrypoint
-     vmrg   $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
-    andi    $12, $5, CLIP_MOD_MASK_SCRN_ALL // If any vertex outside screen bounds...
-    vsub    $v12, $v14, $v10  // VH - VL (negative)
+    beqz    $6, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
+     andi   $12, $5, CLIP_MOD_MASK_SCRN_ALL // If any vertex outside screen bounds...
+    add     $11, $6, $11        // Add magic number; see description at gCullMagicNumbers
+    vmrg    $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
+    bgez    $11, return_routine // If sign bit is clear, cull.
+     vsub   $v12, $v14, $v10  // VH - VL (negative)
     mfc2    $11, $v12[2]      // Y value of VH - VL (negative)
     lhu     $6, modClipLargeTriThresh
     add     $11, $11, $6      // Is triangle more than a certain number of scanlines high?
