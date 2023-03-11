@@ -22,6 +22,24 @@
     ori dst, src, 0
 .endmacro
 
+// Prohibit macros involving slt; this silently clobbers $1. You can of course
+// manually write the slt and branch instructions if you want this behavior.
+.macro blt, ra, rb, lbl
+    .error "blt is a macro using slt, and silently clobbers $1!"
+.endmacro
+
+.macro bgt, ra, rb, lbl
+    .error "bgt is a macro using slt, and silently clobbers $1!"
+.endmacro
+
+.macro ble, ra, rb, lbl
+    .error "ble is a macro using slt, and silently clobbers $1!"
+.endmacro
+
+.macro bge, ra, rb, lbl
+    .error "bge is a macro using slt, and silently clobbers $1!"
+.endmacro
+
 // Vector macros
 .if MOD_GENERAL
 // This version doesn't depend on $v0, which may not exist in mods, and also
@@ -737,7 +755,7 @@ vOne  equ $v1  // global (not in MOD_VL_REWRITE)
 
 // Must keep values during the full clipping process: clipping overlay, vertex
 // write, tri drawing.
-clipPolySelect        equ $18 // global
+clipPolySelect        equ $18 // global (mods: >= 0 indicates clipping, < 0 normal tri write)
 clipPolyWrite         equ $21 // also input_mtx_0
 savedActiveClipPlanes equ $29 // global (mods: got rid of, now available)
 savedRA               equ $30 // global (mods: got rid of, now available)
@@ -843,7 +861,7 @@ postOvlRA     equ $12 // Commonly used locally
 // $27: inputBufferPos
 // $28: not used!
 // $29: savedActiveClipPlanes (mods, got rid of, not used!)
-// $30: savedRA (unused in MOD_GENERAL, used in MOD_CLIP_CHANGES)
+// $30: savedRA (unused in MOD_GENERAL)
 // $ra: Return address for jal, b*al
 // $v0: vZero (every element 0)
 // $v1: vOne (every element 1)
@@ -1247,21 +1265,21 @@ ovl3_clipping_nosavera:
     jal     load_spfx_global_values
 .endif
      la     clipMaskIdx, 4
+    // Clear all temp vertex slots used.
+    la      $11, (clipTempVertsCount - 1) * vtxSize
+clipping_mod_init_used_loop:
+    sh      $zero, (VTX_CLIP + clipTempVerts)($11)
+    bgtz    $11, clipping_mod_init_used_loop
+     addiu  $11, $11, -vtxSize
 .else
     la      clipMaskIdx, 0x0014
 .endif
 .if MOD_VL_REWRITE
     vsub    vOne, vZero, $v31[1] // -1; 1 = 0 - -1
 .endif
+    // This being >= 0 also indicates that tri writes are in clipping mode.
     la      clipPolySelect, 6  // Everything being indexed from 6 saves one instruction at the end of the loop
-.if MOD_CLIP_CHANGES
-    // Using $30 (formerly savedRA) for two things:
-    // - Greater than zero if doing clipping, less than zero if normal tri draw outside clipping.
-    //   For whether to check clip masks.
-    // - Tracking how many vertices have been written. This is relative to clipTempVerts,
-    //   but once that is exhausted and wraps, and eventually searches, this keeps going up.
-    la      $30, clipTempVerts - vtxSize
-.else
+.if !MOD_CLIP_CHANGES
     la      outputVtxPos, clipTempVerts
 .endif
     // Write the current three verts as the initial polygon
@@ -1302,10 +1320,15 @@ clipping_edgelooptop: // Loop over edges connecting verts, possibly subdivide th
      move   clipFlags, $11                     // clipFlags = masked V2's flags
     // Going to subdivide this edge
 .if MOD_CLIP_CHANGES
-    addiu   $30, $30, vtxSize                  // Next vertex
-    move    outputVtxPos, $30
-    // TODO more logic for wrap, search, etc.
-clipping_mod_contsetupsubdivide:
+    // Find available temp vertex slot
+    la      outputVtxPos, clipTempVerts + clipTempVertsCount * vtxSize
+clipping_mod_find_unused_loop:
+    lhu     $11, (VTX_CLIP - vtxSize)(outputVtxPos)
+    addiu   $12, outputVtxPos, -clipTempVerts  // This is within the loop rather than before b/c delay after lhu
+    blez    $12, clipping_done                 // If can't find one, give up--TODO draw current polygon?
+     andi   $11, $11, CLIP_MOD_VTX_USED
+    bnez    $11, clipping_mod_find_unused_loop
+     addiu  outputVtxPos, outputVtxPos, -vtxSize
 .endif
     beqz    clipFlags, clipping_skipswap23     // V2 flag is clear / on screen, therefore V3 is set / off screen
      move   $19, $2                            // 
@@ -1328,6 +1351,8 @@ vClBaseF equ $v8
 vClBaseI equ $v9
 vClDiffF equ $v10
 vClDiffI equ $v11
+vClFade1 equ $v10 // = vClDiffF
+vClFade2 equ $v2
 .if !MOD_CLIP_CHANGES
     sll     $11, clipMaskIdx, 1  // clipMaskIdx counts by 4, so this is now by 8
     ldv     $v2[0], (clipRatio)($11) // Load four shorts holding clip ratio for this clip condition
@@ -1481,11 +1506,15 @@ clipping_mod_skipxy:
 .endif
     vmadm   vClDiffI, vClDiffI, $v2[3]
 .if MOD_VL_REWRITE
-    llv     vPairST[0], VTX_TC_VEC   ($19)   // Vtx on screen, ST
+    llv     vPairST[0], VTX_TC_VEC($19)   // Vtx on screen, ST
 .elseif MOD_CLIP_CHANGES
     llv     $v13[8], VTX_TC_VEC   ($19)   // Vtx on screen, ST
 .endif
+.if MOD_CLIP_CHANGES
+    jal     clipping_mod_clamp_fade_factor // This code used twice, so subroutine
+.endif
     vmadn   vClDiffF, vClDiffF, vZero[0]  // * one of the reciprocals above
+.if !MOD_CLIP_CHANGES
     // Clamp fade factor
     vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
 .if MOD_VL_REWRITE
@@ -1495,39 +1524,37 @@ clipping_mod_skipxy:
 .endif
     vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
     vge     vClDiffI, vClDiffI, vZero[0]  // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
-vClFade1 equ $v10 // = vClDiffF
-vClFade2 equ $v2
     vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
 .if MOD_VL_REWRITE
     vmudn   vClFade2, vClFade1, $v31[1]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
 .else
     vmudn   vClFade2, vClFade1, $v31[0]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
 .endif
+.endif
     // Fade between attributes for on screen and off screen vert
 .if MOD_CLIP_CHANGES
     // Save on-screen fade factor * on screen W in $v9:$v8.
     // Also, colors are now in $v12 and $v13.
-    vmudl   $v29, $v4, vClFade2[3]        //   Fade factor for on  screen vert * on  screen vert pos frac
-    vmadm   $v9, $v5, vClFade2[3]         // + Fade factor for on  screen vert * on  screen vert pos int
-    vmadn   $v8, vZero, vZero             // Load resulting frac pos
-    vmadl   $v29, $v6, vClFade1[3]        // + Fade factor for off screen vert * off screen vert pos frac
-    vmadm   vPairMVPPosI, $v7, vClFade1[3] // + Fade factor for off screen vert * off screen vert pos int
-    vmadn   vPairMVPPosF, vZero, vZero[0] // Load resulting frac pos
 .if MOD_VL_REWRITE
+    // Also, texture coords are now in $v14 and vPairST.
+    vmadm   vPairRGBA, $v13, vClFade2[3]  // + Fade factor for on  screen vert * on  screen vert color
     vmudm   $v29, $v14, vClFade1[3]       //   Fade factor for off screen vert * off screen vert TC
     vmadm   vPairST, vPairST, vClFade2[3] // + Fade factor for on  screen vert * on  screen vert TC
-    vmudm   $v29, $v12, vClFade1[3]       //   Fade factor for off screen vert * off screen vert color
-    vmadm   vPairRGBA, $v13, vClFade2[3]  // + Fade factor for on  screen vert * on  screen vert color
 .else
-    vmudm   $v29, $v12, vClFade1[3]       //   Fade factor for off screen vert * off screen vert color and TC
     vmadm   vPairST, $v13, vClFade2[3]    // + Fade factor for on  screen vert * on  screen vert color and TC
 .endif
-.else
+.endif
     vmudl   $v29, $v6, vClFade1[3]        //   Fade factor for off screen vert * off screen vert pos frac
+.if MOD_CLIP_CHANGES
+    vmadm   $v9, $v7, vClFade1[3]         // + Fade factor for off screen vert * off screen vert pos int
+    vmadn   $v8, vZero, vZero             // Load resulting frac pos
+.else
     vmadm   $v29, $v7, vClFade1[3]        // + Fade factor for off screen vert * off screen vert pos int
-    vmadl   $v29, $v4, vClFade2[3]        // + Fade factor for on  screen vert * on  screen vert pos frac
-    vmadm   vPairMVPPosI, $v5, vClFade2[3] //+ Fade factor for on  screen vert * on  screen vert pos int
+.endif
+    vmadl   $v29, $v4, vClFade2[3]        // + Fade factor for on screen vert * on screen vert pos frac
+    vmadm   vPairMVPPosI, $v5, vClFade2[3] // + Fade factor for on screen vert * on screen vert pos int
     vmadn   vPairMVPPosF, vZero, vZero[0] // Load resulting frac pos
+.if !MOD_CLIP_CHANGES
     vmudm   $v29, $v26, vClFade1[3]       //   Fade factor for off screen vert * off screen vert color and TC
     vmadm   vPairST, $v25, vClFade2[3]    // + Fade factor for on  screen vert * on  screen vert color and TC
 .endif
@@ -1552,6 +1579,7 @@ clipping_after_vtxwrite:
 // outputVtxPos has been incremented by 2 * vtxSize
 // Store last vertex attributes which were skipped by the early return
 .if MOD_CLIP_CHANGES
+// (Off screen interp * off screen W) * persp norm * 1/(interpolated W)
 .if MOD_VL_REWRITE
     vmudl   $v29, $v8, vVpMisc[2]         // interp * W * persp norm
     andi    $11, clipMaskIdx, 4           // Is W?
@@ -1568,36 +1596,19 @@ clipping_after_vtxwrite:
      vmudl  $v29, $v8, $v28               // $v30:$v28 still contains computed 1/W
     vmadm   $v29, $v9, $v28
     vmadn   vClDiffF, $v8, $v30
-    vmadh   vClDiffI, $v9, $v30
+    jal     clipping_mod_clamp_fade_factor
+     vmadh  vClDiffI, $v9, $v30
+    vmadm   $v8, $v13, vClFade2[3]        // + Fade factor for on  screen vert * on  screen vert color and TC
+    suv     $v8[0],     (VTX_COLOR_VEC )(outputVtxPos)
+    slv     vPairST[0], (VTX_TC_VEC    )(outputVtxPos)
 .else
      suv    vPairST[0], (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos) // Store linearly interpolated color
     vmudl   $v29, $v8, $v5                // $v4:$v5 still contains computed 1/W
     vmadm   $v29, $v9, $v5
     vmadn   vClDiffF, $v8, $v4
-    vmadh   vClDiffI, $v9, $v4
-.endif
-    // Clamp fade factor (same code as above, except the input and therefore vClFade1 is for on screen vert)
-    vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
-.if MOD_VL_REWRITE
-    vmrg    vClDiffF, vClDiffF, $v31[1]   // keep frac part of factor, else set to 0xFFFF (max val)
-.else
-    vmrg    vClDiffF, vClDiffF, $v31[0]   // keep frac part of factor, else set to 0xFFFF (max val)
-.endif
-    vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
-    vge     vClDiffI, vClDiffI, vZero[0]  // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
-    vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
-.if MOD_VL_REWRITE
-    vmudn   vClFade2, vClFade1, $v31[1]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for off screen vert
-.else
-    vmudn   vClFade2, vClFade1, $v31[0]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for off screen vert
-.endif
-    // Interpolate colors
-    vmudm   $v29, $v12, vClFade2[3]       //   Fade factor for off screen vert * off screen vert color and TC
-    vmadm   $v8, $v13, vClFade1[3]        // + Fade factor for on  screen vert * on  screen vert color and TC
-.if MOD_VL_REWRITE
-    suv     $v8[0],     (VTX_COLOR_VEC )(outputVtxPos)
-    slv     vPairST[0], (VTX_TC_VEC    )(outputVtxPos)
-.else
+    jal     clipping_mod_clamp_fade_factor
+     vmadh  vClDiffI, $v9, $v4
+    vmadm   $v8, $v13, vClFade2[3]        // + Fade factor for on  screen vert * on  screen vert color and TC
     suv     $v8[0],     (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
 .endif
 clipping_mod_skipfixcolor:
@@ -1618,14 +1629,12 @@ clipping_mod_skipfixcolor:
 .endif
 .endif
 .if MOD_CLIP_CHANGES
-    beqz    $4, clipping_mod_endedge         // Did screen clipping, done
 .if !MOD_VL_REWRITE
-     addi   outputVtxPos, outputVtxPos, -2*vtxSize // back by 2 vertices because this was incremented
+    addi    outputVtxPos, outputVtxPos, -2*vtxSize // back by 2 vertices because this was incremented
 .endif
-    la      $4, 0                            // Change from scaled clipping to screen clipping
-    j       clipping_interpolate
-     move   $3, outputVtxPos                 // Off-screen vertex is now the one we just wrote
-clipping_mod_endedge:
+    move    $3, outputVtxPos                 // Off-screen vertex is now the one we just wrote
+    bnez    $4, clipping_interpolate         // Did scaled clipping, repeat for screen clipping
+     la     $4, 0                            // Change from scaled clipping to screen clipping
     sh      outputVtxPos, (clipPoly)(clipPolyWrite) // Write generated vertex to polygon
 .else
     addi    outputVtxPos, outputVtxPos, -vtxSize // back by 1 vtx so we are actually 1 ahead of where started
@@ -1665,13 +1674,24 @@ clipping_mod_checkcond_loop:
     bnez    $11, clipping_condlooptop          // If any vert outside scaled, run the clipping
      and    $1, $1, $9                         // Mask to outside screen
     addiu   clipPolyRead, clipPolyRead, 2      // Going to read next vertex
-    blt     clipPolyRead, clipPolyWrite, clipping_mod_checkcond_loop
+    bne     clipPolyRead, clipPolyWrite, clipping_mod_checkcond_loop
      sub    $12, $12, $1                       // Subtract 1*mask for each outside screen
     // Loop done. If $12 is negative, there are at least two verts outside screen.
     bltz    $12, clipping_condlooptop
      nop    // Could optimize this to branch one instr later and put a copy of the first instr here.
     j       clipping_mod_nextcond_skip         // Otherwise go to next clip condition.
-    // Next instruction is OK to clobber $4 here when jumping.
+    // Next instruction is OK to run in delay slot
+    
+clipping_mod_clamp_fade_factor:
+    vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
+    vmrg    vClDiffF, vClDiffF, $v31[0]   // keep frac part of factor, else set to 0xFFFF (max val)
+    vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
+    vge     vClDiffI, vClDiffI, vZero[0]  // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
+    vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
+    vmudn   vClFade2, vClFade1, $v31[0]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
+    jr      $ra
+     vmudm  $v29, $v12, vClFade1[3]       // Fade factor for off screen vert * off screen vert color and TC
+    
 clipping_mod_draw_tris:
 .else
     bnez    clipMaskIdx, clipping_condlooptop  // Done with clipping conditions?
@@ -1687,9 +1707,8 @@ clipping_mod_draw_tris:
     lqv     $v30, v30Value($zero)
 .endif
 // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
-.if MOD_CLIP_CHANGES
+.if MOD_CLIP_SUBDIVIDE
     addiu   clipPolySelect, clipPolySelect, -6 // = Pointer to first vertex
-    addiu   clipPolyWrite, clipPolyWrite, -2   // = Pointer to last vertex
     // Available locals: most registers ($5, $6, $7, $8, $9, $11, $12, etc.)
     // Available regs which won't get clobbered by tri write: 
     // clipPolySelect, clipPolyWrite, $14 (inputVtxPos), $15 (outputVtxPos), (more)
@@ -1698,14 +1717,16 @@ clipping_mod_draw_tris:
     move    $7, clipPolySelect        // initial vertex pointer
     lhu     $12, (clipPoly)($7)       // Load vertex address
 clipping_mod_search_highest_loop:
-    lh      $11, VTX_SCR_Y($12)       // Load screen Y
-    bge     $11, $5, clipping_mod_search_skip_better
+    lh      $9, VTX_SCR_Y($12)        // Load screen Y
+    sub     $11, $9, $5               // Branch if new vtx Y >= best vtx Y
+    bgez    $11, clipping_mod_search_skip_better
      addiu  $7, $7, 2                 // Next vertex
     addiu   $14, $7, -2               // Save pointer to best/current vertex
-    move    $5, $11                   // Save best value
+    move    $5, $9                    // Save best value
 clipping_mod_search_skip_better:
-    bge     clipPolyWrite, $7, clipping_mod_search_highest_loop
+    bne     clipPolyWrite, $7, clipping_mod_search_highest_loop
      lhu    $12, (clipPoly)($7)       // Next vertex address
+    addiu   clipPolyWrite, clipPolyWrite, -2   // = Pointer to last vertex
     // Find next closest vertex, from the two on either side
     bne     $14, clipPolySelect, @@skip1
      addiu  $6, $14, -2               // $6 = previous vertex
@@ -1719,7 +1740,8 @@ clipping_mod_search_skip_better:
     lhu     $9, (clipPoly)($8)
     lh      $7, VTX_SCR_Y($7)
     lh      $9, VTX_SCR_Y($9)
-    bge     $7, $9, clipping_mod_draw_loop // If value from prev vtx >= value from next, use next
+    sub     $11, $7, $9               // If value from prev vtx >= value from next, use next
+    bgez    $11, clipping_mod_draw_loop
      move   $15, $8                   // $14 is first, $8 -> $15 is next
     move    $15, $14                  // $14 -> $15 is next
     move    $14, $6                   // $6 -> $14 is first
@@ -1809,7 +1831,7 @@ clipping_done:
     jr      savedRA  // This will be G_TRI1_handler if was first tri of pair, else run_next_DL_command
 .endif
 .if MOD_CLIP_CHANGES
-     la     $30, -1  // Back to normal tri drawing mode (check clip masks)
+     la     clipPolySelect, -1  // Back to normal tri drawing mode (check clip masks)
 .else
      sw     savedActiveClipPlanes, activeClipPlanes
 .endif
@@ -1957,6 +1979,7 @@ vl_mod_vtx_store:
     vmudl   $v29, $v21, $v28
     lsv     vPairMVPPosI[6],  (VTX_Z_INT     )(outputVtxPos) // load Z into W slot, will be for fog below
     vmadm   $v29, $v20, $v28
+    ori     $12, $12, CLIP_MOD_VTX_USED // Write for all verts, only matters for generated verts
     vmadn   $v28, $v21, $v30
     vmadh   $v30, $v20, $v30    // $v30:$v28 is 1/W
     vmadh   $v25, $v25, $v31[7] // 0x7FFF; $v25:$v28 is 1/W but large number if W negative
@@ -2296,6 +2319,7 @@ vertices_store:
     vmudm   $v3, vPairST, vVpMisc       // Scale ST for two verts, using TexSScl and TexTScl in elems 2, 3, 6, 7
 .if MOD_CLIP_CHANGES
     or      $12, $12, $11               // Combine final results for first vertex
+    ori     $12, $12, CLIP_MOD_VTX_USED // Write for all verts, only matters for generated verts
     sh      $24,              (VTX_CLIP       - 1 * vtxSize)(secondVtxPos) // Store second vertex results
 .else
     sh      $11,              (VTX_CLIP_SCRN  - 2 * vtxSize)(outputVtxPos) // Clip screen first vtx results
@@ -2478,7 +2502,7 @@ tri_to_rdp:
 .endif
     move    $4, $1                // Save original vertex 1 addr (pre-shuffle) for flat shading
 .if MOD_CLIP_CHANGES
-    la      $30, -1               // Normal tri drawing mode (check clip masks)
+    la      clipPolySelect, -1    // Normal tri drawing mode (check clip masks)
 .endif
 tri_to_rdp_noinit:
     // ra is next cmd, second tri in TRI2, or middle of clipping
@@ -2530,7 +2554,7 @@ tri_to_rdp_noinit:
      lbu    $11, geometryModeLabel + 2  // Loads the geometry mode byte that contains face culling settings
     vmudh   $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
 .if MOD_CLIP_CHANGES
-    sra     $12, $30, 31      // All 1s if $30 is negative, meaning clipping allowed
+    sra     $12, clipPolySelect, 31 // All 1s if negative, meaning clipping allowed
 .else
     lw      $12, activeClipPlanes
 .endif
@@ -2553,22 +2577,20 @@ tri_to_rdp_noinit:
     and     $5, $5, $12       // ...which is in the set of currently enabled clipping planes (scaled for XY, screen for ZW)...
     vmrg    $v14, $v8, $v14   // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
 .if MOD_CLIP_CHANGES
-    andi    $12, $5, CLIP_NEAR >> 4 // If tri crosses camera plane, backface info is garbage
-    bnez    $12, tri_mod_skip_check_backface
-     lw     $11, (gCullMagicNumbers)($11)
-    beqz    $6, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
-     add    $11, $6, $11        // Add magic number; see description at gCullMagicNumbers
-    bgez    $11, return_routine // If sign bit is clear, cull.
-tri_mod_skip_check_backface:
+    // If tri crosses camera plane or scaled bounds, go directly to clipping
+    andi    $12, $5, CLIP_MOD_MASK_SCAL_ALL | (CLIP_NEAR >> 4)
     vlt     $v6, $v6, $v2     // v6 (thrown out), VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
-    andi    $12, $5, CLIP_MOD_MASK_SCAL_ALL // If any outside scaled bounds, do clipping
+    bnez    $12, ovl23_clipping_entrypoint // Backface info is garbage, don't check it
+     lw     $11, (gCullMagicNumbers)($11)
     vmrg    $v2, $v4, $v10   // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
-    bnez    $12, ovl23_clipping_entrypoint
-     vmrg   $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
-    lhu     $6, modClipLargeTriThresh
-    vsub    $v12, $v14, $v10  // VH - VL (negative)
+    beqz    $6, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
+     andi   $12, $5, CLIP_MOD_MASK_SCRN_ALL // If any vertex outside screen bounds...
+    add     $11, $6, $11        // Add magic number; see description at gCullMagicNumbers
+    vmrg    $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
+    bgez    $11, return_routine // If sign bit is clear, cull.
+     vsub   $v12, $v14, $v10  // VH - VL (negative)
     mfc2    $11, $v12[2]      // Y value of VH - VL (negative)
-    andi    $12, $5, CLIP_MOD_MASK_SCRN_ALL // If any vertex outside screen bounds...
+    lhu     $6, modClipLargeTriThresh
     add     $11, $11, $6      // Is triangle more than a certain number of scanlines high?
     sra     $11, $11, 31      // All 1s if tri is large, all 0s if it is small
     and     $12, $12, $11     // Large tri and partly outside screen bounds
