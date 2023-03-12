@@ -1684,11 +1684,19 @@ clipping_mod_checkcond_loop:
     
 clipping_mod_clamp_fade_factor:
     vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
+.if MOD_VL_REWRITE
+    vmrg    vClDiffF, vClDiffF, $v31[1]   // keep frac part of factor, else set to 0xFFFF (max val)
+.else
     vmrg    vClDiffF, vClDiffF, $v31[0]   // keep frac part of factor, else set to 0xFFFF (max val)
+.endif
     vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
     vge     vClDiffI, vClDiffI, vZero[0]  // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
     vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
+.if MOD_VL_REWRITE
+    vmudn   vClFade2, vClFade1, $v31[1]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
+.else
     vmudn   vClFade2, vClFade1, $v31[0]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
+.endif
     jr      $ra
      vmudm  $v29, $v12, vClFade1[3]       // Fade factor for off screen vert * off screen vert color and TC
     
@@ -1895,7 +1903,7 @@ vl_mod_vtx_load_loop:
     // Elems 0-1 get bytes 6-7 of the following vertex (0)
     lpv     $v30[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
     vmrg    vPairRGBA, vPairRGBA, $v25 // Merge colors
-    bnez    $11, vl_mod_lighting
+    //bnez    $11, vl_mod_lighting // TODO XXX
      // Elems 4-5 get bytes 6-7 of the following vertex (1)
      lpv    $v25[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
  vl_mod_return_from_lighting:
@@ -3304,7 +3312,7 @@ vl_mod_skip_packed_normals:
     vmadh   $v29, $v0, vNormals[0h]
     vmadn   $v29, $v5, vNormals[1h]
     vmadh   $v29, $v1, vNormals[1h]
-    addi    curLight, curLight, spFxBase - lightSize // Point to first non-ambient light
+    addi    curLight, curLight, spFxBase // Point to ambient light
     vmadn   $v29, $v6, vNormals[2h]
     vmadh   vNormals, $v2, vNormals[2h] // Single precision should be plenty
     vsub    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; offset alpha, will be fixed later
@@ -3312,7 +3320,7 @@ vl_mod_skip_packed_normals:
     vmudh   $v29, vNormals, vNormals // Transformed normal squared
     vreadacc $v23, ACC_UPPER // Load high component
     vmulf   $v26, vPairRGBA, vFogMask[2]  // aoAmb factor
-    luv     vLtLvl, (ltBufOfs + lightSize + 0)(curLight) // Total light level, init to ambient
+    luv     vLtLvl, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
     vmrg    vNormals, vNormals, vFogMask[3] // 0; set elems 3, 7 to 0
     vadd    $v29, $v23, $v23[1h] // Sum components
     vadd    $v26, $v26, $v31[7] // 0x7FFF = 1 in s.15
@@ -3327,19 +3335,18 @@ vl_mod_skip_packed_normals:
     vrsqh   $v25[4], vFogMask[3] // High output, 0 input
     vmulf   vLtLvl, vLtLvl, $v26[3h] // light color *= ambient factor
     vmudm   $v29, vNormals, $v25[1h] // Normal * frac scaling
-    j vl_mod_lighting_done // TODO XXX
     vmadh   vNormals, vNormals, $v25[0h] // Normal * int scaling
 vl_mod_light_loop:
     // $v20:$v21 vert pos, vPairST, $v23 light pos/dir (then local), $v24 $v25 locals,
     // $v26 light color, vPairRGBA, vNormals, $v29 temp, vLtLvl
-    lbu     $11,     (ltBufOfs + 3)(curLight) // Light type / constant attenuation
-    ldv     $v23[0], (ltBufOfs + 8)(curLight) // Light position or direction or lookat dir 1
-    blt     curLight, spFxBaseReg, vl_mod_lighting_done
-     ldv    $v23[8], (ltBufOfs + 8)(curLight)
+    lbu     $11,     (ltBufOfs + 3 - lightSize)(curLight) // Light type / constant attenuation
+    ldv     $v23[0], (ltBufOfs + 8 - lightSize)(curLight) // Light position or direction or lookat dir 1
+    beq     curLight, spFxBaseReg, vl_mod_lighting_done
+     ldv    $v23[8], (ltBufOfs + 8 - lightSize)(curLight)
     and     $11, $11, $12 // Mask away if point lighting disabled
     vmulf   $v29, vPairRGBA, vFogMask[6] // aoDir factor
     bnez    $11, vl_mod_point_light
-     luv    $v26,    (ltBufOfs + 0)(curLight) // Light color
+     luv    $v26,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
     vmulu   $v25, $v23, vNormals // Light dir * normalized normals, clamp to 0
     vadd    $v29, $v29, $v31[7] // 0x7FFF
     vand    $v25, $v25, $v31[7] // vmulu produces 0xFFFF if 0x8000 * 0x8000; make this 0x7FFF instead
@@ -3359,7 +3366,7 @@ vl_mod_point_light:
 
 vl_mod_lighting_done:
     j       vl_mod_return_from_lighting // TODO XXX
-     vxor   vPairRGBA, vPairRGBA, vPairRGBA
+     vmrg   vPairRGBA, vLtLvl, vFogMask[3]
     vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
     ldv     $v24[0], (ltBufOfs - lightSize + 8)(curLight) // Lookat dir 0
     vmulf   $v23, vNormals, $v23 // Normal * lookat dir 1
