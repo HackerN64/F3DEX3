@@ -361,7 +361,7 @@ mwModsStart:
 modClipRatio:
     .dh 0x0002 // Clip ratio; strongly recommend keeping as 2
 modClipLargeTriThresh:
-    .dh 120 << 2 // Number of quarter-scanlines high a triangle is to be considered large
+    .dh 60 << 2 // Number of quarter-scanlines high a triangle is to be considered large
 .else
     .dw 0 //TODO
 .endif
@@ -1593,6 +1593,9 @@ clipping_after_vtxwrite:
     vmadn   $v8, vZero, vZero
     bnez    $11, clipping_mod_skipfixcolor // Don't do perspective-incorrect color interpolation
 .if MOD_VL_REWRITE
+.if MOD_CLIP_EXPERIM
+    .error "MOD_CLIP_EXPERIM is incompatible with MOD_VL_REWRITE"
+.endif
      vmudl  $v29, $v8, $v28               // $v30:$v28 still contains computed 1/W
     vmadm   $v29, $v9, $v28
     vmadn   vClDiffF, $v8, $v30
@@ -1603,13 +1606,39 @@ clipping_after_vtxwrite:
     slv     vPairST[0], (VTX_TC_VEC    )(outputVtxPos)
 .else
      suv    vPairST[0], (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos) // Store linearly interpolated color
+.if MOD_CLIP_EXPERIM
+    sltu    $11, $zero, clipFlags         // 1 = clipFlags nonzero = edge from offscreen to onscreen
+    xor     $11, $11, clipMaskIdx         // Invert based on clip polarity
+.endif
     vmudl   $v29, $v8, $v5                // $v4:$v5 still contains computed 1/W
+.if MOD_CLIP_EXPERIM
+    ctc2    $11, $vcc                     // vcc elem 0
+.endif
     vmadm   $v29, $v9, $v5
+.if MOD_CLIP_EXPERIM
+    srl     $12, clipMaskIdx, 1           // 1 if X clipping, 0 if Y
+.endif
     vmadn   vClDiffF, $v8, $v4
+.if MOD_CLIP_EXPERIM
+    addiu   $12, $12, 1                   // 2 if X clipping, 1 if Y
+    vmadh   vClDiffI, $v9, $v4
+.endif
     jal     clipping_mod_clamp_fade_factor
+.if MOD_CLIP_EXPERIM
+     vmrg   $v6, vOne, $v31               // Select 1 or -1 in elem 0
+    vor     $v6, vZero, $v6[0]            // Move to all elements
+    ctc2    $12, $vcc                     // elem 0 on if Y, elem 1 on if X
+.else
      vmadh  vClDiffI, $v9, $v4
+.endif
     vmadm   $v8, $v13, vClFade2[3]        // + Fade factor for on  screen vert * on  screen vert color and TC
+.if MOD_CLIP_EXPERIM
+    vmrg    $v6, $v6, vZero               // Add value to X if Y clipping and vice versa
+.endif
     suv     $v8[0],     (VTX_COLOR_VEC  - 2 * vtxSize)(outputVtxPos)
+.if MOD_CLIP_EXPERIM
+    vadd    $v25, $v25, $v6               // Add +/-1 to screen position
+.endif
 .endif
 clipping_mod_skipfixcolor:
 .endif
@@ -1633,7 +1662,7 @@ clipping_mod_skipfixcolor:
     addi    outputVtxPos, outputVtxPos, -2*vtxSize // back by 2 vertices because this was incremented
 .endif
     move    $3, outputVtxPos                 // Off-screen vertex is now the one we just wrote
-    bnez    $4, clipping_interpolate         // Did scaled clipping, repeat for screen clipping
+    bnez    $4, clipping_interpolate         // Did scaled clipping, do screen now
      la     $4, 0                            // Change from scaled clipping to screen clipping
     sh      outputVtxPos, (clipPoly)(clipPolyWrite) // Write generated vertex to polygon
 .else
@@ -1658,7 +1687,11 @@ clipping_mod_nextcond_skip:
      lbu    $11, (clipCondShifts - 1)(clipMaskIdx) // Load next clip condition shift amount
     la      $9, 1
     sllv    $9, $9, $11                        // $9 is clip mask
+.if !MOD_CLIP_EXPERIM
+    j       clipping_condlooptop
+.endif
     addiu   clipMaskIdx, clipMaskIdx, -1
+.if MOD_CLIP_EXPERIM
     // Compare all verts to clip mask. If any are outside scaled, run the clipping.
     // Also see if there are at least two outside the screen; if none, obviously don't
     // do clipping, and if one, clipping would produce another tri, so better to let
@@ -1681,6 +1714,7 @@ clipping_mod_checkcond_loop:
      nop    // Could optimize this to branch one instr later and put a copy of the first instr here.
     j       clipping_mod_nextcond_skip         // Otherwise go to next clip condition.
     // Next instruction is OK to run in delay slot
+.endif
     
 clipping_mod_clamp_fade_factor:
     vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
