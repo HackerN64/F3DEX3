@@ -3279,6 +3279,7 @@ vNormals equ $v28
 vnPosXY equ $v23
 vnZ equ $v24
 vLtLvl equ $v30
+vLtOne equ $v24
 
 // Locals for original code
 xfrmLtPtr equ $20 // also input_mtx_1 and dmemAddr
@@ -3319,6 +3320,7 @@ vl_mod_continue_lighting:
     // Outputs: vPairRGBA, vPairST, must leave alone $v20:$v21
     // Locals: $v29 temp, $v23 (will be vPairMVPPosF), $v24 (will be vPairMVPPosI),
     // $v25 after merge, $v26 after merge, whichever of $v28 or $v30 is unused
+    // Use $v10 (part of pMatrix) as an extra local, restore before return
     /* TODO XXX
     beqz    $11, vl_mod_skip_packed_normals
      vmrg   $v30, $v30, $v25          // Merge packed normals
@@ -3343,60 +3345,60 @@ vl_mod_continue_lighting:
 vl_mod_skip_packed_normals:
     // Transform normals by M matrix and normalize
     // Also set up ambient occlusion: light *= (factor * (alpha - 1) + 1)
+    vxor    vLtOne, vLtOne, vLtOne
     vmudn   $v29, $v4, vNormals[0h]
     lbu     curLight, numLightsx18
     vmadh   $v29, $v0, vNormals[0h]
+    sll     $12, $5, 17 // G_LIGHTING_POSITIONAL = 0x00400000; $5 is middle 16 bits so 0x00004000
     vmadn   $v29, $v5, vNormals[1h]
+    sra     $12, $12, 31 // All 1s if point lighting enabled, else all 0s
     vmadh   $v29, $v1, vNormals[1h]
     addi    curLight, curLight, spFxBase // Point to ambient light
-    vmadn   $v29, $v6, vNormals[2h]
+    vmadn   $v23, $v6, vNormals[2h] // vNormals:$v23 = normals
     vmadh   vNormals, $v2, vNormals[2h]
-    vne     $v29, $v31, $v31[3h] // Set VCC to 11101110
     vsub    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; offset alpha, will be fixed later
-    vmrg    vNormals, vNormals, vFogMask[3] // 0; set elems 3, 7 to 0
-    vmudh   $v29, vNormals, vNormals // Transformed normal squared
-    vreadacc $v24, ACC_MIDDLE // Load low component
-    vreadacc $v25, ACC_UPPER // Load high component
-    vmulf   $v26, vPairRGBA, vFogMask[2]  // aoAmb factor
+    vadd    vLtOne, vLtOne, $v31[2] // vLtOne = 1
+    vmudm   $v29, vNormals, $v23 // Squared. Don't care about frac*frac term
+    vmadn   $v29, $v23, vNormals
+    vmadh   $v29, vNormals, vNormals
+    vreadacc $v26, ACC_MIDDLE // $v25:$v26 = normals squared
+    vreadacc $v25, ACC_UPPER
     luv     vLtLvl, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
-    vaddc   $v24, $v24, $v24[1q] // Add Y to X and 0 to Z
-    vadd    $v25, $v25, $v25[1q]
-    vadd    $v26, $v26, $v31[7] // 0x7FFF = 1 in s.15
-    vaddc   $v24, $v24, $v24[2h] // Add 0+Z to Y+X
-    vadd    $v25, $v25, $v25[2h]
-    //vmulf   vNormals, vNormals, $v31[5] // 0x4000 * transformed normal, effectively / 2
-    vrsqh   $v23[2], $v25[0] // High input, garbage output
-    vrsql   $v23[1], $v24[0] // Low input, low output
-    sll     $12, $5, 17 // G_LIGHTING_POSITIONAL = 0x00400000; $5 is middle 16 bits so 0x00004000
-    vrsqh   $v23[0], $v25[4] // High input, high output
-    sra     $12, $12, 31 // All 1s if point lighting enabled, else all 0s
-    vrsql   $v23[5], $v24[4] // Low input, low output
-    vrsqh   $v23[4], vFogMask[3] // 0 input, high output
-    // vmulf   vLtLvl, vLtLvl, $v26[3h] // light color *= ambient factor TODO XXX
-    vmudm   $v29, vNormals, $v23[1h] // Normal * frac scaling
-    vmadh   vNormals, vNormals, $v23[0h] // Normal * int scaling
-    // TODO XXX
-    vmulf   vNormals, vNormals, $v31[5] // normals * 0x4000
-    vadd    vPairRGBA, vNormals, $v31[5] // + 0x4000
-    j       vl_mod_return_from_lighting
-     vmrg   vPairRGBA, vPairRGBA, vFogMask[3] // 0
+    vmulf   $v10, vPairRGBA, vFogMask[2] // aoAmb factor; only care about elems 3, 7
+    vmudm   $v29, vLtOne, $v26[2h] // Sum of squared components
+    vmadh   $v29, vLtOne, $v25[2h]
+    vmadm   $v29, vLtOne, $v26[1h]
+    vmadh   $v29, vLtOne, $v25[1h]
+    vmadn   $v26, $v26, vLtOne // elem 0; swapped so we can do vmadn and get result
+    vmadh   $v25, $v25, vLtOne
+    vadd    $v10, $v10, $v31[7] // 0x7FFF = 1 in s.15; elems 3, 7
+    vrsqh   $v10[2], $v25[0] // High input, garbage output
+    vrsql   $v10[1], $v26[0] // Low input, low output
+    vrsqh   $v10[0], $v25[4] // High input, high output
+    vrsql   $v10[5], $v26[4] // Low input, low output
+    vrsqh   $v10[4], vFogMask[3] // 0 input, high output
+    vmudm   $v29, vNormals, $v10[1h] // Normal * frac scaling, don't care about frac*frac term
+    vmadn   $v29, $v23, $v10[0h] // Normal frac * int scaling
+    vmadh   vNormals, vNormals, $v10[0h] // Normal * int scaling
+    vmulf   vLtLvl, vLtLvl, $v10[3h] // light color *= ambient factor
 vl_mod_light_loop:
-    // $v20:$v21 vert pos, vPairST, $v23 light pos/dir (then local), $v24 $v25 locals,
-    // $v26 light color, vPairRGBA, vNormals, $v29 temp, vLtLvl
+    // $v20:$v21 vert pos, vPairST, $v23 light pos/dir (then local), $v10 $v25 locals,
+    // $v26 light color, vPairRGBA, vNormals, $v29 temp, vLtLvl, vLtOne
     lbu     $11,     (ltBufOfs + 3 - lightSize)(curLight) // Light type / constant attenuation
     ldv     $v23[0], (ltBufOfs + 8 - lightSize)(curLight) // Light position or direction or lookat dir 1
     beq     curLight, spFxBaseReg, vl_mod_lighting_done
      ldv    $v23[8], (ltBufOfs + 8 - lightSize)(curLight)
     and     $11, $11, $12 // Mask away if point lighting disabled
-    vmulf   $v29, vPairRGBA, vFogMask[6] // aoDir factor
     bnez    $11, vl_mod_point_light
      luv    $v26,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
-    vmulu   $v25, $v23, vNormals // Light dir * normalized normals, clamp to 0
-    vadd    $v29, $v29, $v31[7] // 0x7FFF
-    vand    $v25, $v25, $v31[7] // vmulu produces 0xFFFF if 0x8000 * 0x8000; make this 0x7FFF instead
-    // vmulf   $v26, $v26, $v29[3h] // light color *= ambient factor TODO XXX
-    vadd    $v25, $v25, $v25[1q] // Sum elements for dot product
-    vadd    $v25, $v25, $v25[2h]
+    vmulf   $v25, $v23, vNormals // Light dir * normalized normals
+    vmudm   $v29, vLtOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
+    vmacf   $v10, vPairRGBA, vFogMask[6] // + (alpha - 1) * aoDir factor
+    vmudh   $v29, vLtOne, $v25[0h] // Sum components of dot product as signed
+    vmadh   $v29, vLtOne, $v25[1h]
+    vmadh   $v25, vLtOne, $v25[2h]
+    //vmulf   $v26, $v26, $v10[3h] // light color *= ambient factor
+    vge     $v25, $v25, vFogMask[3] // Clamp dot product to >= 0
 vl_mod_finish_light:
     addiu   curLight, curLight, -lightSize
     vmulf   $v29, vLtLvl, $v31[7] // 0x7FFF; Total light level * 1 in s.15
@@ -3406,10 +3408,13 @@ vl_mod_finish_light:
 vl_mod_point_light:
     // TODO replace this with real implementation
     j       vl_mod_finish_light
-     vand   $v25, $v25, $v31[7] // for now, X component of dot product
+     vor    $v25, $v23, $v23
 
 vl_mod_lighting_done:
     vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
+    vne     $v29, $v31, $v31[3h] // Set VCC to 11101110
+    ldv     $v10[0], (pMatrix  + 0x10)($zero) // Restore v10 before returning
+    ldv     $v10[8], (pMatrix  + 0x10)($zero)
     j       vl_mod_return_from_lighting // TODO XXX
      vmrg   vPairRGBA, vLtLvl, vPairRGBA // TODO XXX
     /* TODO XXX
