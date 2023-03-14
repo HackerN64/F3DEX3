@@ -3384,15 +3384,17 @@ vl_mod_skip_packed_normals:
 vl_mod_light_loop:
     // $v20:$v21 vert pos, vPairST, $v23 light pos/dir (then local), $v10 $v25 locals,
     // $v26 light color, vPairRGBA, vNormals, $v29 temp, vLtLvl, vLtOne
+    lpv     $v23[0], (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 1 dir in elems 0-2
+    vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
+    lpv     $v25[4], (ltBufOfs + 8 - lightSize)(curLight) // Dir in elems 4-6
     lbu     $11,     (ltBufOfs + 3 - lightSize)(curLight) // Light type / constant attenuation
-    ldv     $v23[0], (ltBufOfs + 8 - lightSize)(curLight) // Light position or direction or lookat dir 1
     beq     curLight, spFxBaseReg, vl_mod_lighting_done
-     ldv    $v23[8], (ltBufOfs + 8 - lightSize)(curLight)
+     vmrg   $v23, $v23, $v25                              // $v23 = light direction
     and     $11, $11, $12 // Mask away if point lighting disabled
     bnez    $11, vl_mod_point_light
      luv    $v26,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
     vmulf   $v25, $v23, vNormals // Light dir * normalized normals
-    vmudm   $v29, vLtOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
+    vmudh   $v29, vLtOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
     vmacf   $v10, vPairRGBA, vFogMask[6] // + (alpha - 1) * aoDir factor
     vmudh   $v29, vLtOne, $v25[0h] // Sum components of dot product as signed
     vmadh   $v29, vLtOne, $v25[1h]
@@ -3401,7 +3403,7 @@ vl_mod_light_loop:
     vge     $v25, $v25, vFogMask[3] // Clamp dot product to >= 0
 vl_mod_finish_light:
     addiu   curLight, curLight, -lightSize
-    vmulf   $v29, vLtLvl, $v31[7] // 0x7FFF; Total light level * 1 in s.15
+    vmudh   $v29, vLtOne, vLtLvl // Load accum mid with current light level
     j       vl_mod_light_loop
      vmacf  vLtLvl, $v26, $v25[0h] // + light color * dot product
 
@@ -3411,58 +3413,61 @@ vl_mod_point_light:
      vor    $v25, $v23, $v23
 
 vl_mod_lighting_done:
+    /*
     vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
     vne     $v29, $v31, $v31[3h] // Set VCC to 11101110
     ldv     $v10[0], (pMatrix  + 0x10)($zero) // Restore v10 before returning
     ldv     $v10[8], (pMatrix  + 0x10)($zero)
     j       vl_mod_return_from_lighting // TODO XXX
      vmrg   vPairRGBA, vLtLvl, vPairRGBA // TODO XXX
-    /* TODO XXX
-    ldv     $v24[0], (ltBufOfs + 8 - 2 * lightSize)(curLight) // Lookat dir 0
-    vmulf   $v23, vNormals, $v23 // Normal * lookat dir 1
-    ldv     $v24[8], (ltBufOfs + 8 - 2 * lightSize)(curLight) // Lookat dir 0
+    */
+    vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
+    lpv     $v10[0], (ltBufOfs + 8 - 2 * lightSize)(curLight) // Lookat 0 dir in elems 0-2
+    lpv     $v26[4], (ltBufOfs + 8 - 2 * lightSize)(curLight) // Dir in elems 4-6
     andi    $11, $5, G_LIGHTTOALPHA >> 8
+    vmulf   $v23, vNormals, $v23 // Normal * lookat 1 dir
     andi    $12, $5, G_PACKED_NORMALS >> 8
     vmulf   $v25, vPairRGBA, vLtLvl     // Base output is RGB * light
+    vmrg    $v10, $v10, $v26                              // $v10 = lookat 0 dir
+    vor     $v26, vPairRGBA, vPairRGBA  // $v26 = alpha output = vtx alpha (only 3, 7 matter)
     beqz    $11, vl_mod_skip_cel
-     vor    $v26, vPairRGBA, vPairRGBA  // $v26 = alpha output = vtx alpha (only 3, 7 matter)
-    vmrg    $v26, vFogMask, vLtLvl[1h]  //                     = light green
-    vor     $v25, vPairRGBA, vPairRGBA  // Base output is just RGB
+     vne    $v29, $v31, $v31[3h] // Set VCC to 11101110
+    vmrg    $v26, $v31, vLtLvl[1h]  // Cel:   Alpha output = light green (don't care RGB)
+    vor     $v25, vPairRGBA, vPairRGBA  //        Base output is just RGB
 vl_mod_skip_cel:
-    vadd    $v23, $v23, $v23[1q] // First part of summing dot product for dir 1 -> 0,4
-    vmulf   $v24, vNormals, $v24 // Normal * lookat dir 0
-// End of vNormals lifetime
-    bnez    $12, vl_mod_skip_novtxcolor
-     vxor   $v28, $v28, $v28 // Zero
-    vor     $v25, vLtLvl, vLtLvl // Base output is just light
-// End of vLtLvl lifetime
-vl_mod_skip_novtxcolor:
-    vadd    $v23, $v23, $v23[2h] // Second part of summing dot product for dir 1 -> 0,4
+    vmulf   $v28, vNormals, $v10 // Normal * lookat 0 dir; $v28 is vNormals
     andi    $11, $5, G_TEXTURE_GEN >> 8
-    vadd    $v24, $v24, $v24[0q] // First part of summing dot product for dir 0 -> 1,5
+    vmudh   $v29, vLtOne, $v23[0h]
+    ldv     $v10[0], (pMatrix  + 0x10)($zero) // Restore v10 before returning
+    vmadh   $v29, vLtOne, $v23[1h]
+    bnez    $12, vl_mod_skip_novtxcolor
+     vmadh  $v23, vLtOne, $v23[2h] // Dot product 1
+    vor     $v25, vLtLvl, vLtLvl // If no packed normals, base output is just light
+vl_mod_skip_novtxcolor:
+    vmudh   $v29, vLtOne, $v28[0h]
+    ldv     $v10[8], (pMatrix  + 0x10)($zero)
+    vmadh   $v29, vLtOne, $v28[1h]
+    lqv     $v30[0], (linearGenerateCoefficients)($zero) // Was vLtLvl
+    vmadh   $v28, vLtOne, $v28[2h] // Dot product 0
     beqz    $11, vl_mod_return_from_lighting
      vmrg   vPairRGBA, $v25, $v26 // Merge base output and alpha output
-    // Texgen: $v24 and $v23 are dirs 0 and 1, locals $v25, $v26, $v28, $v30
+    // Texgen: $v28 and $v23 are dirs 0 and 1, locals $v25, $v26, $v30, have vLtOne = $v24
     // Output: vPairST; have to leave $v20:$v21, vPairRGBA
-    vadd    $v24, $v24, $v24[3h] // Second part of summing dot product for dir 0 -> 1,5
-    lqv     $v30[0], (linearGenerateCoefficients)($zero)
-    vsub    $v28, $v28, $v31[1] // -1; $v28 = 1
-    andi    $11, $5, G_TEXTURE_GEN_LINEAR >> 8
     vne     $v29, $v31, $v31[1h] // Set VCC to 10111011
-    vmrg    $v23, $v23, $v24     // Dot products in elements 0, 1, 4, 5
-    vmudh   $v29, $v28, $v31[5]  // 1 * 0x4000
+    andi    $11, $5, G_TEXTURE_GEN_LINEAR >> 8
+    vmrg    $v23, $v28, $v23[0h]  // Dot products in elements 0, 1, 4, 5
+    vmudh   $v29, vLtOne, $v31[5]  // 1 * 0x4000
     beqz    $11, vl_mod_return_from_lighting
      vmacf  vPairST, $v23, $v31[5] // + dot products * 0x4000
     // Texgen Linear
-    vmadh   vPairST, $v28, $v30[0] // + 1 * 0xC000 (gets rid of the 0x4000?)
+    vmadh   vPairST, vLtOne, $v30[0] // + 1 * 0xC000 (gets rid of the 0x4000?)
     vmulf   $v26, vPairST, vPairST // ST squared
-    vmulf   $v25, vPairST, $v31[7] // 0x7FFF, move to accumulator
+    vmulf   $v25, vPairST, $v31[7] // Move ST to accumulator (0x7FFF = 1)
     vmacf   $v25, vPairST, $v2[2] // + ST * 0x6CB3
-    vmudh   $v29, $v28, $v31[5] // 1 * 0x4000
+    vmudh   $v29, vLtOne, $v31[5] // 1 * 0x4000
     vmacf   vPairST, vPairST, $v2[1] // + ST * 0x44D3
     j       vl_mod_return_from_lighting
      vmacf  vPairST, $v26, $v25 // + ST squared * (ST + ST * coeff)
-    */
 
 .else // MOD_VL_REWRITE
 
