@@ -3399,7 +3399,7 @@ vl_mod_light_loop:
     vmudh   $v29, vLtOne, $v25[0h] // Sum components of dot product as signed
     vmadh   $v29, vLtOne, $v25[1h]
     vmadh   $v25, vLtOne, $v25[2h]
-    //vmulf   $v26, $v26, $v10[3h] // light color *= ambient factor
+    vmulf   $v26, $v26, $v10[3h] // light color *= ambient factor
     vge     $v25, $v25, vFogMask[3] // Clamp dot product to >= 0
 vl_mod_finish_light:
     addiu   curLight, curLight, -lightSize
@@ -3413,14 +3413,6 @@ vl_mod_point_light:
      vor    $v25, $v23, $v23
 
 vl_mod_lighting_done:
-    /*
-    vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
-    vne     $v29, $v31, $v31[3h] // Set VCC to 11101110
-    ldv     $v10[0], (pMatrix  + 0x10)($zero) // Restore v10 before returning
-    ldv     $v10[8], (pMatrix  + 0x10)($zero)
-    j       vl_mod_return_from_lighting // TODO XXX
-     vmrg   vPairRGBA, vLtLvl, vPairRGBA // TODO XXX
-    */
     vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
     lpv     $v10[0], (ltBufOfs + 8 - 2 * lightSize)(curLight) // Lookat 0 dir in elems 0-2
     lpv     $v26[4], (ltBufOfs + 8 - 2 * lightSize)(curLight) // Dir in elems 4-6
@@ -3463,9 +3455,9 @@ vl_mod_skip_novtxcolor:
     vmadh   vPairST, vLtOne, $v30[0] // + 1 * 0xC000 (gets rid of the 0x4000?)
     vmulf   $v26, vPairST, vPairST // ST squared
     vmulf   $v25, vPairST, $v31[7] // Move ST to accumulator (0x7FFF = 1)
-    vmacf   $v25, vPairST, $v2[2] // + ST * 0x6CB3
+    vmacf   $v25, vPairST, $v30[2] // + ST * 0x6CB3
     vmudh   $v29, vLtOne, $v31[5] // 1 * 0x4000
-    vmacf   vPairST, vPairST, $v2[1] // + ST * 0x44D3
+    vmacf   vPairST, vPairST, $v30[1] // + ST * 0x44D3
     j       vl_mod_return_from_lighting
      vmacf  vPairST, $v26, $v25 // + ST squared * (ST + ST * coeff)
 
