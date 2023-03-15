@@ -3393,24 +3393,19 @@ vl_mod_light_loop:
     and     $11, $11, $12 // Mask away if point lighting disabled
     bnez    $11, vl_mod_point_light
      luv    $v26,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
-    vmulf   $v25, $v23, vNormals // Light dir * normalized normals
+    vmulf   $v23, $v23, vNormals // Light dir * normalized normals
     vmudh   $v29, vLtOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
     vmacf   $v10, vPairRGBA, vFogMask[6] // + (alpha - 1) * aoDir factor
-    vmudh   $v29, vLtOne, $v25[0h] // Sum components of dot product as signed
-    vmadh   $v29, vLtOne, $v25[1h]
-    vmadh   $v25, vLtOne, $v25[2h]
-    vmulf   $v26, $v26, $v10[3h] // light color *= ambient factor
-    vge     $v25, $v25, vFogMask[3] // Clamp dot product to >= 0
+    vmudh   $v29, vLtOne, $v23[0h] // Sum components of dot product as signed
+    vmadh   $v29, vLtOne, $v23[1h]
+    vmadh   $v23, vLtOne, $v23[2h]
 vl_mod_finish_light:
+    vmulf   $v26, $v26, $v10[3h] // light color *= ambient or point light factor
+    vge     $v23, $v23, vFogMask[3] // Clamp dot product to >= 0
     addiu   curLight, curLight, -lightSize
     vmudh   $v29, vLtOne, vLtLvl // Load accum mid with current light level
     j       vl_mod_light_loop
-     vmacf  vLtLvl, $v26, $v25[0h] // + light color * dot product
-
-vl_mod_point_light:
-    // TODO replace this with real implementation
-    j       vl_mod_finish_light
-     vor    $v25, $v23, $v23
+     vmacf  vLtLvl, $v26, $v23[0h] // + light color * dot product
 
 vl_mod_lighting_done:
     vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
@@ -3460,6 +3455,72 @@ vl_mod_skip_novtxcolor:
     vmacf   vPairST, vPairST, $v30[1] // + ST * 0x44D3
     j       vl_mod_return_from_lighting
      vmacf  vPairST, $v26, $v25 // + ST squared * (ST + ST * coeff)
+     
+vl_mod_point_light:
+    /*
+    Input vector 1 elem size 7FFF.0000 -> len^2 3FFF0001 -> 1/len 0001.0040 -> vec +801E.FFC0 -> clamped 7FFF
+        len^2 * 1/len = 400E.FFC1 so about half actual length
+    Input vector 1 elem size 0100.0000 -> len^2 00010000 -> 1/len 007F.FFC0 -> vec  7FFF.C000 -> clamped 7FFF
+        len^2 * 1/len = 007F.FFC0 so about half actual length
+    Input vector 1 elem size 0010.0000 -> len^2 00000100 -> 1/len 07FF.FC00 -> vec  7FFF.C000
+    Input vector 1 elem size 0001.0000 -> len^2 00000001 -> 1/len 7FFF.C000 -> vec  7FFF.C000
+    */
+    vxor    $v10, $v10, $v10 // TODO packed light pos frac parts
+    ldv     $v23[0], (ltBufOfs + 8 - lightSize)(curLight) // Light position int part 0-3
+    ldv     $v23[8], (ltBufOfs + 8 - lightSize)(curLight) // 4-7
+    vsubc   $v10, $v10, $v21 // Vector from vertex to light, frac
+    lbu     $20,     (ltBufOfs + 7 - lightSize)(curLight) // Linear factor
+    vsub    $v23, $v23, $v20 // Int
+    lbu     $24,     (ltBufOfs + 0xF - lightSize)(curLight) // Quadratic factor
+    vmudm   $v29, $v23, $v10 // Squared. Don't care about frac*frac term
+    sll     $11, $11, 12 // Constant factor
+    vmadn   $v29, $v10, $v23
+    sll     $20, $20, 1 // Linear factor
+    vmadh   $v29, $v23, $v23
+    sll     $24, $24, 5 // Quadratic factor
+    vreadacc $v26, ACC_MIDDLE
+    mtc2    $11, vNormals[6] // Low part in elem 3
+    vreadacc $v25, ACC_UPPER
+    vmudm   $v29, vLtOne, $v26[2h] // Sum of squared components
+    vmadh   $v29, vLtOne, $v25[2h]
+    vmadm   $v29, vLtOne, $v26[1h]
+    mtc2    $20, vLtLvl[6] // Linear factor in elem 3
+    vmadh   $v29, vLtOne, $v25[1h]
+    vmadn   $v26, $v26, vLtOne // elem 0; swapped so we can do vmadn and get result
+    srl     $11, $11, 16
+    vmadh   $v25, $v25, vLtOne
+    vrsqh   $v29[2], $v25[0] // High input, garbage output
+    mtc2    $24, vLtLvl[14] // Quadratic factor in elem 7
+    vrsql   $v29[1], $v26[0] // Low input, low output
+    vrsqh   $v29[0], $v25[4] // High input, high output
+    vrsql   $v29[5], $v26[4] // Low input, low output
+    vrsqh   $v29[4], vFogMask[3] // 0 input, high output
+    mtc2    $11, vNormals[14] // High part in elem 7
+    vmudn   $v10, $v10, $v29[0h] // Vec frac * int scaling, discard result
+    vmadm   $v10, $v23, $v29[1h] // Vec int * frac scaling, discard result
+    vmadh   $v23, $v23, $v29[0h] // Vec int * int scaling
+    // $v23 = normalized vector from vertex to light, $v29[0h:1h] = 1/len, $v25 = len^2
+    vmudm   $v10, $v25, $v29[1h] // len^2 int * 1/len frac
+    vmadn   $v10, $v26, $v29[0h] // len^2 frac * 1/len int = len frac
+    vmadh   $v29, $v25, $v29[0h] // len^2 int * 1/len int = len int
+    vmulf   $v23, $v23, vNormals // Normalized light dir * normalized normals
+    vmudl   $v26, $v26, vLtLvl[7]     //   len^2 frac * quadratic factor (frac)
+    vmadm   $v26, $v25, vLtLvl[7]     // + len^2 int * quadratic factor (frac)
+    vmadm   $v26, vLtOne, vNormals[3] // + 1 * constant factor frac
+    vmadh   $v26, vLtOne, vNormals[7] // + 1 * constant factor int
+    vmadn   $v25, $v10, vLtLvl[3]     // + len frac * linear factor (int)
+    vmadh   $v29, $v29, vLtLvl[3]     // + len int * linear factor (int)
+    luv     $v26,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
+    vmudh   $v10, vLtOne, $v23[0h] // Sum components of dot product as signed
+    vmadh   $v10, vLtOne, $v23[1h]
+    vmadh   $v23, vLtOne, $v23[2h]
+    vrcph   $v10[1], $v29[0] // Reciprocal of light factor
+    vrcpl   $v10[2], $v25[0]
+    vrcph   $v10[3], $v29[4]
+    vrcpl   $v10[6], $v25[4]
+    vrcph   $v10[7], vFogMask[3] // 0
+    j       vl_mod_finish_light
+     vand   $v10, $v10, $v31[7] // 0x7FFF; vrcp produces 0xFFFF when 1/0, change this to 0x7FFF
 
 .else // MOD_VL_REWRITE
 
@@ -3778,7 +3839,7 @@ light_point:
     vmulf   $v29, $v29, $v20[3]          // Length * byte 0x7
     vmadm   $v29, $v2, $v20[7]           // + (scaled length squared) * byte 0xE << 5
 .if MOD_GENERAL
-    vmadh   $v29, vPairST, $v30[3]       // + (byte 0x3 << 4) * 0x0100
+    vmadn   $v29, vPairST, $v30[3]       // + (byte 0x3 << 4) * 0x0100
 .else
     vmadn   $v29, $v27, $v30[3]          // + (byte 0x3 << 4) * 0x0100
 .endif
