@@ -376,7 +376,7 @@ attrOffsetST:
     .dh 0xFF00
 
 attrOffsetZ:
-    .dh 0x0002
+    .dh 0xFFFE
     .dh 0x0000
 .endif
 
