@@ -126,14 +126,6 @@ Removed:
 #define G_ROTATE_FRAC           16
 
 /*
- * Parameters to graphics commands
- */
-
-/*
- * Data packing macros
- */
-
-/*
  * Maximum z-buffer value, used to initialize the z-buffer.
  * Note : this number is NOT the viewport z-scale constant.
  * See the comment next to G_MAXZ for more info.
@@ -1134,12 +1126,25 @@ typedef union {
 
 typedef struct {
     unsigned char col[3];   /* diffuse light value (rgba) */
-    char          pad1;
+    union {
+        unsigned char type; /* MUST SET TO 0 to indicate directional light */
+        char pad1;          /* for no-code-changes GBI backwards compatibility */
+    };
     unsigned char colc[3];  /* copy of diffuse light value (rgba) */
     char          pad2;
     signed char   dir[3];   /* direction of light (normalized) */
     char          pad3;
 } Light_t;
+
+typedef struct {
+  unsigned char col[3];         /* diffuse light value (rgba) */
+  unsigned char kc;             /* positional lighting enable flag & constant attenuation Kc */
+  unsigned char colc[3];        /* copy of diffuse light value (rgba) */
+  unsigned char kl;             /* linear attenuation Kl */
+  short pos[3];                 /* light position x, y, z integer part */
+  unsigned char kq;             /* quadratic attenuation Kq */
+  unsigned char frac;           /* light position frac, 2-3 bits per component packed as 0xE0 X, 0x1C Y, 0x7 Z */
+} PosLight_t;
 
 typedef struct {
     unsigned char col[3];   /* ambient light value (rgba) */
@@ -1166,6 +1171,12 @@ typedef union {
     long long int force_structure_alignment[1];
 } Ambient;
 
+typedef union {
+  PosLight_t p;
+  Light_t    l;
+  long long int force_structure_alignment[2];
+} PosLight;
+
 typedef struct {
     Ambient a;
     Light   l[7];
@@ -1173,7 +1184,8 @@ typedef struct {
 
 typedef struct {
     Ambient a;
-    Light   l[1];
+    /* F3DEX3 properly supports zero lights, unlike F3DEX2 where you need
+    to include one black directional light. */
 } Lights0;
 
 typedef struct {
@@ -1212,6 +1224,50 @@ typedef struct {
 } Lights7;
 
 typedef struct {
+    Ambient     a;
+    PosLight    l[7];
+} PosLightsn;
+
+typedef struct {
+    Ambient     a;
+} PosLights0;
+
+typedef struct {
+    Ambient     a;
+    PosLight    l[1];
+} PosLights1;
+
+typedef struct {
+    Ambient     a;
+    PosLight    l[2];
+} PosLights2;
+
+typedef struct {
+    Ambient     a;
+    PosLight    l[3];
+} PosLights3;
+
+typedef struct {
+    Ambient     a;
+    PosLight    l[4];
+} PosLights4;
+
+typedef struct {
+    Ambient     a;
+    PosLight    l[5];
+} PosLights5;
+
+typedef struct {
+    Ambient     a;
+    PosLight    l[6];
+} PosLights6;
+
+typedef struct {
+    Ambient     a;
+    PosLight    l[7];
+} PosLights7;
+
+typedef struct {
     Light   l[2];
 } LookAt;
 
@@ -1225,14 +1281,7 @@ typedef union {
         {{                          \
             { ar, ag, ab }, 0,      \
             { ar, ag, ab }, 0,      \
-        }},                         \
-        {                           \
-            {{                      \
-                { 0, 0, 0 }, 0,     \
-                { 0, 0, 0 }, 0,     \
-                { 0, 0, 0 }, 0,     \
-            }}                      \
-        }                           \
+        }}                          \
     }
 
 #define gdSPDefLights1(ar, ag, ab,              \
@@ -1487,6 +1536,56 @@ typedef union {
             { upx, upy, upz }, 0,                               \
         }},                                                     \
     }}
+
+
+#define _gdSPDefAmbient(ar,ag,ab)  {{ {ar,ag,ab},0,{ar,ag,ab},0}}
+#define _gdSPDefPosLight(r,g,b,x,y,z,c,l,q) {{ {r,g,b},c,{r,g,b},l,{x,y,z},q,0 }}
+#define _gdSPDefInfLight(r,g,b,x,y,z)       {{ {r,g,b},0,{r,g,b},0,{((x)<<8)|((y)&0xff),(z)<<8,0},0,0}}
+#define gdSPDefPosLights0(ar,ag,ab) \
+  { _gdSPDefAmbient(ar,ag,ab) }
+#define gdSPDefPosLights1(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1) \
+  { _gdSPDefAmbient(ar,ag,ab), \
+    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1)} }
+#define gdSPDefPosLights2(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2) \
+  { _gdSPDefAmbient(ar,ag,ab), \
+    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2)} }
+#define gdSPDefPosLights3(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3) \
+  { _gdSPDefAmbient(ar,ag,ab), \
+    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+      _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3)} }
+#define gdSPDefPosLights4(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3,r4,g4,b4,x4,y4,z4,c4,l4,q4) \
+  { _gdSPDefAmbient(ar,ag,ab), \
+    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+      _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
+      _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4)} }
+#define gdSPDefPosLights5(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3,r4,g4,b4,x4,y4,z4,c4,l4,q4,r5,g5,b5,x5,y5,z5,c5,l5,q5) \
+  { _gdSPDefAmbient(ar,ag,ab), \
+    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+      _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
+      _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4), \
+      _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5)} }
+#define gdSPDefPosLights6(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3,r4,g4,b4,x4,y4,z4,c4,l4,q4,r5,g5,b5,x5,y5,z5,c5,l5,q5,r6,g6,b6,x6,y6,z6,c6,l6,q6) \
+  { _gdSPDefAmbient(ar,ag,ab), \
+    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+      _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
+      _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4), \
+      _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5), \
+      _gdSPDefPosLight(r6,g6,b6,x6,y6,z6,c6,l6,q6)} }
+#define gdSPDefPosLights7(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3,r4,g4,b4,x4,y4,z4,c4,l4,q4,r5,g5,b5,x5,y5,z5,c5,l5,q5,r6,g6,b6,x6,y6,z6,c6,l6,q6,r7,g7,b7,x7,y7,z7,c7,l7,q7) \
+  { _gdSPDefAmbient(ar,ag,ab), \
+    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+      _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
+      _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4), \
+      _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5), \
+      _gdSPDefPosLight(r6,g6,b6,x6,y6,z6,c6,l6,q6), \
+      _gdSPDefPosLight(r7,g7,b7,x7,y7,z7,c7,l7,q7)} }
+
 
 typedef struct {
     int          cmd  : 8;
@@ -2453,7 +2552,8 @@ _DW({                                               \
  * Lighting Macros
  */
 #define NUML(n)    ((n) * 24)
-#define NUMLIGHTS_0 1
+/* F3DEX3 properly supports zero lights. */
+#define NUMLIGHTS_0 0
 #define NUMLIGHTS_1 1
 #define NUMLIGHTS_2 2
 #define NUMLIGHTS_3 3
@@ -2507,18 +2607,26 @@ _DW({                                               \
     gsMoveWd(G_MW_LIGHTCOL, G_MWO_a##n, col),       \
     gsMoveWd(G_MW_LIGHTCOL, G_MWO_b##n, col)
 
+#define _gSPLightColor2(pkt, n, col1, col2) \
+{\
+  gMoveWd(pkt, G_MW_LIGHTCOL, G_MWO_a##n, col1);\
+  gMoveWd(pkt, G_MW_LIGHTCOL, G_MWO_b##n, col2);\
+}
+#define _gsSPLightColor2(n, col1, col2) \
+  gsMoveWd(G_MW_LIGHTCOL, G_MWO_a##n, col1),\
+  gsMoveWd(G_MW_LIGHTCOL, G_MWO_b##n, col2)
+
+
 /* These macros use a structure "name" which is init'd with the gdSPDefLights macros*/
 
 #define gSPSetLights0(pkt,name)     \
 _DW({                               \
     gSPNumLights(pkt, NUMLIGHTS_0); \
-    gSPLight(pkt, &name.l[0], 1);   \
-    gSPLight(pkt, &name.a, 2);      \
+    gSPLight(pkt, &name.a, 1);      \
 })
 #define gsSPSetLights0(name)        \
     gsSPNumLights(NUMLIGHTS_0),     \
-    gsSPLight(&name.l[0], 1),       \
-    gsSPLight(&name.a, 2)
+    gsSPLight(&name.a, 1)
 
 #define gSPSetLights1(pkt,name)     \
 _DW({                               \

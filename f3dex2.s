@@ -3321,7 +3321,6 @@ vl_mod_continue_lighting:
     // Locals: $v29 temp, $v23 (will be vPairMVPPosF), $v24 (will be vPairMVPPosI),
     // $v25 after merge, $v26 after merge, whichever of $v28 or $v30 is unused
     // Use $v10 (part of pMatrix) as an extra local, restore before return
-    /* TODO XXX
     beqz    $11, vl_mod_skip_packed_normals
      vmrg   $v30, $v30, $v25          // Merge packed normals
     // Packed normals algorithm. This produces a vector (one for each input vertex)
@@ -3340,7 +3339,6 @@ vl_mod_continue_lighting:
     vne     $v29, $v31, $v31[2h] // set VCC to 11011101
     vabs    vNormals, $v30, vNormals // Apply sign of original X and Y to new X and Y
     vmrg    vNormals, vNormals, vnZ[0h] // Move Z to elements 2, 6
-    */
 // End of lifetimes of vnPosXY and vnZ
 vl_mod_skip_packed_normals:
     // Transform normals by M matrix and normalize
