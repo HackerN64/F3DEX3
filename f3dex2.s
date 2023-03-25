@@ -1946,8 +1946,8 @@ vtx_return_from_addrs:
     sub     dmemAddr, $3, $1
     jal     dma_read_write
      addi   dmaLen, $1, -1                     // DMA length is always offset by -1
-    lhu     $5, (geometryModeLabel + 1)($zero) // Middle 2 bytes
-    lbu     $11, (mITValid)($zero)
+    lhu     $5, geometryModeLabel + 1          // Middle 2 bytes
+    lbu     $11, mITValid                      // 0 if matrix invalid, 1 if valid
     mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
     move    inputVtxPos, dmemAddr
     lqv     $v0,     (mvMatrix + 0x00)($zero)  // Load M matrix
@@ -1956,7 +1956,7 @@ vtx_return_from_addrs:
     lqv     $v6,     (mvMatrix + 0x30)($zero)
     srl     $7, $5, 9                          // G_LIGHTING in bit 1
     vor     $v1,  $v0,  $v0
-    sltu    $11, $zero, $11                    // 1 if M inverse transpose not valid
+    xori    $11, $11, 1                        // 0 if matrix valid, 1 if invalid
     vor     $v3,  $v2,  $v2
     ldv     $v1[0],  (mvMatrix + 0x08)($zero)
     vor     $v5,  $v4,  $v4
@@ -3355,7 +3355,7 @@ vPairNZ equ $v5
 ovl2_start:
 ovl23_lighting_entrypoint:
 .if MOD_VL_REWRITE
-    beqz    $7, vl_mod_after_lt_ovl           // $7 = 0 if not update matrix, else nonzero
+    beqz    $7, vl_mod_after_lt_ovl           // $7 = 0 if not update matrix, 1 if update
      nop
     j       vl_mod_calc_mit                   // Next instr is the store $ra, harmless
 .else
@@ -3605,7 +3605,7 @@ vl_mod_point_light:
      vand   $v10, $v10, $v31[7] // 0x7FFF; vrcp produces 0xFFFF when 1/0, change this to 0x7FFF
 
 vl_mod_calc_mit:
-    sb      $7, mITValid      // $7 is nonzero if we got here, mark valid.
+    sb      $7, mITValid      // $7 is 1 if we got here, mark valid.
     /*
     // Compute M inverse transpose.
     // Scale factor can be arbitrary, but final matrix must only reduce a vector's
