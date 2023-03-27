@@ -694,6 +694,10 @@ overlayInfo2:
     OverlayEntry orga(ovl2_start), orga(ovl2_end), ovl2_start
 overlayInfo3:
     OverlayEntry orga(ovl3_start), orga(ovl3_end), ovl3_start
+.if MOD_VL_REWRITE
+overlayInfo4:
+    OverlayEntry orga(ovl4_start), orga(ovl4_end), ovl4_start
+.endif
 
 .align 8
 
@@ -1022,6 +1026,16 @@ f3dzex_xbus_0000111C:
     sw      $11, matrixStackPtr
 calculate_overlay_addrs:
     lw      $1, OSTask + OSTask_ucode
+.if MOD_VL_REWRITE
+    la      $2, overlayInfo4 // Assumes all overlay info structs are contiguous
+    la      $3, overlayInfo0
+@@loop:
+    lw      $4, (overlay_load)($3)
+    add     $4, $4, $1
+    sw      $4, (overlay_load)($3)
+    bne     $2, $3, @@loop
+     addiu  $3, overlayInfo1 - overlayInfo0
+.else
     lw      $2, overlayInfo0 + overlay_load
     lw      $3, overlayInfo1 + overlay_load
     lw      $4, overlayInfo2 + overlay_load
@@ -1034,6 +1048,7 @@ calculate_overlay_addrs:
     add     $5, $5, $1
     sw      $4, overlayInfo2 + overlay_load
     sw      $5, overlayInfo3 + overlay_load
+.endif
     lw      taskDataPtr, OSTask + OSTask_data_ptr
 load_overlay1_init:
     li      ovlTableEntry, overlayInfo1   // set up loading of overlay 1
@@ -1964,12 +1979,14 @@ vtx_return_from_addrs:
     vor     $v7,  $v6,  $v6
     ldv     $v5[0],  (mvMatrix + 0x28)($zero)
     ldv     $v7[0],  (mvMatrix + 0x38)($zero)
-    ldv     $v0[8],  (mvMatrix + 0x00)($zero)
     and     $7, $7, $11                        // If lighting enabled and need to update matrix,
+    ldv     $v0[8],  (mvMatrix + 0x00)($zero)
     ldv     $v2[8],  (mvMatrix + 0x10)($zero)
     ldv     $v4[8],  (mvMatrix + 0x20)($zero)
-    bnez    $7, ovl23_lighting_entrypoint      // do that here so we can use $v8::$v19
-     ldv    $v6[8],  (mvMatrix + 0x30)($zero)
+    ldv     $v6[8],  (mvMatrix + 0x30)($zero)
+    li      ovlTableEntry, overlayInfo4        // $11
+    bnez    $7, load_overlay_and_enter         // run overlay 4 to compute M inverse transpose
+     li     postOvlRA, vl_mod_calc_mit         // $12
 vl_mod_after_calc_mit:
     lqv     $v8,     (pMatrix  + 0x00)($zero)
     lqv     $v10,    (pMatrix  + 0x10)($zero)
@@ -2040,12 +2057,8 @@ aoAmb, aoDir set to 0 if ambient occlusion disabled
     vmov    vVpFgScale[5], $v20[1]                // Same for second half
     bnez    $ra, clipping_mod_after_constants     // Return to clipping if from there
      vmrg    vVpFgOffset, vVpFgOffset, $v23[1]    // Put fog offset in elements 3,7 of vtrans
-    jal     while_wait_dma_busy                   // Only uses $11 and $ra
-     andi   $24, $5, G_LIGHTING >> 8              // If lighting enabled,
-    bnez    $24, ovl23_lighting_entrypoint        // make sure lighting overlay loaded
-     la     $7, 0                                 // Don't update matrix
-vl_mod_after_lt_ovl:
-    andi    $7, $5, G_FOG >> 8                    // Nonzero if fog enabled
+    jal     while_wait_dma_busy                   // Wait for vertex load to finish
+     andi   $7, $5, G_FOG >> 8                    // Nonzero if fog enabled
 vl_mod_vtx_load_loop:
     ldv     $v20[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
     vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
@@ -2191,10 +2204,6 @@ vl_mod_skip_fog:
     jr      $ra
      ssv    $v20[4],          (VTX_SCR_Z     )(outputVtxPos)
 
-vl_mod_matrix_load:
-    // M matrix is $v0-$v7, VP matrix is $v8-$v15
-    
-    
 .endif
 
 vPairRGBATemp equ $v7
@@ -3355,9 +3364,10 @@ vPairNZ equ $v5
 ovl2_start:
 ovl23_lighting_entrypoint:
 .if MOD_VL_REWRITE
-    beqz    $7, vl_mod_after_lt_ovl           // $7 = 0 if not update matrix, 1 if update
-     nop
-    j       vl_mod_calc_mit                   // Next instr is the store $ra, harmless
+vl_mod_lighting:
+    vmrg    vNormals, $v28, $v26          // Merge normals
+    j       vl_mod_continue_lighting
+     andi   $11, $5, G_PACKED_NORMALS >> 8
 .else
     lbu     $11, lightsValid
     j       continue_light_dir_xfrm
@@ -3375,15 +3385,13 @@ ovl23_clipping_entrypoint_copy:  // same IMEM address as ovl23_clipping_entrypoi
      li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
 
 .if MOD_VL_REWRITE
-vl_mod_lighting:
+vl_mod_continue_lighting:
     // Inputs: $v20:$v21 vertices pos world int:frac, vPairRGBA, vPairST,
     // $v28 vNormals, $v30:$v25 (to be merged) packed normals
     // Outputs: vPairRGBA, vPairST, must leave alone $v20:$v21
     // Locals: $v29 temp, $v23 (will be vPairMVPPosF), $v24 (will be vPairMVPPosI),
     // $v25 after merge, $v26 after merge, whichever of $v28 or $v30 is unused
     // Use $v10 (part of pMatrix) as an extra local, restore before return
-    andi    $11, $5, G_PACKED_NORMALS >> 8
-    vmrg    vNormals, $v28, $v26          // Merge normals
     beqz    $11, vl_mod_skip_packed_normals
      vmrg   $v30, $v30, $v25          // Merge packed normals
     // Packed normals algorithm. This produces a vector (one for each input vertex)
@@ -3603,73 +3611,7 @@ vl_mod_point_light:
     vrcph   $v10[7], vFogMask[3] // 0
     j       vl_mod_finish_light
      vand   $v10, $v10, $v31[7] // 0x7FFF; vrcp produces 0xFFFF when 1/0, change this to 0x7FFF
-
-vl_mod_calc_mit:
-    sb      $7, mITValid      // $7 is 1 if we got here, mark valid.
-    /*
-    // Compute M inverse transpose.
-    // Scale factor can be arbitrary, but final matrix must only reduce a vector's
-    // magnitude (rotation * scale < 1). So want components of matrix to be < 0001.0000.
-    // However, if input matrix has components on the order of 0000.0100, multiplying
-    // two terms will reduce that to the order of 0000.0001, which kills all the precision.
-    vxor    $v23, $v0, $v31[1] // One's complement of X int part
-    vlt     $v29, $v0, vFogMask[3] // X int part < 0
-    vabs    $v24, $v0, $v4 // Apply sign of X int part to X frac part
-    vxor    $v25, $v1, $v31[1] // One's complement of Y int part
-    vmrg    $v23, $v23, $v0 // $v23:$v24 = abs(X int:frac)
-    vlt     $v29, $v1, vFogMask[3] // Y int part < 0
-    vabs    $v26, $v1, $v5 // Apply sign of Y int part to Y frac part
-    vxor    $v10, $v2, $v31[1] // One's complement of Z int part
-    vmrg    $v25, $v25, $v1 // $v25:$v26 = abs(Y int:frac)
-    vlt     $v29, $v2, vFogMask[3] // Z int part < 0
-    la      $11, mITMatrix + 2 // For left rotates with lqv
-    vabs    $v30, $v2, $v6 // Apply sign of Z int part to Z frac part
-    la      $12, mITMatrix + 0xE // For right rotates with lrv
-    vmrg    $v10, $v10, $v2 // $v10:$v30 = abs(Z int:frac)
-    // See if any of the int parts are nonzero, if so will skip the normalization.
-    // Also, get the maximum of the frac parts.
-    // Also, start rotating terms as registers become available.
-    vge     $v24, $v24, $v26
-    la      $24, tempMemRounded
-    vor     $v23, $v23, $v25
-    lqv     $v26[0], (0x00)($11) // X int and Y int, left shifted 1 element
-    vge     $v24, $v24, $v30
-    lqv     $v25[0], (0x20)($11) // X frac and Y frac, left shifted 1 element
-    vor     $v23, $v23, $v10
-    lsv     $v26[4], (-2)($11) // X int elem 0 into elem 2
-    vge     $v24, $v24, $v24[1h]
-    lsv     $v25[4], (0x1E)($11) // X frac elem 0 into elem 2
-    vor     $v23, $v23, $v23[1h]
-    lsv     $v26[12], (6)($11) // Y int elem 0 into elem 6
-    vge     $v24, $v24, $v24[2h]
-    lsv     $v25[12], (0x26)($11) // Y frac elem 0 into elem 6
-    vor     $v23, $v23, $v23[2h]
-    lrv     $v10[0], (0x00)($12) // X int and Y int, right shifted 1 element
-    // Scale factor is 1/(2*max), which is exactly what vrcp provides. If we multiplied
-    // by 1/max, the output matrix would have components on the order of 0001.0000, but
-    // we want the components to be smaller than this, so divide by two.
-    vrcp    $v30[1], $v24[0] // low in, low out (discarded)
-    sqv     $v26[0], (0x00)($24) // Store to temp mem
-    vrcph   $v30[0], vFogMask[3] // zero in, high out
-    sqv     $v25[0], (0x20)($24)
-    veq     $v29, $v23, vFogMask[3] // elem 0 (all int parts) == 0
-    lrv     $v24[0], (0x20)($12) // X frac and Y frac, right shifted 1 element
-    vmrg    $v30, $v30, $v31[2] // If so, use computed normalization, else use 1 (elem 0)
-    ldv     $v25[0], 
-    vne     $v29, $v31, $v31[0h] // Set VCC to 01110111
-    vmrg    $v10, $v10, $v10[3h] // Move elem 3 to 0 and 7 to 4 (X, Y int)
-    vmrg    $v24, $v24, $v24[3h] // Same (X, Y frac)
-vl_mod_mit_skip_norm:
-    */
-    // TODO XXX temporarily, copy M to M inverse transpose
-    sdv     $v0[0], (mITMatrix + 0x00)($zero)
-    sdv     $v1[0], (mITMatrix + 0x08)($zero)
-    sdv     $v2[0], (mITMatrix + 0x10)($zero)
-    sdv     $v4[0], (mITMatrix + 0x18)($zero)
-    sdv     $v5[0], (mITMatrix + 0x20)($zero)
-    j       vl_mod_after_calc_mit
-     sdv    $v6[0], (mITMatrix + 0x28)($zero)
-
+    
 .else // MOD_VL_REWRITE
 
 continue_light_dir_xfrm:
@@ -4127,5 +4069,166 @@ lights_finishone:
 
 .align 8
 ovl2_end:
+
+.if MOD_VL_REWRITE
+
+.headersize ovl23_start - orga()
+
+ovl4_start:
+vl_mod_calc_mit:
+    /*
+    Compute M inverse transpose. All regs available except $v0::$v7 and $v31.
+    $v31 constants present, but no other constants.
+    Register use (all only elems 0-2):
+    $v8:$v9   X left rotated int:frac, $v10:$v11 X right rotated int:frac
+    $v12:$v13 Y left rotated int:frac, $v14:$v15 Y right rotated int:frac
+    $v16:$v17 Z left rotated int:frac, $v18:$v19 Z right rotated int:frac
+    Rest temps.
+    Scale factor can be arbitrary, but final matrix must only reduce a vector's
+    magnitude (rotation * scale < 1). So want components of matrix to be < 0001.0000.
+    However, if input matrix has components on the order of 0000.0100, multiplying
+    two terms will reduce that to the order of 0000.0001, which kills all the precision.
+    */
+    // Get absolute value of all terms of M matrix.
+    vxor    $v30, $v30, $v30  // $v30 = 0
+    la      $12, mvMatrix + 0xE                              // For right rotates with lrv/ldv
+    vxor    $v20, $v0, $v31[1] // One's complement of X int part
+    sb      $7, mITValid                                      // $7 is 1 if we got here, mark valid
+    vlt     $v29, $v0, $v30[0] // X int part < 0
+    la      $11, mvMatrix + 2                                // For left rotates with lqv/ldv
+    vabs    $v21, $v0, $v4     // Apply sign of X int part to X frac part
+    lrv     $v10[0], (0x00)($12)                              // X int right shifted
+    vxor    $v22, $v1, $v31[1] // One's complement of Y int part
+    lrv     $v11[0], (0x20)($12)                              // X frac right shifted
+    vmrg    $v20, $v20, $v0    // $v20:$v21 = abs(X int:frac)
+    lqv     $v16[0], (0x10)($11)                              // Z int left shifted
+    vlt     $v29, $v1, $v30[0] // Y int part < 0
+    lqv     $v17[0], (0x30)($11)                              // Z frac left shifted
+    vabs    $v23, $v1, $v5     // Apply sign of Y int part to Y frac part
+    lsv     $v10[0], (0x02)($11)                              // X int right rot elem 2->0
+    vxor    $v24, $v2, $v31[1] // One's complement of Z int part
+    lsv     $v11[0], (0x22)($11)                              // X frac right rot elem 2->0
+    vmrg    $v22, $v22, $v1    // $v22:$v23 = abs(Y int:frac)
+    lsv     $v16[4],  (0x0E)($11)                             // Z int left rot elem 0->2
+    vlt     $v29, $v2, $v30[0] // Z int part < 0
+    lsv     $v17[4],  (0x2E)($11)                             // Z frac left rot elem 0->2
+    vabs    $v25, $v2, $v6     // Apply sign of Z int part to Z frac part
+    lrv     $v18[0], (0x10)($12)                              // Z int right shifted
+    vmrg    $v24, $v24, $v2    // $v24:$v25 = abs(Z int:frac)
+    lrv     $v19[0], (0x30)($12)                              // Z frac right shifted
+    // See if any of the int parts are nonzero. Also, get the maximum of the frac parts.
+    vge     $v21, $v21, $v23
+    lqv     $v8[0],  (0x00)($11)                              // X int left shifted
+    vor     $v20, $v20, $v22
+    lqv     $v9[0],  (0x20)($11)                              // X frac left shifted
+    vmudn   $v11, $v11, $v31[1] // -1; negate X right rot
+    lsv     $v18[0], (0x12)($11)                              // Z int right rot elem 2->0
+    vmadh   $v10, $v10, $v31[1]
+    lsv     $v19[0], (0x32)($11)                              // Z frac right rot elem 2->0
+    vge     $v21, $v21, $v25
+    lsv     $v8[4],  (-0x02)($11)                             // X int left rot elem 0->2
+    vor     $v20, $v20, $v24
+    lsv     $v9[4],  (0x1E)($11)                              // X frac left rot elem 0->2
+    vmudn   $v17, $v17, $v31[1] // -1; negate Z left rot
+    ldv     $v12[0], (0x08)($11)                              // Y int left shifted
+    vmadh   $v16, $v16, $v31[1]
+    ldv     $v13[0], (0x28)($11)                              // Y frac left shifted
+    vge     $v21, $v21, $v21[1h]
+    ldv     $v14[0], (-0x08)($12)                             // Y int right shifted
+    vor     $v20, $v20, $v20[1h]
+    ldv     $v15[0], (0x18)($12)                              // Y frac right shifted
+    vmudn   $v27, $v19, $v31[1] // -1; $v26:$v27 is negated copy of Z right rot
+    lsv     $v12[4], (0x06)($11)                              // Y int left rot elem 0->2
+    vmadh   $v26, $v18, $v31[1]
+    lsv     $v13[4], (0x26)($11)                              // Y frac left rot elem 0->2
+    vge     $v21, $v21, $v21[2h]
+    lsv     $v14[0], (0x0A)($11)                              // Y int right rot elem 2->0
+    vor     $v20, $v20, $v20[2h]
+    lsv     $v15[0], (0x2A)($11)                              // Y frac right rot elem 2->0
+    // Scale factor is 1/(2*(max^2)) (clamped if overflows).
+    // 1/(2*max) is what vrcp provides, so we multiply that by 2 and then by the rcp
+    // output. If we used the scale factor of 1/(max^2), the output matrix would have
+    // components on the order of 0001.0000, but we want the components to be smaller than this.
+    vrcp    $v28[1], $v21[0] // low in, low out (discarded)
+    vrcph   $v28[0], $v30[0] // zero in, high out (only care about elem 0)
+    vadd    $v22, $v28, $v28 // *2
+    vmudh   $v28, $v22, $v28 // (1/max) * (1/(2*max)), clamp to 0x7FFF
+    veq     $v29, $v20, $v30[0] // elem 0 (all int parts) == 0
+    vmrg    $v28, $v28, $v31[2] // If so, use computed normalization, else use 1 (elem 0)
+    /*
+    The original equations for the matrix rows are (XL = X rotated left, etc., n = normalization):
+    n*(YL*ZR - YR*ZL)
+    n*(ZL*XR - ZR*XL)
+    n*(XL*YR - XR*YL)
+    We need to apply the normalization to one of each of the terms before the multiply,
+    and also there's no multiply-subtract instruction, only multiply-add. Converted to:
+    (n*YL)*  ZR  + (n*  YR )*(-ZL)
+    (n*XL)*(-ZR) + (n*(-XR))*(-ZL)
+    (n*XL)*  YR  + (n*(-XR))*  YL
+    So the steps are:
+    Negate XR, negate ZL, negated copy of ZR (all done above)
+    Scale XL, scale negated XR
+    Do multiply-adds for Y and Z output vectors
+    Scale YL, scale YR
+    Do multiply-adds for X output vector
+    */
+    vmudn   $v9,  $v9,  $v28[0] // Scale XL
+    vmadh   $v8,  $v8,  $v28[0]
+    vmudn   $v11, $v11, $v28[0] // Scale XR
+    vmadh   $v10, $v10, $v28[0]
+    // Z output vector: XL*YR + XR*YL, with each term having had scale and/or negative applied
+    vmudl   $v29, $v9,  $v15
+    vmadm   $v29, $v8,  $v15
+    vmadn   $v29, $v9,  $v14
+    vmadh   $v29, $v8,  $v14
+    vmadl   $v29, $v11, $v13
+    vmadm   $v29, $v10, $v13
+    vmadn   $v25, $v11, $v12
+    vmadh   $v24, $v10, $v12 // $v24:$v25 = Z output
+    vmudn   $v13, $v13, $v28[0] // Scale YL
+    vmadh   $v12, $v12, $v28[0]
+    vmudn   $v15, $v15, $v28[0] // Scale YR
+    vmadh   $v14, $v14, $v28[0]
+    // Y output vector: XL*ZR + XR*ZL, with each term having had scale and/or negative applied
+    vmudl   $v29, $v9,  $v27 // Negated copy of ZR
+    vmadm   $v29, $v8,  $v27
+    vmadn   $v29, $v9,  $v26
+    vmadh   $v29, $v8,  $v26
+    sdv     $v25[0], (mITMatrix + 0x28)($zero)
+    vmadl   $v29, $v11, $v17
+    sdv     $v24[0], (mITMatrix + 0x10)($zero)
+    vmadm   $v29, $v10, $v17
+    vmadn   $v23, $v11, $v16
+    vmadh   $v22, $v10, $v16 // $v22:$v23 = Y output
+    // X output vector: YL*ZR + YR*ZL, with each term having had scale and/or negative applied
+    vmudl   $v29, $v13, $v19
+    vmadm   $v29, $v12, $v19
+    vmadn   $v29, $v13, $v18
+    vmadh   $v29, $v12, $v18
+    sdv     $v23[0], (mITMatrix + 0x20)($zero)
+    vmadl   $v29, $v15, $v17
+    sdv     $v22[0], (mITMatrix + 0x08)($zero)
+    vmadm   $v29, $v14, $v17
+    vmadn   $v21, $v15, $v16
+    vmadh   $v20, $v14, $v16 // $v20:$v21 = X output
+    sdv     $v21[0], (mITMatrix + 0x18)($zero)
+    sdv     $v20[0], (mITMatrix + 0x00)($zero)
+    /*
+    // TODO XXX temporarily, copy M to M inverse transpose
+    sdv     $v0[0], (mITMatrix + 0x00)($zero)
+    sdv     $v1[0], (mITMatrix + 0x08)($zero)
+    sdv     $v2[0], (mITMatrix + 0x10)($zero)
+    sdv     $v4[0], (mITMatrix + 0x18)($zero)
+    sdv     $v5[0], (mITMatrix + 0x20)($zero)
+    sdv     $v6[0], (mITMatrix + 0x28)($zero)
+    */
+    li      ovlTableEntry, overlayInfo2 // Load lighting overlay, but don't enter it
+    j       load_overlay_and_enter
+     li     postOvlRA, vl_mod_after_calc_mit // Jump back to vertex setup
+
+.align 8
+ovl4_end:
+
+.endif
 
 .close // CODE_FILE
