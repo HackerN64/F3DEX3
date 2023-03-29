@@ -3563,30 +3563,30 @@ vl_mod_point_light:
     vsub    $v23, $v23, $v20 // Int
     lbu     $20,     (ltBufOfs + 7 - lightSize)(curLight) // Linear factor
     vmudm   $v29, $v23, $v10 // Squared. Don't care about frac*frac term
-    sll     $11, $11, 13 // Constant factor, 00002000 - 001FE000
+    sll     $11, $11, 9 // Constant factor, 00000800 - 0001FE00
     vmadn   $v29, $v10, $v23
     sll     $24, $24, 14 // Quadratic factor, 00004000 - 003FC000
     vmadh   $v29, $v23, $v23
-    sll     $20, $20, 11 // Linear factor, 00000800 - 0007F800
+    sll     $20, $20, 7 // Linear factor, 00000800 - 00007F80
     vreadacc $v26, ACC_MIDDLE
     vreadacc $v25, ACC_UPPER
     mtc2    $11, vNormals[6] // Constant frac part in elem 3
     vmudm   $v29, vLtOne, $v26[2h] // Sum of squared components
     vmadh   $v29, vLtOne, $v25[2h]
-    srl     $11, $11, 16
     vmadm   $v29, vLtOne, $v26[1h]
     mtc2    $24, vLtLvl[6] // Quadratic frac part in elem 3
     vmadh   $v29, vLtOne, $v25[1h]
+    srl     $11, $11, 16
     vmadn   $v26, $v26, vLtOne // elem 0; swapped so we can do vmadn and get result
-    srl     $24, $24, 16
     vmadh   $v25, $v25, vLtOne
     mtc2    $20, vPairST[6] // Linear frac part in elem 3 (elems 0, 1, 4, 5 matter)
     vrsqh   $v29[2], $v25[0] // High input, garbage output
+    srl     $24, $24, 16
     vrsql   $v29[1], $v26[0] // Low input, low output
-    srl     $20, $20, 16
     vrsqh   $v29[0], $v25[4] // High input, high output
     mtc2    $11, vNormals[14] // Constant int part in elem 7
     vrsql   $v29[5], $v26[4] // Low input, low output
+    srl     $20, $20, 16
     vrsqh   $v29[4], vFogMask[3] // 0 input, high output
     vmudn   $v10, $v10, $v29[0h] // Vec frac * int scaling, discard result
     mtc2    $24, vLtLvl[14] // Quadratic int part in elem 7
@@ -3616,7 +3616,6 @@ vl_mod_point_light:
     vrcpl   $v10[6], $v25[4] // Light factor 0010.0000 -> normals /= 32
     vrcph   $v10[7], vFogMask[3] // 0
     vge     $v23, $v23, vFogMask[3] // Clamp dot product to >= 0
-    vand    $v10, $v10, $v31[7] // 0x7FFF; vrcp produces 0xFFFF when 1/0, change this to 0x7FFF
     vmudm   $v29, $v23, $v10[2h] // Dot product int * rcp frac
     j       vl_mod_finish_light
      vmadh  $v23, $v23, $v10[3h] // Dot product int * rcp int, clamp to 0x7FFF
@@ -4218,22 +4217,13 @@ vl_mod_calc_mit:
     vmadl   $v29, $v15, $v17
     sdv     $v22[0], (mITMatrix + 0x08)($zero)
     vmadm   $v29, $v14, $v17
+    li      ovlTableEntry, overlayInfo2 // Load lighting overlay, but don't enter it
     vmadn   $v21, $v15, $v16
+    li      postOvlRA, vl_mod_after_calc_mit // Jump back to vertex setup
     vmadh   $v20, $v14, $v16 // $v20:$v21 = X output
     sdv     $v21[0], (mITMatrix + 0x18)($zero)
-    sdv     $v20[0], (mITMatrix + 0x00)($zero)
-    /*
-    // TODO XXX temporarily, copy M to M inverse transpose
-    sdv     $v0[0], (mITMatrix + 0x00)($zero)
-    sdv     $v1[0], (mITMatrix + 0x08)($zero)
-    sdv     $v2[0], (mITMatrix + 0x10)($zero)
-    sdv     $v4[0], (mITMatrix + 0x18)($zero)
-    sdv     $v5[0], (mITMatrix + 0x20)($zero)
-    sdv     $v6[0], (mITMatrix + 0x28)($zero)
-    */
-    li      ovlTableEntry, overlayInfo2 // Load lighting overlay, but don't enter it
     j       load_overlay_and_enter
-     li     postOvlRA, vl_mod_after_calc_mit // Jump back to vertex setup
+     sdv    $v20[0], (mITMatrix + 0x00)($zero)
 
 .align 8
 ovl4_end:
