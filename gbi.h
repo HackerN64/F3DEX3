@@ -1110,9 +1110,10 @@ typedef union {
 #define G_MWO_POINT_ZSCREEN     0x1C
 
 #define G_MWO_CLIP_MOD_SETTINGS 0x00
-#define G_MWO_ATTR_OFFSET_ST    0x04
-#define G_MWO_ATTR_OFFSET_Z     0x08
-#define G_MWO_AMB_OCCLUSION     0x0C
+#define G_MWO_AMB_OCCLUSION     0x04
+#define G_MWO_FRESNEL           0x08
+#define G_MWO_ATTR_OFFSET_ST    0x0C
+#define G_MWO_ATTR_OFFSET_Z     0x10
 
 /*
  * Light structure.

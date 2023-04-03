@@ -3454,7 +3454,7 @@ vl_mod_skip_packed_normals:
     vreadacc $v26, ACC_MIDDLE // $v25:$v26 = normals squared
     vreadacc $v25, ACC_UPPER
     luv     vLtLvl, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
-    vmulf   $v10, vPairRGBA, vFogMask[2] // aoAmb factor; only care about elems 3, 7
+    vmudm   $v10, vPairRGBA, vFogMask[2] // (alpha - 1) * aoAmb factor; elems 3, 7
     vmudm   $v29, vLtOne, $v26[2h] // Sum of squared components
     vmadh   $v29, vLtOne, $v25[2h]
     vmadm   $v29, vLtOne, $v26[1h]
@@ -3485,7 +3485,7 @@ vl_mod_light_loop:
      luv    $v26,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
     vmulf   $v23, $v23, vNormals // Light dir * normalized normals
     vmudh   $v29, vLtOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
-    vmacf   $v10, vPairRGBA, vFogMask[6] // + (alpha - 1) * aoDir factor
+    vmadm   $v10, vPairRGBA, vFogMask[6] // + (alpha - 1) * aoDir factor
     vmudh   $v29, vLtOne, $v23[0h] // Sum components of dot product as signed
     vmadh   $v29, vLtOne, $v23[1h]
     vmadh   $v23, vLtOne, $v23[2h]
