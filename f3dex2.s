@@ -149,6 +149,10 @@ mITMatrix:
 //TODO
     .fill 0x10
     
+.if . != 0x00C0
+.error "Scissor and othermode must be at 0x00C0 for S2DEX"
+.endif
+    
 // scissor (four 12-bit values)
 scissorUpLeft: // the command byte is included since the command word is copied verbatim
     .dw (G_SETSCISSOR << 24) | ((  0 * 4) << 12) | ((  0 * 4) << 0)
@@ -179,8 +183,8 @@ perspNorm:
 displayListStackLength:
     .db 0x00 // starts at 0, increments by 4 for each "return address" pushed onto the stack
 
-mITValid:
-    .db 0
+// TODO
+    .db 0x48
 
 // viewport
 viewport:
@@ -318,6 +322,10 @@ attrOffsetZ:
 numLightsx18:
     .db 0   // Clobbers unused half of attrOffsetZ
     
+mITValid:
+    .db 0
+.align 2
+
 // excluding ambient light
 MAX_LIGHTS equ 7
 
@@ -1930,7 +1938,7 @@ ovl0_start:
     // actually at the beginning is only in 2.04H, so skipping is likely the intended
     // behavior. Maybe some other ucodes use this for detecting whether they were run
     // from scratch or called from another ucode?
-     li     $ra, start + 4
+     li     $ra, start // TODO jump to actual start
 
 .if . > start
     .error "ovl0_start does not fit within the space before the start of the ucode loaded with G_LOAD_UCODE"
