@@ -146,6 +146,9 @@ pMatrix:
 mITMatrix:
     .fill 0x30
     
+//TODO
+    .fill 0x10
+    
 // scissor (four 12-bit values)
 scissorUpLeft: // the command byte is included since the command word is copied verbatim
     .dw (G_SETSCISSOR << 24) | ((  0 * 4) << 12) | ((  0 * 4) << 0)
@@ -382,26 +385,6 @@ jumpTableEntry G_TRI1_handler
 jumpTableEntry G_TRI2_handler
 jumpTableEntry G_QUAD_handler
 
-// vertex pointers
-vertexTable:
-
-// The vertex table is a list of pointers to the location of each vertex in the buffer
-// After the last vertex pointer, there is a pointer to the address after the last vertex
-// This means there are really 33 entries in the table
-
-.macro vertexTableEntry, i
-    .dh vertexBuffer + (i * vtxSize)
-.endmacro
-
-.macro vertexTableEntries, i
-    .if i > 0
-        vertexTableEntries (i - 1)
-    .endif
-    vertexTableEntry i
-.endmacro
-
-    vertexTableEntries 32
-
 gCullMagicNumbers:
 // Values added to cross product (16-bit sign extended).
 // Then if sign bit is clear, cull the triangle.
@@ -556,6 +539,8 @@ clipPolyRead equ $17 // global
 // use has been fulfilled for the specific command.
 cmd_w1_dram equ $24 // Command word 1, which is also DMA DRAM addr; almost global, occasionally used locally
 cmd_w0      equ $25 // Command word 0; almost global, occasionally used locally
+vtxPtr    equ $25 // = cmd_w0
+endVtxPtr equ $24 // = cmd_w1_dram
 
 // Must keep values during the full vertex process: load, lighting, and vertex write
 // $1: count of remaining vertices
@@ -567,16 +552,6 @@ vPairMVPPosF equ $v23
 vPairMVPPosI equ $v24
 // Mods:
 vPairRGBA equ $v27
-
-// v25: prev vertex screen pos
-// v26: prev vertex screen Z
-// For point lighting
-mvTc0f equ $v3
-mvTc0i equ $v4
-mvTc1i equ $v21
-mvTc1f equ $v28
-mvTc2i equ $v30
-mvTc2f equ $v31
 
 // Values set up by load_spfx_global_values, which must be kept during the full
 // vertex process, and which are reloaded for each vert during clipping. See
@@ -640,8 +615,8 @@ postOvlRA     equ $12 // Commonly used locally
 // $v0: vZero (every element 0)
 // $v1: vOne (every element 1)
 // $v2: very common local
-// $v3: mvTc0f, local
-// $v4: mvTc0i, local
+// $v3: local
+// $v4: local
 // $v5: local
 // $v6: local
 // $v7: local
@@ -658,17 +633,17 @@ postOvlRA     equ $12 // Commonly used locally
 // $v18: vVpMisc, local
 // $v19: vFogMask, local
 // $v20: local
-// $v21: mvTc1i, vVpNegScale, local
+// $v21: vVpNegScale, local
 // $v22: vPairST, local
 // $v23: vPairMVPPosF, local
 // $v24: vPairMVPPosI, local
 // $v25: prev vertex data, local
 // $v26: prev vertex data, local
 // $v27: vPairRGBA, local
-// $v28: mvTc1f, local
+// $v28: local
 // $v29: register to write to discard results, local
-// $v30: mvTc2i, constant values for tri write
-// $v31: mvTc2f, general constant values
+// $v30: constant values for tri write
+// $v31: general constant values
 
 
 // Initialization routines
@@ -795,7 +770,34 @@ do_cmd_jump_table:                                      // If fell through, $1 h
      sll    $11, $11, 1                                 // Multiply jump table index in $2 by 2 for addr offset
     lhu     $11, cmdJumpTableForwardBack($11)           // Load address of handler from jump table
     jr      $11                                         // Jump to handler
+     // Delay slot is harmless; $ra never holds anything useful here.
+     
+G_SETxIMG_handler:
+    li      $ra, G_RDP_handler          // Load the RDP command handler into the return address, then fall through to convert the address to virtual
+// Converts the segmented address in cmd_w1_dram to the corresponding physical address
+segmented_to_physical:
+    srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
+    andi    $11, $11, 0x3C                // Clear the bottom 2 bits that remained during the shift
+    lw      $11, (segmentTable)($11)      // Get the current address of the segment
+    sll     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address to the left so that the top 8 bits are shifted out
+    srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
+    jr      $ra
+     add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
+G_CULLDL_handler:
+    j       vtx_addrs_from_cmd
+     la     $11, culldl_return_from_addrs
+culldl_return_from_addrs:
+    mfc2    vtxPtr, $v27[6]
+    la      $1, CLIP_MOD_MASK_SCRN_ALL
+    lhu     $11, VTX_CLIP(vtxPtr)
+    mfc2    endVtxPtr, $v27[14]
+culldl_loop:
+    and     $1, $1, $11
+    beqz    $1, run_next_DL_command           // Some vertex is on the screen-side of all clipping planes; have to render
+     lhu    $11, (vtxSize + VTX_CLIP)(vtxPtr) // next vertex clip flags
+    bne     vtxPtr, endVtxPtr, culldl_loop    // loop until reaching the last vertex
+     addiu  vtxPtr, vtxPtr, vtxSize           // advance to the next vertex
 G_ENDDL_handler:
     lbu     $1, displayListStackLength          // Load the DL stack index
     beqz    $1, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
@@ -813,37 +815,36 @@ G_DMA_IO_handler:
     j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
      li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
 
+G_MODIFYVTX_handler:
+    j       vtx_addrs_from_cmd
+     la     $11, modifyvtx_return_from_addrs
+modifyvtx_return_from_addrs:
+    lbu     $1, (inputBufferEnd - 0x07)(inputBufferPos)
+    j       do_moveword
+     mfc2   cmd_w0, $v27[6]
+
+G_BRANCH_WZ_handler:
+    j       vtx_addrs_from_cmd
+     la     $11, branchwz_return_from_addrs
+branchwz_return_from_addrs:
+    mfc2    vtxPtr, $v27[6]
+.if CFG_G_BRANCH_W                            // BRANCH_W/BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
+    lh      vtxPtr, VTX_W_INT(vtxPtr)         // read the w coordinate of the vertex (f3dzex)
+.else
+    lw      vtxPtr, VTX_SCR_Z(vtxPtr)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
+.endif
+    sub     $2, vtxPtr, cmd_w1_dram           // subtract the w/z value being tested
+    bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
+     lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
+    j       branch_dl
+     // Delay slot is harmless.
+
 G_GEOMETRYMODE_handler:
     lw      $11, geometryModeLabel  // load the geometry mode value
     and     $11, $11, cmd_w0        // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
     or      $11, $11, cmd_w1_dram   // sets the flags in cmd_w1_dram (set in g*SPSetGeometryMode)
     j       run_next_DL_command     // run the next DL command
      sw     $11, geometryModeLabel  // update the geometry mode value
-
-G_RDPHALF_2_handler:
-    ldv     $v29[0], (texrectWord1)($zero)
-    lw      cmd_w0, rdpHalf1Val                 // load the RDPHALF1 value into w0
-    addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
-    sdv     $v29[0], -8(rdpCmdBufPtr)
-G_RDP_handler:
-    sw      cmd_w1_dram, 4(rdpCmdBufPtr)        // Add the second word of the command to the RDP command buffer
-G_SYNC_handler:
-G_NOOP_handler:
-    sw      cmd_w0, 0(rdpCmdBufPtr)         // Add the command word to the RDP command buffer
-    j       check_rdp_buffer_full_and_run_next_cmd
-     addi   rdpCmdBufPtr, rdpCmdBufPtr, 8   // Increment the next RDP command pointer by 2 words
-
-G_SETxIMG_handler:
-    li      $ra, G_RDP_handler          // Load the RDP command handler into the return address, then fall through to convert the address to virtual
-// Converts the segmented address in cmd_w1_dram to the corresponding physical address
-segmented_to_physical:
-    srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
-    andi    $11, $11, 0x3C                // Clear the bottom 2 bits that remained during the shift
-    lw      $11, (segmentTable)($11)      // Get the current address of the segment
-    sll     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address to the left so that the top 8 bits are shifted out
-    srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
-    jr      $ra
-     add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
 G_RDPSETOTHERMODE_handler:
     sw      cmd_w0, otherMode0       // Record the local otherMode0 copy
@@ -854,10 +855,19 @@ G_SETSCISSOR_handler:
     sw      cmd_w0, scissorUpLeft            // Record the local scissorUpleft copy
     j       G_RDP_handler                    // Send the command to the RDP
      sw     cmd_w1_dram, scissorBottomRight  // Record the local scissorBottomRight copy
-
+     
+G_RDPHALF_2_handler:
+    ldv     $v29[0], (texrectWord1)($zero)
+    lw      cmd_w0, rdpHalf1Val                 // load the RDPHALF1 value into w0
+    addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
+    sdv     $v29[0], -8(rdpCmdBufPtr)
+G_RDP_handler:
+    sw      cmd_w1_dram, 4(rdpCmdBufPtr)        // Add the second word of the command to the RDP command buffer
+G_SYNC_handler:
+    sw      cmd_w0, 0(rdpCmdBufPtr)         // Add the command word to the RDP command buffer
+    addi    rdpCmdBufPtr, rdpCmdBufPtr, 8   // Increment the next RDP command pointer by 2 words
 check_rdp_buffer_full_and_run_next_cmd:
     li      $ra, run_next_DL_command    // Set up running the next DL command as the return address
-
 check_rdp_buffer_full:
      sub    $11, rdpCmdBufPtr, rdpCmdBufEnd
     blez    $11, return_routine         // Return if rdpCmdBufEnd >= rdpCmdBufPtr
@@ -1233,11 +1243,9 @@ G_VTX_handler:
     jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
      lhu    $1, (inputBufferEnd - 0x07)(inputBufferPos) // Size in inputVtxSize units
     srl     $2, cmd_w0, 11                     // n << 1
-    addiu   $11, inputBufferPos, inputBufferEnd - 0x08 // Out of reach of offset
     sub     $2, cmd_w0, $2                     // v0 << 1
     sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
-    lpv     $v27[0], (0)($11)                  // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3
-    j       vtx_indices_to_addr
+    j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3
      la     $11, vtx_return_from_addrs
 vtx_return_from_addrs:
     mfc2    $3, $v27[6]                        // Address of end in vtxSize units
@@ -1487,6 +1495,10 @@ vl_mod_skip_fog:
     jr      $ra
      ssv    $v20[4],          (VTX_SCR_Z     )(outputVtxPos)
 
+vtx_addrs_from_cmd:
+    // Treat eight bytes of last command each as vertex indices << 1
+    addiu   $12, inputBufferPos, inputBufferEnd - 0x08 // Out of reach of offset
+    lpv     $v27[0], (0)($12)
 vtx_indices_to_addr:
     // Input and output in $v27
     vxor    $v28, $v28, $v28  // Zero
@@ -1816,7 +1828,7 @@ no_textures:
     ssv     $v7[14], -0x0004(rdpCmdBufPtr)
     ssv     $v5[14], -0x000E(rdpCmdBufPtr)
     j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
-    ssv     $v18[14], -0x10(rdpCmdBufPtr)
+     ssv    $v18[14], -0x10(rdpCmdBufPtr)
 
 no_z_buffer:
     sdv     $v5[0], 0x0010($2)      // Store RGBA shade color (fractional)
@@ -1825,37 +1837,8 @@ no_z_buffer:
     j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
      sdv    $v18[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
 
-vtxPtr    equ $25 // = cmd_w0
-endVtxPtr equ $24 // = cmd_w1_dram
-G_CULLDL_handler:
-    lhu     vtxPtr, (vertexTable)(cmd_w0)     // load start vertex address
-    lhu     endVtxPtr, (vertexTable)(cmd_w1_dram) // load end vertex address
-    la      $1, CLIP_MOD_MASK_SCRN_ALL
-    lhu     $11, VTX_CLIP(vtxPtr)
-culldl_loop:
-    and     $1, $1, $11
-    beqz    $1, run_next_DL_command           // Some vertex is on the screen-side of all clipping planes; have to render
-     lhu    $11, (vtxSize + VTX_CLIP)(vtxPtr) // next vertex clip flags
-    bne     vtxPtr, endVtxPtr, culldl_loop    // loop until reaching the last vertex
-     addiu  vtxPtr, vtxPtr, vtxSize           // advance to the next vertex
-    j       G_ENDDL_handler                   // If got here, there's some clipping plane where all verts are outside it; skip DL
-G_BRANCH_WZ_handler:
-     lhu    vtxPtr, (vertexTable)(cmd_w0)     // get the address of the vertex being tested
-.if CFG_G_BRANCH_W                            // BRANCH_W/BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
-    lh      vtxPtr, VTX_W_INT(vtxPtr)         // read the w coordinate of the vertex (f3dzex)
-.else
-    lw      vtxPtr, VTX_SCR_Z(vtxPtr)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
-.endif
-    sub     $2, vtxPtr, cmd_w1_dram           // subtract the w/z value being tested
-    bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
-     lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
-    j       branch_dl
-G_MODIFYVTX_handler:
-     lbu    $1, (inputBufferEnd - 0x07)(inputBufferPos)
-    j       do_moveword
-     lhu    cmd_w0, (vertexTable)(cmd_w0)
+totalImemUseUpTo1FAC:
 
-     
 .if . > 0x00001FAC
     .error "Not enough room in IMEM"
 .endif
@@ -1899,10 +1882,10 @@ while_dma_full:
     mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from/to
     bltz    dmemAddr, dma_write       // If the DMEM address is negative, this is a DMA write, if not read
      mtc0   cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA from/to
-    jr $ra
+    jr      $ra
      mtc0   dmaLen, SP_RD_LEN         // Initiate a DMA read with a length of dmaLen
 dma_write:
-    jr $ra
+    jr      $ra
      mtc0   dmaLen, SP_WR_LEN         // Initiate a DMA write with a length of dmaLen
 
 .if . > 0x00002000
