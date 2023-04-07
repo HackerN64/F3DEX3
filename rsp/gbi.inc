@@ -18,10 +18,8 @@ G_SHADE                 equ 0x00000004
 G_CULL_FRONT            equ 0x00000200
 G_CULL_BACK             equ 0x00000400
 G_CULL_BOTH             equ 0x00000600
-.if MOD_ATTR_OFFSETS
 G_ATTROFFSET_ST_ENABLE  equ 0x00000100
 G_ATTROFFSET_Z_ENABLE   equ 0x00000800
-.endif
 G_PACKED_NORMALS        equ 0x00001000
 G_LIGHTTOALPHA          equ 0x00002000
 G_AMBOCCLUSION          equ 0x00004000
@@ -196,16 +194,9 @@ CLIP_SHIFT_SCAL equ 16
 CLIP_SHIFT_SCRN equ 0
 // Values used for far and near clipping.
 CLIP_FAR equ CLIP_PZ
-.if CFG_NoN
-    // No Nearclipping uses -w instead of -z
-    CLIP_NEAR equ CLIP_NW
-.else
-    CLIP_NEAR equ CLIP_NZ
-.endif
+CLIP_NEAR equ CLIP_NW // No Nearclipping uses -w instead of -z
 
-.if MOD_CLIP_CHANGES
-    // Could add CLIP_NZ and CLIP_PZ to SCRN if desired, even though not clipping there.
-    CLIP_MOD_MASK_SCRN_ALL equ ((CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY | CLIP_NEAR) >> 4)
-    CLIP_MOD_MASK_SCAL_ALL equ  (CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY)
-    CLIP_MOD_VTX_USED equ CLIP_PZ // won't ever be used for other things
-.endif
+// Could add CLIP_NZ and CLIP_PZ to SCRN if desired, even though not clipping there.
+CLIP_MOD_MASK_SCRN_ALL equ ((CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY | CLIP_NEAR) >> 4)
+CLIP_MOD_MASK_SCAL_ALL equ  (CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY)
+CLIP_MOD_VTX_USED equ CLIP_PZ // won't ever be used for other things
