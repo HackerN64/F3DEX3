@@ -146,7 +146,7 @@ pMatrix:
 mITMatrix:
     .fill 0x30
     
-//TODO
+//TODO put something useful here
     .fill 0x10
     
 .if . != 0x00C0
@@ -210,6 +210,11 @@ displayListStack:
 .align 16
 .if . - displayListStack != 0x48
     .warning "ID_STR incorrect length, affects displayListStack"
+.endif
+
+endSharedDMEM:
+.if . != 0x180
+    .error "endSharedDMEM at incorrect address, matters for G_LOAD_UCODE"
 .endif
 
 lightBufferLookat:
@@ -1927,18 +1932,15 @@ ovl0_start:
     jal     dma_read_write          // DMA DRAM read -> IMEM write
      li     dmaLen, (while_wait_dma_busy - start) - 1 // End of overwritable part of IMEM
     lw      cmd_w1_dram, rdpHalf1Val // Get DRAM address of ucode data from rdpHalf1Val
-    la      dmemAddr, spFxBase      // DMEM address is spFxBase
+    la      dmemAddr, endSharedDMEM // DMEM address is endSharedDMEM
     andi    dmaLen, cmd_w0, 0x0FFF  // Extract DMEM length from command word
-    add     cmd_w1_dram, cmd_w1_dram, dmemAddr // Start overwriting data from spFxBase
+    add     cmd_w1_dram, cmd_w1_dram, dmemAddr // Start overwriting data from endSharedDMEM
     jal     dma_read_write          // initate DMA read
      sub    dmaLen, dmaLen, dmemAddr // End that much before the end of DMEM
     j       while_wait_dma_busy
-    // Not sure why we skip the first instruction of the new ucode; in this ucode, it's
-    // zeroing vZero, but maybe it could be something else in other ucodes. But, starting
-    // actually at the beginning is only in 2.04H, so skipping is likely the intended
-    // behavior. Maybe some other ucodes use this for detecting whether they were run
-    // from scratch or called from another ucode?
-     li     $ra, start // TODO jump to actual start
+    // Jumping to actual start of new ucode, which zeros vZero. Not sure why later ucodes
+    // jumped one instruction in.
+     li     $ra, start
 
 .if . > start
     .error "ovl0_start does not fit within the space before the start of the ucode loaded with G_LOAD_UCODE"
