@@ -75,7 +75,8 @@ G_BRANCH_Z        equ 0x04
 G_TRI1            equ 0x05
 G_TRI2            equ 0x06
 G_QUAD            equ 0x07
-G_LINE3D          equ 0x08
+G_TRISTRIP        equ 0x08
+G_TRIFAN          equ 0x09
 
 // rdp
 G_SETCIMG         equ 0xff

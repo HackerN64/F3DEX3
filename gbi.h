@@ -49,7 +49,6 @@ Removed:
 #define G_TRI1              0x05
 #define G_TRI2              0x06
 #define G_QUAD              0x07
-#define G_LINE3D            0x08
 
 /* RDP commands: */
 #define G_SETCIMG           0xFF    /*  -1 */
@@ -1729,14 +1728,6 @@ typedef struct {
 } Gtexture;
 
 typedef struct {
-    int           cmd : 8;
-    unsigned char v0;
-    unsigned char v1;
-    unsigned char wd;
-    unsigned int  pad;
-} Gline3D;
-
-typedef struct {
     int       cmd  : 8;
     int       pad1 : 24;
     short int pad2;
@@ -1900,7 +1891,6 @@ typedef union {
     Gtri            tri;
     Gtri2           tri2;
     Gquad           quad;
-    Gline3D         line;
     Gcull           cull;
     Gmovewd         movewd;
     Gmovemem        movemem;
@@ -2166,15 +2156,6 @@ _DW({                                                   \
     ((flag) == 1) ? __gsSP1Triangle_w1(v1, v2, v0) :    \
                     __gsSP1Triangle_w1(v2, v0, v1))
 
-#define __gsSPLine3D_w1(v0, v1, wd)   \
-   (_SHIFTL((v0) * 2, 16, 8) |          \
-    _SHIFTL((v1) * 2,  8, 8) |          \
-    _SHIFTL((wd),      0, 8))
-
-#define __gsSPLine3D_w1f(v0, v1, wd, flag)        \
-   (((flag) == 0) ? __gsSPLine3D_w1(v0, v1, wd) :   \
-                    __gsSPLine3D_w1(v1, v0, wd))
-
 #define __gsSP1Quadrangle_w1f(v0, v1, v2, v3, flag)   \
    (((flag) == 0) ? __gsSP1Triangle_w1(v0, v1, v2) :    \
     ((flag) == 1) ? __gsSP1Triangle_w1(v1, v2, v3) :    \
@@ -2203,48 +2184,6 @@ _DW({                                                       \
 {                                           \
    (_SHIFTL(G_TRI1, 24, 8) |                \
     __gsSP1Triangle_w1f(v0, v1, v2, flag)), \
-    0                                       \
-}
-
-/***
- ***  Line
- ***/
-#define gSPLine3D(pkt, v0, v1, flag)                    \
-_DW({                                                   \
-    Gfx *_g = (Gfx *)(pkt);                             \
-                                                        \
-    _g->words.w0 = (_SHIFTL(G_LINE3D, 24, 8) |          \
-                    __gsSPLine3D_w1f(v0, v1, 0, flag)); \
-    _g->words.w1 = 0;                                   \
-})
-#define gsSPLine3D(v0, v1, flag)        \
-{                                       \
-   (_SHIFTL(G_LINE3D, 24, 8) |          \
-    __gsSPLine3D_w1f(v0, v1, 0, flag)), \
-    0                                   \
-}
-
-/***
- ***  LineW
- ***/
-/* these macros are the same as SPLine3D, except they have an
- * additional parameter for width. The width is added to the "minimum"
- * thickness, which is 1.5 pixels. The units for width are in
- * half-pixel units, so a width of 1 translates to (.5 + 1.5) or
- * a 2.0 pixels wide line.
- */
-#define gSPLineW3D(pkt, v0, v1, wd, flag)                   \
-_DW({                                                       \
-    Gfx *_g = (Gfx *)(pkt);                                 \
-                                                            \
-    _g->words.w0 = (_SHIFTL(G_LINE3D, 24, 8) |              \
-                    __gsSPLine3D_w1f(v0, v1, wd, flag));    \
-    _g->words.w1 = 0;                                       \
-})
-#define gsSPLineW3D(v0, v1, wd, flag)       \
-{                                           \
-   (_SHIFTL(G_LINE3D, 24, 8) |              \
-    __gsSPLine3D_w1f(v0, v1, wd, flag)),    \
     0                                       \
 }
 
