@@ -82,8 +82,8 @@ start                 task)         handlers)
 Many command
 handlers
 
-Overlay 2           Overlay 3
-(Lighting)          (Clipping)
+Overlay 2           Overlay 3       Overlay 4
+(Lighting)          (Clipping)      (mIT, rare cmds)
 
 Vertex and
 tri handlers
@@ -99,17 +99,8 @@ DMA code (end of this = IMEM 0x2000 = file 0xF80)
 Overlay 0
 Overlay 1
 Overlay 2
+Overlay 4
 */
-
-// Overlay table data member offsets
-overlay_load equ 0x0000
-overlay_len  equ 0x0004
-overlay_imem equ 0x0006
-.macro OverlayEntry, loadStart, loadEnd, imemAddr
-    .dw loadStart
-    .dh (loadEnd - loadStart - 1) & 0xFFFF
-    .dh (imemAddr) & 0xFFFF
-.endmacro
 
 .macro jumpTableEntry, addr
     .dh addr & 0xFFFF
@@ -419,19 +410,6 @@ clipPoly2:         //  \ / \ / \ /
 // but there needs to be room for the terminating 0, and clipMaskList below needs
 // to be word-aligned. So this is why it's 10 each.
 
-.align 4
-
-overlayInfo0:
-    OverlayEntry orga(ovl0_start), orga(ovl0_end), ovl0_start
-overlayInfo1:
-    OverlayEntry orga(ovl1_start), orga(ovl1_end), ovl1_start
-overlayInfo2:
-    OverlayEntry orga(ovl2_start), orga(ovl2_end), ovl2_start
-overlayInfo3:
-    OverlayEntry orga(ovl3_start), orga(ovl3_end), ovl3_start
-overlayInfo4:
-    OverlayEntry orga(ovl4_start), orga(ovl4_end), ovl4_start
-
 .align 8
 
 // Vertex buffer in RSP internal format
@@ -665,7 +643,7 @@ start: // This is at IMEM 0x1080, not the start of IMEM
     beqz    $11, task_init
      mtc0   $1, SP_STATUS
     andi    $12, $12, OS_TASK_YIELDED
-    beqz    $12, calculate_overlay_addrs    // skip overlay address calculations if resumed from yield?
+    beqz    $12, load_task_ptr    // skip overlay address calculations if resumed from yield?
      sw     $zero, OSTask + OSTask_flags
     j       load_overlay1_init              // Skip the initialization and go straight to loading overlay 1
      lw     taskDataPtr, OS_YIELD_DATA_SIZE - 8  // Was previously saved here at yield time
@@ -696,44 +674,21 @@ wait_dpc_start_valid:
 f3dzex_0000111C:
     sw      $2, rdpFifoPos
     lw      $11, matrixStackPtr
-    bnez    $11, calculate_overlay_addrs
+    bnez    $11, load_task_ptr
      lw     $11, OSTask + OSTask_dram_stack
     sw      $11, matrixStackPtr
-calculate_overlay_addrs:
-    lw      $1, OSTask + OSTask_ucode
-    la      $2, overlayInfo4 // Assumes all overlay info structs are contiguous
-    la      $3, overlayInfo0
-@@loop:
-    lw      $4, (overlay_load)($3)
-    add     $4, $4, $1
-    sw      $4, (overlay_load)($3)
-    bne     $2, $3, @@loop
-     addiu  $3, overlayInfo1 - overlayInfo0
+load_task_ptr:
     lw      taskDataPtr, OSTask + OSTask_data_ptr
 load_overlay1_init:
-    li      ovlTableEntry, overlayInfo1   // set up loading of overlay 1
+    la      cmd_w1_dram, orga(ovl1_start)
+    j       load_overlays_0_1
+     la     postOvlRA, displaylist_dma
 
-// Make room for overlays 0 and 1. Normally, overlay 1 ends exactly at ovl01_end,
-// and overlay 0 is much shorter, but if things are modded this constraint must be met.
-// The 0x88 is because the file starts 0x80 into IMEM, and the overlays can extend 8
-// bytes over the next two instructions as well.
-.orga max(orga(), max(ovl0_end - ovl0_start, ovl1_end - ovl1_start) - 0x88)
-
-// Also needs to be aligned so that ovl01_end is a DMA word, in case ovl0 and ovl1
-// are shorter than the code above and the code above is an odd number of instructions.
 .align 8
 
-// Unnecessarily clever code. The jal sets $ra to the address of the next instruction,
-// which is displaylist_dma. So the padding has to be before these two instructions,
-// so that this is immediately before displaylist_dma; otherwise the return address
-// will be in the last few instructions of overlay 1. However, this was unnecessary--
-// it could have been a jump and then `la postOvlRA, displaylist_dma`,
-// and the padding put after this.
-    jal     load_overlay_and_enter  // load overlay 1 and enter
-     move   postOvlRA, $ra          // set up the return address, since load_overlay_and_enter returns to postOvlRA
+.orga max(orga(), max(ovl0_end - ovl0_start, ovl1_end - ovl1_start) - 0x80)
 
 ovl01_end:
-// Overlays 0 and 1 overwrite everything up to this point (2.08 versions overwrite up to the previous .align 8)
 
 displaylist_dma: // loads inputBufferLength bytes worth of displaylist data via DMA into inputBuffer
     li      dmaLen, inputBufferLength - 1               // set the DMA length
@@ -918,8 +873,8 @@ ovl3_start:
 // Jump here to do lighting. If overlay 3 is loaded (this code), loads and jumps
 // to overlay 2 (same address as right here).
 ovl23_lighting_entrypoint_copy:  // same IMEM address as ovl23_lighting_entrypoint
-    li      ovlTableEntry, overlayInfo2          // set up a load for overlay 2
-    j       load_overlay_and_enter               // load overlay 2
+    li      cmd_w1_dram, orga(ovl2_start)        // set up a load for overlay 2
+    j       load_overlays_2_3_4                  // load overlay 2
      li     postOvlRA, ovl23_lighting_entrypoint // set the return address
 
 // Jump here to do clipping. If overlay 3 is loaded (this code), directly starts
@@ -1236,8 +1191,7 @@ clipping_done:
 
 .align 8
 
-// Leave room for loading overlay 2 if it is larger than overlay 3 (true for f3dzex)
-.orga max(ovl2_end - ovl2_start + orga(ovl3_start), orga())
+.orga max(max(ovl2_end - ovl2_start, ovl4_end - ovl4_start) + orga(ovl3_start), orga())
 ovl3_end:
 
 ovl23_end:
@@ -1278,8 +1232,8 @@ vtx_return_from_addrs:
     ldv     $v2[8],  (mvMatrix + 0x10)($zero)
     ldv     $v4[8],  (mvMatrix + 0x20)($zero)
     ldv     $v6[8],  (mvMatrix + 0x30)($zero)
-    li      ovlTableEntry, overlayInfo4        // $11
-    bnez    $7, load_overlay_and_enter         // run overlay 4 to compute M inverse transpose
+    li      cmd_w1_dram, orga(ovl4_start)      // $24
+    bnez    $7, load_overlays_2_3_4            // run overlay 4 to compute M inverse transpose
      li     postOvlRA, vl_mod_calc_mit         // $12
 vl_mod_after_calc_mit:
     lqv     $v8,     (pMatrix  + 0x00)($zero)
@@ -1381,7 +1335,7 @@ vl_mod_vtx_load_loop:
     // Elems 0-1 get bytes 6-7 of the following vertex (0)
     lpv     $v30[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
     vmrg    vPairRGBA, vPairRGBA, $v25 // Merge colors
-    bnez    $11, vl_mod_lighting
+    bnez    $11, ovl23_lighting_entrypoint
      // Elems 4-5 get bytes 6-7 of the following vertex (1)
      lpv    $v25[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
  vl_mod_return_from_lighting:
@@ -1841,33 +1795,32 @@ no_z_buffer:
     j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
      sdv    $v18[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
 
-totalImemUseUpTo1FAC:
-
-.if . > 0x00001FAC
-    .error "Not enough room in IMEM"
-.endif
-.org 0x1FAC
-
-// This subroutine sets up the values to load overlay 0 and then falls through
-// to load_overlay_and_enter to execute the load.
 load_overlay_0_and_enter:
 G_LOAD_UCODE_handler:
-    li      postOvlRA, ovl0_start                    // Sets up return address
-    li      ovlTableEntry, overlayInfo0              // Sets up ovl0 table address
-// This subroutine accepts the address of an overlay table entry and loads that overlay.
-// It then jumps to that overlay's address after DMA of the overlay is complete.
-// ovlTableEntry is used to provide the overlay table entry
-// postOvlRA is used to pass in a value to return to
-load_overlay_and_enter:
-    lw      cmd_w1_dram, overlay_load(ovlTableEntry) // Set up overlay dram address
-    lhu     dmaLen, overlay_len(ovlTableEntry)       // Set up overlay length
-    jal     dma_read_write                           // DMA the overlay
-     lhu    dmemAddr, overlay_imem(ovlTableEntry)    // Set up overlay load address
-    move    $ra, postOvlRA                // Set the return address to the passed in value
+    la      postOvlRA, 0x1000                        // Sets up return address
+    la      cmd_w1_dram, orga(ovl0_start)            // Sets up ovl0 table address
+// To use these: set postOvlRA ($12) to the address to execute after the load is
+// done, and set cmd_w1_dram to orga(your_overlay).
+load_overlays_0_1:
+    la      dmaLen, ovl01_end - 0x1000 - 1
+    j       load_overlay_inner
+     la     dmemAddr, 0x1000
+load_overlays_2_3_4:
+    la      dmaLen, ovl23_end - ovl23_start - 1
+    la      dmemAddr, ovl23_start
+load_overlay_inner:
+    lw      $11, OSTask + OSTask_ucode
+    jal     dma_read_write
+     add    cmd_w1_dram, cmd_w1_dram, $11
+    move    $ra, postOvlRA
+    // Fall through to while_wait_dma_busy
+    
+totalImemUseUpTo1FC8:
 
 .if . > 0x1FC8
     .error "Constraints violated on what can be overwritten at end of ucode (relevant for G_LOAD_UCODE)"
 .endif
+.org 0x1FC8
 
 while_wait_dma_busy:
     mfc0    ovlTableEntry, SP_DMA_BUSY    // Load the DMA_BUSY value into ovlTableEntry
@@ -1895,9 +1848,6 @@ dma_write:
 .if . > 0x00002000
     .error "Not enough room in IMEM"
 .endif
-
-// first overlay table at 0x02E0
-// overlay 0 (0x98 bytes loaded into 0x1000)
 
 .headersize 0x00001000 - orga()
 
@@ -2108,7 +2058,7 @@ ovl1_end:
 
 .headersize ovl23_start - orga()
 
-// Locals for vl_mod_lighting, but armips requires them to be defined on all codepaths.
+// Locals
 vNormals equ $v28
 vnPosXY equ $v23
 vnZ equ $v24
@@ -2117,15 +2067,14 @@ vLtOne equ $v24
 
 ovl2_start:
 ovl23_lighting_entrypoint:
-vl_mod_lighting:
     vmrg    vNormals, $v28, $v26          // Merge normals
     j       vl_mod_continue_lighting
      andi   $11, $5, G_PACKED_NORMALS >> 8
 
 ovl23_clipping_entrypoint_copy:  // same IMEM address as ovl23_clipping_entrypoint
     sh      $ra, rdpHalf1Val
-    li      ovlTableEntry, overlayInfo3       // set up a load of overlay 3
-    j       load_overlay_and_enter            // load overlay 3
+    li      cmd_w1_dram, orga(ovl3_start)     // set up a load of overlay 3
+    j       load_overlays_2_3_4               // load overlay 3
      li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
 
 vl_mod_continue_lighting:
@@ -2505,12 +2454,12 @@ vl_mod_calc_mit:
     vmadl   $v29, $v15, $v17
     sdv     $v22[0], (mITMatrix + 0x08)($zero)
     vmadm   $v29, $v14, $v17
-    li      ovlTableEntry, overlayInfo2 // Load lighting overlay, but don't enter it
+    li      cmd_w1_dram, orga(ovl2_start) // Load lighting overlay, but don't enter it
     vmadn   $v21, $v15, $v16
     li      postOvlRA, vl_mod_after_calc_mit // Jump back to vertex setup
     vmadh   $v20, $v14, $v16 // $v20:$v21 = X output
     sdv     $v21[0], (mITMatrix + 0x18)($zero)
-    j       load_overlay_and_enter
+    j       load_overlays_2_3_4
      sdv    $v20[0], (mITMatrix + 0x00)($zero)
 
 .align 8
