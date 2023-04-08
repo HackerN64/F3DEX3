@@ -146,8 +146,17 @@ pMatrix:
 mITMatrix:
     .fill 0x30
     
-//TODO put something useful here
-    .fill 0x10
+fogFactor:
+    .dw 0x00000000
+
+textureSettings1:
+    .dw 0x00000000 // first word, has command byte, bowtie val, level, tile, and on
+    
+textureSettings2:
+    .dw 0x00000000 // second word, has s and t scale
+    
+geometryModeLabel:
+    .dw 0x00000000 // originally initialized to G_CLIPPING, but this does nothing
     
 .if . != 0x00C0
 .error "Scissor and othermode must be at 0x00C0 for S2DEX"
@@ -182,9 +191,9 @@ perspNorm:
 // displaylist stack length
 displayListStackLength:
     .db 0x00 // starts at 0, increments by 4 for each "return address" pushed onto the stack
-
-// TODO
-    .db 0x48
+    
+mITValid:
+    .db 0
 
 // viewport
 viewport:
@@ -214,13 +223,14 @@ displayListStack:
 
 endSharedDMEM:
 .if . != 0x180
-    .error "endSharedDMEM at incorrect address, matters for G_LOAD_UCODE"
+    .error "endSharedDMEM at incorrect address, matters for G_LOAD_UCODE / S2DEX"
 .endif
 
+MAX_LIGHTS equ 7 // excluding ambient light
 lightBufferLookat:
     .skip (2 * lightSize)
 lightBufferMain:
-    .skip (8 * lightSize)
+    .skip ((MAX_LIGHTS + 1) * lightSize)
 ltBufOfs equ (lightBufferMain - spFxBase)
 
 // Base address for RSP effects DMEM region (see discussion in lighting below).
@@ -232,7 +242,9 @@ ltBufOfs equ (lightBufferMain - spFxBase)
 spFxBase:
 
 // constants for register $v31
-.align 0x10 // loaded with lqv
+.if (. & 15) != 0
+    .error "Wrong alignment for v31value"
+.endif
 // VCC patterns used:
 // vlt xxx, $v31, $v31[3]  = 11101110 in load_spfx_global_values (uses vne in mods)
 // vne xxx, $v31, $v31[3h] = 11101110 in lighting
@@ -249,7 +261,9 @@ v31Value:
     .dh 0x7FFF // used in vtx write, tri write, lighting, point lighting
 
 // constants for register $v30
-.align 0x10 // loaded with lqv
+.if (. & 15) != 0
+    .error "Wrong alignment for v30value"
+.endif
 // VCC patterns used:
 // vge xxx, $v30, $v30[7] = 11110001 in tri write
 v30Value:
@@ -273,31 +287,21 @@ the 4 and -4 come from. For tri write, the result needs to be multiplied by 4
 for subpixels, so it's 16 and -16.
 */
 
-.align 0x10 // loaded with lqv
+.if (. & 15) != 0
+    .error "Wrong alignment for linearGenerateCoefficients"
+.endif
 linearGenerateCoefficients:
     .dh 0xC000
     .dh 0x44D3
     .dh 0x6CB3
     .dh 2
-
-.if (. & 3) != 0
-.error "Wrong alignment before fogFactor"
-.endif
-
-fogFactor:
-    .dw 0x00000000
-
-textureSettings1:
-    .dw 0x00000000 // first word, has command byte, bowtie val, level, tile, and on
-
-// textureSettings2 and modClipRatio loaded together
-.if (. & 7) != 0
-.error "Wrong alignment before textureSettings2"
-.endif
-
-textureSettings2:
-    .dw 0x00000000 // second word, has s and t scale
     
+clipCondShifts:
+    .db CLIP_SHIFT_NY - 4
+    .db CLIP_SHIFT_PY - 4
+    .db CLIP_SHIFT_NX - 4
+    .db CLIP_SHIFT_PX - 4
+
 mwModsStart:
 modClipRatio:
     .dh 0x0002 // Clip ratio; strongly recommend keeping as 2
@@ -327,12 +331,6 @@ attrOffsetZ:
 numLightsx18:
     .db 0   // Clobbers unused half of attrOffsetZ
     
-mITValid:
-    .db 0
-.align 2
-
-// excluding ambient light
-MAX_LIGHTS equ 7
 
 // Movemem table
 movememTable:
@@ -421,15 +419,7 @@ clipPoly2:         //  \ / \ / \ /
 // but there needs to be room for the terminating 0, and clipMaskList below needs
 // to be word-aligned. So this is why it's 10 each.
 
-clipCondShifts:
-    .db CLIP_SHIFT_NY - 4
-    .db CLIP_SHIFT_PY - 4
-    .db CLIP_SHIFT_NX - 4
-    .db CLIP_SHIFT_PX - 4
-
 .align 4
-geometryModeLabel:
-    .dw G_CLIPPING
 
 overlayInfo0:
     OverlayEntry orga(ovl0_start), orga(ovl0_end), ovl0_start
@@ -1337,27 +1327,28 @@ aoAmb, aoDir set to 0 if ambient occlusion disabled
 @@skipz:
     andi    $11, $12, G_ATTROFFSET_ST_ENABLE
     bnez    $11, @@skipst                         // Skip if ST offset enabled
-     ldv    vVpMisc[0], (textureSettings2 - spFxBase)(spFxBaseReg) // Texture ST scale in 0, 1, clipRatio in 2
+     llv    vVpMisc[0], (textureSettings2)($zero) // Texture ST scale in 0, 1
     vxor    vFogMask, vFogMask, vFogMask          // If disabled, clear ST offset
 @@skipst:
     andi    $11, $12, G_AMBOCCLUSION
     vmov    $v20[6], $v20[3]                      // move aoDir to 6
     bnez    $11, @@skipao                         // Skip if ambient occlusion enabled
-     ldv    vVpMisc[8], (textureSettings2 - spFxBase)(spFxBaseReg) // Duplicated in 4-6
+     llv    vVpMisc[8], (textureSettings2)($zero) // Texture ST scale in 4, 5
     vor     $v20, $v21, $v21                      // Set aoAmb and aoDir to 0
 @@skipao:
     ldv     vVpFgScale[0], (viewport)($zero)      // Load vscale duplicated in 0-3 and 4-7
     ldv     vVpFgScale[8], (viewport)($zero)
-    llv     $v23[0], (fogFactor - spFxBase)(spFxBaseReg) // Load fog multiplier 0 and offset 1
     mtc2    $24, vVpMisc[4]                       // perspNorm
+    llv     $v23[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
     vmrg    vFogMask, vFogMask, $v20              // move aoAmb and aoDir into vFogMask
     vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
     vsub    $v20, $v21, vVpFgScale                // -vscale
+    vmrg    vVpMisc, vVpMisc, $v22                // Put 4s in elements 3,7
     vmrg    vVpFgScale, vVpFgScale, $v23[0]       // Put fog multiplier in elements 3,7 of vscale
     vadd    $v23, $v23, $v31[6]                   // Add 0x7F00 to fog offset
-    vmrg    vVpMisc, vVpMisc, $v22                // Put 4s in elements 3,7
     vmrg    vFogMask, vFogMask, $v21              // Put 0s in elements 3,7
     vmov    vVpFgScale[1], $v20[1]                // Negate vscale[1] because RDP top = y=0
+    lsv     vVpMisc[12], (modClipRatio - spFxBase)(spFxBaseReg) // clipRatio in elem 6
     vmov    vVpFgScale[5], $v20[1]                // Same for second half
     bnez    $ra, clipping_mod_after_constants     // Return to clipping if from there
      vmrg    vVpFgOffset, vVpFgOffset, $v23[1]    // Put fog offset in elements 3,7 of vtrans
