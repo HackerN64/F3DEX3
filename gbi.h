@@ -49,6 +49,8 @@ Removed:
 #define G_TRI1              0x05
 #define G_TRI2              0x06
 #define G_QUAD              0x07
+#define G_TRISTRIP          0x08
+#define G_TRIFAN            0x09
 
 /* RDP commands: */
 #define G_SETCIMG           0xFF    /*  -1 */
@@ -858,7 +860,10 @@ Removed:
  */
 typedef struct {
     short          ob[3];   /* x, y, z */
-    unsigned short flag;
+    union {
+        unsigned short packedNormals;
+        unsigned short flag;    /* for no-code-changes GBI backwards compatibility */
+    };
     short          tc[2];   /* texture coord */
     unsigned char  cn[4];   /* color & alpha */
 } Vtx_t;
@@ -868,7 +873,7 @@ typedef struct {
  */
 typedef struct {
     short          ob[3];   /* x, y, z */
-    unsigned short flag;
+    unsigned short flag;    /* not used when normals are in colors */
     short          tc[2];   /* texture coord */
     signed char    n[3];    /* normal */
     unsigned char  a;       /* alpha  */
@@ -879,33 +884,6 @@ typedef union {
     Vtx_tn n;   /* Use this one for normals */
     long long int force_structure_alignment;
 } Vtx;
-
-/*
- * Sprite structure
- */
-
-typedef struct {
-  void* SourceImagePointer;
-  void* TlutPointer;
-  short Stride;
-  short SubImageWidth;
-  short SubImageHeight;
-  char  SourceImageType;
-  char  SourceImageBitSize;
-  short SourceImageOffsetS;
-  short SourceImageOffsetT;
-  /* 20 bytes for above */
-
-  /* padding to bring structure size to 64 bit allignment */
-  char  dummy[4];
-} uSprite_t;
-
-typedef union {
-  uSprite_t s;
-
-  /* Need to make sure this is 64 bit aligned */
-  long long int force_structure_allignment[3];
-} uSprite;
 
 /*
  * Triangle face
@@ -1004,11 +982,8 @@ typedef union {
 
 /*
  * MOVEMEM indices
- *
- * Each of these indexes an entry in a dmem table
- * which points to a 1-4 word block of dmem in
- * which to store a 1-4 word DMA.
- *
+ * Each of these indexes an entry in a dmem table which points to an arbitrarily
+ * sized block of dmem in which to store the result of a DMA.
  */
 /* 0,4 are reserved by G_MTX */
 # define G_MV_MMTX      2
@@ -1016,44 +991,26 @@ typedef union {
 # define G_MV_VIEWPORT  8
 # define G_MV_LIGHT     10
 # define G_MV_POINT     12
-# define G_MV_MATRIX    14      /* NOTE: this is in moveword table */
-# define G_MVO_LOOKATX  (0 * 24)
-# define G_MVO_LOOKATY  (1 * 24)
-# define G_MVO_L0       (2 * 24)
-# define G_MVO_L1       (3 * 24)
-# define G_MVO_L2       (4 * 24)
-# define G_MVO_L3       (5 * 24)
-# define G_MVO_L4       (6 * 24)
-# define G_MVO_L5       (7 * 24)
-# define G_MVO_L6       (8 * 24)
-# define G_MVO_L7       (9 * 24)
+// G_MV_MATRIX is no longer supported because there is no MVP matrix.
 
 /*
  * MOVEWORD indices
- *
- * Each of these indexes an entry in a dmem table
- * which points to a word in dmem in dmem where
- * an immediate word will be stored.
- *
+ * Each of these indexes an entry in a dmem table which points to a word in dmem
+ * where an immediate word will be stored.
  */
-#define G_MW_MATRIX         0x00    /* NOTE: also used by movemem */
+#define G_MW_MODS           0x00 // replaces G_MW_MATRIX which is no longer supported
 #define G_MW_NUMLIGHT       0x02
-#define G_MW_CLIP           0x04
+#define G_MW_PERSPNORM      0x04 // replaces G_MW_CLIP which is no longer supported
 #define G_MW_SEGMENT        0x06
 #define G_MW_FOG            0x08
 #define G_MW_LIGHTCOL       0x0A
-#define G_MW_FORCEMTX       0x0C
-#define G_MW_PERSPNORM      0x0E
-#define G_MW_MODS           0x10
+// G_MW_FORCEMTX is no longer supported because there is no MVP matrix.
 
 /*
  * These are offsets from the address in the dmem table
  */
 #define G_MWO_NUMLIGHT          0x00
-#define G_MWO_CLIP_RNX          0x04
-#define G_MWO_CLIP_RNY          0x0C
-#define G_MWO_CLIP_RPX          0x14
-#define G_MWO_CLIP_RPY          0x1C
+
 #define G_MWO_SEGMENT_0         0x00
 #define G_MWO_SEGMENT_1         0x01
 #define G_MWO_SEGMENT_2         0x02
@@ -1071,38 +1028,25 @@ typedef union {
 #define G_MWO_SEGMENT_E         0x0E
 #define G_MWO_SEGMENT_F         0x0F
 #define G_MWO_FOG               0x00
+
+/* These are deprecated and no longer needed. */
 #define G_MWO_aLIGHT_1          0x00
 #define G_MWO_bLIGHT_1          0x04
-#define G_MWO_aLIGHT_2          0x18
-#define G_MWO_bLIGHT_2          0x1C
-#define G_MWO_aLIGHT_3          0x30
-#define G_MWO_bLIGHT_3          0x34
-#define G_MWO_aLIGHT_4          0x48
-#define G_MWO_bLIGHT_4          0x4C
-#define G_MWO_aLIGHT_5          0x60
-#define G_MWO_bLIGHT_5          0x64
-#define G_MWO_aLIGHT_6          0x78
-#define G_MWO_bLIGHT_6          0x7C
-#define G_MWO_aLIGHT_7          0x90
-#define G_MWO_bLIGHT_7          0x94
-#define G_MWO_aLIGHT_8          0xA8
-#define G_MWO_bLIGHT_8          0xAC
-#define G_MWO_MATRIX_XX_XY_I    0x00
-#define G_MWO_MATRIX_XZ_XW_I    0x04
-#define G_MWO_MATRIX_YX_YY_I    0x08
-#define G_MWO_MATRIX_YZ_YW_I    0x0C
-#define G_MWO_MATRIX_ZX_ZY_I    0x10
-#define G_MWO_MATRIX_ZZ_ZW_I    0x14
-#define G_MWO_MATRIX_WX_WY_I    0x18
-#define G_MWO_MATRIX_WZ_WW_I    0x1C
-#define G_MWO_MATRIX_XX_XY_F    0x20
-#define G_MWO_MATRIX_XZ_XW_F    0x24
-#define G_MWO_MATRIX_YX_YY_F    0x28
-#define G_MWO_MATRIX_YZ_YW_F    0x2C
-#define G_MWO_MATRIX_ZX_ZY_F    0x30
-#define G_MWO_MATRIX_ZZ_ZW_F    0x34
-#define G_MWO_MATRIX_WX_WY_F    0x38
-#define G_MWO_MATRIX_WZ_WW_F    0x3C
+#define G_MWO_aLIGHT_2          0x10
+#define G_MWO_bLIGHT_2          0x14
+#define G_MWO_aLIGHT_3          0x20
+#define G_MWO_bLIGHT_3          0x24
+#define G_MWO_aLIGHT_4          0x30
+#define G_MWO_bLIGHT_4          0x34
+#define G_MWO_aLIGHT_5          0x40
+#define G_MWO_bLIGHT_5          0x44
+#define G_MWO_aLIGHT_6          0x50
+#define G_MWO_bLIGHT_6          0x54
+#define G_MWO_aLIGHT_7          0x60
+#define G_MWO_bLIGHT_7          0x64
+#define G_MWO_aLIGHT_8          0x70
+#define G_MWO_bLIGHT_8          0x74
+
 #define G_MWO_POINT_RGBA        0x10
 #define G_MWO_POINT_ST          0x14
 #define G_MWO_POINT_XYSCREEN    0x18
@@ -1154,6 +1098,11 @@ typedef struct {
 } Ambient_t;
 
 typedef struct {
+    signed char   dir[3];   /* direction of lookat (normalized) */
+    char          pad;
+} LookAt_t;
+
+typedef struct {
     /* texture offsets for highlight 1/2 */
     int x1;
     int y1;
@@ -1172,60 +1121,70 @@ typedef union {
 } Ambient;
 
 typedef union {
-  PosLight_t p;
-  Light_t    l;
-  long long int force_structure_alignment[2];
+    PosLight_t p;
+    Light_t    l;
+    long long int force_structure_alignment[2];
 } PosLight;
 
+typedef union {
+    LookAt_t   l[2];
+    long long int force_structure_alignment[1];
+} LookAt;
+
+typedef union {
+    Hilite_t h;
+    long int force_structure_alignment;
+} Hilite;
+
 typedef struct {
-    Ambient a;
     Light   l[7];
+    Ambient a;
 } Lightsn;
 
 typedef struct {
-    Ambient a;
     /* F3DEX3 properly supports zero lights, unlike F3DEX2 where you need
     to include one black directional light. */
+    Ambient a;
 } Lights0;
 
 typedef struct {
-    Ambient a;
     Light   l[1];
+    Ambient a;
 } Lights1;
 
 typedef struct {
-    Ambient a;
     Light   l[2];
+    Ambient a;
 } Lights2;
 
 typedef struct {
-    Ambient a;
     Light   l[3];
+    Ambient a;
 } Lights3;
 
 typedef struct {
-    Ambient a;
     Light   l[4];
+    Ambient a;
 } Lights4;
 
 typedef struct {
-    Ambient a;
     Light   l[5];
+    Ambient a;
 } Lights5;
 
 typedef struct {
-    Ambient a;
     Light   l[6];
+    Ambient a;
 } Lights6;
 
 typedef struct {
-    Ambient a;
     Light   l[7];
+    Ambient a;
 } Lights7;
 
 typedef struct {
-    Ambient     a;
     PosLight    l[7];
+    Ambient     a;
 } PosLightsn;
 
 typedef struct {
@@ -1233,48 +1192,39 @@ typedef struct {
 } PosLights0;
 
 typedef struct {
-    Ambient     a;
     PosLight    l[1];
+    Ambient     a;
 } PosLights1;
 
 typedef struct {
-    Ambient     a;
     PosLight    l[2];
+    Ambient     a;
 } PosLights2;
 
 typedef struct {
-    Ambient     a;
     PosLight    l[3];
+    Ambient     a;
 } PosLights3;
 
 typedef struct {
-    Ambient     a;
     PosLight    l[4];
+    Ambient     a;
 } PosLights4;
 
 typedef struct {
-    Ambient     a;
     PosLight    l[5];
+    Ambient     a;
 } PosLights5;
 
 typedef struct {
-    Ambient     a;
     PosLight    l[6];
+    Ambient     a;
 } PosLights6;
 
 typedef struct {
-    Ambient     a;
     PosLight    l[7];
+    Ambient     a;
 } PosLights7;
-
-typedef struct {
-    Light   l[2];
-} LookAt;
-
-typedef union {
-    Hilite_t h;
-    long int force_structure_alignment;
-} Hilite;
 
 #define gdSPDefLights0(ar, ag, ab)  \
     {                               \
@@ -1287,27 +1237,23 @@ typedef union {
 #define gdSPDefLights1(ar, ag, ab,              \
                        r1, g1, b1, x1, y1, z1)  \
     {                                           \
-        {{                                      \
-            { ar, ag, ab }, 0,                  \
-            { ar, ag, ab }, 0,                  \
-        }},                                     \
         {                                       \
             {{                                  \
                 { r1, g1, b1 }, 0,              \
                 { r1, g1, b1 }, 0,              \
                 { x1, y1, z1 }, 0,              \
             }}                                  \
-        }                                       \
+        },                                      \
+        {{                                      \
+            { ar, ag, ab }, 0,                  \
+            { ar, ag, ab }, 0,                  \
+        }}                                      \
     }
 
 #define gdSPDefLights2(ar, ag, ab,              \
                        r1, g1, b1, x1, y1, z1,  \
                        r2, g2, b2, x2, y2, z2)  \
     {                                           \
-        {{                                      \
-            { ar, ag, ab }, 0,                  \
-            { ar, ag, ab }, 0,                  \
-        }},                                     \
         {                                       \
             {{                                  \
                 { r1, g1, b1 }, 0,              \
@@ -1319,7 +1265,11 @@ typedef union {
                 { r2, g2, b2 }, 0,              \
                 { x2, y2, z2 }, 0,              \
             }}                                  \
-        }                                       \
+        },                                      \
+        {{                                      \
+            { ar, ag, ab }, 0,                  \
+            { ar, ag, ab }, 0,                  \
+        }}                                      \
     }
 
 #define gdSPDefLights3(ar, ag, ab,              \
@@ -1327,10 +1277,6 @@ typedef union {
                        r2, g2, b2, x2, y2, z2,  \
                        r3, g3, b3, x3, y3, z3)  \
     {                                           \
-        {{                                      \
-            { ar, ag, ab }, 0,                  \
-            { ar, ag, ab }, 0,                  \
-        }},                                     \
         {                                       \
             {{                                  \
                 { r1, g1, b1 }, 0,              \
@@ -1347,7 +1293,11 @@ typedef union {
                 { r3, g3, b3 }, 0,              \
                 { x3, y3, z3 }, 0,              \
             }}                                  \
-        }                                       \
+        },                                      \
+        {{                                      \
+            { ar, ag, ab }, 0,                  \
+            { ar, ag, ab }, 0,                  \
+        }}                                      \
     }
 
 #define gdSPDefLights4(ar, ag, ab,              \
@@ -1356,10 +1306,6 @@ typedef union {
                        r3, g3, b3, x3, y3, z3,  \
                        r4, g4, b4, x4, y4, z4)  \
     {                                           \
-        {{                                      \
-            { ar, ag, ab }, 0,                  \
-            { ar, ag, ab }, 0,                  \
-        }},                                     \
         {                                       \
             {{                                  \
                 { r1, g1, b1 }, 0,              \
@@ -1381,7 +1327,11 @@ typedef union {
                 { r4, g4, b4 }, 0,              \
                 { x4, y4, z4 }, 0,              \
             }}                                  \
-        }                                       \
+        },                                      \
+        {{                                      \
+            { ar, ag, ab }, 0,                  \
+            { ar, ag, ab }, 0,                  \
+        }}                                      \
     }
 
 #define gdSPDefLights5(ar, ag, ab,              \
@@ -1391,10 +1341,6 @@ typedef union {
                        r4, g4, b4, x4, y4, z4,  \
                        r5, g5, b5, x5, y5, z5)  \
     {                                           \
-        {{                                      \
-            { ar, ag, ab }, 0,                  \
-            { ar, ag, ab }, 0,                  \
-        }},                                     \
         {                                       \
             {{                                  \
                 { r1, g1, b1 }, 0,              \
@@ -1421,7 +1367,11 @@ typedef union {
                 { r5, g5, b5 }, 0,              \
                 { x5, y5, z5 }, 0,              \
             }}                                  \
-        }                                       \
+        },                                      \
+        {{                                      \
+            { ar, ag, ab }, 0,                  \
+            { ar, ag, ab }, 0,                  \
+        }}                                      \
     }
 
 #define gdSPDefLights6(ar, ag, ab,              \
@@ -1432,10 +1382,6 @@ typedef union {
                        r5, g5, b5, x5, y5, z5,  \
                        r6, g6, b6, x6, y6, z6)  \
     {                                           \
-        {{                                      \
-            { ar, ag, ab }, 0,                  \
-            { ar, ag, ab }, 0,                  \
-        }},                                     \
         {                                       \
             {{                                  \
                 { r1, g1, b1 }, 0,              \
@@ -1467,7 +1413,11 @@ typedef union {
                 { r6, g6, b6 }, 0,              \
                 { x6, y6, z6 }, 0,              \
             }}                                  \
-        }                                       \
+        },                                      \
+        {{                                      \
+            { ar, ag, ab }, 0,                  \
+            { ar, ag, ab }, 0,                  \
+        }}                                      \
     }
 
 #define gdSPDefLights7(ar, ag, ab,              \
@@ -1479,10 +1429,6 @@ typedef union {
                        r6, g6, b6, x6, y6, z6,  \
                        r7, g7, b7, x7, y7, z7)  \
     {                                           \
-        {{                                      \
-            { ar, ag, ab}, 0,                   \
-            { ar, ag, ab}, 0,                   \
-        }},                                     \
         {                                       \
             {{                                  \
                 { r1, g1, b1 }, 0,              \
@@ -1519,72 +1465,71 @@ typedef union {
                 { r7, g7, b7 }, 0,              \
                 { x7, y7, z7 }, 0,              \
             }}                                  \
-        }                                       \
+        },                                      \
+        {{                                      \
+            { ar, ag, ab}, 0,                   \
+            { ar, ag, ab}, 0,                   \
+        }}                                      \
     }
 
 
 #define gdSPDefLookAt(rightx, righty, rightz, upx, upy, upz)    \
-    {{                                                          \
-        {{                                                      \
-            {      0,      0,      0 }, 0,                      \
-            {      0,      0,      0 }, 0,                      \
-            { rightx, righty, rightz }, 0,                      \
-        }},                                                     \
-        {{                                                      \
-            {   0, 128,   0 }, 0,                               \
-            {   0, 128,   0 }, 0,                               \
-            { upx, upy, upz }, 0,                               \
-        }},                                                     \
-    }}
+    {                                                           \
+        {{ rightx, righty, rightz }, 0 },                       \
+        {{ upx, upy, upz }, 0 },                                \
+    }
 
 
-#define _gdSPDefAmbient(ar,ag,ab)  {{ {ar,ag,ab},0,{ar,ag,ab},0}}
-#define _gdSPDefPosLight(r,g,b,x,y,z,c,l,q) {{ {r,g,b},c,{r,g,b},l,{x,y,z},q,0 }}
-#define _gdSPDefInfLight(r,g,b,x,y,z)       {{ {r,g,b},0,{r,g,b},0,{((x)<<8)|((y)&0xff),(z)<<8,0},0,0}}
+#define _gdSPDefAmbient(ar,ag,ab) \
+    {{ {ar,ag,ab},0,{ar,ag,ab},0}}
+#define _gdSPDefPosLight(r,g,b,x,y,z,c,l,q) \
+    {{ {r,g,b},c,{r,g,b},l,{x,y,z},q,0 }}
+#define _gdSPDefInfLight(r,g,b,x,y,z) \
+    {{ {r,g,b},0,{r,g,b},0,{((x)<<8)|((y)&0xff),(z)<<8,0},0,0}}
 #define gdSPDefPosLights0(ar,ag,ab) \
-  { _gdSPDefAmbient(ar,ag,ab) }
+    {   _gdSPDefAmbient(ar,ag,ab) }
 #define gdSPDefPosLights1(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1) \
-  { _gdSPDefAmbient(ar,ag,ab), \
-    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1)} }
+    {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1) },
+        _gdSPDefAmbient(ar,ag,ab) }
 #define gdSPDefPosLights2(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2) \
-  { _gdSPDefAmbient(ar,ag,ab), \
-    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
-      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2)} }
+    {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+        _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2) }, \
+        _gdSPDefAmbient(ar,ag,ab) }
 #define gdSPDefPosLights3(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3) \
-  { _gdSPDefAmbient(ar,ag,ab), \
-    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
-      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
-      _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3)} }
+    {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+        _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+        _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3) }, \
+        _gdSPDefAmbient(ar,ag,ab) }
 #define gdSPDefPosLights4(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3,r4,g4,b4,x4,y4,z4,c4,l4,q4) \
-  { _gdSPDefAmbient(ar,ag,ab), \
-    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
-      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
-      _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
-      _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4)} }
+    {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+        _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+        _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
+        _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4) }, \
+        _gdSPDefAmbient(ar,ag,ab) }
 #define gdSPDefPosLights5(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3,r4,g4,b4,x4,y4,z4,c4,l4,q4,r5,g5,b5,x5,y5,z5,c5,l5,q5) \
-  { _gdSPDefAmbient(ar,ag,ab), \
-    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
-      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
-      _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
-      _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4), \
-      _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5)} }
+    {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+        _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+        _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
+        _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4), \
+        _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5) }, \
+        _gdSPDefAmbient(ar,ag,ab) }
 #define gdSPDefPosLights6(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3,r4,g4,b4,x4,y4,z4,c4,l4,q4,r5,g5,b5,x5,y5,z5,c5,l5,q5,r6,g6,b6,x6,y6,z6,c6,l6,q6) \
-  { _gdSPDefAmbient(ar,ag,ab), \
-    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
-      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
-      _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
-      _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4), \
-      _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5), \
-      _gdSPDefPosLight(r6,g6,b6,x6,y6,z6,c6,l6,q6)} }
+    {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+        _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+        _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
+        _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4), \
+        _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5), \
+        _gdSPDefPosLight(r6,g6,b6,x6,y6,z6,c6,l6,q6) }, \
+        _gdSPDefAmbient(ar,ag,ab) }
 #define gdSPDefPosLights7(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3,r4,g4,b4,x4,y4,z4,c4,l4,q4,r5,g5,b5,x5,y5,z5,c5,l5,q5,r6,g6,b6,x6,y6,z6,c6,l6,q6,r7,g7,b7,x7,y7,z7,c7,l7,q7) \
-  { _gdSPDefAmbient(ar,ag,ab), \
-    { _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
-      _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
-      _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
-      _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4), \
-      _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5), \
-      _gdSPDefPosLight(r6,g6,b6,x6,y6,z6,c6,l6,q6), \
-      _gdSPDefPosLight(r7,g7,b7,x7,y7,z7,c7,l7,q7)} }
+    {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+        _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+        _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
+        _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4), \
+        _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5), \
+        _gdSPDefPosLight(r6,g6,b6,x6,y6,z6,c6,l6,q6), \
+        _gdSPDefPosLight(r7,g7,b7,x7,y7,z7,c7,l7,q7) }, \
+        _gdSPDefAmbient(ar,ag,ab) }
 
 
 typedef struct {
@@ -1623,11 +1568,10 @@ typedef struct {
 /*
  *  Graphics Moveword Packet
  */
-// Inaccurate for F3DEX2, offset and index are swapped
 typedef struct {
     int          cmd    : 8;
-    unsigned int offset : 16;
     unsigned int index  : 8;
+    unsigned int offset : 16;
     unsigned int data;
 } Gmovewd;
 
@@ -1682,19 +1626,10 @@ typedef struct {
     unsigned int  param;
 } Gpopmtx;
 
-/*
- * typedef struct {
- *      int     cmd:8;
- *      int     pad0:24;
- *      int     pad1:4;
- *      int     number:4;
- *      int     base:24;
- * } Gsegment;
- */
 typedef struct {
     int cmd      : 8;
-    int pad0     : 8;
     int mw_index : 8;
+    int pad0     : 8;
     int number   : 8;
     int pad1     : 8;
     int base     : 24;
@@ -2018,9 +1953,6 @@ _DW({                                               \
 #define gSPBranchList(pkt,dl)   gDma1p(pkt, G_DL, dl, 0, G_DL_NOPUSH)
 #define gsSPBranchList(   dl)   gsDma1p(    G_DL, dl, 0, G_DL_NOPUSH)
 
-#define gSPSprite2DBase(pkt, s) gDma1p(pkt, G_SPRITE2D_BASE, s, sizeof(uSprite), 0)
-#define gsSPSprite2DBase(s)     gsDma1p(    G_SPRITE2D_BASE, s, sizeof(uSprite), 0)
-
 /*
  * RSP short command (no DMA required) macros
  */
@@ -2106,44 +2038,6 @@ _DW({                                       \
     gDma1p((pkt), G_MOVEWORD, data, offset, index)
 #define gsMoveWd(    index, offset, data)           \
     gsDma1p(      G_MOVEWORD, data, offset, index)
-
-/* Sprite immediate macros, there is also a sprite dma macro above */
-
-#define gSPSprite2DScaleFlip(pkt, sx, sy, fx, fy)                   \
-_DW({                                                               \
-    Gfx *_g = (Gfx *)(pkt);                                         \
-                                                                    \
-    _g->words.w0 = (_SHIFTL(G_SPRITE2D_SCALEFLIP, 24, 8) |          \
-                    _SHIFTL((fx),                  8, 8) |          \
-                    _SHIFTL((fy),                  0, 8));          \
-    _g->words.w1 = (_SHIFTL((sx), 16, 16) |                         \
-                    _SHIFTL((sy),  0, 16));                         \
-})
-
-#define gsSPSprite2DScaleFlip(sx, sy, fx, fy)   \
-{                                               \
-   (_SHIFTL(G_SPRITE2D_SCALEFLIP, 24, 8) |      \
-    _SHIFTL((fx),                  8, 8) |      \
-    _SHIFTL((fy),                  0, 8)),      \
-   (_SHIFTL((sx), 16, 16) |                     \
-    _SHIFTL((sy),  0, 16))                      \
-}
-
-#define gSPSprite2DDraw(pkt, px, py)                    \
-_DW({                                                   \
-    Gfx *_g = (Gfx *)(pkt);                             \
-                                                        \
-    _g->words.w0 = (_SHIFTL(G_SPRITE2D_DRAW, 24, 8));   \
-    _g->words.w1 = (_SHIFTL((px), 16, 16) |             \
-                    _SHIFTL((py),  0, 16));             \
-})
-
-#define gsSPSprite2DDraw(px, py)        \
-{                                       \
-   (_SHIFTL(G_SPRITE2D_DRAW, 24, 8)),   \
-   (_SHIFTL((px), 16, 16) |             \
-    _SHIFTL((py),  0, 16))              \
-}
 
 
 #define __gsSP1Triangle_w1(v0, v1, v2)    \
@@ -2250,50 +2144,20 @@ _DW({                                                   \
     gsMoveWd(    G_MW_SEGMENT, (segment) * 4, base)
 
 /*
- * Clipping Macros
+ * Clipping Macros - Deprecated, encodes SP no-ops
  */
-#define FR_NEG_FRUSTRATIO_1 0x00000001
-#define FR_POS_FRUSTRATIO_1 0x0000FFFF
-#define FR_NEG_FRUSTRATIO_2 0x00000002
-#define FR_POS_FRUSTRATIO_2 0x0000FFFE
-#define FR_NEG_FRUSTRATIO_3 0x00000003
-#define FR_POS_FRUSTRATIO_3 0x0000FFFD
-#define FR_NEG_FRUSTRATIO_4 0x00000004
-#define FR_POS_FRUSTRATIO_4 0x0000FFFC
-#define FR_NEG_FRUSTRATIO_5 0x00000005
-#define FR_POS_FRUSTRATIO_5 0x0000FFFB
-#define FR_NEG_FRUSTRATIO_6 0x00000006
-#define FR_POS_FRUSTRATIO_6 0x0000FFFA
-/*
- * r should be one of: FRUSTRATIO_1, FRUSTRATIO_2, FRUSTRATIO_3, ... FRUSTRATIO_6
- */
-#define gSPClipRatio(pkt, r)                                \
-_DW({                                                       \
-    gMoveWd(pkt, G_MW_CLIP, G_MWO_CLIP_RNX, FR_NEG_##r);    \
-    gMoveWd(pkt, G_MW_CLIP, G_MWO_CLIP_RNY, FR_NEG_##r);    \
-    gMoveWd(pkt, G_MW_CLIP, G_MWO_CLIP_RPX, FR_POS_##r);    \
-    gMoveWd(pkt, G_MW_CLIP, G_MWO_CLIP_RPY, FR_POS_##r);    \
-})
+#define gSPClipRatio(pkt, r) \
+    gSPNoOp(pkt)
 
-#define gsSPClipRatio(r)                                \
-    gsMoveWd(G_MW_CLIP, G_MWO_CLIP_RNX, FR_NEG_##r),    \
-    gsMoveWd(G_MW_CLIP, G_MWO_CLIP_RNY, FR_NEG_##r),    \
-    gsMoveWd(G_MW_CLIP, G_MWO_CLIP_RPX, FR_POS_##r),    \
-    gsMoveWd(G_MW_CLIP, G_MWO_CLIP_RPY, FR_POS_##r)
+#define gsSPClipRatio(r) \
+    gsSPNoOp()
 
 /*
- * Load new matrix directly
- *
- * mptr = pointer to matrix
+ * Load new MVP matrix directly.
+ * This is no longer supported as there is no MVP matrix in F3DEX3.
  */
-#define gSPForceMatrix(pkt, mptr)                                       \
-_DW({                                                                   \
-    gDma2p((pkt),  G_MOVEMEM, (mptr), sizeof(Mtx), G_MV_MATRIX, 0);     \
-    gMoveWd((pkt), G_MW_FORCEMTX, 0, 0x00010000);                       \
-})
-#define gsSPForceMatrix(mptr)                                       \
-    gsDma2p(       G_MOVEMEM, (mptr), sizeof(Mtx), G_MV_MATRIX, 0), \
-    gsMoveWd(      G_MW_FORCEMTX, 0, 0x00010000)
+#define gSPForceMatrix(pkt, mptr) gSPNoOp(pkt)
+#define gsSPForceMatrix(mptr)    gsSPNoOp()
 
 
 /*
@@ -2491,8 +2355,11 @@ _DW({                                               \
 /*
  * Lighting Macros
  */
-#define NUML(n)    ((n) * 24)
-/* F3DEX3 properly supports zero lights. */
+#define NUML(n)    ((n) * 0x10)
+/*
+ * F3DEX3 properly supports zero lights. There is no need to use these macros
+ * anymore.
+ */
 #define NUMLIGHTS_0 0
 #define NUMLIGHTS_1 1
 #define NUMLIGHTS_2 2
@@ -2502,7 +2369,7 @@ _DW({                                               \
 #define NUMLIGHTS_6 6
 #define NUMLIGHTS_7 7
 /*
- * n should be one of: NUMLIGHTS_0, NUMLIGHTS_1, ..., NUMLIGHTS_7
+ * n should be an integer 0-7
  * NOTE: in addition to the number of directional lights specified,
  *       there is always 1 ambient light
  */
@@ -2521,195 +2388,119 @@ _DW({                                               \
 #define LIGHT_8     8
 
 /*
- * l should point to a Light struct
- * n should be one of: LIGHT_1, LIGHT_2, ..., LIGHT_8
- * NOTE: the highest numbered light is always the ambient light (eg if there are
- *       3 directional lights defined: gsSPNumLights(NUMLIGHTS_3), then lights
- *       LIGHT_1 through LIGHT_3 will be the directional lights and light
- *       LIGHT_4 will be the ambient light.
+ * l should point to a Light or PosLight struct.
+ * n should be an integer 1-7 to load lights 0-6.
+ * Can also load Ambient lights to lights 0-6 with this. However, must use
+ * SPAmbient to load light 7 (LIGHT_8) with an ambient light.
+ * Note that you can set multiple lights in one memory transaction with
+ * SPSetLights.
  */
-#define gSPLight(pkt, l, n)                                                \
-      gDma2p((pkt), G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, (n) * 24 + 24)
-#define gsSPLight(l, n)                                                    \
-     gsDma2p(       G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, (n) * 24 + 24)
+#define _CLAMP_LIGHT_TO_7(n) ((n) < 8 ? (n) : 7)
+#define _LIGHT_TO_OFFSET(n) (((n) - 1) * 0x10 + 8)
+#define gSPLight(pkt, l, n) \
+    gDma2p((pkt), G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, \
+        _LIGHT_TO_OFFSET(_CLAMP_LIGHT_TO_7(n)))
+#define gsSPLight(l, n) \
+    gsDma2p(      G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, \
+        _LIGHT_TO_OFFSET(_CLAMP_LIGHT_TO_7(n)))
+
+/*
+ * l should point to an Ambient struct.
+ * n should be an integer 1-8 to load lights 0-7.
+ */
+#define gSPAmbient(pkt, l, n) \
+    gDma2p((pkt), G_MOVEMEM, (l), sizeof(Ambient), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
+#define gsSPAmbient(l, n) \
+    gsDma2p(      G_MOVEMEM, (l), sizeof(Ambient), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
 
 /*
  * gSPLightColor changes color of light without recalculating light direction
- * col is a 32 bit word with r,g,b,a (alpha is ignored)
- * n should be one of LIGHT_1, LIGHT_2, ..., LIGHT_8
+ * col is a 32 bit word with r,g,b,a. For directional lights, a must be zero.
+ * For point lights, a becomes both the constant and linear factors, which is
+ * rarely desired. You can use the hidden _g*SPLightColor2 to specify a
+ * different factor for each.
+ * n should be an integer 1-8 to apply to light 0-7.
  */
 #define gSPLightColor(pkt, n, col)                  \
 _DW({                                               \
-    gMoveWd(pkt, G_MW_LIGHTCOL, G_MWO_a##n, col);   \
-    gMoveWd(pkt, G_MW_LIGHTCOL, G_MWO_b##n, col);   \
+    gMoveWd(pkt, G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 0, col);   \
+    gMoveWd(pkt, G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 4, col);   \
 })
 #define gsSPLightColor(n, col)                      \
-    gsMoveWd(G_MW_LIGHTCOL, G_MWO_a##n, col),       \
-    gsMoveWd(G_MW_LIGHTCOL, G_MWO_b##n, col)
+    gsMoveWd(G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 0, col),       \
+    gsMoveWd(G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 4, col)
 
 #define _gSPLightColor2(pkt, n, col1, col2) \
-{\
-  gMoveWd(pkt, G_MW_LIGHTCOL, G_MWO_a##n, col1);\
-  gMoveWd(pkt, G_MW_LIGHTCOL, G_MWO_b##n, col2);\
-}
+_DW({\
+  gMoveWd(pkt, G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 0, col1); \
+  gMoveWd(pkt, G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 4, col2); \
+})
 #define _gsSPLightColor2(n, col1, col2) \
-  gsMoveWd(G_MW_LIGHTCOL, G_MWO_a##n, col1),\
-  gsMoveWd(G_MW_LIGHTCOL, G_MWO_b##n, col2)
+  gsMoveWd(G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 0, col1), \
+  gsMoveWd(G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 4, col2)
 
-
-/* These macros use a structure "name" which is init'd with the gdSPDefLights macros*/
-
-#define gSPSetLights0(pkt,name)     \
-_DW({                               \
-    gSPNumLights(pkt, NUMLIGHTS_0); \
-    gSPLight(pkt, &name.a, 1);      \
-})
-#define gsSPSetLights0(name)        \
-    gsSPNumLights(NUMLIGHTS_0),     \
-    gsSPLight(&name.a, 1)
-
-#define gSPSetLights1(pkt,name)     \
-_DW({                               \
-    gSPNumLights(pkt, NUMLIGHTS_1); \
-    gSPLight(pkt, &name.l[0], 1);   \
-    gSPLight(pkt, &name.a, 2);      \
-})
-#define gsSPSetLights1(name)        \
-    gsSPNumLights(NUMLIGHTS_1),     \
-    gsSPLight(&name.l[0], 1),       \
-    gsSPLight(&name.a, 2)
-
-#define gSPSetLights2(pkt,name)     \
-_DW({                               \
-    gSPNumLights(pkt, NUMLIGHTS_2); \
-    gSPLight(pkt, &name.l[0], 1);   \
-    gSPLight(pkt, &name.l[1], 2);   \
-    gSPLight(pkt, &name.a, 3);      \
-})
-#define gsSPSetLights2(name)        \
-    gsSPNumLights(NUMLIGHTS_2),     \
-    gsSPLight(&name.l[0], 1),       \
-    gsSPLight(&name.l[1], 2),       \
-    gsSPLight(&name.a,3)
-
-#define gSPSetLights3(pkt,name)     \
-_DW({                               \
-    gSPNumLights(pkt, NUMLIGHTS_3); \
-    gSPLight(pkt, &name.l[0], 1);   \
-    gSPLight(pkt, &name.l[1], 2);   \
-    gSPLight(pkt, &name.l[2], 3);   \
-    gSPLight(pkt, &name.a, 4);      \
-})
-#define gsSPSetLights3(name)        \
-    gsSPNumLights(NUMLIGHTS_3),     \
-    gsSPLight(&name.l[0], 1),       \
-    gsSPLight(&name.l[1], 2),       \
-    gsSPLight(&name.l[2], 3),       \
-    gsSPLight(&name.a, 4)
-
-#define gSPSetLights4(pkt,name)     \
-_DW({                               \
-    gSPNumLights(pkt, NUMLIGHTS_4); \
-    gSPLight(pkt, &name.l[0], 1);   \
-    gSPLight(pkt, &name.l[1], 2);   \
-    gSPLight(pkt, &name.l[2], 3);   \
-    gSPLight(pkt, &name.l[3], 4);   \
-    gSPLight(pkt, &name.a, 5);      \
-})
-#define gsSPSetLights4(name)        \
-    gsSPNumLights(NUMLIGHTS_4),     \
-    gsSPLight(&name.l[0], 1),       \
-    gsSPLight(&name.l[1], 2),       \
-    gsSPLight(&name.l[2], 3),       \
-    gsSPLight(&name.l[3], 4),       \
-    gsSPLight(&name.a, 5)
-
-#define gSPSetLights5(pkt,name)     \
-_DW({                               \
-    gSPNumLights(pkt, NUMLIGHTS_5); \
-    gSPLight(pkt, &name.l[0], 1);   \
-    gSPLight(pkt, &name.l[1], 2);   \
-    gSPLight(pkt, &name.l[2], 3);   \
-    gSPLight(pkt, &name.l[3], 4);   \
-    gSPLight(pkt, &name.l[4], 5);   \
-    gSPLight(pkt, &name.a, 6);      \
-})
-
-#define gsSPSetLights5(name)        \
-    gsSPNumLights(NUMLIGHTS_5),     \
-    gsSPLight(&name.l[0], 1),       \
-    gsSPLight(&name.l[1], 2),       \
-    gsSPLight(&name.l[2], 3),       \
-    gsSPLight(&name.l[3], 4),       \
-    gsSPLight(&name.l[4], 5),       \
-    gsSPLight(&name.a, 6)
-
-#define gSPSetLights6(pkt,name)     \
-_DW({                               \
-    gSPNumLights(pkt, NUMLIGHTS_6); \
-    gSPLight(pkt, &name.l[0], 1);   \
-    gSPLight(pkt, &name.l[1], 2);   \
-    gSPLight(pkt, &name.l[2], 3);   \
-    gSPLight(pkt, &name.l[3], 4);   \
-    gSPLight(pkt, &name.l[4], 5);   \
-    gSPLight(pkt, &name.l[5], 6);   \
-    gSPLight(pkt, &name.a, 7);      \
-})
-
-#define gsSPSetLights6(name)        \
-    gsSPNumLights(NUMLIGHTS_6),     \
-    gsSPLight(&name.l[0], 1),       \
-    gsSPLight(&name.l[1], 2),       \
-    gsSPLight(&name.l[2], 3),       \
-    gsSPLight(&name.l[3], 4),       \
-    gsSPLight(&name.l[4], 5),       \
-    gsSPLight(&name.l[5], 6),       \
-    gsSPLight(&name.a, 7)
-
-#define gSPSetLights7(pkt,name)     \
-_DW({                               \
-    gSPNumLights(pkt, NUMLIGHTS_7); \
-    gSPLight(pkt, &name.l[0], 1);   \
-    gSPLight(pkt, &name.l[1], 2);   \
-    gSPLight(pkt, &name.l[2], 3);   \
-    gSPLight(pkt, &name.l[3], 4);   \
-    gSPLight(pkt, &name.l[4], 5);   \
-    gSPLight(pkt, &name.l[5], 6);   \
-    gSPLight(pkt, &name.l[6], 7);   \
-    gSPLight(pkt, &name.a, 8);      \
-})
-
-#define gsSPSetLights7(name)        \
-    gsSPNumLights(NUMLIGHTS_7),     \
-    gsSPLight(&name.l[0], 1),       \
-    gsSPLight(&name.l[1], 2),       \
-    gsSPLight(&name.l[2], 3),       \
-    gsSPLight(&name.l[3], 4),       \
-    gsSPLight(&name.l[4], 5),       \
-    gsSPLight(&name.l[5], 6),       \
-    gsSPLight(&name.l[6], 7),       \
-    gsSPLight(&name.a, 8)
 
 /*
- * Reflection/Hiliting Macros
+ * Set all your scene's lights (directional/point + ambient) with one memory
+ * transaction.
+ * n is the number of directional / point lights, from 0 to 7. There is also
+ * always an ambient light.
+ * name should be the name of a Lights* or PosLights* struct filled in with all
+ * the lighting data. You can use the gdSPDef* macros to fill in the struct or
+ * just do it manually. Example:
+ * PosLights2 myLights; // 2 pos + 1 ambient
+ * <code to fill in the fields of myLights>
+ * gSPSetLights(POLY_OPA_DISP++, 2, myLights);
  */
-#define gSPLookAtX(pkt, l)                                                 \
-     gDma2p((pkt),G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, G_MVO_LOOKATX)
-#define gsSPLookAtX(l)                                                     \
-     gsDma2p(     G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, G_MVO_LOOKATX)
-#define gSPLookAtY(pkt, l)                                                 \
-     gDma2p((pkt),G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, G_MVO_LOOKATY)
-#define gsSPLookAtY(l)                                                     \
-     gsDma2p(     G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, G_MVO_LOOKATY)
-
-#define gSPLookAt(pkt, la)              \
-_DW({                                   \
-    gSPLookAtX(pkt, la);                \
-    gSPLookAtY(pkt, (char*)(la) + 16);  \
+#define gSPSetLights(pkt, n, name) \
+_DW({
+    gSPNumLights(pkt, n); \
+    gDma2p((pkt),  G_MOVEMEM, &name, (n) * 0x10 + 8, G_MV_LIGHT, 8); \
 })
-#define gsSPLookAt(la)              \
-    gsSPLookAtX(la),                \
-    gsSPLookAtY((char*)(la) + 16)
+#define gsSPSetLights(n, name) \
+    gsSPNumLights(n), \
+    gsDma2p(G_MOVEMEM, &name, (n) * 0x10 + 8, G_MV_LIGHT, 8)
+
+#define  gSPSetLights0(pkt, name)  gSPSetLights(pkt, 0, name)
+#define gsSPSetLights0(name)      gsSPSetLights(     0, name)
+#define  gSPSetLights1(pkt, name)  gSPSetLights(pkt, 1, name)
+#define gsSPSetLights1(name)      gsSPSetLights(     1, name)
+#define  gSPSetLights2(pkt, name)  gSPSetLights(pkt, 2, name)
+#define gsSPSetLights2(name)      gsSPSetLights(     2, name)
+#define  gSPSetLights3(pkt, name)  gSPSetLights(pkt, 3, name)
+#define gsSPSetLights3(name)      gsSPSetLights(     3, name)
+#define  gSPSetLights4(pkt, name)  gSPSetLights(pkt, 4, name)
+#define gsSPSetLights4(name)      gsSPSetLights(     4, name)
+#define  gSPSetLights5(pkt, name)  gSPSetLights(pkt, 5, name)
+#define gsSPSetLights5(name)      gsSPSetLights(     5, name)
+#define  gSPSetLights6(pkt, name)  gSPSetLights(pkt, 6, name)
+#define gsSPSetLights6(name)      gsSPSetLights(     6, name)
+#define  gSPSetLights7(pkt, name)  gSPSetLights(pkt, 7, name)
+#define gsSPSetLights7(name)      gsSPSetLights(     7, name)
+
+
+/*
+ * Reflection/Hiliting Macros.
+ * la is the name/address of a LookAt struct.
+ */
+#define gSPLookAt(pkt, la) \
+    gDma2p((pkt), G_MOVEMEM, (la), sizeof(LookAt), G_MV_LIGHT, 0)
+#define gSPLookAt(la) \
+    gsDma2p(      G_MOVEMEM, (la), sizeof(LookAt), G_MV_LIGHT, 0)
+ 
+/*
+ * These versions are deprecated, please use g*SPLookAt. The two directions
+ * cannot be set independently anymore as they both fit within one memory word.
+ * (They could be set with moveword, but then the values would have to be within
+ * the command itself, not at a memory address.)
+ * This deprecated version has the X command set both (assuming l is the name /
+ * address of a LookAt struct) and has the Y command as a SP no-op.
+ */
+#define gSPLookAtX(pkt, l) gSPLookAt(pkt, l)
+#define gsSPLookAtX(l)     gsSPLookAt(l)
+#define gSPLookAtY(pkt, l) gSPNoOp(pkt)
+#define gsSPLookAtY(l)     gsSPNoOp()
+
 
 #define gDPSetHilite1Tile(pkt, tile, hilite, width, height) \
     gDPSetTileSize(pkt, tile,                               \
@@ -3303,8 +3094,6 @@ _DW({                                                   \
 /*
  * Texturing macros
  */
-
-/* These are also defined defined above for Sprite Microcode */
 
 #define G_TX_LOADTILE   7
 #define G_TX_RENDERTILE 0

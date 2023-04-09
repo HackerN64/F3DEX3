@@ -121,7 +121,8 @@ G_MV_LIGHT    equ 0x0A
 G_MV_POINT    equ 0x0C
 G_MV_MATRIX   equ 0x0E
 
-lightSize equ 0x18
+MAX_LIGHTS equ 7 // excluding ambient light
+lightSize equ 0x10
 
 // Input Vertex structure offsets, should match Vtx structure in gbi.h
 inputVtxSize equ 0x10

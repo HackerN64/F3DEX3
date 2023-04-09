@@ -217,11 +217,12 @@ endSharedDMEM:
     .error "endSharedDMEM at incorrect address, matters for G_LOAD_UCODE / S2DEX"
 .endif
 
-MAX_LIGHTS equ 7 // excluding ambient light
 lightBufferLookat:
-    .skip (2 * lightSize)
+    .skip 8 // s8 X0, Y0, Z0, dummy, X1, Y1, Z1, dummy
 lightBufferMain:
-    .skip ((MAX_LIGHTS + 1) * lightSize)
+    .skip (MAX_LIGHTS * lightSize)
+lightBufferAmbient:
+    .skip 8 // just colors for ambient light
 ltBufOfs equ (lightBufferMain - spFxBase)
 
 // Base address for RSP effects DMEM region (see discussion in lighting below).
@@ -319,7 +320,7 @@ attrOffsetZ:
     .dh 0x0000
 
     .db 0
-numLightsx18:
+numLightsxSize:
     .db 0   // Clobbers unused half of attrOffsetZ
     
 
@@ -334,20 +335,16 @@ tempMemRounded equ ((clipTempVerts + 15) & ~15)
     .dh viewport          // G_MV_VIEWPORT
     .dh lightBufferLookat // G_MV_LIGHT
     .dh vertexBuffer      // G_MV_POINT
-// Further entries in the movemem table come from the moveword table
 
 // moveword table
 movewordTable:
-    .dh clipTempVerts    // G_MW_MATRIX; discard writes to here
-    .dh numLightsx18 - 3 // G_MW_NUMLIGHT
-    .dh clipTempVerts    // G_MW_CLIP; discard writes to here
+    .dh mwModsStart      // G_MW_MODS: 0 = large tri thresh and clip ratio,
+                         // 1 = attrOffsetST, 2 = attrOffsetZ, 3 = ambient occlusion
+    .dh numLightsxSize - 3 // G_MW_NUMLIGHT
+    .dh perspNorm - 2    // G_MW_PERSPNORM
     .dh segmentTable     // G_MW_SEGMENT
     .dh fogFactor        // G_MW_FOG
     .dh lightBufferMain  // G_MW_LIGHTCOL
-    .dh clipTempVerts    // G_MW_FORCEMTX; discard writes to here
-    .dh perspNorm - 2    // G_MW_PERSPNORM
-    .dh mwModsStart      // G_MW_MODS: 0 = large tri thresh and clip ratio,
-                         // 1 = attrOffsetST, 2 = attrOffsetZ, 3 = ambient occlusion
 
 // G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
 movememHandlerTable:
@@ -2047,7 +2044,7 @@ do_movemem:
      andi   $1, cmd_w0, 0x00FE                              // Move the movemem table index into $1 (bits 1-7 of the first command word)
     lbu     dmaLen, (inputBufferEnd - 0x07)(inputBufferPos) // Move the second byte of the first command word into dmaLen
     lhu     dmemAddr, (movememTable)($1)                    // Load the address of the memory location for the given movemem index
-    srl     $2, cmd_w0, 5                                   // Left shifts the index by 5 (which is then added to the value read from the movemem table)
+    srl     $2, cmd_w0, 5                                   // ((w0) >> 8) << 3; top 3 bits of idx must be 0; lower 1 bit of len byte must be 0
     lh      $ra, (movememHandlerTable - (G_POPMTX | 0xFF00))($12)  // Loads the return address from movememHandlerTable based on command byte
     j       dma_read_write
 G_SETOTHERMODE_H_handler: // These handler labels must be 4 bytes apart for the code below to work
@@ -2151,7 +2148,7 @@ vl_mod_skip_packed_normals:
     vmadh   vNormals, $v26, vNormals[2h]
     // Normalize normals
     // Also set up ambient occlusion: light *= (factor * (alpha - 1) + 1)
-    lbu     curLight, numLightsx18
+    lbu     curLight, numLightsxSize
     vsub    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; offset alpha, will be fixed later
     sll     $12, $5, 17 // G_LIGHTING_POSITIONAL = 0x00400000; $5 is middle 16 bits so 0x00004000
     vadd    vLtOne, vLtOne, $v31[2] // vLtOne = 1
@@ -2183,9 +2180,9 @@ vl_mod_skip_packed_normals:
 vl_mod_light_loop:
     // $v20:$v21 vert pos, vPairST, $v23 light pos/dir (then local), $v10 $v25 locals,
     // $v26 light color, vPairRGBA, vNormals, $v29 temp, vLtLvl, vLtOne
-    lpv     $v23[0], (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 1 dir in elems 0-2
+    lpv     $v23[0], (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 0 dir in elems 0-2
     vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
-    lpv     $v25[4], (ltBufOfs + 8 - lightSize)(curLight) // Dir in elems 4-6
+    lpv     $v25[4], (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 0 dir in elems 4-6
     lbu     $11,     (ltBufOfs + 3 - lightSize)(curLight) // Light type / constant attenuation
     beq     curLight, spFxBaseReg, vl_mod_lighting_done
      vmrg   $v23, $v23, $v25                              // $v23 = light direction
@@ -2208,13 +2205,13 @@ vl_mod_finish_light:
 
 vl_mod_lighting_done:
     vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
-    lpv     $v10[0], (ltBufOfs + 8 - 2 * lightSize)(curLight) // Lookat 0 dir in elems 0-2
-    lpv     $v26[4], (ltBufOfs + 8 - 2 * lightSize)(curLight) // Dir in elems 4-6
+    lpv     $v10[4], (ltBufOfs + 0 - lightSize)(curLight) // Lookat 1 dir in elems 0-2
+    lpv     $v26[0], (ltBufOfs + 8 - lightSize)(curLight) // Lookat 1 dir in elems 4-6
     andi    $11, $5, G_LIGHTTOALPHA >> 8
-    vmulf   $v23, vNormals, $v23 // Normal * lookat 1 dir
+    vmulf   $v23, vNormals, $v23 // Normal * lookat 0 dir
     andi    $12, $5, G_PACKED_NORMALS >> 8
     vmulf   $v25, vPairRGBA, vLtLvl     // Base output is RGB * light
-    vmrg    $v10, $v10, $v26                              // $v10 = lookat 0 dir
+    vmrg    $v10, $v10, $v26                              // $v10 = lookat 1 dir
     vor     $v26, vPairRGBA, vPairRGBA  // $v26 = alpha output = vtx alpha (only 3, 7 matter)
     beqz    $11, vl_mod_skip_cel
      vne    $v29, $v31, $v31[3h] // Set VCC to 11101110
@@ -2227,21 +2224,21 @@ vl_mod_skip_cel:
     ldv     $v10[0], (pMatrix  + 0x10)($zero) // Restore v10 before returning
     vmadh   $v29, vLtOne, $v23[1h]
     bnez    $12, vl_mod_skip_novtxcolor
-     vmadh  $v23, vLtOne, $v23[2h] // Dot product 1
+     vmadh  $v23, vLtOne, $v23[2h] // Dot product 0
     vor     $v25, vLtLvl, vLtLvl // If no packed normals, base output is just light
 vl_mod_skip_novtxcolor:
     vmudh   $v29, vLtOne, $v28[0h]
     ldv     $v10[8], (pMatrix  + 0x10)($zero)
     vmadh   $v29, vLtOne, $v28[1h]
     lqv     $v30[0], (linearGenerateCoefficients)($zero) // Was vLtLvl
-    vmadh   $v28, vLtOne, $v28[2h] // Dot product 0
+    vmadh   $v28, vLtOne, $v28[2h] // Dot product 1
     beqz    $24, vl_mod_return_from_lighting
      vmrg   vPairRGBA, $v25, $v26 // Merge base output and alpha output
-    // Texgen: $v28 and $v23 are dirs 0 and 1, locals $v25, $v26, $v30, have vLtOne = $v24
+    // Texgen: $v23 and $v28 are dirs 0 and 1, locals $v25, $v26, $v30, have vLtOne = $v24
     // Output: vPairST; have to leave $v20:$v21, vPairRGBA
     vne     $v29, $v31, $v31[1h] // Set VCC to 10111011
     andi    $11, $5, G_TEXTURE_GEN_LINEAR >> 8
-    vmrg    $v23, $v28, $v23[0h]  // Dot products in elements 0, 1, 4, 5
+    vmrg    $v23, $v23, $v28[0h]  // Dot products in elements 0, 1, 4, 5
     vmudh   $v29, vLtOne, $v31[5]  // 1 * 0x4000
     beqz    $11, vl_mod_return_from_lighting
      vmacf  vPairST, $v23, $v31[5] // + dot products * 0x4000
