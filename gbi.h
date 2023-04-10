@@ -5,7 +5,7 @@ Removed:
   F3DEX1, so this one (unused/beta) file doesn't match, but the rest of OoT
   matches.
 - SGI documentation which is irrelevant or no longer correct
-- stuff for RSP assembly compatbility; with the modern toolchain, a C .h file
+- stuff for RSP assembly compatibility; with the modern toolchain, a C .h file
   cannot be included in the microcode.
 */
 
@@ -991,20 +991,20 @@ typedef union {
 # define G_MV_VIEWPORT  8
 # define G_MV_LIGHT     10
 # define G_MV_POINT     12
-// G_MV_MATRIX is no longer supported because there is no MVP matrix.
+/* G_MV_MATRIX is no longer supported because there is no MVP matrix in F3DEX3. */
 
 /*
  * MOVEWORD indices
  * Each of these indexes an entry in a dmem table which points to a word in dmem
  * where an immediate word will be stored.
  */
-#define G_MW_MODS           0x00 // replaces G_MW_MATRIX which is no longer supported
+#define G_MW_MODS           0x00 /* replaces G_MW_MATRIX which is no longer supported */
 #define G_MW_NUMLIGHT       0x02
-#define G_MW_PERSPNORM      0x04 // replaces G_MW_CLIP which is no longer supported
+#define G_MW_PERSPNORM      0x04 /* replaces G_MW_CLIP which is no longer supported */
 #define G_MW_SEGMENT        0x06
 #define G_MW_FOG            0x08
 #define G_MW_LIGHTCOL       0x0A
-// G_MW_FORCEMTX is no longer supported because there is no MVP matrix.
+/* G_MW_FORCEMTX is no longer supported because there is no MVP matrix in F3DEX3. */
 
 /*
  * These are offsets from the address in the dmem table
@@ -1065,7 +1065,6 @@ typedef union {
  *
  * Note: the weird order is for the DMEM alignment benefit of
  * the microcode.
- *
  */
 
 typedef struct {
@@ -1081,13 +1080,12 @@ typedef struct {
 } Light_t;
 
 typedef struct {
-  unsigned char col[3];         /* diffuse light value (rgba) */
-  unsigned char kc;             /* positional lighting enable flag & constant attenuation Kc */
-  unsigned char colc[3];        /* copy of diffuse light value (rgba) */
-  unsigned char kl;             /* linear attenuation Kl */
-  short pos[3];                 /* light position x, y, z integer part */
-  unsigned char kq;             /* quadratic attenuation Kq */
-  unsigned char frac;           /* light position frac, 2-3 bits per component packed as 0xE0 X, 0x1C Y, 0x7 Z */
+    unsigned char col[3];         /* diffuse light value (rgba) */
+    unsigned char kc;             /* positional lighting enable flag & constant attenuation Kc */
+    unsigned char colc[3];        /* copy of diffuse light value (rgba) */
+    unsigned char kl;             /* linear attenuation Kl */
+    short pos[3];                 /* light position x, y, z integer part */
+    unsigned char kq;             /* quadratic attenuation Kq */
 } PosLight_t;
 
 typedef struct {
@@ -1099,8 +1097,12 @@ typedef struct {
 
 typedef struct {
     signed char   dir[3];   /* direction of lookat (normalized) */
-    char          pad;
+    char          pad1;
 } LookAt_t;
+
+typedef struct {
+    LookAt_t      l;    /* for backwards compatibility */
+} LookAtWrapper;
 
 typedef struct {
     /* texture offsets for highlight 1/2 */
@@ -1127,7 +1129,7 @@ typedef union {
 } PosLight;
 
 typedef union {
-    LookAt_t   l[2];
+    LookAtWrapper l[2];
     long long int force_structure_alignment[1];
 } LookAt;
 
@@ -1188,6 +1190,8 @@ typedef struct {
 } PosLightsn;
 
 typedef struct {
+    /* F3DEX3 properly supports zero lights, unlike F3DEX2 where you need
+    to include one black directional light. */
     Ambient     a;
 } PosLights0;
 
@@ -1475,8 +1479,8 @@ typedef struct {
 
 #define gdSPDefLookAt(rightx, righty, rightz, upx, upy, upz)    \
     {                                                           \
-        {{ rightx, righty, rightz }, 0 },                       \
-        {{ upx, upy, upz }, 0 },                                \
+        {{{ rightx, righty, rightz }, 0 }},                     \
+        {{{ upx, upy, upz }, 0 }},                              \
     }
 
 
@@ -1489,7 +1493,7 @@ typedef struct {
 #define gdSPDefPosLights0(ar,ag,ab) \
     {   _gdSPDefAmbient(ar,ag,ab) }
 #define gdSPDefPosLights1(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1) \
-    {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1) },
+    {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1) }, \
         _gdSPDefAmbient(ar,ag,ab) }
 #define gdSPDefPosLights2(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2) \
     {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
@@ -1537,8 +1541,8 @@ typedef struct {
     unsigned int type : 8;
     unsigned int len  : 16;
     union {
-        // The exact form of this callback is intentionally left unspecified, a display list
-        // parser may choose the return value and parameters so long as it is consistent.
+        /* The exact form of this callback is intentionally left unspecified, a display list
+        parser may choose the return value and parameters so long as it is consistent. */
         void       (*callback)();
         const char*  str;
         unsigned int u32;
@@ -1684,14 +1688,14 @@ typedef struct {
 
 typedef struct {
     int          cmd : 8;
-    // muxs0
+    /* muxs0 */
     unsigned int a0  : 4;
     unsigned int c0  : 5;
     unsigned int Aa0 : 3;
     unsigned int Ac0 : 3;
     unsigned int a1  : 4;
     unsigned int c1  : 5;
-    // muxs1
+    /* muxs1 */
     unsigned int b0  : 4;
     unsigned int b1  : 4;
     unsigned int Aa1 : 3;
@@ -1799,9 +1803,9 @@ typedef struct {
 typedef struct {
     int           cmd  : 8;
     unsigned int  pad  : 4;
-    unsigned int  len  : 8; // n
+    unsigned int  len  : 8; /* n */
     unsigned int  pad2 : 4;
-    unsigned char par;      // v0
+    unsigned char par;      /* v0 */
     unsigned int  addr;
 } Gvtx;
 
@@ -2146,11 +2150,8 @@ _DW({                                                   \
 /*
  * Clipping Macros - Deprecated, encodes SP no-ops
  */
-#define gSPClipRatio(pkt, r) \
-    gSPNoOp(pkt)
-
-#define gsSPClipRatio(r) \
-    gsSPNoOp()
+#define gSPClipRatio(pkt, r) gSPNoOp(pkt)
+#define gsSPClipRatio(r) gsSPNoOp()
 
 /*
  * Load new MVP matrix directly.
@@ -2195,7 +2196,7 @@ _DW({                                               \
  *  flag = G_BZ_PERSP or G_BZ_ORTHO
  */
 
-// From gu.h
+/* From gu.h */
 #ifndef FTOFIX32
 # define FTOFIX32(x) (long)((x) * (float)0x00010000)
 #endif
@@ -2453,7 +2454,7 @@ _DW({\
  * gSPSetLights(POLY_OPA_DISP++, 2, myLights);
  */
 #define gSPSetLights(pkt, n, name) \
-_DW({
+_DW({ \
     gSPNumLights(pkt, n); \
     gDma2p((pkt),  G_MOVEMEM, &name, (n) * 0x10 + 8, G_MV_LIGHT, 8); \
 })
@@ -2485,7 +2486,7 @@ _DW({
  */
 #define gSPLookAt(pkt, la) \
     gDma2p((pkt), G_MOVEMEM, (la), sizeof(LookAt), G_MV_LIGHT, 0)
-#define gSPLookAt(la) \
+#define gsSPLookAt(la) \
     gsDma2p(      G_MOVEMEM, (la), sizeof(LookAt), G_MV_LIGHT, 0)
  
 /*
@@ -4427,4 +4428,4 @@ _DW({                                                   \
 
 #endif
 
-#endif // MOD_ULTRA64_GBI_H
+#endif /* MOD_ULTRA64_GBI_H */

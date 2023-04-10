@@ -338,13 +338,13 @@ tempMemRounded equ ((clipTempVerts + 15) & ~15)
 
 // moveword table
 movewordTable:
-    .dh mwModsStart      // G_MW_MODS: 0 = large tri thresh and clip ratio,
-                         // 1 = attrOffsetST, 2 = attrOffsetZ, 3 = ambient occlusion
+    .dh mwModsStart        // G_MW_MODS: 0 = large tri thresh and clip ratio,
+                           // 1 = attrOffsetST, 2 = attrOffsetZ, 3 = ambient occlusion
     .dh numLightsxSize - 3 // G_MW_NUMLIGHT
-    .dh perspNorm - 2    // G_MW_PERSPNORM
-    .dh segmentTable     // G_MW_SEGMENT
-    .dh fogFactor        // G_MW_FOG
-    .dh lightBufferMain  // G_MW_LIGHTCOL
+    .dh perspNorm - 2      // G_MW_PERSPNORM
+    .dh segmentTable       // G_MW_SEGMENT
+    .dh fogFactor          // G_MW_FOG
+    .dh lightBufferMain    // G_MW_LIGHTCOL
 
 // G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
 movememHandlerTable:
@@ -435,7 +435,7 @@ spaceBeforeVertexBuffer:
 .endif
 
 // Vertex buffer in RSP internal format
-MAX_VERTS equ 51
+MAX_VERTS equ 54
 vertexBuffer:
     .skip (MAX_VERTS * vtxSize)
 
