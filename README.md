@@ -37,9 +37,10 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   Fixed 2*Z bug. Quadratic point light attenuation factor is now an E3M5
   floating-point number. The performance penalty for enabling point lighting,
   and for each additional point light, has been reduced.
-- Lighting memory changes. DMEM use reduced. Supports 0 lights without "1 light
-  with black color" hack. Supports loading all lights in one DMA transfer,
-  rather than one per light.
+- Maximum number of directional / point lights raised from 7 to 9. Minimum
+  number of directional / point lights lowered from 1 to 0 (F3DEX2 required at
+  least one). Also supports loading all lights in one DMA transfer
+  (`SPSetLights`), rather than one per light.
 - Clipped triangles are drawn by minimal overlapping scanlines algorithm; this
   slightly improves RDP draw time for large tris. Clipping DMEM use
   substantially reduced.

@@ -429,7 +429,7 @@ clipPoly2:                              //  \ / \ / \
     .skip (MAX_CLIP_POLY_VERTS+1) * 2   //   4   6   7 + term 0
 
 // Vertex buffer in RSP internal format
-MAX_VERTS equ 54
+MAX_VERTS equ 56
 vertexBuffer:
     .skip (MAX_VERTS * vtxSize)
 
@@ -440,17 +440,6 @@ vertexBuffer:
     .error "Important things in DMEM will not be saved at yield!"
 .endif
 
-spaceBeforeInputBuffer:
-.if (. & 7) != 0
-    .skip 8 - (. & 7)
-.endif
-
-// Input buffer
-inputBuffer:
-inputBufferLength equ 0xA8
-    .skip inputBufferLength
-inputBufferEnd:
-
 // Space for temporary verts for clipping code
 // tempMemRounded = rounded up to 16 bytes = temp matrix for G_MTX multiplication mode
 clipTempVerts:
@@ -460,14 +449,21 @@ clipTempVerts:
     .error "Not enough space for temp matrix!"
 .endif
 
-spaceBeforeRDPBuffers:
-.if (. & 7) != 0
-    .skip 8 - (. & 7)
-.endif
-
 RDP_CMD_BUFSIZE equ 0xB0
 RDP_CMD_BUFSIZE_EXCESS equ 0xB0 // Maximum size of an RDP triangle command
-RDP_CMD_BUFSIZE_TOTAL equ RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS
+RDP_CMD_BUFSIZE_TOTAL equ (RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS)
+INPUT_BUFFER_CMDS equ 21
+INPUT_BUFFER_LEN equ (INPUT_BUFFER_CMDS * 8)
+END_VARIABLE_LEN_DMEM equ (0xFC0 - INPUT_BUFFER_LEN - (2 * RDP_CMD_BUFSIZE_TOTAL))
+
+endVariableDmemUse:
+
+.if . > END_VARIABLE_LEN_DMEM
+    .error "Out of DMEM space"
+.endif
+
+.org END_VARIABLE_LEN_DMEM
+
 // First RDP Command Buffer
 rdpCmdBuffer1:
     .skip RDP_CMD_BUFSIZE
@@ -479,10 +475,13 @@ rdpCmdBuffer2:
 rdpCmdBuffer2End:
     .skip RDP_CMD_BUFSIZE_EXCESS
 
-totalDmemUse:
+// Input buffer
+inputBuffer:
+    .skip INPUT_BUFFER_LEN
+inputBufferEnd:
 
-.if . > 0x00000FC0
-    .error "Not enough room in DMEM"
+.if . != 0xFC0
+    .error "DMEM organization incorrect"
 .endif
 
 .org 0xFC0
@@ -720,13 +719,13 @@ load_overlay1_init:
 
 ovl01_end:
 
-displaylist_dma: // loads inputBufferLength bytes worth of displaylist data via DMA into inputBuffer
-    li      dmaLen, inputBufferLength - 1               // set the DMA length
+displaylist_dma: // loads INPUT_BUFFER_LEN bytes worth of displaylist data via DMA into inputBuffer
+    li      dmaLen, INPUT_BUFFER_LEN - 1               // set the DMA length
     move    cmd_w1_dram, taskDataPtr                    // set up the DRAM address to read from
     jal     dma_read_write                              // initiate the DMA read
      la     dmemAddr, inputBuffer                       // set the address to DMA read to
-    addiu   taskDataPtr, taskDataPtr, inputBufferLength // increment the DRAM address to read from next time
-    li      inputBufferPos, -inputBufferLength          // reset the DL word index
+    addiu   taskDataPtr, taskDataPtr, INPUT_BUFFER_LEN // increment the DRAM address to read from next time
+    li      inputBufferPos, -INPUT_BUFFER_LEN          // reset the DL word index
 wait_for_dma_and_run_next_command:
 G_POPMTX_end:
 G_MOVEMEM_end:
@@ -1453,8 +1452,8 @@ vl_mod_skip_fog:
 
 vtx_addrs_from_cmd:
     // Treat eight bytes of last command each as vertex indices << 1
-    addiu   $12, inputBufferPos, inputBufferEnd - 0x08 // Out of reach of offset
-    lpv     $v27[0], (0)($12)
+    // inputBufferEnd is close enough to the end of DMEM to fit in signed offset
+    lpv     $v27[0], (-(0x1000 - (inputBufferEnd - 0x08)))(inputBufferPos)
 vtx_indices_to_addr:
     // Input and output in $v27
     vxor    $v28, $v28, $v28  // Zero

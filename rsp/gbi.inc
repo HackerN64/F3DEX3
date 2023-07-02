@@ -37,14 +37,14 @@ G_CLIPPING              equ 0x00800000 // Initially on, but never checked
 // because they form a "clip code mask" is kind of irrelevant given that these
 // bits can't be properly set or cleared.
 
-G_FOG_H                 equ G_FOG / 0x10000
-G_LIGHTING_H            equ G_LIGHTING / 0x10000
-G_TEXTURE_GEN_H         equ G_TEXTURE_GEN / 0x10000
-G_TEXTURE_GEN_LINEAR_H  equ G_TEXTURE_GEN_LINEAR / 0x10000
-G_LOD_H                 equ G_LOD / 0x10000
-G_SHADING_SMOOTH_H      equ G_SHADING_SMOOTH / 0x10000
-G_LIGHTING_POSITIONAL_H equ G_LIGHTING_POSITIONAL / 0x10000
-G_CLIPPING_H            equ G_CLIPPING / 0x10000
+G_FOG_H                 equ (G_FOG / 0x10000)
+G_LIGHTING_H            equ (G_LIGHTING / 0x10000)
+G_TEXTURE_GEN_H         equ (G_TEXTURE_GEN / 0x10000)
+G_TEXTURE_GEN_LINEAR_H  equ (G_TEXTURE_GEN_LINEAR / 0x10000)
+G_LOD_H                 equ (G_LOD / 0x10000)
+G_SHADING_SMOOTH_H      equ (G_SHADING_SMOOTH / 0x10000)
+G_LIGHTING_POSITIONAL_H equ (G_LIGHTING_POSITIONAL / 0x10000)
+G_CLIPPING_H            equ (G_CLIPPING / 0x10000)
 
 // dma
 G_NOOP            equ 0x00
@@ -119,7 +119,7 @@ G_MV_PMTX     equ 0x06
 G_MV_VIEWPORT equ 0x08
 G_MV_LIGHT    equ 0x0A
 
-MAX_LIGHTS equ 7 // excluding ambient light
+MAX_LIGHTS equ 9 // 9 directional / point lights, plus ambient light (and lookat)
 lightSize equ 0x10
 
 // Input Vertex structure offsets, should match Vtx structure in gbi.h
@@ -136,7 +136,7 @@ VTX_IN_T        equ 0x0A
   VTX_IN_CN     equ 0x0C // color or normal
 
 // RSP Vertex structure offsets
-vtxSize equ 0x28
+vtxSize equ 0x26
 
   VTX_INT_VEC   equ 0x00
 VTX_X_INT       equ 0x00

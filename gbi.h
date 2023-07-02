@@ -1047,6 +1047,10 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_MWO_bLIGHT_7          0x64
 #define G_MWO_aLIGHT_8          0x70
 #define G_MWO_bLIGHT_8          0x74
+#define G_MWO_aLIGHT_9          0x80
+#define G_MWO_bLIGHT_9          0x84
+#define G_MWO_aLIGHT_10         0x90
+#define G_MWO_bLIGHT_10         0x94
 
 #define G_MWO_POINT_RGBA        0x10
 #define G_MWO_POINT_ST          0x14
@@ -1140,7 +1144,7 @@ typedef union {
 } Hilite;
 
 typedef struct {
-    Light   l[7];
+    Light   l[9];
     Ambient a;
 } Lightsn;
 
@@ -1186,7 +1190,17 @@ typedef struct {
 } Lights7;
 
 typedef struct {
-    PosLight    l[7];
+    Light   l[8];
+    Ambient a;
+} Lights8;
+
+typedef struct {
+    Light   l[9];
+    Ambient a;
+} Lights9;
+
+typedef struct {
+    PosLight    l[9];
     Ambient     a;
 } PosLightsn;
 
@@ -1230,6 +1244,16 @@ typedef struct {
     PosLight    l[7];
     Ambient     a;
 } PosLights7;
+
+typedef struct {
+    PosLight    l[8];
+    Ambient     a;
+} PosLights8;
+
+typedef struct {
+    PosLight    l[9];
+    Ambient     a;
+} PosLights9;
 
 #define gdSPDefLights0(ar, ag, ab)  \
     {                               \
@@ -1477,6 +1501,127 @@ typedef struct {
         }}                                      \
     }
 
+#define gdSPDefLights8(ar, ag, ab,              \
+                       r1, g1, b1, x1, y1, z1,  \
+                       r2, g2, b2, x2, y2, z2,  \
+                       r3, g3, b3, x3, y3, z3,  \
+                       r4, g4, b4, x4, y4, z4,  \
+                       r5, g5, b5, x5, y5, z5,  \
+                       r6, g6, b6, x6, y6, z6,  \
+                       r7, g7, b7, x7, y7, z7,  \
+                       r8, g8, b8, x8, y8, z8)  \
+    {                                           \
+        {                                       \
+            {{                                  \
+                { r1, g1, b1 }, 0,              \
+                { r1, g1, b1 }, 0,              \
+                { x1, y1, z1 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r2, g2, b2 }, 0,              \
+                { r2, g2, b2 }, 0,              \
+                { x2, y2, z2 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r3, g3, b3 }, 0,              \
+                { r3, g3, b3 }, 0,              \
+                { x3, y3, z3 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r4, g4, b4 }, 0,              \
+                { r4, g4, b4 }, 0,              \
+                { x4, y4, z4 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r5, g5, b5 }, 0,              \
+                { r5, g5, b5 }, 0,              \
+                { x5, y5, z5 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r6, g6, b6 }, 0,              \
+                { r6, g6, b6 }, 0,              \
+                { x6, y6, z6 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r7, g7, b7 }, 0,              \
+                { r7, g7, b7 }, 0,              \
+                { x7, y7, z7 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r8, g8, b8 }, 0,              \
+                { r8, g8, b8 }, 0,              \
+                { x8, y8, z8 }, 0,              \
+            }}                                  \
+        },                                      \
+        {{                                      \
+            { ar, ag, ab}, 0,                   \
+            { ar, ag, ab}, 0,                   \
+        }}                                      \
+    }
+    
+#define gdSPDefLights9(ar, ag, ab,              \
+                       r1, g1, b1, x1, y1, z1,  \
+                       r2, g2, b2, x2, y2, z2,  \
+                       r3, g3, b3, x3, y3, z3,  \
+                       r4, g4, b4, x4, y4, z4,  \
+                       r5, g5, b5, x5, y5, z5,  \
+                       r6, g6, b6, x6, y6, z6,  \
+                       r7, g7, b7, x7, y7, z7,  \
+                       r8, g8, b8, x8, y8, z8,  \
+                       r9, g9, b9, x9, y9, z9)  \
+    {                                           \
+        {                                       \
+            {{                                  \
+                { r1, g1, b1 }, 0,              \
+                { r1, g1, b1 }, 0,              \
+                { x1, y1, z1 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r2, g2, b2 }, 0,              \
+                { r2, g2, b2 }, 0,              \
+                { x2, y2, z2 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r3, g3, b3 }, 0,              \
+                { r3, g3, b3 }, 0,              \
+                { x3, y3, z3 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r4, g4, b4 }, 0,              \
+                { r4, g4, b4 }, 0,              \
+                { x4, y4, z4 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r5, g5, b5 }, 0,              \
+                { r5, g5, b5 }, 0,              \
+                { x5, y5, z5 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r6, g6, b6 }, 0,              \
+                { r6, g6, b6 }, 0,              \
+                { x6, y6, z6 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r7, g7, b7 }, 0,              \
+                { r7, g7, b7 }, 0,              \
+                { x7, y7, z7 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r8, g8, b8 }, 0,              \
+                { r8, g8, b8 }, 0,              \
+                { x8, y8, z8 }, 0,              \
+            }},                                 \
+            {{                                  \
+                { r9, g9, b9 }, 0,              \
+                { r9, g9, b9 }, 0,              \
+                { x9, y9, z9 }, 0,              \
+            }}                                  \
+        },                                      \
+        {{                                      \
+            { ar, ag, ab}, 0,                   \
+            { ar, ag, ab}, 0,                   \
+        }}                                      \
+    }
 
 #define gdSPDefLookAt(rightx, righty, rightz, upx, upy, upz)    \
     {                                                           \
@@ -1534,6 +1679,27 @@ typedef struct {
         _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5), \
         _gdSPDefPosLight(r6,g6,b6,x6,y6,z6,c6,l6,q6), \
         _gdSPDefPosLight(r7,g7,b7,x7,y7,z7,c7,l7,q7) }, \
+        _gdSPDefAmbient(ar,ag,ab) }
+#define gdSPDefPosLights8(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3,r4,g4,b4,x4,y4,z4,c4,l4,q4,r5,g5,b5,x5,y5,z5,c5,l5,q5,r6,g6,b6,x6,y6,z6,c6,l6,q6,r7,g7,b7,x7,y7,z7,c7,l7,q7,r8,g8,b8,x8,y8,z8,c8,l8,q8) \
+    {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+        _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+        _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
+        _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4), \
+        _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5), \
+        _gdSPDefPosLight(r6,g6,b6,x6,y6,z6,c6,l6,q6), \
+        _gdSPDefPosLight(r7,g7,b7,x7,y7,z7,c7,l7,q7), \
+        _gdSPDefPosLight(r8,g8,b8,x8,y8,z8,c8,l8,q8) }, \
+        _gdSPDefAmbient(ar,ag,ab) }
+#define gdSPDefPosLights9(ar,ag,ab,r1,g1,b1,x1,y1,z1,c1,l1,q1,r2,g2,b2,x2,y2,z2,c2,l2,q2,r3,g3,b3,x3,y3,z3,c3,l3,q3,r4,g4,b4,x4,y4,z4,c4,l4,q4,r5,g5,b5,x5,y5,z5,c5,l5,q5,r6,g6,b6,x6,y6,z6,c6,l6,q6,r7,g7,b7,x7,y7,z7,c7,l7,q7,r8,g8,b8,x8,y8,z8,c8,l8,q8,r9,g9,b9,x9,y9,z9,c9,l9,q9) \
+    {{  _gdSPDefPosLight(r1,g1,b1,x1,y1,z1,c1,l1,q1), \
+        _gdSPDefPosLight(r2,g2,b2,x2,y2,z2,c2,l2,q2), \
+        _gdSPDefPosLight(r3,g3,b3,x3,y3,z3,c3,l3,q3), \
+        _gdSPDefPosLight(r4,g4,b4,x4,y4,z4,c4,l4,q4), \
+        _gdSPDefPosLight(r5,g5,b5,x5,y5,z5,c5,l5,q5), \
+        _gdSPDefPosLight(r6,g6,b6,x6,y6,z6,c6,l6,q6), \
+        _gdSPDefPosLight(r7,g7,b7,x7,y7,z7,c7,l7,q7), \
+        _gdSPDefPosLight(r8,g8,b8,x8,y8,z8,c8,l8,q8), \
+        _gdSPDefPosLight(r9,g9,b9,x9,y9,z9,c9,l9,q9) }, \
         _gdSPDefAmbient(ar,ag,ab) }
 
 
@@ -2359,7 +2525,7 @@ _DW({                                               \
  */
 #define NUML(n)    ((n) * 0x10)
 /*
- * F3DEX3 properly supports zero lights. There is no need to use these macros
+ * F3DEX3 properly supports zero lights, so there is no need to use these macros
  * anymore.
  */
 #define NUMLIGHTS_0 0
@@ -2370,8 +2536,11 @@ _DW({                                               \
 #define NUMLIGHTS_5 5
 #define NUMLIGHTS_6 6
 #define NUMLIGHTS_7 7
+#define NUMLIGHTS_8 8
+#define NUMLIGHTS_9 9
 /*
- * n should be an integer 0-7
+ * n should be an integer 0-9. F3DEX3 supports between 0 and 9 directional /
+ * point lights, plus one required ambient light.
  * NOTE: in addition to the number of directional lights specified,
  *       there is always 1 ambient light
  */
@@ -2380,6 +2549,7 @@ _DW({                                               \
 #define gsSPNumLights(n)                                \
     gsMoveWd(    G_MW_NUMLIGHT, G_MWO_NUMLIGHT, NUML(n))
 
+/* There is also no need to use these macros. */
 #define LIGHT_1     1
 #define LIGHT_2     2
 #define LIGHT_3     3
@@ -2388,16 +2558,21 @@ _DW({                                               \
 #define LIGHT_6     6
 #define LIGHT_7     7
 #define LIGHT_8     8
+#define LIGHT_9     9
+#define LIGHT_10    10
 
 /*
  * l should point to a Light or PosLight struct.
- * n should be an integer 1-7 to load lights 0-6.
- * Can also load Ambient lights to lights 0-6 with this. However, must use
- * SPAmbient to load light 7 (LIGHT_8) with an ambient light.
- * Note that you can set multiple lights in one memory transaction with
- * SPSetLights.
+ * n should be an integer 1-9 to load lights 0-8.
+ * Can also load Ambient lights to lights 0-8 with this. However, if you have
+ * 9 directional / point lights, you must use SPAmbient to load light 9
+ * (LIGHT_10) with an ambient light. (That is, the memory for light 9 (LIGHT_10)
+ * is only sizeof(Ambient), so if you load this with SPLight, it will overwrite
+ * other DMEM and crash.)
+ * New code should not generally use SPLight, and instead use SPSetLights to set
+ * all lights in one memory transaction.
  */
-#define _LIGHT_TO_OFFSET(n) (((n) - 1) * 0x10 + 8)
+#define _LIGHT_TO_OFFSET(n) (((n) - 1) * 0x10 + 8) /* The + 8 skips lookat */
 #define gSPLight(pkt, l, n) \
     gDma2p((pkt), G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
 #define gsSPLight(l, n) \
@@ -2405,7 +2580,7 @@ _DW({                                               \
 
 /*
  * l should point to an Ambient struct.
- * n should be an integer 1-8 to load lights 0-7.
+ * n should be an integer 1-10 to load lights 0-9.
  */
 #define gSPAmbient(pkt, l, n) \
     gDma2p((pkt), G_MOVEMEM, (l), sizeof(Ambient), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
@@ -2418,7 +2593,7 @@ _DW({                                               \
  * For point lights, a becomes both the constant and linear factors, which is
  * rarely desired. You can use the hidden _g*SPLightColor2 to specify a
  * different factor for each.
- * n should be an integer 1-8 to apply to light 0-7.
+ * n should be an integer 1-10 to apply to light 0-9.
  */
 #define gSPLightColor(pkt, n, col)                  \
 _DW({                                               \
@@ -2442,7 +2617,7 @@ _DW({\
 /*
  * Set all your scene's lights (directional/point + ambient) with one memory
  * transaction.
- * n is the number of directional / point lights, from 0 to 7. There is also
+ * n is the number of directional / point lights, from 0 to 9. There is also
  * always an ambient light.
  * name should be the name of a Lights* or PosLights* struct filled in with all
  * the lighting data. You can use the gdSPDef* macros to fill in the struct or
@@ -2476,6 +2651,10 @@ _DW({ \
 #define gsSPSetLights6(name)      gsSPSetLights(     6, name)
 #define  gSPSetLights7(pkt, name)  gSPSetLights(pkt, 7, name)
 #define gsSPSetLights7(name)      gsSPSetLights(     7, name)
+#define  gSPSetLights8(pkt, name)  gSPSetLights(pkt, 8, name)
+#define gsSPSetLights8(name)      gsSPSetLights(     8, name)
+#define  gSPSetLights9(pkt, name)  gSPSetLights(pkt, 9, name)
+#define gsSPSetLights9(name)      gsSPSetLights(     9, name)
 
 
 /*
