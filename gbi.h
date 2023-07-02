@@ -2397,14 +2397,11 @@ _DW({                                               \
  * Note that you can set multiple lights in one memory transaction with
  * SPSetLights.
  */
-#define _CLAMP_LIGHT_TO_7(n) ((n) < 8 ? (n) : 7)
 #define _LIGHT_TO_OFFSET(n) (((n) - 1) * 0x10 + 8)
 #define gSPLight(pkt, l, n) \
-    gDma2p((pkt), G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, \
-        _LIGHT_TO_OFFSET(_CLAMP_LIGHT_TO_7(n)))
+    gDma2p((pkt), G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
 #define gsSPLight(l, n) \
-    gsDma2p(      G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, \
-        _LIGHT_TO_OFFSET(_CLAMP_LIGHT_TO_7(n)))
+    gsDma2p(      G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
 
 /*
  * l should point to an Ambient struct.
