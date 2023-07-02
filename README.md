@@ -15,7 +15,7 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
 
 - New geometry mode bit enables simultaneous vertex colors and normals/lighting
   on the same object. There is no loss of color precision, and only a fraction
-  of a bit of loss of normals precision in model space. (The competing
+  of a bit of loss of normals precision in each model space axis. (The competing
   implementation loses no normals precision, but loses 3 bits of each color
   channel.)
 - New geometry mode bit enables ambient/directional occlusion for opaque

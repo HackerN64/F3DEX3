@@ -895,20 +895,27 @@ f3dzex_000012BC:
      addi   rdpCmdBufPtr, rdpCmdBufEnd, -RDP_CMD_BUFSIZE
 
 .align 8
-ovl23_start:
+ovl234_start:
 
 ovl3_start:
 
 // Jump here to do lighting. If overlay 3 is loaded (this code), loads and jumps
 // to overlay 2 (same address as right here).
-ovl23_lighting_entrypoint_copy:  // same IMEM address as ovl23_lighting_entrypoint
+ovl234_lighting_entrypoint_ovl3ver:  // same IMEM address as ovl234_lighting_entrypoint
     li      cmd_w1_dram, orga(ovl2_start)        // set up a load for overlay 2
     j       load_overlays_2_3_4                  // load overlay 2
-     li     postOvlRA, ovl23_lighting_entrypoint // set the return address
+     li     postOvlRA, ovl234_lighting_entrypoint // set the return address
+
+// Jump here for all overlay 4 features. If overlay 3 is loaded (this code),
+// loads and jumps to overlay 4 (ovl234_start).
+ovl234_ovl4_entrypoint_ovl3ver: // same IMEM address as ovl234_ovl4_entrypoint
+    li      cmd_w1_dram, orga(ovl4_start)        // set up a load for overlay 4
+    j       load_overlays_2_3_4                  // load overlay 4
+     li     postOvlRA, ovl234_ovl4_entrypoint    // set the return address
 
 // Jump here to do clipping. If overlay 3 is loaded (this code), directly starts
 // the clipping code.
-ovl23_clipping_entrypoint:
+ovl234_clipping_entrypoint:
     sh      $ra, rdpHalf1Val // This is unused during clipping
 ovl3_clipping_nosavera:
     sh      $4, rdpHalf1Val + 2
@@ -1190,7 +1197,7 @@ clipping_done:
 .orga max(max(ovl2_end - ovl2_start, ovl4_end - ovl4_start) + orga(ovl3_start), orga())
 ovl3_end:
 
-ovl23_end:
+ovl234_end:
 
 G_VTX_handler:
     jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
@@ -1228,10 +1235,8 @@ vtx_return_from_addrs:
     ldv     $v0[8],  (mvMatrix + 0x00)($zero)
     ldv     $v2[8],  (mvMatrix + 0x10)($zero)
     ldv     $v4[8],  (mvMatrix + 0x20)($zero)
-    ldv     $v6[8],  (mvMatrix + 0x30)($zero)
-    li      cmd_w1_dram, orga(ovl4_start)      // $24
-    bnez    $7, load_overlays_2_3_4            // run overlay 4 to compute M inverse transpose
-     li     postOvlRA, vl_mod_calc_mit         // $12
+    bnez    $7, ovl234_ovl4_entrypoint         // run overlay 4 to compute M inverse transpose
+     ldv    $v6[8],  (mvMatrix + 0x30)($zero)
 vl_mod_after_calc_mit:
     lqv     $v8,     (pMatrix  + 0x00)($zero)
     lqv     $v10,    (pMatrix  + 0x10)($zero)
@@ -1332,7 +1337,7 @@ vl_mod_vtx_load_loop:
     // Elems 0-1 get bytes 6-7 of the following vertex (0)
     lpv     $v30[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
     vmrg    vPairRGBA, vPairRGBA, $v25 // Merge colors
-    bnez    $11, ovl23_lighting_entrypoint
+    bnez    $11, ovl234_lighting_entrypoint
      // Elems 4-5 get bytes 6-7 of the following vertex (1)
      lpv    $v25[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
  vl_mod_return_from_lighting:
@@ -1558,7 +1563,7 @@ tV3AtI equ $v21
     // If tri crosses camera plane or scaled bounds, go directly to clipping
     andi    $12, $5, CLIP_MOD_MASK_SCAL_ALL | (CLIP_NEAR >> 4)
     vlt     $v6, $v6, $v2     // v6 (thrown out), VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
-    bnez    $12, ovl23_clipping_entrypoint // Backface info is garbage, don't check it
+    bnez    $12, ovl234_clipping_entrypoint // Backface info is garbage, don't check it
      lw     $11, (gCullMagicNumbers)($11)
     vmrg    $v2, $v4, $v10   // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     beqz    $6, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
@@ -1846,8 +1851,8 @@ load_overlays_0_1:
     j       load_overlay_inner
      la     dmemAddr, 0x1000
 load_overlays_2_3_4:
-    la      dmaLen, ovl23_end - ovl23_start - 1
-    la      dmemAddr, ovl23_start
+    la      dmaLen, ovl234_end - ovl234_start - 1
+    la      dmemAddr, ovl234_start
 load_overlay_inner:
     lw      $11, OSTask + OSTask_ucode
     jal     dma_read_write
@@ -2096,7 +2101,7 @@ ovl1_end:
     .error "Automatic resizing for overlay 1 failed"
 .endif
 
-.headersize ovl23_start - orga()
+.headersize ovl234_start - orga()
 
 // Locals
 vNormals equ $v28
@@ -2106,12 +2111,17 @@ vLtLvl equ $v30
 vLtOne equ $v24
 
 ovl2_start:
-ovl23_lighting_entrypoint:
+ovl234_lighting_entrypoint:
     vmrg    vNormals, $v28, $v26          // Merge normals
     j       vl_mod_continue_lighting
      andi   $11, $5, G_PACKED_NORMALS >> 8
 
-ovl23_clipping_entrypoint_copy:  // same IMEM address as ovl23_clipping_entrypoint
+ovl234_ovl4_entrypoint_ovl2ver: // same IMEM address as ovl234_ovl4_entrypoint
+    li      cmd_w1_dram, orga(ovl4_start)        // set up a load for overlay 4
+    j       load_overlays_2_3_4                  // load overlay 4
+     li     postOvlRA, ovl234_ovl4_entrypoint    // set the return address
+
+ovl234_clipping_entrypoint_ovl2ver:  // same IMEM address as ovl234_clipping_entrypoint
     sh      $ra, rdpHalf1Val
     li      cmd_w1_dram, orga(ovl3_start)     // set up a load of overlay 3
     j       load_overlays_2_3_4               // load overlay 3
@@ -2357,9 +2367,26 @@ vl_mod_point_light:
 .align 8
 ovl2_end:
 
-.headersize ovl23_start - orga()
+.headersize ovl234_start - orga()
 
 ovl4_start:
+
+ovl234_lighting_entrypoint_ovl4ver:  // same IMEM address as ovl234_lighting_entrypoint
+    li      cmd_w1_dram, orga(ovl2_start)        // set up a load for overlay 2
+    j       load_overlays_2_3_4                  // load overlay 2
+     li     postOvlRA, ovl234_lighting_entrypoint // set the return address
+
+ovl234_ovl4_entrypoint:
+    nop // TODO
+    j vl_mod_calc_mit
+     nop
+
+ovl234_clipping_entrypoint_ovl4ver:  // same IMEM address as ovl234_clipping_entrypoint
+    sh      $ra, rdpHalf1Val
+    li      cmd_w1_dram, orga(ovl3_start)     // set up a load of overlay 3
+    j       load_overlays_2_3_4               // load overlay 3
+     li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
+
 vl_mod_calc_mit:
     /*
     Compute M inverse transpose. All regs available except $v0::$v7 and $v31.
@@ -2378,7 +2405,7 @@ vl_mod_calc_mit:
     vxor    $v30, $v30, $v30  // $v30 = 0
     la      $12, mvMatrix + 0xE                              // For right rotates with lrv/ldv
     vxor    $v20, $v0, $v31[1] // One's complement of X int part
-    sb      $7, mITValid                                      // $7 is 1 if we got here, mark valid
+    sb      $7, mITValid                                     // $7 is 1 if we got here, mark valid
     vlt     $v29, $v0, $v30[0] // X int part < 0
     la      $11, mvMatrix + 2                                // For left rotates with lqv/ldv
     vabs    $v21, $v0, $v4     // Apply sign of X int part to X frac part
@@ -2494,12 +2521,10 @@ vl_mod_calc_mit:
     vmadl   $v29, $v15, $v17
     sdv     $v22[0], (mITMatrix + 0x08)($zero)
     vmadm   $v29, $v14, $v17
-    li      cmd_w1_dram, orga(ovl2_start) // Load lighting overlay, but don't enter it
     vmadn   $v21, $v15, $v16
-    li      postOvlRA, vl_mod_after_calc_mit // Jump back to vertex setup
     vmadh   $v20, $v14, $v16 // $v20:$v21 = X output
     sdv     $v21[0], (mITMatrix + 0x18)($zero)
-    j       load_overlays_2_3_4
+    j       vl_mod_after_calc_mit
      sdv    $v20[0], (mITMatrix + 0x00)($zero)
 
 .align 8
