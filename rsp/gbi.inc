@@ -77,6 +77,13 @@ G_TRI2            equ 0x06
 G_QUAD            equ 0x07
 G_TRISTRIP        equ 0x08
 G_TRIFAN          equ 0x09
+G_FLAGSMASKS      equ 0x0A
+G_FLAGSVERTS      equ 0x0B
+G_FLAGS1VERT      equ 0x0C
+G_FLAGSDRAM       equ 0x0D
+// 0x0E
+// 0x0F
+G_FLAGSOPBASE     equ 0x10
 
 // rdp
 G_SETCIMG         equ 0xff

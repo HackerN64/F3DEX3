@@ -376,9 +376,9 @@ jumpTableEntry G_RDP_handler     // G_LOADTLUT
 jumpTableEntry G_RDPHALF_2_handler
 cmdJumpTablePositive:
 jumpTableEntry G_VTX_handler
-jumpTableEntry G_MODIFYVTX_handler
+jumpTableEntry ovl234_ovl4_entrypoint
 jumpTableEntry G_CULLDL_handler
-jumpTableEntry G_BRANCH_WZ_handler // different for F3DZEX
+jumpTableEntry ovl234_ovl4_entrypoint // different for F3DZEX
 jumpTableEntry G_TRI1_handler
 jumpTableEntry G_TRI2_handler
 jumpTableEntry G_QUAD_handler
@@ -736,12 +736,13 @@ run_next_DL_command:
     lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // load the command word into cmd_w0
     beqz    inputBufferPos, displaylist_dma             // load more DL commands if none are left
      andi   $1, $1, SP_STATUS_SIG0                      // check if the task should yield
-    sra     $12, cmd_w0, 24                             // extract DL command byte from command word
+    sra     $7, cmd_w0, 24                              // extract DL command byte from command word
     bnez    $1, load_overlay_0_and_enter                // load and execute overlay 0 if yielding; $1 > 0
      lw     cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
      addiu  inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
-    // $12 must retain the command byte for load_mtx, and $11 must contain the handler called for G_SETOTHERMODE_H_handler
-    addiu   $2, $12, -G_VTX                             // If >= G_VTX, use jump table
+    // $7 must retain the command byte for load_mtx and overlay 4 stuff
+    // $11 must contain the handler called for G_SETOTHERMODE_H_handler
+    addiu   $2, $7, -G_VTX                             // If >= G_VTX, use jump table
     bgez    $2, do_cmd_jump_table                       // $2 is the index
      addiu  $11, $2, (cmdJumpTablePositive - cmdJumpTableForwardBack) / 2 // Will be interpreted relative to other jump table
     addiu   $2, $2, G_VTX - (0xFF00 | G_SETTIMG)        // If >= G_SETTIMG, use handler; for G_NOOP, this puts
@@ -753,14 +754,14 @@ run_next_DL_command:
      nop
     addiu   $11, $11, G_SETSCISSOR - G_RDPLOADSYNC      // If >= G_RDPLOADSYNC, use handler; for the syncs, this
     bgez    $11, G_RDP_handler                          // stores the second command word, but that's fine
-do_cmd_jump_table:                                      // If fell through, $1 has cmdJumpTableForwardBack and $12 is negative pointing into it
+do_cmd_jump_table:
      sll    $11, $11, 1                                 // Multiply jump table index in $2 by 2 for addr offset
     lhu     $11, cmdJumpTableForwardBack($11)           // Load address of handler from jump table
     jr      $11                                         // Jump to handler
      // Delay slot is harmless; $ra never holds anything useful here.
      
 G_SETxIMG_handler:
-    li      $ra, G_RDP_handler          // Load the RDP command handler into the return address, then fall through to convert the address to virtual
+    li      $ra, G_RDP_handler            // Load the RDP command handler into the return address, then fall through to convert the address to virtual
 // Converts the segmented address in cmd_w1_dram to the corresponding physical address
 segmented_to_physical:
     srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
@@ -801,30 +802,6 @@ G_DMA_IO_handler:
     sra     dmemAddr, dmemAddr, 2
     j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
      li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
-
-G_MODIFYVTX_handler:
-    j       vtx_addrs_from_cmd
-     la     $11, modifyvtx_return_from_addrs
-modifyvtx_return_from_addrs:
-    lbu     $1, (inputBufferEnd - 0x07)(inputBufferPos)
-    j       do_moveword
-     mfc2   cmd_w0, $v27[6]
-
-G_BRANCH_WZ_handler:
-    j       vtx_addrs_from_cmd
-     la     $11, branchwz_return_from_addrs
-branchwz_return_from_addrs:
-    mfc2    vtxPtr, $v27[6]
-.if CFG_G_BRANCH_W                            // BRANCH_W/BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
-    lh      vtxPtr, VTX_W_INT(vtxPtr)         // read the w coordinate of the vertex (f3dzex)
-.else
-    lw      vtxPtr, VTX_SCR_Z(vtxPtr)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
-.endif
-    sub     $2, vtxPtr, cmd_w1_dram           // subtract the w/z value being tested
-    bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
-     lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
-    j       branch_dl
-     // Delay slot is harmless.
 
 G_GEOMETRYMODE_handler:
     lw      $11, geometryModeLabel  // load the geometry mode value
@@ -2067,7 +2044,7 @@ G_MTX_handler:
     sw      cmd_w1_dram, matrixStackPtr                 // Update the matrix stack pointer
     lw      cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Load command word 1 again
 load_mtx:
-    add     $12, $12, $2        // Add the load type to the command byte, selects the return address based on whether the matrix needs multiplying or just loading
+    add     $7, $7, $2        // Add the load type to the command byte in $7, selects the return address based on whether the matrix needs multiplying or just loading
     sb      $zero, mITValid
 G_MOVEMEM_handler:
     jal     segmented_to_physical   // convert the memory address cmd_w1_dram to a virtual one
@@ -2076,7 +2053,7 @@ do_movemem:
     lbu     dmaLen, (inputBufferEnd - 0x07)(inputBufferPos) // Move the second byte of the first command word into dmaLen
     lhu     dmemAddr, (movememTable)($1)                    // Load the address of the memory location for the given movemem index
     srl     $2, cmd_w0, 5                                   // ((w0) >> 8) << 3; top 3 bits of idx must be 0; lower 1 bit of len byte must be 0
-    lh      $ra, (movememHandlerTable - (G_POPMTX | 0xFF00))($12)  // Loads the return address from movememHandlerTable based on command byte
+    lh      $ra, (movememHandlerTable - (G_POPMTX | 0xFF00))($7)  // Loads the return address from movememHandlerTable based on command byte
     j       dma_read_write
 G_SETOTHERMODE_H_handler: // These handler labels must be 4 bytes apart for the code below to work
      add    dmemAddr, dmemAddr, $2                          // This is for the code above, does nothing for G_SETOTHERMODE_H
@@ -2377,15 +2354,47 @@ ovl234_lighting_entrypoint_ovl4ver:  // same IMEM address as ovl234_lighting_ent
      li     postOvlRA, ovl234_lighting_entrypoint // set the return address
 
 ovl234_ovl4_entrypoint:
-    nop // TODO
-    j vl_mod_calc_mit
-     nop
+    vxor    $v30, $v30, $v30      // $v30 = 0 for vl_mod_calc_mit
+    j       ovl4_select_instr
+     la     $11, 1                // $7 = command byte or 1 for mIT (vertex load)
 
 ovl234_clipping_entrypoint_ovl4ver:  // same IMEM address as ovl234_clipping_entrypoint
     sh      $ra, rdpHalf1Val
     li      cmd_w1_dram, orga(ovl3_start)     // set up a load of overlay 3
     j       load_overlays_2_3_4               // load overlay 3
      li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
+
+ovl4_select_instr:
+    beq     $11, $7, vl_mod_calc_mit
+     la     $12, G_BRANCH_Z
+    beq     $12, $7, G_BRANCH_WZ_handler
+     la     $11, G_MODIFYVTX
+    beq     $11, $7, G_MODIFYVTX_handler
+     nop    // TODO
+
+G_BRANCH_WZ_handler:
+    j       vtx_addrs_from_cmd
+     la     $11, branchwz_return_from_addrs
+branchwz_return_from_addrs:
+    mfc2    vtxPtr, $v27[6]
+.if CFG_G_BRANCH_W                            // BRANCH_W/BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
+    lh      vtxPtr, VTX_W_INT(vtxPtr)         // read the w coordinate of the vertex (f3dzex)
+.else
+    lw      vtxPtr, VTX_SCR_Z(vtxPtr)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
+.endif
+    sub     $2, vtxPtr, cmd_w1_dram           // subtract the w/z value being tested
+    bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
+     lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
+    j       branch_dl
+     nop
+
+G_MODIFYVTX_handler:
+    j       vtx_addrs_from_cmd
+     la     $11, modifyvtx_return_from_addrs
+modifyvtx_return_from_addrs:
+    lbu     $1, (inputBufferEnd - 0x07)(inputBufferPos)
+    j       do_moveword
+     mfc2   cmd_w0, $v27[6]
 
 vl_mod_calc_mit:
     /*
@@ -2402,7 +2411,6 @@ vl_mod_calc_mit:
     two terms will reduce that to the order of 0000.0001, which kills all the precision.
     */
     // Get absolute value of all terms of M matrix.
-    vxor    $v30, $v30, $v30  // $v30 = 0
     la      $12, mvMatrix + 0xE                              // For right rotates with lrv/ldv
     vxor    $v20, $v0, $v31[1] // One's complement of X int part
     sb      $7, mITValid                                     // $7 is 1 if we got here, mark valid
