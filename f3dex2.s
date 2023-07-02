@@ -334,7 +334,6 @@ tempMemRounded equ ((clipTempVerts + 15) & ~15)
     .dh pMatrix           // G_MV_PMTX
     .dh viewport          // G_MV_VIEWPORT
     .dh lightBufferLookat // G_MV_LIGHT
-    .dh vertexBuffer      // G_MV_POINT
 
 // moveword table
 movewordTable:
@@ -429,11 +428,6 @@ clipPoly:
 clipPoly2:                              //  \ / \ / \
     .skip (MAX_CLIP_POLY_VERTS+1) * 2   //   4   6   7 + term 0
 
-spaceBeforeVertexBuffer:
-.if (. & 7) != 0
-    .skip 8 - (. & 7)
-.endif
-
 // Vertex buffer in RSP internal format
 MAX_VERTS equ 54
 vertexBuffer:
@@ -444,6 +438,11 @@ vertexBuffer:
     // the ucode and the DL pointer. Make sure anything past there is temporary.
     // (Input buffer will be reloaded from next instruction in the source DL.)
     .error "Important things in DMEM will not be saved at yield!"
+.endif
+
+spaceBeforeInputBuffer:
+.if (. & 7) != 0
+    .skip 8 - (. & 7)
 .endif
 
 // Input buffer
@@ -459,6 +458,11 @@ clipTempVerts:
 
 .if (. - tempMemRounded) < 0x40
     .error "Not enough space for temp matrix!"
+.endif
+
+spaceBeforeRDPBuffers:
+.if (. & 7) != 0
+    .skip 8 - (. & 7)
 .endif
 
 RDP_CMD_BUFSIZE equ 0xB0
@@ -1199,6 +1203,7 @@ G_VTX_handler:
      la     $11, vtx_return_from_addrs
 vtx_return_from_addrs:
     mfc2    $3, $v27[6]                        // Address of end in vtxSize units
+    andi    $3, $3, 0xFFF8                     // Round down to DMA word; one input vtx still fits in one internal vtx
     sub     dmemAddr, $3, $1
     jal     dma_read_write
      addi   dmaLen, $1, -1                     // DMA length is always offset by -1
@@ -1341,14 +1346,14 @@ vl_mod_vtx_load_loop:
     vmadm   $v29, $v8,  $v21[0h]
     addiu   secondVtxPos, outputVtxPos, vtxSize
     vmadn   $v29, $v12, $v20[0h]
-    bgez    $1, @@skip1
+    bgez    $1, @@skip1 // If < 0 verts remain, second and output vertices write to same mem
      vmadh  $v29, $v8,  $v20[0h]
     move    secondVtxPos, outputVtxPos
 @@skip1:
     vmadl   $v29, $v13, $v21[1h]
     la      $ra, vl_mod_vtx_load_loop
     vmadm   $v29, $v9,  $v21[1h]
-    bgtz    $1, @@skip2
+    bgtz    $1, @@skip2 // If <= 0 verts remain, run next DL command
      vmadn  $v29, $v13, $v20[1h]
     la      $ra, run_next_DL_command
 @@skip2:

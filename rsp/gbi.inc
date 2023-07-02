@@ -118,8 +118,6 @@ G_MV_MMTX     equ 0x02
 G_MV_PMTX     equ 0x06
 G_MV_VIEWPORT equ 0x08
 G_MV_LIGHT    equ 0x0A
-G_MV_POINT    equ 0x0C
-G_MV_MATRIX   equ 0x0E
 
 MAX_LIGHTS equ 7 // excluding ambient light
 lightSize equ 0x10
@@ -167,8 +165,6 @@ VTX_SCR_Z_FRAC  equ 0x1E
 VTX_INV_W_INT   equ 0x20
 VTX_INV_W_FRAC  equ 0x22
   VTX_CLIP      equ 0x24
-VTX_CLIP_SCAL   equ 0x24
-VTX_CLIP_SCRN   equ 0x26
 
 // Clipping flags. Bits 0-3, 8-11, etc. contain garbage (values from another
 // vertex or zeros) and are not used. Also, the bits for comparisons to W in

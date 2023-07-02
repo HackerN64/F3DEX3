@@ -990,7 +990,8 @@ typedef union {
 # define G_MV_PMTX      6
 # define G_MV_VIEWPORT  8
 # define G_MV_LIGHT     10
-# define G_MV_POINT     12
+/* G_MV_POINT is no longer supported because the internal vertex format is no
+longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 /* G_MV_MATRIX is no longer supported because there is no MVP matrix in F3DEX3. */
 
 /*
@@ -2162,10 +2163,10 @@ _DW({                                                   \
 
 
 /*
- * Insert values into Points
+ * Insert values into Vertices
  *
- * point = point number 0-15
- * where = which element of point to modify (byte offset into point)
+ * vtx = vertex number 0-55
+ * where = which element of point to modify (byte offset into vertex)
  * num   = new value (32 bit)
  */
 # define gSPModifyVertex(pkt, vtx, where, val)      \
