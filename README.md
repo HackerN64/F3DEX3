@@ -74,8 +74,8 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
       applies it to the flags as an AND and OR mask like the previous
       instruction.
     - `SPCullFlagsNone`, `SPCullFlagsSome`, `SPCullFlagsAll`, `SPCullFlagsNotAll`:
-      24 bit mask. Cull (`SPEndDisplayList`) if none, some, all, or not all of 
-      the flags within the mask are set.
+      24 bit mask. Cull (`SPEndDisplayList`) if none, some (at least one), all,
+      or not all (at least one clear) of the flags within the mask are set.
     - `SPBranchFlagsNone`, `SPBranchFlagsSome`, `SPBranchFlagsAll`,
       `SPBranchFlagsNotAll`: same but branch (jump) to segmented address.
     - `SPCallFlagsNone`, `SPCallFlagsSome`, `SPCallFlagsAll`, `SPCallFlagsNotAll`:

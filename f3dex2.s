@@ -323,6 +323,8 @@ attrOffsetZ:
 numLightsxSize:
     .db 0   // Clobbers unused half of attrOffsetZ
     
+cullFlags:
+    .dw 0x00000000
 
 // Movemem table
 movememTable:
@@ -384,6 +386,7 @@ jumpTableEntry G_TRI2_handler
 jumpTableEntry G_QUAD_handler
 jumpTableEntry G_TRISTRIP_handler
 jumpTableEntry G_TRIFAN_handler
+jumpTableEntry G_FLAGSMASKS_handler
 
 gCullMagicNumbers:
 // Values added to cross product (16-bit sign extended).
@@ -739,10 +742,12 @@ run_next_DL_command:
     sra     $7, cmd_w0, 24                              // extract DL command byte from command word
     bnez    $1, load_overlay_0_and_enter                // load and execute overlay 0 if yielding; $1 > 0
      lw     cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
-     addiu  inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
+    addiu  inputBufferPos, inputBufferPos, 0x0008       // increment the DL index by 2 words
     // $7 must retain the command byte for load_mtx and overlay 4 stuff
     // $11 must contain the handler called for G_SETOTHERMODE_H_handler
-    addiu   $2, $7, -G_VTX                             // If >= G_VTX, use jump table
+    addiu   $3, $7, -G_FLAGSOPBASE                      // If >= G_FLAGSOPBASE, use handler
+    bgez    $3, G_FLAGSOPBASE_handler
+     addiu  $2, $7, -G_VTX                              // If >= G_VTX, use jump table
     bgez    $2, do_cmd_jump_table                       // $2 is the index
      addiu  $11, $2, (cmdJumpTablePositive - cmdJumpTableForwardBack) / 2 // Will be interpreted relative to other jump table
     addiu   $2, $2, G_VTX - (0xFF00 | G_SETTIMG)        // If >= G_SETTIMG, use handler; for G_NOOP, this puts
@@ -803,12 +808,30 @@ G_DMA_IO_handler:
     j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
      li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
 
-G_GEOMETRYMODE_handler:
-    lw      $11, geometryModeLabel  // load the geometry mode value
+G_FLAGSOPBASE_handler:
+    lw      $1, cullFlags
+    sll     $11, $7, 30             // Shift bit 1 of cmd (none / all) into sign bit
+    sra     $11, $11, 31            // Copy to all bits
+    xor     $1, $1, $11             // Invert current flags if all / notall
+    and     $1, $1, cmd_w0          // Mask to only the flags we care about
+    sltiu   $1, $1, 1               // Set bit 0 if less than 1 unsigned (== 0)
+    xor     $1, $1, $7              // Invert condition if some / notall
+    andi    $1, $1, 1               // Only look at bit 0; is 1 if flags cond met
+    beqz    $1, run_next_DL_command // Condition not met
+     addiu  $11, $7, -(G_FLAGSOPBASE + G_FLAGSOP_CALL)
+    bltz    $11, G_ENDDL_handler    // Was G_FLAGSOPBASE + G_FLAGSOP_CULL
+     sll    $2, $7, 28              // Put bit 3 (1=branch, 0=call) into sign bit of $2
+    j       branch_dl               // Call or branch based on $2 < 0
+     // Delay slot is harmless.
+
+G_FLAGSMASKS_handler:
+    la      $7, (cullFlags - geometryModeLabel - (0x100 - G_GEOMETRYMODE))
+G_GEOMETRYMODE_handler: // $7 = G_GEOMETRYMODE (as negative) if jumped here
+    lw      $11, (geometryModeLabel + (0x100 - G_GEOMETRYMODE))($7) // load the geometry mode value
     and     $11, $11, cmd_w0        // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
     or      $11, $11, cmd_w1_dram   // sets the flags in cmd_w1_dram (set in g*SPSetGeometryMode)
     j       run_next_DL_command     // run the next DL command
-     sw     $11, geometryModeLabel  // update the geometry mode value
+     sw     $11, (geometryModeLabel + (0x100 - G_GEOMETRYMODE))($7)  // update the geometry mode value
 
 G_RDPSETOTHERMODE_handler:
     sw      cmd_w0, otherMode0       // Record the local otherMode0 copy
