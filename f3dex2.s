@@ -557,7 +557,6 @@ endVtxPtr equ $24 // = cmd_w1_dram
 
 // Must keep values during the full vertex process: load, lighting, and vertex write
 // $1: count of remaining vertices
-topLightPtr  equ $6   // Used locally elsewhere
 curLight     equ $9   // Used locally elsewhere
 inputVtxPos  equ $14  // global
 vPairST      equ $v22
@@ -599,7 +598,7 @@ postOvlRA     equ $12 // Commonly used locally
 // $3: vertex 3 addr, vertex at start of edge in clipping, local
 // $4: pre-shuffle vertex 1 addr for flat shading (mods: got rid of, available local), local
 // $5: clipMaskIdx, geometry mode high short during vertex load / lighting, local
-// $6: topLightPtr, geometry mode low byte during tri write, local
+// $6: geometry mode low byte during tri write, local
 // $7: fog flag in vtx write, local
 // $8: secondVtxPos, local
 // $9: curLight, local
@@ -819,7 +818,7 @@ G_FLAGSOPBASE_handler:
     andi    $1, $1, 1               // Only look at bit 0; is 1 if flags cond met
     beqz    $1, run_next_DL_command // Condition not met
      addiu  $11, $7, -(G_FLAGSOPBASE + G_FLAGSOP_CALL)
-    bltz    $11, G_ENDDL_handler    // Was G_FLAGSOPBASE + G_FLAGSOP_CULL
+    bltz    $11, G_ENDDL_handler    // Was one of the cull commands
      sll    $2, $7, 28              // Put bit 3 (1=branch, 0=call) into sign bit of $2
     j       branch_dl               // Call or branch based on $2 < 0
      // Delay slot is harmless.
@@ -1199,6 +1198,58 @@ ovl3_end:
 
 ovl234_end:
 
+G_FLAGSVERTS_handler:
+    jal     segmented_to_physical
+     la     dmemAddr, (clipTempVerts + 7) & 0xFFF8 // Verts being loaded to temp mem
+    andi    $1, cmd_w0, (31 << 3)              // Lower 16 bits is count << 3 (size)
+    jal     dma_read_write
+     addiu  dmaLen, $1, -1                     // DMA length is always offset by -1
+    la      $5, 0                              // Disable lighting (all geometry mode bits)
+    j       vtx_setup_from_flagsverts
+     la     $ra, 0                             // Flag to return here
+flagsverts_setup_end:
+    jal     while_wait_dma_busy                // Wait for vertex load to finish
+     addiu  inputVtxPos, dmemAddr, -8          // Second vertex loaded at 0x10 above
+    la      $6, 0                              // Output bit 1, whether any vtx near enough
+    la      $9, CLIP_MOD_MASK_SCRN_ALL         // Output bit 0, whether all vertices offscreen
+    llv     vVpFgScale[0], rdpHalf1Val($zero)  // W compare int / frac; reg not used on this path
+flagsverts_loop:
+    move    outputVtxPos, rdpCmdBufPtr         // Write output verts to temp mem in cmd buf
+    j       vtx_load_skip1st
+     ldv    $v20[0], (8)(inputVtxPos)          // Load first vertex
+flagsverts_after_xfrm:
+    // $20 and $24 are the first and second vert's flags.
+    // W values in vPairMVPPosI/F elem 3 and 7.
+    vsubc   $v29, vPairMVPPosF, vVpFgScale[1]  // Compare W frac
+    addiu   $1, $1, 0x10                       // Has had - 2*inputVtxsize, need - 2*8 instead
+    vlt     $v29, vPairMVPPosI, vVpFgScale[0]  // Compare W int
+    and     $9, $9, $20                        // Combine screen clip mask for first vtx
+    mfc2    $11, $vcc                          // Get W compare results
+    srl     $12, $11, 2                        // Elem 3 (first vtx near) -> bit 1
+    bltz    $1, @@skip                         // Only one of two verts valid
+     or     $6, $6, $12                        // Combine first vtx near result
+    and     $9, $9, $24                        // Combine screen clip mask for second vtx
+    srl     $11, $11, 6                        // Elem 7 (second vtx near) -> bit 1
+    or      $6, $6, $11                        // Combine second vtx near result
+@@skip:
+    andi    $6, $6, 2                          // Mask near results to only bit 1
+    sltiu   $24, $9, 1                         // Set bit 0 if no clip planes left
+    or      $24, $24, $6                       // Value to be written to flags
+    la      $12, 3                             // Is this 3 already?
+    beq     $24, $12, flagsverts_early_return  // If so, early return
+     addiu  inputVtxPos, inputVtxPos, -0x10    // Has had + 2*inputVtxSize, need + 2*8 instead
+    bgtz    $1, flagsverts_loop                // > 0 verts remain, continue
+flagsverts_early_return:
+     lbu    $11, (inputBufferEnd - 0x07)(inputBufferPos) // Shift amount
+    lw      $20, cullFlags                     // Current flags
+    sllv    $12, $12, $11                      // Shift 3 to desired bits
+    sllv    $24, $24, $11                      // Shift new flags to desired bits
+    nor     $12, $12, $zero                    // Negate shifted 3
+    and     $20, $20, $12                      // Mask away old values of bits
+    or      $20, $20, $24                      // Insert new values of bits
+    j       run_next_DL_command
+     sw     $20, cullFlags                     // Store updated flags
+
 G_VTX_handler:
     jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
      lhu    $1, (inputBufferEnd - 0x07)(inputBufferPos) // Size in inputVtxSize units
@@ -1215,8 +1266,10 @@ vtx_return_from_addrs:
      addi   dmaLen, $1, -1                     // DMA length is always offset by -1
     lhu     $5, geometryModeLabel + 1          // Middle 2 bytes
     lbu     $11, mITValid                      // 0 if matrix invalid, 1 if valid
+    la      $6, -1                             // For flagsverts, negative means normal vtx load
     mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
     move    inputVtxPos, dmemAddr
+vtx_setup_from_flagsverts:
     lqv     $v0,     (mvMatrix + 0x00)($zero)  // Load M matrix
     lqv     $v2,     (mvMatrix + 0x10)($zero)
     lqv     $v4,     (mvMatrix + 0x20)($zero)
@@ -1254,7 +1307,8 @@ vl_mod_after_calc_mit:
     ldv     $v8[8],  (pMatrix  + 0x00)($zero)
     ldv     $v10[8], (pMatrix  + 0x10)($zero)
     ldv     $v12[8], (pMatrix  + 0x20)($zero)
-    ldv     $v14[8], (pMatrix  + 0x30)($zero)
+    beqz    $ra, flagsverts_setup_end          // If came from flagsverts, go back
+     ldv    $v14[8], (pMatrix  + 0x30)($zero)
     la      $ra, 0                             // Set to not return to clipping
 vl_mod_setup_constants:
 /*
@@ -1312,6 +1366,7 @@ aoAmb, aoDir set to 0 if ambient occlusion disabled
      andi   $7, $5, G_FOG >> 8                    // Nonzero if fog enabled
 vl_mod_vtx_load_loop:
     ldv     $v20[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
+vtx_load_skip1st:
     vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
     ldv     $v20[8],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
     vmudn   $v29, $v7, $v31[2]  // 1
@@ -1395,7 +1450,8 @@ vl_mod_vtx_store:
     vrcph   $v30[3], $v20[7]
     vrcpl   $v28[7], $v21[7]
     vrcph   $v30[7], vFogMask[3] // Zero
-    srl     $24, $20, 4            // Shift second vertex screen clipping to first slots
+    bgez    $6, flagsverts_after_xfrm // >= 0 for flagsverts, < 0 for normal vtx
+     srl    $24, $20, 4            // Shift second vertex screen clipping to first slots
     vch     $v29, vPairMVPPosI, $v25[3h] // Clip scaled high
     andi    $12, $20, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
     vcl     $v29, vPairMVPPosF, $v26[3h] // Clip scaled low
