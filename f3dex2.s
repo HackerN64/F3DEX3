@@ -1177,31 +1177,41 @@ G_FLAGSVERTS_handler:
      addiu  dmaLen, $1, -1                     // DMA length is always offset by -1
     la      $5, 0                              // Disable lighting (all geometry mode bits)
     j       vtx_setup_from_flagsverts
-     la     $ra, 0                             // Flag to return here
+     la     $ra, -1                            // Flag to return here
 flagsverts_setup_end:
     jal     while_wait_dma_busy                // Wait for vertex load to finish
      addiu  inputVtxPos, dmemAddr, -8          // Second vertex loaded at 0x10 above
     la      $6, 0                              // Output bit 1, whether any vtx near enough
     la      $9, CLIP_MOD_MASK_SCRN_ALL         // Output bit 0, whether all vertices offscreen
-    llv     vVpFgScale[0], rdpHalf1Val($zero)  // W compare int / frac; reg not used on this path
+    llv     vVpFgScale[0], rdpHalf1Val($zero)  // Dist compare int / frac; reg not used on this path
+    ldv     vVpFgOffset[0], (cameraWorldPos - spFxBase)(spFxBaseReg) // Camera world pos
+    ldv     vVpFgOffset[8], (cameraWorldPos - spFxBase)(spFxBaseReg)
 flagsverts_loop:
-    move    outputVtxPos, rdpCmdBufPtr         // Write output verts to temp mem in cmd buf
     j       vtx_load_skip1st
      ldv    $v20[0], (8)(inputVtxPos)          // Load first vertex
 flagsverts_after_xfrm:
-    // $20 and $24 are the first and second vert's flags.
-    // W values in vPairMVPPosI/F elem 3 and 7.
-    vsubc   $v29, vPairMVPPosF, vVpFgScale[1]  // Compare W frac
+    // World space XYZ in $v20:v21; clip space coords in vPairMVPPosI/F elem 3 and 7.
+    vsub    $v28, $v20, vVpFgOffset            // Vertex - camera
     addiu   $1, $1, 0x10                       // Has had - 2*inputVtxsize, need - 2*8 instead
-    vlt     $v29, vPairMVPPosI, vVpFgScale[0]  // Compare W int
+    vmudh   $v28, $v28, $v28                   // Squared
+    vreadacc $v30, ACC_UPPER
+    vch     $v29, vPairMVPPosI, vPairMVPPosI[3h] // Clip screen high
+    vcl     $v29, vPairMVPPosF, vPairMVPPosF[3h] // Clip screen low
+    vaddc   $v28, $v28, $v28[0h]               // Sum into Y
+    cfc2    $20, $vcc
+    vadd    $v30, $v30, $v30[0h]
+    vaddc   $v28, $v28, $v28[2h]
+    vadd    $v30, $v30, $v30[2h]
+    vsubc   $v29, $v28, vVpFgScale[1]          // Compare dist frac
     and     $9, $9, $20                        // Combine screen clip mask for first vtx
-    cfc2    $11, $vcc                          // Get W compare results
-    srl     $12, $11, 2                        // Elem 3 (first vtx near) -> bit 1
+    vlt     $v29, $v30, vVpFgScale[0]          // Compare dist int, bits 1 and 5
+    cfc2    $11, $vcc                          // Get compare results
     bltz    $1, @@skip                         // Only one of two verts valid
-     or     $6, $6, $12                        // Combine first vtx near result
-    and     $9, $9, $24                        // Combine screen clip mask for second vtx
-    srl     $11, $11, 6                        // Elem 7 (second vtx near) -> bit 1
+     or     $6, $6, $11                        // Combine first vtx near result
+    srl     $11, $11, 4                        // Second vtx near result -> bit 1
     or      $6, $6, $11                        // Combine second vtx near result
+    srl     $24, $20, 4                        // Shift second vertex screen clipping to first slots
+    and     $9, $9, $24                        // Combine screen clip mask for second vtx
 @@skip:
     andi    $6, $6, 2                          // Mask near results to only bit 1
     sltiu   $24, $9, 1                         // Set bit 0 if no clip planes left
@@ -1277,10 +1287,10 @@ vl_mod_after_calc_mit:
     ldv     $v15[0], (pMatrix  + 0x38)($zero)
     ldv     $v8[8],  (pMatrix  + 0x00)($zero)
     ldv     $v10[8], (pMatrix  + 0x10)($zero)
-    ldv     $v12[8], (pMatrix  + 0x20)($zero)
-    beqz    $ra, flagsverts_setup_end          // If came from flagsverts, go back
-     ldv    $v14[8], (pMatrix  + 0x30)($zero)
-    la      $ra, 0                             // Set to not return to clipping
+    ldv     $v12[8], (pMatrix  + 0x20)($zero)  // Want spFxBaseReg instr below for flagsverts
+    ldv     $v14[8], (pMatrix  + 0x30)($zero)  // $ra is > 0 if came from verts or < 0 from flagsverts
+    andi    $ra, $ra, 0x8000                   // Make that = 0 or < 0
+    bltz    $ra, flagsverts_setup_end          // Otherwise = 0 for clipping return below
 vl_mod_setup_constants:
 /*
 $v16 = vVpFgScale  = [vscale[0], -vscale[1], vscale[2], fogMult,   (repeat)]
@@ -1290,7 +1300,7 @@ $v19 = vFogMask    = [TexSOfs,   TexTOfs,    aoAmb,     0,         TexSOfs,   Te
 $v31 =               [-4,        -1,         1,         0x0010,    0x0100,    0x4000,  0x7F00,    0x7FFF]
 aoAmb, aoDir set to 0 if ambient occlusion disabled
 */
-    li      spFxBaseReg, spFxBase
+     li     spFxBaseReg, spFxBase
     vne     $v29, $v31, $v31[2h]                  // VCC = 11011101
     ldv     vFogMask[0], (attrOffsetST - spFxBase)(spFxBaseReg) // elems 0, 1, 2 = S, T, Z offset
     vxor    $v21, $v21, $v21                      // Zero
@@ -1391,7 +1401,8 @@ vtx_load_skip1st:
     vmadl   $v29, $v14, $v21[2h]
     vmadm   $v29, $v10, $v21[2h]
     vmadn   vPairMVPPosF, $v14, $v20[2h]
-    vmadh   vPairMVPPosI, $v10, $v20[2h]
+    bgez    $6, flagsverts_after_xfrm // >= 0 for flagsverts, < 0 for normal vtx
+     vmadh  vPairMVPPosI, $v10, $v20[2h]
     vmudm   $v29, vPairST, vVpMisc     // Scale ST; must be after texgen
     vmadh   vPairST, vFogMask, $v31[2] // + 1 * ST offset
 vl_mod_vtx_store:
@@ -1421,8 +1432,7 @@ vl_mod_vtx_store:
     vrcph   $v30[3], $v20[7]
     vrcpl   $v28[7], $v21[7]
     vrcph   $v30[7], vFogMask[3] // Zero
-    bgez    $6, flagsverts_after_xfrm // >= 0 for flagsverts, < 0 for normal vtx
-     srl    $24, $20, 4            // Shift second vertex screen clipping to first slots
+    srl     $24, $20, 4            // Shift second vertex screen clipping to first slots
     vch     $v29, vPairMVPPosI, $v25[3h] // Clip scaled high
     andi    $12, $20, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
     vcl     $v29, vPairMVPPosF, $v26[3h] // Clip scaled low
@@ -1836,8 +1846,7 @@ tDaDeI equ $v9
     sdv     tDaDeI[8], 0x0020($1)   // Store DsDe, DtDe, DwDe texture coefficients (integer)
 tV1AtFF equ $v10
     vmudn   tV1AtFF, tDaDeF, $v4[1] // Super-frac (frac * frac) part; assumes v4 factor >= 0
-    beqz    $6, no_z_buffer
-     vmudn  tDaDeF, tDaDeF, $v30[i6]  // v30[i6] is 0x0020
+    vmudn   tDaDeF, tDaDeF, $v30[i6]  // v30[i6] is 0x0020
     vmadh   tDaDeI, tDaDeI, $v30[i6]  // v30[i6] is 0x0020
     sdv     tV1AtF[0], 0x0010($2)     // Store RGBA shade color (fractional)
     vmudn   tDaDxF, tDaDxF, $v30[i6]  // v30[i6] is 0x0020
@@ -1845,7 +1854,8 @@ tV1AtFF equ $v10
     vmadh   tDaDxI, tDaDxI, $v30[i6]  // v30[i6] is 0x0020
     sdv     tV1AtF[8], 0x0010($1)     // Store S, T, W texture coefficients (fractional)
     vmudn   tDaDyF, tDaDyF, $v30[i6]  // v30[i6] is 0x0020
-    sdv     tV1AtI[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
+    beqz    $6, check_rdp_buffer_full // see below
+     sdv    tV1AtI[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
     vmadh   tDaDyI, tDaDyI, $v30[i6]  // v30[i6] is 0x0020
     ssv     tDaDeF[14], -0x0006(rdpCmdBufPtr)
     vmudl   $v29,  tV1AtFF, $v30[i6]  // v30[i6] is 0x0020
@@ -1859,13 +1869,6 @@ tV1AtFF equ $v10
     ssv     tV1AtF[14], -0x000E(rdpCmdBufPtr)
     j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
      ssv    tV1AtI[14], -0x10(rdpCmdBufPtr)
-
-no_z_buffer:
-    sdv     tV1AtF[0], 0x0010($2)      // Store RGBA shade color (fractional)
-    sdv     tV1AtI[0], 0x0000($2)     // Store RGBA shade color (integer)
-    sdv     tV1AtF[8], 0x0010($1)      // Store S, T, W texture coefficients (fractional)
-    j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
-     sdv    tV1AtI[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
 
 load_overlay_0_and_enter:
 G_LOAD_UCODE_handler:
