@@ -57,13 +57,18 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   DMEM.
     - `SPFlagsVerts`: Loads up to 32 vertex positions, encoded as XYZ0 shorts
       (no ST / RGBA). These do not overwrite or affect the vertex buffer. Sets
-      "bit 0" if at least one vert is on the screen side of each clip plane
-      (i.e. not culled due to offscreen). Sets "bit 1" if at least one vert
-      nearer than the target Z/W value. The shift of "bit 0" / "bit 1" within
-      the flags word is selected by a field in the command.
+      "bit 1" if at least one vert is closer to the camera than the threshold
+      in world coords (i.e. object is close, should use higher LoD). Sets
+      "bit 0" if "bit 1" is set AND if at least one vert is on the screen side
+      of each clip plane (i.e. object is close enough and not culled due to
+      offscreen). The shift of "bit 0" / "bit 1" within the flags word is
+      selected by a field in the command.
     - `SPFlags1Vert`: Same as `SPFlagsVerts`, but for one vertex only, which is
       encoded in the command instead of taking a DMA transfer.
-    - `SPFlagsDist`: Sets the target Z/W value in the RDP generic word.
+    - `SPFlagsDist`: Sets the distance threshold in the RDP generic word
+      (`G_RDPHALF_1`). The only other commands which overwrite this are
+      `SPBranchLessZ*`, `SPLoadUcode*`, `SP*TextureRectangle*`, `DPWord`, and
+      `SPPerspNormalize`.
     - `SPFlagsLoad` / `SPFlagsSet` / `SPFlagsClear` / `SPFlagsModify`: All the
       same underlying instruction. Instruction contains a 24 bit mask which is
       ANDed with the flags word, and then a 24 bit mask which is ORed with the
@@ -101,12 +106,12 @@ except:
 - `G_MVO_LOOKATX` and `G_MVO_LOOKATY` have been removed, and `g*SPLookAtX` and
   `g*SPLookAtY` are deprecated. `g*SPLookAtX` has been changed to set both
   directions and `g*SPLookAtY` has been converted to a no-op. To set the lookat
-  directions, use `g*SPLookAt`. The lookat directions are now in one 8-bit DMA
+  directions, use `g*SPLookAt`. The lookat directions are now in one 8-byte DMA
   word, so they must always be set at the same time as each other. Most of the
   non-functional fields (e.g. color) of `LookAt` and its sub-types have been
   removed, so code which accesses these fields needs to change. Code which only
   accesses lookat directions should be compatible with no changes.
-- `g*SPLight` cannot be used to load an ambient light into light 7 (`LIGHT_8`).
+- TODO update: `g*SPLight` cannot be used to load an ambient light into light 7 (`LIGHT_8`).
   It can be used to load directional, point, or ambient lights into lights 0-6
   (`LIGHT_1` through `LIGHT_7`). To load an ambient light into light 7
   (`LIGHT_8`) (or to load an ambient light into any slot), use `g*SPAmbient`.

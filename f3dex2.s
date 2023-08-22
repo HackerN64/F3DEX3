@@ -716,10 +716,11 @@ load_overlay1_init:
     j       load_overlays_0_1
      la     postOvlRA, displaylist_dma
 
+start_end:
 .align 8
+start_padded_end:
 
-.orga max(orga(), max(ovl0_end - ovl0_start, ovl1_end - ovl1_start) - 0x80)
-
+.orga max(orga(), max(ovl0_padded_end - ovl0_start, ovl1_padded_end - ovl1_start) - 0x80)
 ovl01_end:
 
 displaylist_dma: // loads INPUT_BUFFER_LEN bytes worth of displaylist data via DMA into inputBuffer
@@ -744,7 +745,7 @@ run_next_DL_command:
      lw     cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
     addiu  inputBufferPos, inputBufferPos, 0x0008       // increment the DL index by 2 words
     // $7 must retain the command byte for load_mtx and overlay 4 stuff
-    // $11 must contain the handler called for G_SETOTHERMODE_H_handler
+    // $11 must contain the handler called for G_SETOTHERMODE_H_handler and G_TEXRECTFLIP_handler
     addiu   $3, $7, -G_FLAGSOPBASE                      // If >= G_FLAGSOPBASE, use handler
     bgez    $3, G_FLAGSOPBASE_handler
      addiu  $2, $7, -G_VTX                              // If >= G_VTX, use jump table
@@ -807,11 +808,14 @@ G_DMA_IO_handler:
     sra     dmemAddr, dmemAddr, 2
     j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
      li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
-
-G_RDPSETOTHERMODE_handler:
-    sw      cmd_w0, otherMode0       // Record the local otherMode0 copy
-    j       G_RDP_handler            // Send the command to the RDP
-     sw     cmd_w1_dram, otherMode1  // Record the local otherMode1 copy
+     
+G_MOVEWORD_handler:
+    srl     $2, cmd_w0, 16                              // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
+    lhu     $1, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
+do_moveword:
+    add     $1, $1, cmd_w0          // adds the offset in the command word to the address from the table (the upper 4 bytes are effectively ignored)
+    j       run_next_DL_command     // process the next command
+     sw     cmd_w1_dram, ($1)       // moves the specified value (in cmd_w1_dram) into the word (offset + moveword_table[index])
 
 G_RDPHALF_2_handler:
     ldv     $v29[0], (texrectWord1)($zero)
@@ -863,6 +867,10 @@ f3dzex_000012BC:
     xori    rdpCmdBufEnd, rdpCmdBufEnd, rdpCmdBuffer1End ^ rdpCmdBuffer2End // Swap between the two RDP command buffers
     j       dma_read_write
      addi   rdpCmdBufPtr, rdpCmdBufEnd, -RDP_CMD_BUFSIZE
+
+.if (. & 4)
+    .warning "One instruction of padding before ovl234"
+.endif
 
 .align 8
 ovl234_start:
@@ -1162,11 +1170,11 @@ clipping_done:
     jr      $ra
      la     clipPolySelect, -1  // Back to normal tri drawing mode (check clip masks)
 
-.align 8
-
-.orga max(max(ovl2_end - ovl2_start, ovl4_end - ovl4_start) + orga(ovl3_start), orga())
 ovl3_end:
+.align 8
+ovl3_padded_end:
 
+.orga max(max(ovl2_padded_end - ovl2_start, ovl4_padded_end - ovl4_start) + orga(ovl3_start), orga())
 ovl234_end:
 
 G_FLAGSVERTS_handler:
@@ -1197,32 +1205,33 @@ flagsverts_after_xfrm:
     vreadacc $v30, ACC_UPPER
     vch     $v29, vPairMVPPosI, vPairMVPPosI[3h] // Clip screen high
     vcl     $v29, vPairMVPPosF, vPairMVPPosF[3h] // Clip screen low
-    vaddc   $v28, $v28, $v28[0h]               // Sum into Y
+    vaddc   $v28, $v28, $v28[1h]               // Sum into X
     cfc2    $20, $vcc
-    vadd    $v30, $v30, $v30[0h]
+    vadd    $v30, $v30, $v30[1h]
     vaddc   $v28, $v28, $v28[2h]
     vadd    $v30, $v30, $v30[2h]
     vsubc   $v29, $v28, vVpFgScale[1]          // Compare dist frac
     and     $9, $9, $20                        // Combine screen clip mask for first vtx
-    vlt     $v29, $v30, vVpFgScale[0]          // Compare dist int, bits 1 and 5
+    vlt     $v29, $v30, vVpFgScale[0]          // Compare dist int, bits 0 and 4
     cfc2    $11, $vcc                          // Get compare results
     bltz    $1, @@skip                         // Only one of two verts valid
      or     $6, $6, $11                        // Combine first vtx near result
-    srl     $11, $11, 4                        // Second vtx near result -> bit 1
+    srl     $11, $11, 4                        // Second vtx near result -> bit 0
     or      $6, $6, $11                        // Combine second vtx near result
-    srl     $24, $20, 4                        // Shift second vertex screen clipping to first slots
-    and     $9, $9, $24                        // Combine screen clip mask for second vtx
+    srl     $20, $20, 4                        // Shift second vertex screen clipping to first slots
+    and     $9, $9, $20                        // Combine screen clip mask for second vtx
 @@skip:
-    andi    $6, $6, 2                          // Mask near results to only bit 1
     sltiu   $24, $9, 1                         // Set bit 0 if no clip planes left
-    or      $24, $24, $6                       // Value to be written to flags
-    la      $12, 3                             // Is this 3 already?
-    beq     $24, $12, flagsverts_early_return  // If so, early return
+    and     $24, $24, $6                       // And at least one vertex near enough
+    bnez    $24, flagsverts_early_return       // If 1, early return
      addiu  inputVtxPos, inputVtxPos, -0x10    // Has had + 2*inputVtxSize, need + 2*8 instead
     bgtz    $1, flagsverts_loop                // > 0 verts remain, continue
 flagsverts_early_return:
      lbu    $11, (inputBufferEnd - 0x07)(inputBufferPos) // Shift amount
     lw      $20, cullFlags                     // Current flags
+    sll     $6, $6, 1                          // Shift near result to bit 1
+    or      $24, $24, $6                       // Bit 1 = near, bit 0 = near and on screen
+    la      $12, 3                             // Initial bitmask
     sllv    $12, $12, $11                      // Shift 3 to desired bits
     sllv    $24, $24, $11                      // Shift new flags to desired bits
     nor     $12, $12, $zero                    // Negate shifted 3
@@ -1545,7 +1554,7 @@ tri_to_rdp:
     vxor    vZero, vZero, vZero
     j       vtx_indices_to_addr
      la     $11, tri_return_from_addrs
- tri_return_from_addrs:
+tri_return_from_addrs:
     mfc2    $1, $v27[10]
     vor     vOne, $v28, $v28             // 1 set up in function
     mfc2    $2, $v27[12]
@@ -1982,10 +1991,11 @@ break:
     break   0
     nop
 
-.align 8
 ovl0_end:
+.align 8
+ovl0_padded_end:
 
-.if ovl0_end > ovl01_end
+.if ovl0_padded_end > ovl01_end
     .error "Automatic resizing for overlay 0 failed"
 .endif
 
@@ -2010,7 +2020,7 @@ f3dzex_ovl1_00001020:
 
 G_TEXTURE_handler:
     li      $11, textureSettings1 - (texrectWord1 - G_TEXRECTFLIP_handler)  // Calculate the offset from texrectWord1 and $11 for saving to textureSettings
-G_TEXRECT_handler:
+G_TEXRECT_handler: // $11 contains address of handler
 G_TEXRECTFLIP_handler:
     // Stores first command word into textureSettings for gSPTexture, 0x00D0 for gSPTextureRectangle/Flip
     sw      cmd_w0, (texrectWord1 - G_TEXRECTFLIP_handler)($11)
@@ -2018,14 +2028,13 @@ G_RDPHALF_1_handler:
     j       run_next_DL_command
     // Stores second command word into textureSettings for gSPTexture, 0x00D4 for gSPTextureRectangle/Flip, 0x00D8 for G_RDPHALF_1
      sw     cmd_w1_dram, (texrectWord2 - G_TEXRECTFLIP_handler)($11)
-
-G_MOVEWORD_handler:
-    srl     $2, cmd_w0, 16                              // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
-    lhu     $1, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
-do_moveword:
-    add     $1, $1, cmd_w0          // adds the offset in the command word to the address from the table (the upper 4 bytes are effectively ignored)
-    j       run_next_DL_command     // process the next command
-     sw     cmd_w1_dram, ($1)       // moves the specified value (in cmd_w1_dram) into the word (offset + moveword_table[index])
+     
+G_SETSCISSOR_handler:
+    la      $11, scissorUpLeft - (otherMode0 - G_RDPSETOTHERMODE_handler)
+G_RDPSETOTHERMODE_handler: // $11 contains address of handler
+    sw      cmd_w0, (otherMode0 - G_RDPSETOTHERMODE_handler)($11) // Record the local otherMode0 copy
+    j       G_RDP_handler            // Send the command to the RDP
+     sw     cmd_w1_dram, (otherMode1 - G_RDPSETOTHERMODE_handler)($11) // Record the local otherMode1 copy
 
 G_POPMTX_handler:
     lw      $11, matrixStackPtr             // Get the current matrix stack pointer
@@ -2110,15 +2119,11 @@ G_GEOMETRYMODE_handler: // $7 = G_GEOMETRYMODE (as negative) if jumped here
     j       run_next_DL_command     // run the next DL command
      sw     $11, (geometryModeLabel + (0x100 - G_GEOMETRYMODE))($7)  // update the geometry mode value
 
-G_SETSCISSOR_handler:
-    sw      cmd_w0, scissorUpLeft            // Record the local scissorUpleft copy
-    j       G_RDP_handler                    // Send the command to the RDP
-     sw     cmd_w1_dram, scissorBottomRight  // Record the local scissorBottomRight copy
-     
-.align 8
 ovl1_end:
+.align 8
+ovl1_padded_end:
 
-.if ovl1_end > ovl01_end
+.if ovl1_padded_end > ovl01_end
     .error "Automatic resizing for overlay 1 failed"
 .endif
 
@@ -2385,8 +2390,9 @@ vl_mod_point_light:
     j       vl_mod_finish_light
      vmadh  $v23, $v23, $v10[3h] // Dot product int * rcp int, clamp to 0x7FFF
 
-.align 8
 ovl2_end:
+.align 8
+ovl2_padded_end:
 
 .headersize ovl234_start - orga()
 
@@ -2620,7 +2626,8 @@ vl_mod_calc_mit:
     j       vl_mod_after_calc_mit
      sdv    $v20[0], (mITMatrix + 0x00)($zero)
 
-.align 8
 ovl4_end:
+.align 8
+ovl4_padded_end:
 
 .close // CODE_FILE
