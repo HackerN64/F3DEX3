@@ -224,13 +224,13 @@ endSharedDMEM:
 v31Value:
 // v31 must go from lowest to highest (signed) values for vcc patterns.
     .dh -4     // used in clipping, vtx write for Newton-Raphson reciprocal
-    .dh -1     // used in init, clipping
-    .dh 1      // used to load accumulator in many places, replaces vOne
-    .dh 0x0010 // used in tri write for Newton-Raphson reciprocal, and point lighting
-    .dh 0x0100 // used in tri write, vertex color >>= 8 and vcr?; also in lighting and point lighting
+    .dh -1     // used often
+    .dh 1      // used to load accumulator when vOne or vLtOne not available
+    .dh 2      // used as clip ratio (vtx write, clipping) and in clipping
+    .dh 0x0100 // not used, must be in order
     .dh 0x4000 // used in tri write, texgen
-    .dh 0x7F00 // used in vtx write and pre-jump instrs to there, also normals unpacking
-    .dh 0x7FFF // used in vtx write, tri write, lighting, point lighting
+    .dh 0x7F00 // used in fog, normals unpacking
+    .dh 0x7FFF // used often
 
 // constants for register $v30
 .if (. & 15) != 0
@@ -239,14 +239,14 @@ v31Value:
 // VCC patterns used:
 // vge xxx, $v30, $v30[7] = 11110001 in tri write
 v30Value:
-    .dh vertexBuffer // used in tri write
-    .dh vtxSize << 7 // 0x1300; it's not 0x2600 because vertex indices are *2; used in tri write for vtx index to addr
-    .dh 0x1000 // used in tri write, some multiplier
-    .dh 0x0100 // used in tri write, vertex color >>= 8 and vcr?; also in lighting and point lighting
+    .dh vertexBuffer // this and next used in vtx_indices_to_addr
+    .dh vtxSize << 7 // 0x1300; it's not 0x2600 because vertex indices are *2
+    .dh 0x1000 // used once in tri write, some multiplier
+    .dh 0x0100 // used several times in tri write
     .dh -16    // used in tri write for Newton-Raphson reciprocal 
-    .dh 0xFFF8 // used in tri write, mask away lower ST bits?
-    .dh 0x0010 // used in tri write for Newton-Raphson reciprocal; value moved to elem 7 for point lighting
-    .dh 0x0020 // used in tri write, both signed and unsigned multipliers; value moved from elem 6 from point lighting
+    .dh 0xFFF8 // used once in tri write, mask away lower ST bits
+    .dh 0x0010 // used once in tri write for Newton-Raphson reciprocal
+    .dh 0x0020 // used in tri write, both signed and unsigned multipliers
 
 /*
 Quick note on Newton-Raphson:
@@ -266,7 +266,7 @@ linearGenerateCoefficients:
     .dh 0xC000
     .dh 0x44D3
     .dh 0x6CB3
-    .dh 2
+    .dh 0 // not used
     
 cameraWorldPos:
     .skip 6
@@ -977,8 +977,8 @@ vClFade2 equ $v2
     Five clip conditions (these are in a different order from vanilla):
            vClBaseI/vClBaseF[3]     vClDiffI/vClDiffF[3]
     4 W=0:             W1                 W1  -         W2
-    3 +X :      X1 - 2*W1         (X1 - 2*W1) - (X2 - 2*W2) <- the 2 is clip ratio, can be changed
-    2 -X :      X1 + 2*W1         (X1 + 2*W1) - (X2 + 2*W2)    it is 1 if we are doing screen clipping
+    3 +X :      X1 - 2*W1         (X1 - 2*W1) - (X2 - 2*W2) <- the 2 is clip ratio
+    2 -X :      X1 + 2*W1         (X1 + 2*W1) - (X2 + 2*W2)
     1 +Y :      Y1 - 2*W1         (Y1 - 2*W1) - (Y2 - 2*W2)
     0 -Y :      Y1 + 2*W1         (Y1 + 2*W1) - (Y2 + 2*W2)
     */
@@ -991,7 +991,7 @@ vClFade2 equ $v2
     ldv     $v4[8], VTX_FRAC_VEC($3)         // Vtx off screen, frac pos
     bnez    $11, clipping_mod_w              // If so, use 1 or -1
      ldv    $v5[8], VTX_INT_VEC ($3)         // Vtx off screen, int pos
-    vmudh   $v29, $v29, vVpMisc[6]           // elem 0 is (1 or -1) * clipRatio
+    vmudh   $v29, $v29, $v31[3]              // elem 0 is (1 or -1) * 2 (clip ratio)
     andi    $11, clipMaskIdx, 2              // Conditions 2 (-x) or 3 (+x)
     vmudm   vClBaseF, vOne, $v4[0h]          // Set accumulator (care about 3, 7) to X
     bnez    $11, clipping_mod_skipy
@@ -999,18 +999,17 @@ vClFade2 equ $v2
     vmudm   vClBaseF, vOne, $v4[1h]          // Discard that and set accumulator 3, 7 to Y
     vmadh   vClBaseI, vOne, $v5[1h]
 clipping_mod_skipy:
-    vmadn   vClBaseF, $v4, $v29[0]           // + W * +/- clipRatio
+    vmadn   vClBaseF, $v4, $v29[0]           // + W * +/- 2
     vmadh   vClBaseI, $v5, $v29[0]
 clipping_mod_skipxy:
     vsubc   vClDiffF, vClBaseF, vClBaseF[7]  // Vtx on screen - vtx off screen
-    lqv     $v25[0], (linearGenerateCoefficients)($zero) // Used just to load the value 2
     vsub    vClDiffI, vClBaseI, vClBaseI[7]
     // Not sure what the first reciprocal is for.
     vor     $v29, vClDiffI, vOne[0]       // round up int sum to odd; this ensures the value is not 0, otherwise v29 will be 0 instead of +/- 2
     vrcph   $v3[3], vClDiffI[3]
     vrcpl   $v2[3], vClDiffF[3]           // frac: 1 / (x+y+z+w), vtx on screen - vtx off screen
     vrcph   $v3[3], vZero[0]              // get int result of reciprocal
-    vabs    $v29, $v29, $v25[3]           // 0x0002 // v29 = +/- 2 based on sum positive (incl. zero) or negative
+    vabs    $v29, $v29, $v31[3]           // 2; v29 = +/- 2 based on sum positive (incl. zero) or negative
     vmudn   $v2, $v2, $v29[3]             // multiply reciprocal by +/- 2
     vmadh   $v3, $v3, $v29[3]
     veq     $v3, $v3, vZero[0]            // if reciprocal high is 0
@@ -1332,9 +1331,9 @@ vl_mod_setup_constants:
 /*
 $v16 = vVpFgScale  = [vscale[0], -vscale[1], vscale[2], fogMult,   (repeat)]
 $v17 = vVpFgOffset = [vtrans[0],  vtrans[1], vtrans[2], fogOffset, (repeat)]
-$v18 = vVpMisc     = [TexSScl,   TexTScl,    perspNorm, 4,         TexSScl,   TexTScl, clipRatio, 4     ]
+$v18 = vVpMisc     = [TexSScl,   TexTScl,    perspNorm, 4,         TexSScl,   TexTScl, ---,       4     ]
 $v19 = vFogMask    = [TexSOfs,   TexTOfs,    aoAmb,     0,         TexSOfs,   TexTOfs, aoDir,     0     ]
-$v31 =               [-4,        -1,         1,         0x0010,    0x0100,    0x4000,  0x7F00,    0x7FFF]
+$v31 =               [-4,        -1,         1,         2,         ---,       0x4000,  0x7F00,    0x7FFF]
 aoAmb, aoDir set to 0 if ambient occlusion disabled
 */
     vne     $v29, $v31, $v31[2h]                  // VCC = 11011101
@@ -1343,7 +1342,6 @@ aoAmb, aoDir set to 0 if ambient occlusion disabled
     ldv     vVpFgOffset[0], (viewport + 8)($zero) // Load vtrans duplicated in 0-3 and 4-7
     ldv     vVpFgOffset[8], (viewport + 8)($zero)
     lhu     $12, (geometryModeLabel+2)($zero)
-    lhu     $24, (perspNorm)($zero)               // Can't load this as a short because not enough reach
     vmrg    $v29, $v21, vFogMask[2]               // all zeros except elems 2, 6 are Z offset
     ldv     vFogMask[8], (attrOffsetST - spFxBase)(spFxBaseReg) // Duplicated in 4-6
     vsub    $v22, $v21, $v31[0]                   // Vector of 4s = 0 - -4
@@ -1365,7 +1363,7 @@ aoAmb, aoDir set to 0 if ambient occlusion disabled
 @@skipao:
     ldv     vVpFgScale[0], (viewport)($zero)      // Load vscale duplicated in 0-3 and 4-7
     ldv     vVpFgScale[8], (viewport)($zero)
-    mtc2    $24, vVpMisc[4]                       // perspNorm
+    llv     vVpMisc[4], (perspNorm)($zero)        // perspNorm in elem 2, garbage in 3
     llv     $v23[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
     vmrg    vFogMask, vFogMask, $v20              // move aoAmb and aoDir into vFogMask
     vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
@@ -1375,7 +1373,6 @@ aoAmb, aoDir set to 0 if ambient occlusion disabled
     vadd    $v23, $v23, $v31[6]                   // Add 0x7F00 to fog offset
     vmrg    vFogMask, vFogMask, $v21              // Put 0s in elements 3,7
     vmov    vVpFgScale[1], $v20[1]                // Negate vscale[1] because RDP top = y=0
-    lsv     vVpMisc[12], (linearGenerateCoefficients + 6 - spFxBase)(spFxBaseReg) // clipRatio = 2 in elem 6
     vmov    vVpFgScale[5], $v20[1]                // Same for second half
     bnez    $ra, clipping_mod_after_constants     // Return to clipping if from there
      vmrg    vVpFgOffset, vVpFgOffset, $v23[1]    // Put fog offset in elements 3,7 of vtrans
@@ -1457,9 +1454,9 @@ vl_mod_vtx_store:
     sdv     vPairMVPPosI[0],  (VTX_INT_VEC   )(outputVtxPos)
     vcl     $v29, vPairMVPPosF, vPairMVPPosF[3h] // Clip screen low
     suv     vPairRGBA[4],     (VTX_COLOR_VEC )(secondVtxPos)
-    vmudn   $v26, vPairMVPPosF, vVpMisc[6] // Clip ratio
+    vmudn   $v26, vPairMVPPosF, $v31[3] // Clip ratio
     suv     vPairRGBA[0],     (VTX_COLOR_VEC )(outputVtxPos)
-    vmadh   $v25, vPairMVPPosI, vVpMisc[6] // Clip ratio
+    vmadh   $v25, vPairMVPPosI, $v31[3] // Clip ratio
     slv     vPairST[8],       (VTX_TC_VEC    )(secondVtxPos)
     vrcph   $v29[0], $v20[3]
     slv     vPairST[0],       (VTX_TC_VEC    )(outputVtxPos)
@@ -1632,7 +1629,7 @@ tV3AtI equ $v21
      andi   $11, $11, G_CULL_BOTH >> 8  // Only look at culling bits, so we can use others for other mods
     vor     $v20, vZero, vZero  // Zero vector reg initially
     lbv     $v20[1], VTX_COLOR_A($1) // Load vertex alpha
-    vor     $v15, vZero, $v31[4] // 0x0100 in all elems
+    vor     $v15, vZero, $v30[3] // 0x0100 in all elems
     lbv     $v20[3], VTX_COLOR_A($2)
     lbv     $v20[5], VTX_COLOR_A($3)
     bgtz    $8, tri_alpha_compare_cull_skip_flip // Checking all alphas < value
@@ -1660,7 +1657,7 @@ tri_skip_alpha_compare_cull:
      add    $11, $6, $11        // Add magic number; see description at gCullMagicNumbers
     vmrg    $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
     bgez    $11, return_routine // If sign bit is clear, cull.
-     vmudn  $v4, $v14, $v31[5]
+     vmudn  $v4, $v14, $v31[5] // 0x4000
     mfc2    $1, $v14[12]      // $v14 = lowest Y value = highest on screen (x, y, addr)
     vsub    $v6, $v2, $v14
     mfc2    $2, $v2[12]       // $v2 = mid vertex (x, y, addr)
@@ -1693,42 +1690,36 @@ tri_skip_alpha_compare_cull:
     vmrg    tV2AtI, $v25, tV2AtI        // RGB from $4, alpha from $2
     vmrg    tV3AtI, $v25, tV3AtI        // RGB from $4, alpha from $3
 tri_skip_flat_shading:
-    i1 equ 3 // v30[3] is 0x0100
-    i2 equ 7 // v30[7] is 0x0020
-    i3 equ 2 // v30[2] is 0x1000
-    i4 equ 3 // v30[3] is 0x0100
-    i5 equ 6 // v30[6] is 0x0010
-    i6 equ 7 // v30[7] is 0x0020
-    vec1 equ v30
-    vec2 equ v22
     vrcp    $v20[2], $v6[1]
+    /*
     // Get rid of any other bits so they can be used for other mods.
     // G_TEXTURE_ENABLE is defined as 0 in the F3DEX2 GBI, and whether the tri
     // commands are sent to the RDP as textured or not is set via enabling or
     // disabling the texture in SPTexture (textureSettings1 + 3 below).
     andi    $6, $6, G_SHADE | G_ZBUFFER
+    // Update - ended up putting the new mod bits in second byte only, don't need this
+    */
     vrcph   $v22[2], $v6[1]
     lw      $5, VTX_INV_W_VEC($1)
     vrcp    $v20[3], $v8[1]
     lw      $7, VTX_INV_W_VEC($2)
     vrcph   $v22[3], $v8[1]
     lw      $8, VTX_INV_W_VEC($3)
-    // v30[i1] is 0x0100
-    vmudl   tV1AtI, tV1AtI, $v30[i1] // vertex color 1 >>= 8
+    vmudl   tV1AtI, tV1AtI, $v30[3] // 0x0100; vertex color 1 >>= 8
     lbu     $9, textureSettings1 + 3
-    vmudl   tV2AtI, tV2AtI, $v30[i1] // vertex color 2 >>= 8
+    vmudl   tV2AtI, tV2AtI, $v30[3] // 0x0100; vertex color 2 >>= 8
     sub     $11, $5, $7
-    vmudl   tV3AtI, tV3AtI, $v30[i1] // vertex color 3 >>= 8
+    vmudl   tV3AtI, tV3AtI, $v30[3] // 0x0100; vertex color 3 >>= 8
     sra     $12, $11, 31
     vmov    $v15[3], $v8[0]
     and     $11, $11, $12
-    vmudl   $v29, $v20, $vec1[i2]
+    vmudl   $v29, $v20, $v30[7] // 0x0020
     sub     $5, $5, $11
-    vmadm   $v22, $v22, $vec1[i2]
+    vmadm   $v22, $v22, $v30[7] // 0x0020
     sub     $11, $5, $8
     vmadn   $v20, vZero, vZero[0]
     sra     $12, $11, 31
-    vmudm   $v25, $v15, $vec1[i3]
+    vmudm   $v25, $v15, $v30[2] // 0x1000
     and     $11, $11, $12
     vmadn   $v15, vZero, vZero[0]
     sub     $5, $5, $11
@@ -1752,36 +1743,36 @@ tri_skip_flat_shading:
     ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
     vmadh   $v17, $v24, $v17
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
-    vand    $v22, $v20, $v30[5]
-    vcr     $v15, $v15, $v30[i4]
+    vand    $v22, $v20, $v30[5] // 0xFFF8
+    vcr     $v15, $v15, $v30[3] // 0x0100
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
-    vmudh   $v29, vOne, $v30[i5]
+    vmudh   $v29, vOne, $v30[6] // 0x0010
     ssv     $v10[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
-    vmadn   $v16, $v16, $v30[4]     // v30[4] is 0xFFF0
+    vmadn   $v16, $v16, $v30[4] // -16
     ssv     $v2[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
-    vmadh   $v17, $v17, $v30[4]     // v30[4] is 0xFFF0
+    vmadh   $v17, $v17, $v30[4] // -16
     ssv     $v14[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vmudn   $v29, $v3, $v14[0]
     andi    $12, $5, 0x0080 // Extract the left major flag from $5
-    vmadl   $v29, $vec2, $v4[1]
+    vmadl   $v29, $v22, $v4[1]
     or      $12, $12, $7 // Combine the left major flag with the level and tile from the texture settings
     vmadm   $v29, $v15, $v4[1]
     sb      $12, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
-    vmadn   $v2, $vec2, $v26[1]
+    vmadn   $v2, $v22, $v26[1]
     beqz    $9, no_textures // If textures are not enabled, skip texture coefficient calculation
      vmadh  $v3, $v15, $v26[1]
     vrcph   $v29[0], $v27[0]
     vrcpl   $v10[0], $v27[1]
     vadd    $v14, vZero, $v13[1q]
     vrcph   $v27[0], vZero[0]
-    vor     $v22, vZero, $v31[7]
+    vor     $v22, vZero, $v31[7] // 0x7FFF
     vmudm   $v29, $v13, $v10[0]
     vmadl   $v29, $v14, $v10[0]
     llv     $v22[0], VTX_TC_VEC($1)
     vmadn   $v14, $v14, $v27[0]
     llv     $v22[8], VTX_TC_VEC($2)
     vmadh   $v13, $v13, $v27[0]
-    vor     $v10, vZero, $v31[7]
+    vor     $v10, vZero, $v31[7] // 0x7FFF
     vge     $v29, $v30, $v30[7] // Set VCC to 11110001; select RGBA___Z or ____STW_
     llv     $v10[8], VTX_TC_VEC($3)
     vmudm   $v29, $v22, $v14[0h]
@@ -1891,23 +1882,23 @@ tDaDeI equ $v9
     sdv     tDaDeI[8], 0x0020($1)   // Store DsDe, DtDe, DwDe texture coefficients (integer)
 tV1AtFF equ $v10
     vmudn   tV1AtFF, tDaDeF, $v4[1] // Super-frac (frac * frac) part; assumes v4 factor >= 0
-    vmudn   tDaDeF, tDaDeF, $v30[i6]  // v30[i6] is 0x0020
-    vmadh   tDaDeI, tDaDeI, $v30[i6]  // v30[i6] is 0x0020
-    sdv     tV1AtF[0], 0x0010($2)     // Store RGBA shade color (fractional)
-    vmudn   tDaDxF, tDaDxF, $v30[i6]  // v30[i6] is 0x0020
-    sdv     tV1AtI[0], 0x0000($2)     // Store RGBA shade color (integer)
-    vmadh   tDaDxI, tDaDxI, $v30[i6]  // v30[i6] is 0x0020
-    sdv     tV1AtF[8], 0x0010($1)     // Store S, T, W texture coefficients (fractional)
-    vmudn   tDaDyF, tDaDyF, $v30[i6]  // v30[i6] is 0x0020
+    vmudn   tDaDeF, tDaDeF, $v30[7] // 0x0020
+    vmadh   tDaDeI, tDaDeI, $v30[7] // 0x0020
+    sdv     tV1AtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
+    vmudn   tDaDxF, tDaDxF, $v30[7] // 0x0020
+    sdv     tV1AtI[0], 0x0000($2)   // Store RGBA shade color (integer)
+    vmadh   tDaDxI, tDaDxI, $v30[7] // 0x0020
+    sdv     tV1AtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
+    vmudn   tDaDyF, tDaDyF, $v30[7] // 0x0020
     beqz    $6, check_rdp_buffer_full // see below
-     sdv    tV1AtI[8], 0x0000($1)     // Store S, T, W texture coefficients (integer)
-    vmadh   tDaDyI, tDaDyI, $v30[i6]  // v30[i6] is 0x0020
+     sdv    tV1AtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
+    vmadh   tDaDyI, tDaDyI, $v30[7] // 0x0020
     ssv     tDaDeF[14], -0x0006(rdpCmdBufPtr)
-    vmudl   $v29,  tV1AtFF, $v30[i6]  // v30[i6] is 0x0020
+    vmudl   $v29,  tV1AtFF, $v30[7] // 0x0020
     ssv     tDaDeI[14], -0x0008(rdpCmdBufPtr)
-    vmadn   tV1AtF, tV1AtF, $v30[i6]  // v30[i6] is 0x0020
+    vmadn   tV1AtF, tV1AtF, $v30[7] // 0x0020
     ssv     tDaDxF[14], -0x000A(rdpCmdBufPtr)
-    vmadh   tV1AtI, tV1AtI, $v30[i6]  // v30[i6] is 0x0020
+    vmadh   tV1AtI, tV1AtI, $v30[7] // 0x0020
     ssv     tDaDxI[14], -0x000C(rdpCmdBufPtr)
     ssv     tDaDyF[14], -0x0002(rdpCmdBufPtr)
     ssv     tDaDyI[14], -0x0004(rdpCmdBufPtr)
@@ -2358,7 +2349,7 @@ vl_mod_skip_fresnel:
     beqz    $11, vl_mod_return_from_lighting
      vmacf  vPairST, $v30, $v31[5] // + dot products * 0x4000
     // Texgen_Linear:
-    vmadh   vPairST, vLtOne, $v23[0] // + 1 * 0xC000 (gets rid of the 0x4000?)
+    vmadh   vPairST, vLtOne, $v23[0] // + 1 * 0xC000 (gets rid of the 0x4000?) //TODO
     vmulf   $v26, vPairST, vPairST // ST squared
     vmulf   $v25, vPairST, $v31[7] // Move ST to accumulator (0x7FFF = 1)
     vmacf   $v25, vPairST, $v23[2] // + ST * 0x6CB3
