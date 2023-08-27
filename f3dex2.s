@@ -227,7 +227,7 @@ v31Value:
     .dh -1     // used often
     .dh 1      // used to load accumulator when vOne or vLtOne not available
     .dh 2      // used as clip ratio (vtx write, clipping) and in clipping
-    .dh 0x0100 // not used, must be in order
+    .dh 4      // used to initialize 4s in vVpMisc in vtx setup
     .dh 0x4000 // used in tri write, texgen
     .dh 0x7F00 // used in fog, normals unpacking
     .dh 0x7FFF // used often
@@ -259,15 +259,6 @@ the 4 and -4 come from. For tri write, the result needs to be multiplied by 4
 for subpixels, so it's 16 and -16.
 */
 
-.if (. & 15) != 0
-    .error "Wrong alignment for linearGenerateCoefficients"
-.endif
-linearGenerateCoefficients:
-    .dh 0xC000
-    .dh 0x44D3
-    .dh 0x6CB3
-    .dh 0 // not used
-    
 cameraWorldPos:
     .skip 6
 tempHalfword2:
@@ -288,9 +279,10 @@ ltBufOfs equ (lightBufferMain - spFxBase)
 // vtx write / lighting because vector load offsets can't reach all of DMEM.
 spFxBase:
 
-cullFlags:
-    .dw 0x00000000
-
+texgenLinearCoeffs:
+    .dh 0x44D3
+    .dh 0x6CB3
+    
 mwModsStart:
 alphaCompareCullMode:
     .db 0x00 // 0 = disabled, 1 = cull if all < value, -1 = cull if all > value
@@ -339,6 +331,9 @@ tempHalfword1:
 numLightsxSize:
     .db 0   // Clobbers unused half of attrOffsetZ
     
+cullFlags:
+    .dw 0x00000000
+
 clipCondShifts:
     .db CLIP_SHIFT_NY
     .db CLIP_SHIFT_PY
@@ -1333,7 +1328,7 @@ $v16 = vVpFgScale  = [vscale[0], -vscale[1], vscale[2], fogMult,   (repeat)]
 $v17 = vVpFgOffset = [vtrans[0],  vtrans[1], vtrans[2], fogOffset, (repeat)]
 $v18 = vVpMisc     = [TexSScl,   TexTScl,    perspNorm, 4,         TexSScl,   TexTScl, ---,       4     ]
 $v19 = vFogMask    = [TexSOfs,   TexTOfs,    aoAmb,     0,         TexSOfs,   TexTOfs, aoDir,     0     ]
-$v31 =               [-4,        -1,         1,         2,         ---,       0x4000,  0x7F00,    0x7FFF]
+$v31 =               [-4,        -1,         1,         2,         4,         0x4000,  0x7F00,    0x7FFF]
 aoAmb, aoDir set to 0 if ambient occlusion disabled
 */
     vne     $v29, $v31, $v31[2h]                  // VCC = 11011101
@@ -1344,7 +1339,6 @@ aoAmb, aoDir set to 0 if ambient occlusion disabled
     lhu     $12, (geometryModeLabel+2)($zero)
     vmrg    $v29, $v21, vFogMask[2]               // all zeros except elems 2, 6 are Z offset
     ldv     vFogMask[8], (attrOffsetST - spFxBase)(spFxBaseReg) // Duplicated in 4-6
-    vsub    $v22, $v21, $v31[0]                   // Vector of 4s = 0 - -4
     andi    $11, $12, G_ATTROFFSET_Z_ENABLE
     beqz    $11, @@skipz                          // Skip if Z offset disabled
      llv    $v20[4], (aoAmbientFactor - spFxBase)(spFxBaseReg) // Load aoAmb 2 and aoDir 3
@@ -1368,7 +1362,7 @@ aoAmb, aoDir set to 0 if ambient occlusion disabled
     vmrg    vFogMask, vFogMask, $v20              // move aoAmb and aoDir into vFogMask
     vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
     vsub    $v20, $v21, vVpFgScale                // -vscale
-    vmrg    vVpMisc, vVpMisc, $v22                // Put 4s in elements 3,7
+    vmrg    vVpMisc, vVpMisc, $v31[4]             // Put 4s in elements 3,7
     vmrg    vVpFgScale, vVpFgScale, $v23[0]       // Put fog multiplier in elements 3,7 of vscale
     vadd    $v23, $v23, $v31[6]                   // Add 0x7F00 to fog offset
     vmrg    vFogMask, vFogMask, $v21              // Put 0s in elements 3,7
@@ -2342,19 +2336,19 @@ vl_mod_skip_fresnel:
     vmadh   $v29, vLtOne, $v28[1h]
     vmadh   $v28, vLtOne, $v28[2h]      // $v28 = dot product 1
     vne     $v29, $v31, $v31[1h] // Set VCC to 10111011
-    lqv     $v23[0], (linearGenerateCoefficients)($zero)
+    llv     $v23[0], (texgenLinearCoeffs - spFxBase)(spFxBaseReg)
     vmrg    $v30, $v30, $v28[0h]  // Dot products in elements 0, 1, 4, 5
     andi    $11, $5, G_TEXTURE_GEN_LINEAR >> 8
     vmudh   $v29, vLtOne, $v31[5]  // 1 * 0x4000
     beqz    $11, vl_mod_return_from_lighting
-     vmacf  vPairST, $v30, $v31[5] // + dot products * 0x4000
+     vmacf  vPairST, $v30, $v31[5] // + dot products * 0x4000 ( / 2)
     // Texgen_Linear:
-    vmadh   vPairST, vLtOne, $v23[0] // + 1 * 0xC000 (gets rid of the 0x4000?) //TODO
+    vmulf   vPairST, $v30, $v31[5] // dot products * 0x4000 ( / 2)
     vmulf   $v26, vPairST, vPairST // ST squared
     vmulf   $v25, vPairST, $v31[7] // Move ST to accumulator (0x7FFF = 1)
-    vmacf   $v25, vPairST, $v23[2] // + ST * 0x6CB3
+    vmacf   $v25, vPairST, $v23[1] // + ST * 0x6CB3
     vmudh   $v29, vLtOne, $v31[5] // 1 * 0x4000
-    vmacf   vPairST, vPairST, $v23[1] // + ST * 0x44D3
+    vmacf   vPairST, vPairST, $v23[0] // + ST * 0x44D3
     j       vl_mod_return_from_lighting
      vmacf  vPairST, $v26, $v25 // + ST squared * (ST + ST * coeff)
      
