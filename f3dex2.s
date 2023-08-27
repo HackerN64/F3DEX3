@@ -306,8 +306,20 @@ aoAmbientFactor:
 aoDirectionalFactor:
     .dh 0xA000
 
-fresnelStuff:
-    .dw 0
+fresnelOffset:
+    .dh 0 // Dot product value, in 0000 - 7FFF, which gives shade alpha = 0
+fresnelScale:
+    .dh 0 // Let k = dot product value, in 0000 - 7FFF, which gives shade alpha = FF.
+          // Then fresnelScale = 0.7FFF / (k - fresnelOffset) as s7.8 fixed point.
+          // Alternatively, shade alpha [0000 - 7FFF] =
+          // fresnelScale [-80.00 - 7F.FF] * (dot product [0000 - 7FFF] - fresnelOffset)
+          // Examples:
+          // 1. Grazing -> 00; normal -> FF
+          //    Then set fresnelOffset = 0000, fresnelScale = 01.00
+          // 2. Grazing -> FF; normal -> 00
+          //    Then set fresnelOffset = 7FFF, fresnelScale = FF.00 (-01.00)
+          // 3. 30 degrees (0.5f or 4000) -> FF; 60 degrees (0.86f or 6ED9) -> 00
+          //    Then set fresnelOffset = 6ED9, fresnelScale = FD.45 (-02.BB = 1 / (0.5f - 0.86f))
 
 .if (. & 7) != 0
 .error "Wrong alignment before attrOffsetST"
@@ -1201,7 +1213,8 @@ flagsverts_after_xfrm:
     // World space XYZ in $v20:v21; clip space coords in vPairMVPPosI/F elem 3 and 7.
     vsub    $v28, $v20, vVpFgOffset            // Vertex - camera
     addiu   $1, $1, 0x10                       // Has had - 2*inputVtxsize, need - 2*8 instead
-    vmudh   $v28, $v28, $v28                   // Squared
+    vmudh   $v29, $v28, $v28                   // Squared
+    vreadacc $v28, ACC_MIDDLE                  // Have to separately read because clamped
     vreadacc $v30, ACC_UPPER
     vch     $v29, vPairMVPPosI, vPairMVPPosI[3h] // Clip screen high
     vcl     $v29, vPairMVPPosF, vPairMVPPosF[3h] // Clip screen low
@@ -2267,50 +2280,67 @@ vl_mod_finish_light:
 
 vl_mod_lighting_done:
     vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
-    lpv     $v10[4], (ltBufOfs + 0 - lightSize)(curLight) // Lookat 1 dir in elems 0-2
-    lpv     $v26[0], (ltBufOfs + 8 - lightSize)(curLight) // Lookat 1 dir in elems 4-6
     andi    $11, $5, G_LIGHTTOALPHA >> 8
-    vmulf   $v23, vNormals, $v23 // Normal * lookat 0 dir
-    andi    $12, $5, G_PACKED_NORMALS >> 8
+    vne     $v29, $v31, $v31[3h]        // Set VCC to 11101110
+    andi    $20, $5, G_PACKED_NORMALS >> 8
+    andi    $12, $5, G_TEXTURE_GEN >> 8
     vmulf   $v25, vPairRGBA, vLtLvl     // Base output is RGB * light
-    vmrg    $v10, $v10, $v26                              // $v10 = lookat 1 dir
-    vor     $v26, vPairRGBA, vPairRGBA  // $v26 = alpha output = vtx alpha (only 3, 7 matter)
     beqz    $11, vl_mod_skip_cel
-     vne    $v29, $v31, $v31[3h] // Set VCC to 11101110
-    vmrg    $v26, $v31, vLtLvl[1h]  // Cel:   Alpha output = light green (don't care RGB)
-    vor     $v25, vPairRGBA, vPairRGBA  //        Base output is just RGB
+     vor    $v26, vPairRGBA, vPairRGBA  // $v26 = alpha output = vtx alpha (only 3, 7 matter)
+    vmrg    $v26, $v31, vLtLvl[1h]      // Cel: Alpha output = light green (don't care RGB)
+    vor     $v25, vPairRGBA, vPairRGBA  //      Base output is just RGB
 vl_mod_skip_cel:
-    vmulf   $v28, vNormals, $v10 // Normal * lookat 0 dir; $v28 is vNormals
-    andi    $24, $5, G_TEXTURE_GEN >> 8
-    vmudh   $v29, vLtOne, $v23[0h]
-    ldv     $v10[0], (pMatrix  + 0x10)($zero) // Restore v10 before returning
-    vmadh   $v29, vLtOne, $v23[1h]
-    bnez    $12, vl_mod_skip_novtxcolor
-     vmadh  $v23, vLtOne, $v23[2h] // Dot product 0
-    vor     $v25, vLtLvl, vLtLvl // If no packed normals, base output is just light
+    bnez    $20, vl_mod_skip_novtxcolor
+     andi   $24, $5, G_FRESNEL >> 8
+    vor     $v25, vLtLvl, vLtLvl        // If no packed normals, base output is just light
 vl_mod_skip_novtxcolor:
-    vmudh   $v29, vLtOne, $v28[0h]
-    ldv     $v10[8], (pMatrix  + 0x10)($zero)
-    vmadh   $v29, vLtOne, $v28[1h]
-    lqv     $v30[0], (linearGenerateCoefficients)($zero) // Was vLtLvl
-    vmadh   $v28, vLtOne, $v28[2h] // Dot product 1
-    beqz    $24, vl_mod_return_from_lighting
-     vmrg   vPairRGBA, $v25, $v26 // Merge base output and alpha output
-    // Texgen: $v23 and $v28 are dirs 0 and 1, locals $v25, $v26, $v30, have vLtOne = $v24
+    vmulf   $v30, vNormals, $v23        // Normal * lookat 0 dir; $v30 was vLtLvl
+    beqz    $24, vl_mod_skip_fresnel
+     vmrg   vPairRGBA, $v25, $v26       // Merge base output and alpha output
+    // Fresnel: call point lighting; camera pos in $v23
+    ldv     $v23[0], (cameraWorldPos - spFxBase)(spFxBaseReg) // Camera world pos
+    j       vl_mod_normal_to_vertex
+     ldv    $v23[8], (cameraWorldPos - spFxBase)(spFxBaseReg)
+vl_mod_finish_fresnel: // output in $v23
+    llv     $v10[0], (fresnelOffset - spFxBase)(spFxBaseReg) // Load fresnel offset and scale
+    vabs    $v23, $v23, $v23            // Absolute value
+    vmudn   $v26, $v31, $v10[1]         // Elem 5 = low part of 0x0100 * scale
+    vmadh   $v25, $v31, vFogMask[3]     // + 0; elem 5 = high part of 0x0100 * scale
+    vsub    $v23, $v23, $v10[0]         // Subtract offset
+    vmudl   $v29, $v23, $v26[5]         // Unsigned Fresnel value * low part shifted scale
+    vmadn   $v23, $v23, $v25[5]         // Alpha = unsigned Fresnel value * high part
+    vmrg    vPairRGBA, vPairRGBA, $v23  // Merge base output and alpha output
+vl_mod_skip_fresnel:
+    ldv     $v10[0], (pMatrix  + 0x10)($zero) // Restore v10 before returning
+    beqz    $12, vl_mod_return_from_lighting
+     ldv    $v10[8], (pMatrix  + 0x10)($zero)
+    // Texgen: $v30 and $v28 are dirs 0 and 1, locals $v25, $v26, $v23, have vLtOne = $v24
     // Output: vPairST; have to leave $v20:$v21, vPairRGBA
+    vmudh   $v29, vLtOne, $v30[0h]
+    lpv     $v28[4], (ltBufOfs + 0 - lightSize)(curLight) // Lookat 1 dir in elems 0-2
+    vmadh   $v29, vLtOne, $v30[1h]
+    lpv     $v26[0], (ltBufOfs + 8 - lightSize)(curLight) // Lookat 1 dir in elems 4-6
+    vmadh   $v30, vLtOne, $v30[2h]      // $v30 = dot product 0
+    vlt     $v29, $v31, $v31[4]         // Set VCC to 11110000
+    vmrg    $v28, $v28, $v26            // $v10 = lookat 1 dir
+    vmulf   $v28, vNormals, $v28        // Normal * lookat 1 dir
+    vmudh   $v29, vLtOne, $v28[0h]
+    vmadh   $v29, vLtOne, $v28[1h]
+    vmadh   $v28, vLtOne, $v28[2h]      // $v28 = dot product 1
     vne     $v29, $v31, $v31[1h] // Set VCC to 10111011
+    lqv     $v23[0], (linearGenerateCoefficients)($zero)
+    vmrg    $v30, $v30, $v28[0h]  // Dot products in elements 0, 1, 4, 5
     andi    $11, $5, G_TEXTURE_GEN_LINEAR >> 8
-    vmrg    $v23, $v23, $v28[0h]  // Dot products in elements 0, 1, 4, 5
     vmudh   $v29, vLtOne, $v31[5]  // 1 * 0x4000
     beqz    $11, vl_mod_return_from_lighting
-     vmacf  vPairST, $v23, $v31[5] // + dot products * 0x4000
-    // Texgen Linear
-    vmadh   vPairST, vLtOne, $v30[0] // + 1 * 0xC000 (gets rid of the 0x4000?)
+     vmacf  vPairST, $v30, $v31[5] // + dot products * 0x4000
+    // Texgen_Linear:
+    vmadh   vPairST, vLtOne, $v23[0] // + 1 * 0xC000 (gets rid of the 0x4000?)
     vmulf   $v26, vPairST, vPairST // ST squared
     vmulf   $v25, vPairST, $v31[7] // Move ST to accumulator (0x7FFF = 1)
-    vmacf   $v25, vPairST, $v30[2] // + ST * 0x6CB3
+    vmacf   $v25, vPairST, $v23[2] // + ST * 0x6CB3
     vmudh   $v29, vLtOne, $v31[5] // 1 * 0x4000
-    vmacf   vPairST, vPairST, $v30[1] // + ST * 0x44D3
+    vmacf   vPairST, vPairST, $v23[1] // + ST * 0x44D3
     j       vl_mod_return_from_lighting
      vmacf  vPairST, $v26, $v25 // + ST squared * (ST + ST * coeff)
      
@@ -2323,9 +2353,13 @@ vl_mod_point_light:
     Input vector 1 elem size 0010.0000 -> len^2 00000100 -> 1/len 07FF.FC00 -> vec  7FFF.C000
     Input vector 1 elem size 0001.0000 -> len^2 00000001 -> 1/len 7FFF.C000 -> vec  7FFF.C000
     */
-    vxor    $v10, $v10, $v10 // TODO packed light pos frac parts
     ldv     $v23[0], (ltBufOfs + 8 - lightSize)(curLight) // Light position int part 0-3
     ldv     $v23[8], (ltBufOfs + 8 - lightSize)(curLight) // 4-7
+vl_mod_normal_to_vertex:
+    // This reused for fresnel; scalar unit stuff all garbage in that case
+    // Input point (light / camera) in $v23; computes $v23 = (vNormals dot (input - vertex))
+    // Uses temps $v10, $v25, $v26, $v29
+    vxor    $v10, $v10, $v10 // Zero light pos frac part
     vsubc   $v10, $v10, $v21 // Vector from vertex to light, frac
     lbu     $20,     (ltBufOfs + 7 - lightSize)(curLight) // Linear factor
     vsub    $v23, $v23, $v20 // Int
@@ -2379,7 +2413,8 @@ vl_mod_point_light:
     luv     $v26,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
     vmudh   $v10, vLtOne, $v23[0h] // Sum components of dot product as signed
     vmadh   $v10, vLtOne, $v23[1h]
-    vmadh   $v23, vLtOne, $v23[2h]
+    beq     curLight, spFxBaseReg, vl_mod_finish_fresnel // If finished light loop, is fresnel
+     vmadh  $v23, vLtOne, $v23[2h]
     vrcph   $v10[1], $v25[0] // 1/(2*light factor), input of 0000.8000 -> no change normals
     vrcpl   $v10[2], $v29[0] // Light factor 0001.0000 -> normals /= 2
     vrcph   $v10[3], $v25[4] // Light factor 0000.1000 -> normals *= 8 (with clamping)

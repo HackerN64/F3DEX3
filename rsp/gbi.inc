@@ -23,6 +23,7 @@ G_ATTROFFSET_Z_ENABLE   equ 0x00000800
 G_PACKED_NORMALS        equ 0x00001000
 G_LIGHTTOALPHA          equ 0x00002000
 G_AMBOCCLUSION          equ 0x00004000
+G_FRESNEL               equ 0x00008000
 G_FOG                   equ 0x00010000
 G_LIGHTING              equ 0x00020000
 G_TEXTURE_GEN           equ 0x00040000
