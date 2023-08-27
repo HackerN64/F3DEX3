@@ -221,12 +221,8 @@ endSharedDMEM:
 .if (. & 15) != 0
     .error "Wrong alignment for v31value"
 .endif
-// VCC patterns used:
-// vlt xxx, $v31, $v31[3]  = 11101110 in load_spfx_global_values (uses vne in mods)
-// vne xxx, $v31, $v31[3h] = 11101110 in lighting
-// veq xxx, $v31, $v31[3h] = 00010001 in lighting
 v31Value:
-// v31 must go from lowest to highest (signed) values. 
+// v31 must go from lowest to highest (signed) values for vcc patterns.
     .dh -4     // used in clipping, vtx write for Newton-Raphson reciprocal
     .dh -1     // used in init, clipping
     .dh 1      // used to load accumulator in many places, replaces vOne
@@ -243,8 +239,8 @@ v31Value:
 // VCC patterns used:
 // vge xxx, $v30, $v30[7] = 11110001 in tri write
 v30Value:
-    .dh vertexBuffer // 0x420; used in tri write
-    .dh vtxSize << 7 // 0x1400; it's not 0x2800 because vertex indices are *2; used in tri write for vtx index to addr
+    .dh vertexBuffer // used in tri write
+    .dh vtxSize << 7 // 0x1300; it's not 0x2600 because vertex indices are *2; used in tri write for vtx index to addr
     .dh 0x1000 // used in tri write, some multiplier
     .dh 0x0100 // used in tri write, vertex color >>= 8 and vcr?; also in lighting and point lighting
     .dh -16    // used in tri write for Newton-Raphson reciprocal 
@@ -296,30 +292,36 @@ cullFlags:
     .dw 0x00000000
 
 mwModsStart:
-modClipRatio:
-    .dh 0x0002 // Clip ratio; strongly recommend keeping as 2
-modClipLargeTriThresh:
-    .dh 60 << 2 // Number of quarter-scanlines high a triangle is to be considered large
+alphaCompareCullMode:
+    .db 0x00 // 0 = disabled, 1 = cull if all < value, -1 = cull if all > value
+alphaCompareCullValue:
+    .db 0x00 // Alpha value, 00 - FF
+tempHalfword3:
+    .dh 0x0000 // Overwritten by alpha compare cull, but can be used as temp
 
 aoAmbientFactor:
     .dh 0xFFFF
 aoDirectionalFactor:
     .dh 0xA000
 
+/*
+fresnelOffset = Dot product value, in 0000 - 7FFF, which gives shade alpha = 0
+Let k = dot product value, in 0000 - 7FFF, which gives shade alpha = FF.
+Then fresnelScale = 0.7FFF / (k - fresnelOffset) as s7.8 fixed point.
+Alternatively, shade alpha [0000 - 7FFF] =
+fresnelScale [-80.00 - 7F.FF] * (dot product [0000 - 7FFF] - fresnelOffset)
+Examples:
+1. Grazing -> 00; normal -> FF
+   Then set fresnelOffset = 0000, fresnelScale = 01.00
+2. Grazing -> FF; normal -> 00
+   Then set fresnelOffset = 7FFF, fresnelScale = FF.00 (-01.00)
+3. 30 degrees (0.5f or 4000) -> FF; 60 degrees (0.86f or 6ED9) -> 00
+   Then set fresnelOffset = 6ED9, fresnelScale = FD.45 (-02.BB = 1 / (0.5f - 0.86f))
+*/
 fresnelOffset:
-    .dh 0 // Dot product value, in 0000 - 7FFF, which gives shade alpha = 0
+    .dh 0x0000 // See above
 fresnelScale:
-    .dh 0 // Let k = dot product value, in 0000 - 7FFF, which gives shade alpha = FF.
-          // Then fresnelScale = 0.7FFF / (k - fresnelOffset) as s7.8 fixed point.
-          // Alternatively, shade alpha [0000 - 7FFF] =
-          // fresnelScale [-80.00 - 7F.FF] * (dot product [0000 - 7FFF] - fresnelOffset)
-          // Examples:
-          // 1. Grazing -> 00; normal -> FF
-          //    Then set fresnelOffset = 0000, fresnelScale = 01.00
-          // 2. Grazing -> FF; normal -> 00
-          //    Then set fresnelOffset = 7FFF, fresnelScale = FF.00 (-01.00)
-          // 3. 30 degrees (0.5f or 4000) -> FF; 60 degrees (0.86f or 6ED9) -> 00
-          //    Then set fresnelOffset = 6ED9, fresnelScale = FD.45 (-02.BB = 1 / (0.5f - 0.86f))
+    .dh 0x0000 // See above
 
 .if (. & 7) != 0
 .error "Wrong alignment before attrOffsetST"
@@ -670,13 +672,18 @@ postOvlRA equ $12 // Commonly used locally
 // $v30: constant values for tri write
 // $v31: general constant values
 
+//TODOs
+/*
+Rework G_FLAGSVERTS_handler
+Refactor $v30 values
+*/
 
 // Initialization routines
 // Everything up until displaylist_dma will get overwritten by ovl0 and/or ovl1
 start: // This is at IMEM 0x1080, not the start of IMEM
     vclr    vZero             // Clear vZero
     lqv     $v31[0], (v31Value)($zero)
-    lqv     $v30[0], (v30Value)($zero)
+    la      spFxBaseReg, spFxBase
     li      rdpCmdBufPtr, rdpCmdBuffer1
     vadd    vOne, vZero, vZero   // Consume VCO (carry) value possibly set by the previous ucode, before vsub below
     li      rdpCmdBufEnd, rdpCmdBuffer1End
@@ -1189,7 +1196,14 @@ ovl3_padded_end:
 .orga max(max(ovl2_padded_end - ovl2_start, ovl4_padded_end - ovl4_start) + orga(ovl3_start), orga())
 ovl234_end:
 
+//TODO
 G_FLAGSVERTS_handler:
+flagsverts_setup_end:
+flagsverts_after_xfrm:
+    j       run_next_DL_command
+     nop
+    
+/*
     jal     segmented_to_physical
      la     dmemAddr, (clipTempVerts + 7) & 0xFFF8 // Verts being loaded to temp mem
     andi    $1, cmd_w0, (31 << 3)              // Lower 16 bits is count << 3 (size)
@@ -1252,6 +1266,7 @@ flagsverts_early_return:
     or      $20, $20, $24                      // Insert new values of bits
     j       run_next_DL_command
      sw     $20, cullFlags                     // Store updated flags
+*/
 
 G_VTX_handler:
     jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
@@ -1322,7 +1337,6 @@ $v19 = vFogMask    = [TexSOfs,   TexTOfs,    aoAmb,     0,         TexSOfs,   Te
 $v31 =               [-4,        -1,         1,         0x0010,    0x0100,    0x4000,  0x7F00,    0x7FFF]
 aoAmb, aoDir set to 0 if ambient occlusion disabled
 */
-     li     spFxBaseReg, spFxBase
     vne     $v29, $v31, $v31[2h]                  // VCC = 11011101
     ldv     vFogMask[0], (attrOffsetST - spFxBase)(spFxBaseReg) // elems 0, 1, 2 = S, T, Z offset
     vxor    $v21, $v21, $v21                      // Zero
@@ -1361,7 +1375,7 @@ aoAmb, aoDir set to 0 if ambient occlusion disabled
     vadd    $v23, $v23, $v31[6]                   // Add 0x7F00 to fog offset
     vmrg    vFogMask, vFogMask, $v21              // Put 0s in elements 3,7
     vmov    vVpFgScale[1], $v20[1]                // Negate vscale[1] because RDP top = y=0
-    lsv     vVpMisc[12], (modClipRatio - spFxBase)(spFxBaseReg) // clipRatio in elem 6
+    lsv     vVpMisc[12], (linearGenerateCoefficients + 6 - spFxBase)(spFxBaseReg) // clipRatio = 2 in elem 6
     vmov    vVpFgScale[5], $v20[1]                // Same for second half
     bnez    $ra, clipping_mod_after_constants     // Return to clipping if from there
      vmrg    vVpFgOffset, vVpFgOffset, $v23[1]    // Put fog offset in elements 3,7 of vtrans
@@ -1603,6 +1617,7 @@ tV3AtI equ $v21
     vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
     and     $11, $7, $11      // If there is any screen clipping plane where all three verts are past it...
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
+    lb      $8, alphaCompareCullMode($zero)
     vmrg    $v14, $v6, $v4    // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     bnez    $11, return_routine // ...whole tri is offscreen, cull.
      lbu    $11, geometryModeLabel + 2  // Loads the geometry mode byte that contains face culling settings
@@ -1613,8 +1628,24 @@ tV3AtI equ $v21
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
     or      $5, $5, $7        // If any verts are past any clipping plane...
     vmrg    $v10, $v6, $v4    // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
-    andi    $11, $11, G_CULL_BOTH >> 8  // Only look at culling bits, so we can use others for other mods
-    vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
+    beqz    $8, tri_skip_alpha_compare_cull
+     andi   $11, $11, G_CULL_BOTH >> 8  // Only look at culling bits, so we can use others for other mods
+    vor     $v20, vZero, vZero  // Zero vector reg initially
+    lbv     $v20[1], VTX_COLOR_A($1) // Load vertex alpha
+    vor     $v15, vZero, $v31[4] // 0x0100 in all elems
+    lbv     $v20[3], VTX_COLOR_A($2)
+    lbv     $v20[5], VTX_COLOR_A($3)
+    bgtz    $8, tri_alpha_compare_cull_skip_flip // Checking all alphas < value
+     lbv    $v20[15], (alphaCompareCullValue - spFxBase)(spFxBaseReg) // Value to compare to
+    // Checking if all alphas > value; equiv to 0x100 - all alphas < 0x100 - value
+    vsub    $v20, $v15, $v20 // 0x100 - all alphas and compare value
+tri_alpha_compare_cull_skip_flip:
+    vlt     $v29, $v20, $v20[7] // Is each element less than the compare value?
+    la      $9, 0x0007        // Flags for first three elements true
+    cfc2    $8, $vcc
+    beq     $8, $9, return_routine // If so, cull
+tri_skip_alpha_compare_cull:
+     vge    $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
     mfc2    $6, $v29[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    $v4, $v14, $v8    // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     and     $5, $5, $12       // ...which is in the set of currently enabled clipping planes (scaled for XY, screen for ZW)...
@@ -1644,32 +1675,24 @@ tV3AtI equ $v21
     vmudh   $v16, $v6, $v8[0]
     llv     $v13[12], VTX_INV_W_VEC($3)
     vmadh   $v16, $v8, $v11[0]
-    sll     $11, $6, 10             // Moves the value of G_SHADING_SMOOTH into the sign bit
-    vreadacc $v17, ACC_UPPER
-    bgez    $11, no_smooth_shading  // Branch if G_SHADING_SMOOTH isn't set
-     vreadacc $v16, ACC_MIDDLE
     lpv     tV1AtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
-    vmov    $v15[2], $v6[0]
+    vreadacc $v17, ACC_UPPER
     lpv     tV2AtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
-    vrcp    $v20[0], $v15[1]
+    vreadacc $v16, ACC_MIDDLE
     lpv     tV3AtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
-    vrcph   $v22[0], $v17[1]
-    vrcpl   $v23[1], $v16[1]
-    j       shading_done
-     vrcph   $v24[1], vZero[0]
-no_smooth_shading:
-    lpv     tV1AtI[0], VTX_COLOR_VEC($4)
-    vrcp    $v20[0], $v15[1]
-    lbv     tV1AtI[6], VTX_COLOR_A($1)
-    vrcph   $v22[0], $v17[1]
-    lpv     tV2AtI[0], VTX_COLOR_VEC($4)
-    vrcpl   $v23[1], $v16[1]
-    lbv     tV2AtI[6], VTX_COLOR_A($2)
-    vrcph   $v24[1], vZero[0]
-    lpv     tV3AtI[0], VTX_COLOR_VEC($4)
     vmov    $v15[2], $v6[0]
-    lbv     tV3AtI[6], VTX_COLOR_A($3)
-shading_done:
+    lpv     $v25[0], VTX_COLOR_VEC($4)  // Load RGB from vertex 4 (flat shading vtx)
+    vrcp    $v20[0], $v15[1]
+    sll     $11, $6, 10                 // Moves the value of G_SHADING_SMOOTH into the sign bit
+    vrcph   $v22[0], $v17[1]
+    vrcpl   $v23[1], $v16[1]
+    bltz    $11, tri_skip_flat_shading  // Branch if G_SHADING_SMOOTH is set
+     vrcph  $v24[1], vZero[0]
+    vlt     $v29, $v31, $v31[3]         // Set vcc to 11100000
+    vmrg    tV1AtI, $v25, tV1AtI        // RGB from $4, alpha from $1
+    vmrg    tV2AtI, $v25, tV2AtI        // RGB from $4, alpha from $2
+    vmrg    tV3AtI, $v25, tV3AtI        // RGB from $4, alpha from $3
+tri_skip_flat_shading:
     i1 equ 3 // v30[3] is 0x0100
     i2 equ 7 // v30[7] is 0x0020
     i3 equ 2 // v30[2] is 0x1000
@@ -2304,11 +2327,11 @@ vl_mod_skip_novtxcolor:
 vl_mod_finish_fresnel: // output in $v23
     llv     $v10[0], (fresnelOffset - spFxBase)(spFxBaseReg) // Load fresnel offset and scale
     vabs    $v23, $v23, $v23            // Absolute value
-    vmudn   $v26, $v31, $v10[1]         // Elem 5 = low part of 0x0100 * scale
-    vmadh   $v25, $v31, vFogMask[3]     // + 0; elem 5 = high part of 0x0100 * scale
+    vmudn   $v26, $v31, $v10[1]         // Elem 4 = low part of 0x0100 * scale
+    vmadh   $v25, $v31, vFogMask[3]     // + 0; elem 4 = high part of 0x0100 * scale
     vsub    $v23, $v23, $v10[0]         // Subtract offset
-    vmudl   $v29, $v23, $v26[5]         // Unsigned Fresnel value * low part shifted scale
-    vmadn   $v23, $v23, $v25[5]         // Alpha = unsigned Fresnel value * high part
+    vmudl   $v29, $v23, $v26[4]         // Unsigned Fresnel value * low part shifted scale
+    vmadn   $v23, $v23, $v25[4]         // Alpha = unsigned Fresnel value * high part
     vmrg    vPairRGBA, vPairRGBA, $v23  // Merge base output and alpha output
 vl_mod_skip_fresnel:
     ldv     $v10[0], (pMatrix  + 0x10)($zero) // Restore v10 before returning
