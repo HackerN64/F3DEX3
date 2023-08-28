@@ -464,6 +464,7 @@ vertexBuffer:
 // tempMemRounded = rounded up to 16 bytes = temp matrix for G_MTX multiplication mode
 clipTempVerts:
     .skip MAX_CLIP_GEN_VERTS * vtxSize
+clipTempVertsEnd:
 
 .if (. - tempMemRounded) < 0x40
     .error "Not enough space for temp matrix!"
@@ -1185,33 +1186,21 @@ ovl3_padded_end:
 .orga max(max(ovl2_padded_end - ovl2_start, ovl4_padded_end - ovl4_start) + orga(ovl3_start), orga())
 ovl234_end:
 
-//TODO
 G_FLAGSVERTS_handler:
-flagsverts_setup_end:
-flagsverts_after_xfrm:
-    j       run_next_DL_command
-     nop
-    
-/*
-    jal     segmented_to_physical
-     la     dmemAddr, (clipTempVerts + 7) & 0xFFF8 // Verts being loaded to temp mem
-    andi    $1, cmd_w0, (31 << 3)              // Lower 16 bits is count << 3 (size)
-    jal     dma_read_write
-     addiu  dmaLen, $1, -1                     // DMA length is always offset by -1
     la      $5, 0                              // Disable lighting (all geometry mode bits)
-    j       vtx_setup_from_flagsverts
-     la     $ra, -1                            // Flag to return here
+    la      $6, 0                              // Output bit 1, whether any vtx near enough
+    j       vtx_common_setup
+     la     $3, (clipTempVertsEnd & 0xFFF8)    // Address of end of load region
+
 flagsverts_setup_end:
     jal     while_wait_dma_busy                // Wait for vertex load to finish
-     addiu  inputVtxPos, dmemAddr, -8          // Second vertex loaded at 0x10 above
-    la      $6, 0                              // Output bit 1, whether any vtx near enough
-    la      $9, CLIP_MOD_MASK_SCRN_ALL         // Output bit 0, whether all vertices offscreen
-    llv     vVpFgScale[0], rdpHalf1Val($zero)  // Dist compare int / frac; reg not used on this path
+     llv    vVpFgScale[0], rdpHalf1Val($zero)  // Dist compare int / frac; reg not used on this path
     ldv     vVpFgOffset[0], (cameraWorldPos - spFxBase)(spFxBaseReg) // Camera world pos
     ldv     vVpFgOffset[8], (cameraWorldPos - spFxBase)(spFxBaseReg)
+    la      $9, CLIP_MOD_MASK_SCRN_ALL         // Output bit 0, whether all vertices offscreen
 flagsverts_loop:
     j       vtx_load_skip1st
-     ldv    $v20[0], (8)(inputVtxPos)          // Load first vertex
+     ldv    $v20[8], (8)(inputVtxPos)          // Load second vertex
 flagsverts_after_xfrm:
     // World space XYZ in $v20:v21; clip space coords in vPairMVPPosI/F elem 3 and 7.
     vsub    $v28, $v20, vVpFgOffset            // Vertex - camera
@@ -1243,7 +1232,7 @@ flagsverts_after_xfrm:
      addiu  inputVtxPos, inputVtxPos, -0x10    // Has had + 2*inputVtxSize, need + 2*8 instead
     bgtz    $1, flagsverts_loop                // > 0 verts remain, continue
 flagsverts_early_return:
-     lbu    $11, (inputBufferEnd - 0x07)(inputBufferPos) // Shift amount
+     lbu    $11, (inputBufferEnd - 0x05)(inputBufferPos) // Shift amount
     lw      $20, cullFlags                     // Current flags
     sll     $6, $6, 1                          // Shift near result to bit 1
     or      $24, $24, $6                       // Bit 1 = near, bit 0 = near and on screen
@@ -1255,28 +1244,27 @@ flagsverts_early_return:
     or      $20, $20, $24                      // Insert new values of bits
     j       run_next_DL_command
      sw     $20, cullFlags                     // Store updated flags
-*/
 
 G_VTX_handler:
-    jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
-     lhu    $1, (inputBufferEnd - 0x07)(inputBufferPos) // Size in inputVtxSize units
     srl     $2, cmd_w0, 11                     // n << 1
     sub     $2, cmd_w0, $2                     // v0 << 1
     sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
     j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3
      la     $11, vtx_return_from_addrs
 vtx_return_from_addrs:
+    lhu     $5, geometryModeLabel + 1          // Middle 2 bytes
+    la      $6, -1                             // For flagsverts, negative means normal vtx load
     mfc2    $3, $v27[6]                        // Address of end in vtxSize units
     andi    $3, $3, 0xFFF8                     // Round down to DMA word; one input vtx still fits in one internal vtx
+    mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
+vtx_common_setup:
+    jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
+     lhu    $1, (inputBufferEnd - 0x07)(inputBufferPos) // Size in inputVtxSize units
     sub     dmemAddr, $3, $1
     jal     dma_read_write
      addi   dmaLen, $1, -1                     // DMA length is always offset by -1
-    lhu     $5, geometryModeLabel + 1          // Middle 2 bytes
-    lbu     $11, mITValid                      // 0 if matrix invalid, 1 if valid
-    la      $6, -1                             // For flagsverts, negative means normal vtx load
-    mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
     move    inputVtxPos, dmemAddr
-vtx_setup_from_flagsverts:
+    lbu     $11, mITValid                      // 0 if matrix invalid, 1 if valid
     lqv     $v0,     (mvMatrix + 0x00)($zero)  // Load M matrix
     lqv     $v2,     (mvMatrix + 0x10)($zero)
     lqv     $v4,     (mvMatrix + 0x20)($zero)
@@ -1304,6 +1292,7 @@ vl_mod_after_calc_mit:
     lqv     $v14,    (pMatrix  + 0x30)($zero)
     addiu   outputVtxPos, outputVtxPos, -2*vtxSize // Going to increment this by 2 verts in loop
     vor     $v9,  $v8,  $v8
+    la      $ra, 0                             // Flag to not return to clipping
     vor     $v11, $v10, $v10
     ldv     $v9[0],  (pMatrix  + 0x08)($zero)
     vor     $v13, $v12, $v12
@@ -1313,10 +1302,9 @@ vl_mod_after_calc_mit:
     ldv     $v15[0], (pMatrix  + 0x38)($zero)
     ldv     $v8[8],  (pMatrix  + 0x00)($zero)
     ldv     $v10[8], (pMatrix  + 0x10)($zero)
-    ldv     $v12[8], (pMatrix  + 0x20)($zero)  // Want spFxBaseReg instr below for flagsverts
-    ldv     $v14[8], (pMatrix  + 0x30)($zero)  // $ra is > 0 if came from verts or < 0 from flagsverts
-    andi    $ra, $ra, 0x8000                   // Make that = 0 or < 0
-    bltz    $ra, flagsverts_setup_end          // Otherwise = 0 for clipping return below
+    ldv     $v12[8], (pMatrix  + 0x20)($zero)
+    bgez    $6, flagsverts_setup_end
+     ldv    $v14[8], (pMatrix  + 0x30)($zero)
 vl_mod_setup_constants:
 /*
 $v16 = vVpFgScale  = [vscale[0], -vscale[1], vscale[2], fogMult,   (repeat)]
@@ -1368,10 +1356,10 @@ aoAmb, aoDir set to 0 if ambient occlusion disabled
     jal     while_wait_dma_busy                   // Wait for vertex load to finish
      andi   $7, $5, G_FOG >> 8                    // Nonzero if fog enabled
 vl_mod_vtx_load_loop:
-    ldv     $v20[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
+    ldv     $v20[8],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
 vtx_load_skip1st:
     vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
-    ldv     $v20[8],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
+    ldv     $v20[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
     vmudn   $v29, $v7, $v31[2]  // 1
     // Element access wraps in lpv/luv, but not intuitively. Basically the named
     // element and above do get the values at the specified address, but the earlier
