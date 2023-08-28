@@ -403,6 +403,7 @@ jumpTableEntry G_FLAGSMASKS_handler
 jumpTableEntry G_FLAGSVERTS_handler
 jumpTableEntry ovl234_ovl4_entrypoint // G_FLAGS1VERT
 jumpTableEntry ovl234_ovl4_entrypoint // G_FLAGSDRAM
+jumpTableEntry ovl234_ovl4_entrypoint // G_LIGHTTORDP
 
 gCullMagicNumbers:
 // Values added to cross product (16-bit sign extended).
@@ -666,12 +667,6 @@ postOvlRA equ $12 // Commonly used locally
 // $v29: register to write to discard results, local
 // $v30: constant values for tri write
 // $v31: general constant values
-
-//TODOs
-/*
-Rework G_FLAGSVERTS_handler
-Refactor $v30 values
-*/
 
 // Initialization routines
 // Everything up until displaylist_dma will get overwritten by ovl0 and/or ovl1
@@ -1608,7 +1603,6 @@ tV3AtI equ $v21
     vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
     and     $11, $7, $11      // If there is any screen clipping plane where all three verts are past it...
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
-    lb      $8, alphaCompareCullMode($zero)
     vmrg    $v14, $v6, $v4    // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     bnez    $11, return_routine // ...whole tri is offscreen, cull.
      lbu    $11, geometryModeLabel + 2  // Loads the geometry mode byte that contains face culling settings
@@ -1619,24 +1613,8 @@ tV3AtI equ $v21
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
     or      $5, $5, $7        // If any verts are past any clipping plane...
     vmrg    $v10, $v6, $v4    // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
-    beqz    $8, tri_skip_alpha_compare_cull
-     andi   $11, $11, G_CULL_BOTH >> 8  // Only look at culling bits, so we can use others for other mods
-    vor     $v20, vZero, vZero  // Zero vector reg initially
-    lbv     $v20[1], VTX_COLOR_A($1) // Load vertex alpha
-    vor     $v15, vZero, $v30[3] // 0x0100 in all elems
-    lbv     $v20[3], VTX_COLOR_A($2)
-    lbv     $v20[5], VTX_COLOR_A($3)
-    bgtz    $8, tri_alpha_compare_cull_skip_flip // Checking all alphas < value
-     lbv    $v20[15], (alphaCompareCullValue - spFxBase)(spFxBaseReg) // Value to compare to
-    // Checking if all alphas > value; equiv to 0x100 - all alphas < 0x100 - value
-    vsub    $v20, $v15, $v20 // 0x100 - all alphas and compare value
-tri_alpha_compare_cull_skip_flip:
-    vlt     $v29, $v20, $v20[7] // Is each element less than the compare value?
-    la      $9, 0x0007        // Flags for first three elements true
-    cfc2    $8, $vcc
-    beq     $8, $9, return_routine // If so, cull
-tri_skip_alpha_compare_cull:
-     vge    $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
+    andi    $11, $11, G_CULL_BOTH >> 8  // Only look at culling bits, so we can use others for other mods
+    vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
     mfc2    $6, $v29[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    $v4, $v14, $v8    // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     and     $5, $5, $12       // ...which is in the set of currently enabled clipping planes (scaled for XY, screen for ZW)...
@@ -1685,14 +1663,7 @@ tri_skip_alpha_compare_cull:
     vmrg    tV3AtI, $v25, tV3AtI        // RGB from $4, alpha from $3
 tri_skip_flat_shading:
     vrcp    $v20[2], $v6[1]
-    /*
-    // Get rid of any other bits so they can be used for other mods.
-    // G_TEXTURE_ENABLE is defined as 0 in the F3DEX2 GBI, and whether the tri
-    // commands are sent to the RDP as textured or not is set via enabling or
-    // disabling the texture in SPTexture (textureSettings1 + 3 below).
-    andi    $6, $6, G_SHADE | G_ZBUFFER
-    // Update - ended up putting the new mod bits in second byte only, don't need this
-    */
+    lb      $20, alphaCompareCullMode($zero)
     vrcph   $v22[2], $v6[1]
     lw      $5, VTX_INV_W_VEC($1)
     vrcp    $v20[3], $v8[1]
@@ -1708,8 +1679,21 @@ tri_skip_flat_shading:
     vmov    $v15[3], $v8[0]
     and     $11, $11, $12
     vmudl   $v29, $v20, $v30[7] // 0x0020
-    sub     $5, $5, $11
-    vmadm   $v22, $v22, $v30[7] // 0x0020
+    beqz    $20, tri_skip_alpha_compare_cull
+     sub    $5, $5, $11
+    vge     $v26, tV1AtI, tV2AtI
+    lbu     $19, alphaCompareCullValue
+    vlt     $v27, tV1AtI, tV2AtI
+    bgtz    $20, @@skip1
+     vge    $v26, $v26, tV3AtI
+    vlt     $v26, $v27, tV3AtI
+@@skip1: // $v26 elem 3 has max or min alpha value
+    mfc2    $24, $v26[6]
+    sub     $24, $24, $19 // sign bit set if (max/min) < value
+    xor     $24, $24, $20 // xor sign bit with condition
+    bltz    $24, return_routine
+tri_skip_alpha_compare_cull:
+     vmadm  $v22, $v22, $v30[7] // 0x0020
     sub     $11, $5, $8
     vmadn   $v20, vZero, vZero[0]
     sra     $12, $11, 31
@@ -2440,6 +2424,7 @@ ovl2_padded_end:
 .headersize ovl234_start - orga()
 
 ovl4_start:
+// Contains M inverse transpose (mIT) computation, and some rarely-used command handlers.
 
 ovl234_lighting_entrypoint_ovl4ver:  // same IMEM address as ovl234_lighting_entrypoint
     li      cmd_w1_dram, orga(ovl2_start)        // set up a load for overlay 2
@@ -2463,9 +2448,31 @@ ovl4_select_instr:
     beq     $12, $7, G_MTX_end
      la     $11, G_BRANCH_Z
     beq     $11, $7, G_BRANCH_WZ_handler
-     la     $12, G_MODIFYVTX
-    beq     $12, $7, G_MODIFYVTX_handler
-     nop    // TODO
+     la     $12, G_LIGHTTORDP
+    beq     $12, $7, G_LIGHTTORDP_handler
+     la     $11, G_FLAGSDRAM
+    beq     $11, $7, G_FLAGSDRAM_handler
+     la     $12, G_FLAGS1VERT
+    beq     $12, $7, G_FLAGS1VERT_handler
+     la     $11, G_MODIFYVTX
+    beq     $11, $7, G_MODIFYVTX_handler
+     nop    // TODO move a handler to the end which starts with a safe instruction,
+            // and remove its beq
+
+G_LIGHTTORDP_handler:
+    // TODO
+    j       run_next_DL_command
+     nop
+    
+G_FLAGSDRAM_handler:
+    // TODO
+    j       run_next_DL_command
+     nop
+
+G_FLAGS1VERT_handler:
+    // TODO
+    j       run_next_DL_command
+     nop
 
 G_BRANCH_WZ_handler:
     j       vtx_addrs_from_cmd

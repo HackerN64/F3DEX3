@@ -26,10 +26,15 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   = vertex color). Useful for cel shading (with alpha compare), bump mapping,
   or unusual CC effects (e.g. vertex color multiplies texture, lighting applied
   after).
+- New geometry mode bit enables Fresnel. The dot product between a vertex normal
+  and the vector from the vertex to the camera is computed. A settable scale and
+  offset converts this to a shade alpha value. This is useful for making
+  surfaces fade between transparent when viewed straight-on and opaque when
+  viewed at a large angle, or for applying a fake "outline" around the border
+  of meshes.
 - New geometry mode bits enable attribute offsets (applied after scale) for Z
   and ST. For Z, this fixes decal mode. For ST, this enables UV scrolling
   without CPU intervention.
-- New geometry mode bit enables Fresnel TODO.
 
 ### Improved existing features
 
@@ -42,8 +47,7 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   least one). Also supports loading all lights in one DMA transfer
   (`SPSetLights`), rather than one per light.
 - Clipped triangles are drawn by minimal overlapping scanlines algorithm; this
-  slightly improves RDP draw time for large tris. Clipping DMEM use
-  substantially reduced.
+  slightly improves RDP draw time for large tris.
 
 ### New GBI features
 
@@ -52,8 +56,18 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   can be drawn with these commands, with only a few at the end drawn with
   `SP2Triangles` or `SP1Triangle`, so this cuts the triangle portion of display
   lists roughly in half.
+- New `SPAlphaCompareCull` command enables culling of triangles whose computed
+  shade alpha values are all below or above a settable threshold. This
+  substantially reduces the performance penalty of cel shading--only tris which
+  "straddle" the cel threshold are drawn twice, the others are only drawn once.
+- New `SPLightToRDP` family of commands (e.g. `SPLightToPrimColor`) writes a
+  selectable RDP command (e.g. `DPSetPrimColor`) with the RGB color of a
+  selectable light (any including ambient). The alpha channel and any other
+  parameters are encoded in the command. With some limitations, this allows the
+  tint colors of cel shading to match scene lighting with no code intervention.
+  Possibly useful for other lighting-dependent effects.
 - New cull flags system replaces `SPBranchZ` and `SPCullDL` (these are still
-  supported, but will be slower). This system uses a 24 bit flags value kept in
+  supported, but are slower). This system uses a 24 bit flags value kept in
   DMEM.
     - `SPFlagsVerts`: Loads up to 32 vertex positions, encoded as XYZ0 shorts
       (no ST / RGBA). These do not overwrite or affect the vertex buffer. Sets
@@ -70,11 +84,12 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
       `SPBranchLessZ*`, `SPLoadUcode*`, `SP*TextureRectangle*`, `DPWord`, and
       `SPPerspNormalize`.
     - `SPFlagsLoad` / `SPFlagsSet` / `SPFlagsClear` / `SPFlagsModify`: All the
-      same underlying instruction. Instruction contains a 24 bit mask which is
-      ANDed with the flags word, and then a 24 bit mask which is ORed with the
-      flags word. `SPFlagsLoad` clears all flags then sets selected flags.
-      `SPFlagsSet` just sets the selected flags and `SPFlagsClear` just clears
-      the selected flags. `SPFlagsModify` sets flags within a selectable group.
+      same underlying instruction `SPFlagsMasks`. Instruction contains a 24 bit
+      mask which is ANDed with the flags word, and then a 24 bit mask which is
+      ORed with the flags word. `SPFlagsLoad` clears all flags then sets
+      selected flags. `SPFlagsSet` just sets the selected flags and
+      `SPFlagsClear` just clears the selected flags. `SPFlagsModify` sets flags
+      within a selectable group.
     - `SPFlagsDram`: Loads 64 bits from the given segmented address, and then
       applies it to the flags as an AND and OR mask like the previous
       instruction.

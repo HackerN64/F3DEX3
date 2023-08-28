@@ -47,28 +47,56 @@ G_SHADING_SMOOTH_H      equ (G_SHADING_SMOOTH / 0x10000)
 G_LIGHTING_POSITIONAL_H equ (G_LIGHTING_POSITIONAL / 0x10000)
 G_CLIPPING_H            equ (G_CLIPPING / 0x10000)
 
-// dma
-G_NOOP            equ 0x00
-G_RDPHALF_2       equ 0xf1
-G_SETOTHERMODE_H  equ 0xe3
-G_SETOTHERMODE_L  equ 0xe2
-G_RDPHALF_1       equ 0xe1
-G_SPNOOP          equ 0xe0
-G_ENDDL           equ 0xdf
-G_DL              equ 0xde
-G_LOAD_UCODE      equ 0xdd
-G_MOVEMEM         equ 0xdc
-G_MOVEWORD        equ 0xdb
-G_MTX             equ 0xda
-G_GEOMETRYMODE    equ 0xd9
-G_POPMTX          equ 0xd8
-G_TEXTURE         equ 0xd7
-G_DMA_IO          equ 0xd6
-G_SPECIAL_1       equ 0xd5
-G_SPECIAL_2       equ 0xd4
-G_SPECIAL_3       equ 0xd3
 
-// immediate
+G_TRI_FILL        equ 0xc8 // not a GBI command
+
+G_DMA_IO          equ 0xd6
+G_TEXTURE         equ 0xd7
+G_POPMTX          equ 0xd8
+G_GEOMETRYMODE    equ 0xd9
+G_MTX             equ 0xda
+G_MOVEWORD        equ 0xdb
+G_MOVEMEM         equ 0xdc
+G_LOAD_UCODE      equ 0xdd
+G_DL              equ 0xde
+G_ENDDL           equ 0xdf
+G_SPNOOP          equ 0xe0
+G_RDPHALF_1       equ 0xe1
+G_SETOTHERMODE_L  equ 0xe2
+G_SETOTHERMODE_H  equ 0xe3
+G_TEXRECT         equ 0xe4
+G_TEXRECTFLIP     equ 0xe5
+// G_RDP_handler group start v
+G_RDPLOADSYNC     equ 0xe6
+G_RDPPIPESYNC     equ 0xe7
+G_RDPTILESYNC     equ 0xe8
+G_RDPFULLSYNC     equ 0xe9
+G_SETKEYGB        equ 0xea
+G_SETKEYR         equ 0xeb
+G_SETCONVERT      equ 0xec
+// G_RDP_handler group end ^
+G_SETSCISSOR      equ 0xed
+G_SETPRIMDEPTH    equ 0xee
+G_RDPSETOTHERMODE equ 0xef
+G_LOADTLUT        equ 0xf0
+G_RDPHALF_2       equ 0xf1
+// G_RDP_handler group start v
+G_SETTILESIZE     equ 0xf2
+G_LOADBLOCK       equ 0xf3
+G_LOADTILE        equ 0xf4
+G_SETTILE         equ 0xf5
+G_FILLRECT        equ 0xf6
+G_SETFILLCOLOR    equ 0xf7
+G_SETFOGCOLOR     equ 0xf8
+G_SETBLENDCOLOR   equ 0xf9
+G_SETPRIMCOLOR    equ 0xfa
+G_SETENVCOLOR     equ 0xfb
+G_SETCOMBINE      equ 0xfc
+G_SETTIMG         equ 0xfd
+G_SETZIMG         equ 0xfe
+G_SETCIMG         equ 0xff
+G_NOOP            equ 0x00
+// G_RDP_handler group end ^
 G_VTX             equ 0x01
 G_MODIFYVTX       equ 0x02
 G_CULLDL          equ 0x03
@@ -82,7 +110,7 @@ G_FLAGSMASKS      equ 0x0A
 G_FLAGSVERTS      equ 0x0B
 G_FLAGS1VERT      equ 0x0C
 G_FLAGSDRAM       equ 0x0D
-// 0x0E
+G_LIGHTTORDP      equ 0x0E
 // 0x0F
 G_FLAGSOPBASE     equ 0x10
 G_FLAGSOP_SOME_NOTALL equ 0x01
@@ -90,37 +118,6 @@ G_FLAGSOP_ALL_NOTALL equ 0x02
 G_FLAGSOP_CULL equ 0x00
 G_FLAGSOP_CALL equ 0x04
 G_FLAGSOP_BRANCH equ 0x08
-
-// rdp
-G_SETCIMG         equ 0xff
-G_SETZIMG         equ 0xfe
-G_SETTIMG         equ 0xfd
-G_SETCOMBINE      equ 0xfc
-G_SETENVCOLOR     equ 0xfb
-G_SETPRIMCOLOR    equ 0xfa
-G_SETBLENDCOLOR   equ 0xf9
-G_SETFOGCOLOR     equ 0xf8
-G_SETFILLCOLOR    equ 0xf7
-G_FILLRECT        equ 0xf6
-G_SETTILE         equ 0xf5
-G_LOADTILE        equ 0xf4
-G_LOADBLOCK       equ 0xf3
-G_SETTILESIZE     equ 0xf2
-G_LOADTLUT        equ 0xf0
-G_RDPSETOTHERMODE equ 0xef
-G_SETPRIMDEPTH    equ 0xee
-G_SETSCISSOR      equ 0xed
-G_SETCONVERT      equ 0xec
-G_SETKEYR         equ 0xeb
-G_SETKEYGB        equ 0xea
-G_RDPFULLSYNC     equ 0xe9
-G_RDPTILESYNC     equ 0xe8
-G_RDPPIPESYNC     equ 0xe7
-G_RDPLOADSYNC     equ 0xe6
-G_TEXRECTFLIP     equ 0xe5
-G_TEXRECT         equ 0xe4
-
-G_TRI_FILL        equ 0xc8
 
 
 G_MTX_P_MV        equ 0x04
