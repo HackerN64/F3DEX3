@@ -19,9 +19,9 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   implementation loses no normals precision, but loses 3 bits of each color
   channel.)
 - New geometry mode bit enables ambient/directional occlusion for opaque
-  materials. Separate factors for how much this affects ambient light and how
-  much it affects all directional lights. Point lights fully illuminate the
-  geometry.
+  materials (vertex alpha multiplies light intensity). Separate factors for how
+  much this affects ambient light and how much it affects all directional
+  lights. Point lights are never affected by ambient occlusion.
 - New geometry mode bit moves light intensity to shade alpha (then shade color
   = vertex color). Useful for cel shading (with alpha compare), bump mapping,
   or unusual CC effects (e.g. vertex color multiplies texture, lighting applied
@@ -113,9 +113,7 @@ except:
 - `G_LINE3D` (and `Gfx.line`) has been removed. This command did not actually
   work in F3DEX2 (it behaved as a no-op).
 - `G_MW_CLIP` has been removed, and `g*SPClipRatio` has been converted into a
-  no-op. Clipping is handled differently in F3DEX3 and it is not recommended to
-  ever change the clip ratio from its default of 2. For microcode development,
-  it can be changed with `g*SPClipModSettings`.
+  no-op. Clipping is handled differently in F3DEX3 and cannot be changed from 2.
 - `G_MV_MATRIX` and `G_MW_FORCEMTX` have been removed, and `g*SPForceMatrix` has
   been converted into a no-op. This is because there is no MVP matrix in F3DEX3.
 - `G_MVO_LOOKATX` and `G_MVO_LOOKATY` have been removed, and `g*SPLookAtX` and
