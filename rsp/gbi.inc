@@ -132,6 +132,8 @@ G_MV_LIGHT    equ 0x0A
 MAX_LIGHTS equ 9 // 9 directional / point lights, plus ambient light (and lookat)
 lightSize equ 0x10
 
+MAX_VERTS equ 56
+
 // Input Vertex structure offsets, should match Vtx structure in gbi.h
 inputVtxSize equ 0x10
 
