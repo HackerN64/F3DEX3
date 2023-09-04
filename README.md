@@ -103,7 +103,50 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
 
 
 
-## Usage
+## Porting Your Romhack Codebase to F3DEX3
+
+With a couple minor exceptions, F3DEX3 is generally backwards compatible with
+F3DEX2 at the C GBI level. So, for an OoT or MM codebase, just use the new
+`gbi.h` and the new microcode and clean/rebuild your project; only a couple very
+small changes in the OoT codebase are needed from there. However, more changes
+are recommended to increase performance and enable new features.
+
+### Required Changes
+
+- A few small modifications to `ucode_disas.c` and `lookathil.c` in OoT are
+  needed to not use removed things from the GBI (see GBI Changes section below).
+  Use the compiler errors to guide you for what to remove; removing them does
+  not affect normal game functionality.
+
+### Recommended Changes
+
+- Whenever your code sends camera properties to the RSP (VP matrix, viewport,
+  etc.), also set the camera world position with `SPCameraWorld`. This is
+  required for the cull flags system and for Fresnel.
+- Clean up any code using the deprecated, hacky `SPLookAtX` and `SPLookAtY` to
+  use `SPLookAt` instead (only a few lines change).
+- Change your game engine lighting code to support between 0 and 9 directional /
+  point lights, instead of between 1 and 7 (F3DEX2 required at least one,
+  though the GBI would create one light with black color if you set zero).
+- Change your game engine lighting code to load all lights in one DMA transfer
+  with `SPSetLights`, instead of one-at-a-time with repeated `SPLight` commands.
+  Also, anywhere you are using `SPLight`, use this only for directional / point
+  lights and use `SPAmbient` for ambient lights. Directional / point lights are
+  16 bytes and ambient are 8, and the memory reserved for lights in the
+  microcode is 16*9+8 bytes, so if you have 9 directional / point lights and
+  then use `SPLight` to write the ambient light, it will overflow the buffer by
+  8 bytes and corrupt memory.
+- Consider setting lights once before rendering a scene and all actors, rather
+  than setting lights before rendering each actor. OoT does the latter to
+  emulate point lights in a scene with a directional light recomputed per actor.
+  You can now just send those to the RSP as real point lights.
+- Re-export as many display lists (scenes, objects, skeletons, etc.) as possible
+  with fast64 set to F3DEX3 mode, to take advantage of the substantially larger
+  vertex buffer and triangle packing commands. For any display lists which are
+  not feasible to re-export (e.g. vanilla assets), manually add
+  `G_LIGHTING_POSITIONAL` to `SP*GeometryMode` commands to ensure they can
+  receive point lighting.
+
 
 ### C GBI Backwards Compatibility with F3DEX2
 
@@ -134,7 +177,7 @@ except:
   likely been used for debugging to copy vertices from DMEM to examine them.
   This does not affect `g*SPModifyVertex`, which is still supported.
 
-`ucode_disas.c` and `lookathil.c` in OoT need relatively minor fixes due to
+ need relatively minor fixes due to
 using removed things. The rest of the OoT codebase does not need code changes.
 
 ### Binary Display List Backwards Compatibility with F3DEX2

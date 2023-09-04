@@ -395,7 +395,7 @@ jumpTableEntry G_TRISTRIP_handler
 jumpTableEntry G_TRIFAN_handler
 jumpTableEntry G_FLAGSMASKS_handler
 jumpTableEntry G_FLAGSVERTS_handler
-jumpTableEntry ovl234_ovl4_entrypoint // G_FLAGS1VERT
+jumpTableEntry G_FLAGS1VERT_handler
 jumpTableEntry ovl234_ovl4_entrypoint // G_FLAGSDRAM
 jumpTableEntry ovl234_ovl4_entrypoint // G_LIGHTTORDP
 
@@ -489,7 +489,7 @@ rdpCmdBuffer2:
 rdpCmdBuffer2End:
     .skip RDP_CMD_BUFSIZE_EXCESS
 
-// Input buffer
+// Input buffer. After RDP cmd buffers so it can be vector addressed from end.
 inputBuffer:
     .skip INPUT_BUFFER_LEN
 inputBufferEnd:
@@ -793,6 +793,7 @@ run_next_DL_command:
     addi    inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
     // $7 must retain the command byte for load_mtx and overlay 4 stuff
     // $11 must contain the handler called for G_SETOTHERMODE_H_handler and G_TEXRECTFLIP_handler
+    // $1 must remain zero to save an instr in G_FLAGS1VERT_handler
     addi    $3, $7, -G_FLAGSOPBASE                      // If >= G_FLAGSOPBASE, use handler
     bgez    $3, G_FLAGSOPBASE_handler
      addi   $2, $7, -G_VTX                              // If >= G_VTX, use jump table
@@ -1218,8 +1219,16 @@ ovl3_padded_end:
 .orga max(max(ovl2_padded_end - ovl2_start, ovl4_padded_end - ovl4_start) + orga(ovl3_start), orga())
 ovl234_end:
 
+G_FLAGS1VERT_handler:
+    // $1 is zero (0 vertices left to process, treated like 1) from run_next_DL_command
+    li      $6, 0                              // Output bit 1, whether any vtx near enough
+    addi    inputVtxPos, inputBufferPos, -6    // Input vertex starts 2 bytes into last cmd
+    j       vtx_setup_skip_load
+     // Intentionally executing next instr to set $5 = 0
+
 G_FLAGSVERTS_handler:
     li      $5, 0                              // Disable lighting (all geometry mode bits)
+    lhu     $1, (inputBufferEnd - 0x06)(inputBufferPos) // Bytes 2-3 = size in bytes
     li      $6, 0                              // Output bit 1, whether any vtx near enough
     j       vtx_common_setup
      li     $12, (clipTempVertsEnd & 0xFFF8)   // Address of end of load region
@@ -1264,7 +1273,7 @@ flagsverts_after_xfrm:
      addi   inputVtxPos, inputVtxPos, -0x10    // Has had + 2*inputVtxSize, need + 2*8 instead
     bgtz    $1, flagsverts_loop                // > 0 verts remain, continue
 flagsverts_early_return:
-     lbu    $11, (inputBufferEnd - 0x05)(inputBufferPos) // Shift amount
+     lbu    $11, (inputBufferEnd - 0x07)(inputBufferPos) // Shift amount
     lw      $20, cullFlags                     // Current flags
     sll     $6, $6, 1                          // Shift near result to bit 1
     or      $24, $24, $6                       // Bit 1 = near, bit 0 = near and on screen
@@ -1278,6 +1287,7 @@ flagsverts_early_return:
      sw     $20, cullFlags                     // Store updated flags
 
 G_VTX_handler:
+    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // Size in inputVtxSize units
     srl     $2, cmd_w0, 11                     // n << 1
     sub     $2, cmd_w0, $2                     // v0 << 1
     sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
@@ -1289,12 +1299,15 @@ vtx_return_from_addrs:
     andi    $12, $12, 0xFFF8                   // Round down end addr to DMA word; one input vtx still fits in one internal vtx
     mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
 vtx_common_setup:
+    // $1 = load size in bytes, $12 = load end addr, cmd_w1_dram, $5 = geom mode middle,
+    // $6 = mode flag, outputVtxPos if G_VTX_handler
     jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
-     lhu    $1, (inputBufferEnd - 0x07)(inputBufferPos) // Size in inputVtxSize units
-    sub     dmemAddr, $12, $1                  // Start addr = end addr - size
+     sub    dmemAddr, $12, $1                  // Start addr = end addr - size
     jal     dma_read_write
      addi   dmaLen, $1, -1                     // DMA length is always offset by -1
     move    inputVtxPos, dmemAddr
+vtx_setup_skip_load:
+    // $1 = vertex count * 0x10, $5 = geom mode middle, $6 = mode flag, inputVtxPos
     lbu     $11, mITValid                      // 0 if matrix invalid, 1 if valid
     lqv     vM0I,     (mMatrix + 0x00)($zero)  // Load M matrix
     lqv     vM2I,     (mMatrix + 0x10)($zero)
@@ -2449,7 +2462,7 @@ ovl234_lighting_entrypoint_ovl4ver:  // same IMEM address as ovl234_lighting_ent
 ovl234_ovl4_entrypoint:
     vclr    $v30                  // $v30 = 0 for calc_mit
     j       ovl4_select_instr
-     li     $11, 1                // $7 = command byte or 1 for mIT (vertex load)
+     li     $11, 1                // $7 = 1 (lighting & mIT invalid) if doing calc_mit
 
 ovl234_clipping_entrypoint_ovl4ver:  // same IMEM address as ovl234_clipping_entrypoint
     sh      $ra, tempHalfword1
@@ -2458,21 +2471,16 @@ ovl234_clipping_entrypoint_ovl4ver:  // same IMEM address as ovl234_clipping_ent
      li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
 
 ovl4_select_instr:
-    beq     $11, $7, calc_mit
+    beq     $11, $7, calc_mit // otherwise $7 = command byte
      li     $12, G_MTX
     beq     $12, $7, G_MTX_end
      li     $11, G_BRANCH_Z
     beq     $11, $7, G_BRANCH_WZ_handler
-     li     $12, G_LIGHTTORDP
-    beq     $12, $7, G_LIGHTTORDP_handler
-     li     $11, G_FLAGSDRAM
-    beq     $11, $7, G_FLAGSDRAM_handler
-     li     $12, G_FLAGS1VERT
-    beq     $12, $7, G_FLAGS1VERT_handler
+     li     $12, G_FLAGSDRAM
+    beq     $12, $7, G_FLAGSDRAM_handler
      li     $11, G_MODIFYVTX
     beq     $11, $7, G_MODIFYVTX_handler
-     nop    // TODO move a handler to the end which starts with a safe instruction,
-            // and remove its beq
+     // Otherwise G_LIGHTTORDP, which starts with a harmless instruction
 
 G_LIGHTTORDP_handler:
     lhu     $1, (inputBufferEnd - 0x7)(inputBufferPos) // Middle 16 bits of first word = addr of light
@@ -2493,11 +2501,13 @@ G_FLAGSDRAM_handler:
     lw      cmd_w0, tempMemRounded($zero)
     j       G_FLAGSMASKS_handler
      lw     cmd_w1_dram, (tempMemRounded + 4)($zero)
-
-G_FLAGS1VERT_handler:
-    // TODO
-    j       run_next_DL_command
-     nop
+     
+G_MODIFYVTX_handler:
+    j       vtx_addrs_from_cmd          // byte 3 = vtx being modified; addr -> $12
+     li     $11, modifyvtx_return_from_addrs
+modifyvtx_return_from_addrs:
+    j       do_moveword                 // Moveword adds cmd_w0 to $12 for final addr
+     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)
 
 G_BRANCH_WZ_handler:
     j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $12
@@ -2511,15 +2521,8 @@ branchwz_return_from_addrs:
     sub     $2, $12, cmd_w1_dram           // subtract the w/z value being tested
     bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
      lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
-    j       branch_dl
-     nop
-
-G_MODIFYVTX_handler:
-    j       vtx_addrs_from_cmd          // byte 3 = vtx being modified; addr -> $12
-     li     $11, modifyvtx_return_from_addrs
-modifyvtx_return_from_addrs:
-    j       do_moveword                 // Moveword adds cmd_w0 to $12 for final addr
-     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)
+    j       branch_dl                  // need $2 < 0 for nopush and cmd_w1_dram
+     // Next instr is harmless
 
 G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
 output_mtx  equ $19
