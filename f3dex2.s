@@ -2285,15 +2285,18 @@ lt_finish_light:
 lt_post:
     vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
     andi    $11, $5, G_LIGHTTOALPHA >> 8
-    vne     $v29, $v31, $v31[3h]        // Set VCC to 11101110
     andi    $20, $5, G_PACKED_NORMALS >> 8
     andi    $12, $5, G_TEXTURE_GEN >> 8
-    vmulf   vLtRGBOut, vPairRGBA, vPairLt     // Base output is RGB * light
+    vmulf   vLtRGBOut, vPairRGBA, vPairLt     // RGB output is RGB * light
     beqz    $11, lt_skip_cel
-     vcopy  vLtAOut, vPairRGBA             // vLtAOut = alpha output = vtx alpha (only 3, 7 matter)
-    vmrg    vLtAOut, $v31, vPairLt[1h]      // Cel: Alpha output = light green (don't care RGB)
-    vcopy   vLtRGBOut, vPairRGBA             //      Base output is just RGB
+     vcopy  vLtAOut, vPairRGBA             // Alpha output = vertex alpha (only 3, 7 matter)
+    // Cel: alpha = max of light components, RGB = vertex color
+    vge     vLtAOut, vPairLt, vPairLt[1h]  // elem 0 = max(R0, G0); elem 4 = max(R1, G1)
+    vge     vLtAOut, vLtAOut, vLtAOut[2h]  // elem 0 = max(R0, G0, B0); equiv for elem 4
+    vcopy   vLtRGBOut, vPairRGBA             //      RGB output is vertex color
+    vmudh   vLtAOut, vLtOne, vLtAOut[0h]   // move elem 0, 4 to 3, 7
 lt_skip_cel:
+    vne     $v29, $v31, $v31[3h]        // Set VCC to 11101110
     bnez    $20, lt_skip_novtxcolor
      andi   $24, $5, G_FRESNEL >> 8
     vcopy   vLtRGBOut, vPairLt                // If no packed normals, base output is just light
@@ -2316,7 +2319,7 @@ lt_finish_fresnel: // output in $v23
     vmrg    vPairRGBA, vPairRGBA, $v23  // Merge base output and alpha output
 lt_skip_fresnel:
     ldv     vVP2I[0], (vpMatrix  + 0x10)($zero) // Restore $v10 = vVP2I before returning
-    beqz    $12, vtx_return_from_lighting
+    beqz    $12, vtx_return_from_lighting // no texgen
      ldv    vVP2I[8], (vpMatrix  + 0x10)($zero)
     // Texgen: vLookat0, vLookat1, locals $v25, $v26, $v23, have vLtOne = $v24
     // Output: vPairST; have to leave vPairPosI/F, vPairRGBA
