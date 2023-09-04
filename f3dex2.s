@@ -558,6 +558,13 @@ vLtAOut    equ $v26 // Light / effects alpha output
 vLtColor   equ $v26 // Light color
 vLookat1   equ $v28 // Lookat direction 1
 vLookat0   equ $v30 // Lookat direction 0
+// M inverse transpose matrix in regs briefly:
+vLtMIT0I   equ $v23
+vLtMIT1I   equ $v25
+vLtMIT2I   equ $v26
+vLtMIT0F   equ $v29
+vLtMIT1F   equ $v10
+vLtMIT2F   equ $v30
 
 
 // Registers marked as "global" are only used for one purpose in the vanilla
@@ -819,19 +826,17 @@ segmented_to_physical:
      add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
 G_CULLDL_handler:
-    j       vtx_addrs_from_cmd
+    j       vtx_addrs_from_cmd           // Load start vtx addr in $12, end vtx in $3
      li     $11, culldl_return_from_addrs
 culldl_return_from_addrs:
-    mfc2    vtxPtr, $v27[6]
     li      $1, CLIP_MOD_MASK_SCRN_ALL
-    lhu     $11, VTX_CLIP(vtxPtr)
-    mfc2    endVtxPtr, $v27[14]
+    lhu     $11, VTX_CLIP($12)
 culldl_loop:
     and     $1, $1, $11
     beqz    $1, run_next_DL_command           // Some vertex is on the screen-side of all clipping planes; have to render
-     lhu    $11, (vtxSize + VTX_CLIP)(vtxPtr) // next vertex clip flags
-    bne     vtxPtr, endVtxPtr, culldl_loop    // loop until reaching the last vertex
-     addi   vtxPtr, vtxPtr, vtxSize           // advance to the next vertex
+     lhu    $11, (vtxSize + VTX_CLIP)($12) // next vertex clip flags
+    bne     $12, $3, culldl_loop    // loop until reaching the last vertex
+     addi   $12, $12, vtxSize           // advance to the next vertex
 G_ENDDL_handler:
     lbu     $1, displayListStackLength          // Load the DL stack index
     beqz    $1, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
@@ -851,11 +856,11 @@ G_DMA_IO_handler:
      
 G_MOVEWORD_handler:
     srl     $2, cmd_w0, 16                              // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
-    lhu     $1, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
+    lhu     $12, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
 do_moveword:
-    add     $1, $1, cmd_w0          // adds the offset in the command word to the address from the table (the upper 4 bytes are effectively ignored)
+    add     $12, $12, cmd_w0        // adds the offset in the command word to the address from the table (the upper 4 bytes are effectively ignored)
     j       run_next_DL_command     // process the next command
-     sw     cmd_w1_dram, ($1)       // moves the specified value (in cmd_w1_dram) into the word (offset + moveword_table[index])
+     sw     cmd_w1_dram, ($12)      // moves the specified value (in cmd_w1_dram) into the word (offset + moveword_table[index])
 
 G_RDPHALF_2_handler:
     ldv     $v29[0], (texrectWord1)($zero)
@@ -1217,7 +1222,7 @@ G_FLAGSVERTS_handler:
     li      $5, 0                              // Disable lighting (all geometry mode bits)
     li      $6, 0                              // Output bit 1, whether any vtx near enough
     j       vtx_common_setup
-     li     $3, (clipTempVertsEnd & 0xFFF8)    // Address of end of load region
+     li     $12, (clipTempVertsEnd & 0xFFF8)   // Address of end of load region
 
 flagsverts_setup_end:
     jal     while_wait_dma_busy                // Wait for vertex load to finish
@@ -1276,18 +1281,17 @@ G_VTX_handler:
     srl     $2, cmd_w0, 11                     // n << 1
     sub     $2, cmd_w0, $2                     // v0 << 1
     sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
-    j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3
+    j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3 = $12
      li     $11, vtx_return_from_addrs
 vtx_return_from_addrs:
     lhu     $5, geometryModeLabel + 1          // Middle 2 bytes
     li      $6, -1                             // For flagsverts, negative means normal vtx load
-    mfc2    $3, $v27[6]                        // Address of end in vtxSize units
-    andi    $3, $3, 0xFFF8                     // Round down to DMA word; one input vtx still fits in one internal vtx
+    andi    $12, $12, 0xFFF8                   // Round down end addr to DMA word; one input vtx still fits in one internal vtx
     mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
 vtx_common_setup:
     jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
      lhu    $1, (inputBufferEnd - 0x07)(inputBufferPos) // Size in inputVtxSize units
-    sub     dmemAddr, $3, $1
+    sub     dmemAddr, $12, $1                  // Start addr = end addr - size
     jal     dma_read_write
      addi   dmaLen, $1, -1                     // DMA length is always offset by -1
     move    inputVtxPos, dmemAddr
@@ -1537,10 +1541,13 @@ vtx_addrs_from_cmd:
     lpv     $v27[0], (-(0x1000 - (inputBufferEnd - 0x08)))(inputBufferPos)
 vtx_indices_to_addr:
     // Input and output in $v27
+    // Also out elem 3 -> $12, elem 7 -> $3 because these are used more than once
     lqv     $v30, v30Value($zero)
     vmudl   $v29, $v27, $v30[1]   // Multiply vtx indices times length
+    vmadn   $v27, vOne, $v30[0]   // Add address of vertex buffer
+    mfc2    $12, $v27[6]
     jr      $11
-     vmadn  $v27, vOne, $v30[0]   // Add address of vertex buffer
+     mfc2   $3, $v27[14]
 
 G_TRISTRIP_handler:
     j       tri_strip_fan_start
@@ -1572,20 +1579,19 @@ tri_fan_store:
 
 G_TRI2_handler:
 G_QUAD_handler:
-    jal     tri_main                   // Send second tri; return here for first tri
+    jal     tri_main                     // Send second tri; return here for first tri
      sw     cmd_w1_dram, 4(rdpCmdBufPtr) // Put second tri indices in temp memory
 G_TRI1_handler:
     li      $ra, run_next_DL_command     // After done with this tri, run next cmd
     sw      cmd_w0, 4(rdpCmdBufPtr)      // Put first tri indices in temp memory
 tri_main:
-    lpv     $v27[0], 0(rdpCmdBufPtr)     // Load tri indexes to 5,6,7
-    j       vtx_indices_to_addr
+    lpv     $v27[0], 0(rdpCmdBufPtr)     // Load tri indexes to elems 5, 6, 7
+    j       vtx_indices_to_addr          // elem 7 -> $3; rest in $v27
      li     $11, tri_return_from_addrs
 tri_return_from_addrs:
     mfc2    $1, $v27[10]
+    vcopy   $v4, $v27                    // Need vtx 2 addr in $v4 elem 6
     mfc2    $2, $v27[12]
-    vcopy   $v4, $v27                    // Need vtx 2 addr in elem 6
-    mfc2    $3, $v27[14]
     move    $4, $1                // Save original vertex 1 addr (pre-shuffle) for flat shading
     li      clipPolySelect, -1    // Normal tri drawing mode (check clip masks)
 tri_noinit:
@@ -2192,19 +2198,19 @@ lt_continue_setup:
 // End of lifetimes of vPackPXY and vPackZ
 lt_skip_packed_normals:
     // Load M inverse transpose. XYZ int $v23, $v25, $v26; XYZ frac $v29, $v10, $v30
-    lqv     $v23,    (mITMatrix + 0x00)($zero) // x int, y int
-    lqv     $v26,    (mITMatrix + 0x10)($zero) // z int, x frac
-    lqv     $v10,    (mITMatrix + 0x20)($zero) // y frac, z frac
-    vcopy   $v25, $v23
-    vcopy   $v29, $v26
-    ldv     $v25[0], (mITMatrix + 0x08)($zero)
-    vcopy   $v30, $v10
-    ldv     $v29[0], (mITMatrix + 0x18)($zero)
-    ldv     $v23[8], (mITMatrix + 0x00)($zero)
-    ldv     $v10[8], (mITMatrix + 0x20)($zero)
-    ldv     $v30[0], (mITMatrix + 0x28)($zero)
+    lqv     vLtMIT0I,    (mITMatrix + 0x00)($zero) // x int, y int
+    lqv     vLtMIT2I,    (mITMatrix + 0x10)($zero) // z int, x frac
+    lqv     vLtMIT1F,    (mITMatrix + 0x20)($zero) // y frac, z frac
+    vcopy   vLtMIT1I, vLtMIT0I
+    vcopy   vLtMIT0F, vLtMIT2I
+    ldv     vLtMIT1I[0], (mITMatrix + 0x08)($zero)
+    vcopy   vLtMIT2F, vLtMIT1F
+    ldv     vLtMIT0F[0], (mITMatrix + 0x18)($zero)
+    ldv     vLtMIT0I[8], (mITMatrix + 0x00)($zero)
+    ldv     vLtMIT1F[8], (mITMatrix + 0x20)($zero)
+    ldv     vLtMIT2F[0], (mITMatrix + 0x28)($zero)
     vclr    vLtOne
-    ldv     $v26[8], (mITMatrix + 0x10)($zero)
+    ldv     vLtMIT2I[8], (mITMatrix + 0x10)($zero)
     // Transform normals by M inverse transpose matrix.
     // At this point we have two and three quarters matrices in registers at once.
     // Nintendo was only able to fit one and three quarters matrices in registers at once.
@@ -2213,12 +2219,12 @@ lt_skip_packed_normals:
     // really would be the full 2 & 3/4 matrices.) This is 22/32 registers full of matrices.
     // The remaining 10 registers are: vVp/ST Scl/Ofs and $v31 constants, vPairPosI/F,
     // vPairST, vPairRGBA, vPairNrml.
-    vmudn   $v29, $v29, vPairNrml[0h]
-    vmadh   $v29, $v23, vPairNrml[0h]
-    vmadn   $v29, $v10, vPairNrml[1h]
-    vmadh   $v29, $v25, vPairNrml[1h]
-    vmadn   $v23, $v30, vPairNrml[2h] // vPairNrml:$v23 = normals
-    vmadh   vPairNrml, $v26, vPairNrml[2h]
+    vmudn   $v29, vLtMIT0F, vPairNrml[0h] // vLtMIT0F = $v29
+    vmadh   $v29, vLtMIT0I, vPairNrml[0h] // vLtMIT0I = $v23
+    vmadn   $v29, vLtMIT1F, vPairNrml[1h]
+    vmadh   $v29, vLtMIT1I, vPairNrml[1h]
+    vmadn   $v23, vLtMIT2F, vPairNrml[2h] // vPairNrml:$v23 = normals
+    vmadh   vPairNrml, vLtMIT2I, vPairNrml[2h]
     // Normalize normals
     // Also set up ambient occlusion: light *= (factor * (alpha - 1) + 1)
     lbu     curLight, numLightsxSize
@@ -2491,28 +2497,26 @@ G_FLAGS1VERT_handler:
      nop
 
 G_BRANCH_WZ_handler:
-    j       vtx_addrs_from_cmd
+    j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $12
      li     $11, branchwz_return_from_addrs
 branchwz_return_from_addrs:
-    mfc2    vtxPtr, $v27[6]
 .if CFG_G_BRANCH_W                            // BRANCH_W/BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
-    lh      vtxPtr, VTX_W_INT(vtxPtr)         // read the w coordinate of the vertex (f3dzex)
+    lh      $12, VTX_W_INT($12)         // read the w coordinate of the vertex (f3dzex)
 .else
-    lw      vtxPtr, VTX_SCR_Z(vtxPtr)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
+    lw      $12, VTX_SCR_Z($12)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
 .endif
-    sub     $2, vtxPtr, cmd_w1_dram           // subtract the w/z value being tested
+    sub     $2, $12, cmd_w1_dram           // subtract the w/z value being tested
     bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
      lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
     j       branch_dl
      nop
 
 G_MODIFYVTX_handler:
-    j       vtx_addrs_from_cmd
+    j       vtx_addrs_from_cmd          // byte 3 = vtx being modified; addr -> $12
      li     $11, modifyvtx_return_from_addrs
 modifyvtx_return_from_addrs:
-    lbu     $1, (inputBufferEnd - 0x07)(inputBufferPos)
-    j       do_moveword
-     mfc2   cmd_w0, $v27[6]
+    j       do_moveword                 // Moveword adds cmd_w0 to $12 for final addr
+     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)
 
 G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
 output_mtx  equ $19
