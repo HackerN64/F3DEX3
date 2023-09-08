@@ -179,14 +179,15 @@ Removed:
 #define G_PACKED_NORMALS        0x00001000
 #define G_LIGHTTOALPHA          0x00002000
 #define G_AMBOCCLUSION          0x00004000
+#define G_FRESNEL               0x00008000
 #define G_FOG                   0x00010000
 #define G_LIGHTING              0x00020000
 #define G_TEXTURE_GEN           0x00040000
 #define G_TEXTURE_GEN_LINEAR    0x00080000
-#define G_LOD                   0x00100000  /* Not implemented in any F3DEX2-like ucodes */
+#define G_LOD                   0x00100000  /* Ignored by all F3DEX* variants */
 #define G_SHADING_SMOOTH        0x00200000  /* flat or smooth shaded */
 #define G_LIGHTING_POSITIONAL   0x00400000
-#define G_CLIPPING              0x00800000  /* Not implemented */
+#define G_CLIPPING              0x00800000  /* Ignored by all F3DEX* variants */
 
 /*
  * G_SETIMG fmt: set image formats

@@ -387,7 +387,7 @@ cmdJumpTablePositive:
 jumpTableEntry G_VTX_handler
 jumpTableEntry ovl234_ovl4_entrypoint // G_MODIFYVTX
 jumpTableEntry G_CULLDL_handler
-jumpTableEntry ovl234_ovl4_entrypoint // G_BRANCH_Z
+jumpTableEntry ovl234_ovl4_entrypoint // G_BRANCH_WZ
 jumpTableEntry G_TRI1_handler
 jumpTableEntry G_TRI2_handler
 jumpTableEntry G_QUAD_handler
@@ -981,7 +981,7 @@ clip_edgelooptop: // Loop over edges connecting verts, possibly subdivide the ed
 clip_find_unused_loop:
     lhu     $11, (VTX_CLIP - vtxSize)(outputVtxPos)
     addi    $12, outputVtxPos, -clipTempVerts  // This is within the loop rather than before b/c delay after lhu
-    blez    $12, clip_done                 // If can't find one, give up--TODO draw current polygon?
+    blez    $12, clip_done                 // If can't find one (should never happen), give up
      andi   $11, $11, CLIP_MOD_VTX_USED
     bnez    $11, clip_find_unused_loop
      addi   outputVtxPos, outputVtxPos, -vtxSize
@@ -1686,6 +1686,9 @@ tV3AtI equ $v21
     vrcp    $v20[0], $v15[1]
     sll     $11, $6, 10                 // Moves the value of G_SHADING_SMOOTH into the sign bit
     vrcph   $v22[0], $v17[1]
+    // TODO If everything else is done and we still have an instruction to spare,
+    // this will prevent a hang if G_TEXTURE_ENABLE is set in the geometry mode
+    //andi    $6, $6, (G_SHADE | G_ZBUFFER)
     vrcpl   $v23[1], $v16[1]
     bltz    $11, tri_skip_flat_shading  // Branch if G_SHADING_SMOOTH is set
      vrcph  $v24[1], vZero[0]
@@ -2474,7 +2477,7 @@ ovl4_select_instr:
     beq     $11, $7, calc_mit // otherwise $7 = command byte
      li     $12, G_MTX
     beq     $12, $7, G_MTX_end
-     li     $11, G_BRANCH_Z
+     li     $11, G_BRANCH_WZ
     beq     $11, $7, G_BRANCH_WZ_handler
      li     $12, G_FLAGSDRAM
     beq     $12, $7, G_FLAGSDRAM_handler
@@ -2513,7 +2516,7 @@ G_BRANCH_WZ_handler:
     j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $12
      li     $11, branchwz_return_from_addrs
 branchwz_return_from_addrs:
-.if CFG_G_BRANCH_W                            // BRANCH_W/BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
+.if CFG_G_BRANCH_W                            // G_BRANCH_W/G_BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
     lh      $12, VTX_W_INT($12)         // read the w coordinate of the vertex (f3dzex)
 .else
     lw      $12, VTX_SCR_Z($12)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)

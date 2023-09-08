@@ -13,27 +13,34 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
 
 ### New visual features
 
-- New geometry mode bit enables simultaneous vertex colors and normals/lighting
-  on the same object. There is no loss of color precision, and only a fraction
-  of a bit of loss of normals precision in each model space axis. (The competing
-  implementation loses no normals precision, but loses 3 bits of each color
-  channel.)
-- New geometry mode bit enables ambient/directional occlusion for opaque
-  materials (vertex alpha multiplies light intensity). Separate factors for how
-  much this affects ambient light and how much it affects all directional
-  lights. Point lights are never affected by ambient occlusion.
-- New geometry mode bit moves light intensity to shade alpha (then shade color
-  = vertex color). Useful for cel shading (with alpha compare), bump mapping,
-  or unusual CC effects (e.g. vertex color multiplies texture, lighting applied
-  after).
-- New geometry mode bit enables Fresnel. The dot product between a vertex normal
-  and the vector from the vertex to the camera is computed. A settable scale and
-  offset converts this to a shade alpha value. This is useful for making
-  surfaces fade between transparent when viewed straight-on and opaque when
-  viewed at a large angle, or for applying a fake "outline" around the border
-  of meshes.
-- New geometry mode bits enable attribute offsets (applied after scale) for Z
-  and ST. For Z, this fixes decal mode. For ST, this enables UV scrolling
+- New geometry mode bit `G_PACKED_NORMALS` enables simultaneous vertex colors
+  and normals/lighting on the same object. There is no loss of color precision,
+  and only a fraction of a bit of loss of normals precision in each model space
+  axis. (The competing implementation loses no normals precision, but loses 3
+  bits of each color channel.)
+- New geometry mode bit `G_AMBOCCLUSION` enables ambient/directional occlusion
+  for opaque materials. Paint the ambient light level into the vertex alpha
+  channel; separate factors (set with `SPAmbOcclusion`) control how much this
+  affects the ambient light and how much it affects all directional lights.
+  Point lights are never affected by ambient occlusion.
+- New geometry mode bit `G_LIGHTTOALPHA` moves light intensity (maximum of
+  R, G, and B of what would normally be the shade color after lighting) to shade
+  alpha. Then, if `G_PACKED_NORMALS` is also enabled, the shade RGB is set to
+  the vertex RGB. Together with alpha compare and some special display lists
+  from fast64 which draw triangles two or more times with different CC settings,
+  this enables cel shading. Besides cel shading, `G_LIGHTTOALPHA` can also be
+  used for bump mapping or other unusual CC effects (e.g. vertex color
+  multiplies texture, lighting applied after).
+- New geometry mode bit `G_FRESNEL` enables Fresnel. The dot product between a
+  vertex normal and the vector from the vertex to the camera is computed. A
+  settable scale and offset from `SPFresnel` converts this to a shade alpha
+  value. This is useful for making surfaces fade between transparent when viewed
+  straight-on and  opaque when viewed at a large angle, or for applying a fake
+  "outline" around the border of meshes.
+- New geometry mode bits `G_ATTROFFSET_ST_ENABLE` and `G_ATTROFFSET_Z_ENABLE`
+  apply settable offsets to vertex ST (`SPAttrOffsetST`) and/or Z
+  (`SPAttrOffsetZ`) values. These offsets are applied after their respective
+  scales. For Z, this fixes decal mode. For ST, this enables UV scrolling
   without CPU intervention.
 
 ### Improved existing features
@@ -102,7 +109,6 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
       same but call segmented address.
 
 
-
 ## Porting Your Romhack Codebase to F3DEX3
 
 With a couple minor exceptions, F3DEX3 is generally backwards compatible with
@@ -111,41 +117,68 @@ F3DEX2 at the C GBI level. So, for an OoT or MM codebase, just use the new
 small changes in the OoT codebase are needed from there. However, more changes
 are recommended to increase performance and enable new features.
 
+### Select Microcode Options
+
+There are only two build-time options for F3DEX3.
+- Enable `CFG_G_BRANCH_W` if the microcode is replacing F3DZEX, otherwise do not
+  enable this option if the microcode is replacing F3DEX2 or an earlier F3D
+  version. Enabling this option makes `SPBranchLessZ*` use the vertex's W
+  coordinate, otherwise it uses the screen Z coordinate. New display lists
+  should use the cull flags system instead of `SPBranchLessZ*`, so this only
+  matters for vanilla display lists used in your romhack.
+- Enable `CFG_ALWAYS_LIGHTING_POSITIONAL` if you have made minor changes to
+  your engine's lighting system (see below); disable it if you are just starting
+  the process of porting a new game to F3DEX3.
+  
 ### Required Changes
 
 - A few small modifications to `ucode_disas.c` and `lookathil.c` in OoT are
-  needed to not use removed things from the GBI (see GBI Changes section below).
-  Use the compiler errors to guide you for what to remove; removing them does
-  not affect normal game functionality.
+  needed to not use things which have been removed from the GBI (see GBI Changes
+  section below). Use the compiler errors to guide you for what to remove;
+  these removals do not affect normal game functionality.
 
-### Recommended Changes
+### Recommended Changes (Non-Lighting)
 
 - Whenever your code sends camera properties to the RSP (VP matrix, viewport,
   etc.), also set the camera world position with `SPCameraWorld`. This is
   required for the cull flags system and for Fresnel.
 - Clean up any code using the deprecated, hacky `SPLookAtX` and `SPLookAtY` to
   use `SPLookAt` instead (only a few lines change).
-- Change your game engine lighting code to support between 0 and 9 directional /
-  point lights, instead of between 1 and 7 (F3DEX2 required at least one,
-  though the GBI would create one light with black color if you set zero).
+- Re-export as many display lists (scenes, objects, skeletons, etc.) as possible
+  with fast64 set to F3DEX3 mode, to take advantage of the substantially larger
+  vertex buffer and triangle packing commands.
+
+### Recommended Changes (Lighting)
+
 - Change your game engine lighting code to load all lights in one DMA transfer
   with `SPSetLights`, instead of one-at-a-time with repeated `SPLight` commands.
-  Also, anywhere you are using `SPLight`, use this only for directional / point
-  lights and use `SPAmbient` for ambient lights. Directional / point lights are
-  16 bytes and ambient are 8, and the memory reserved for lights in the
-  microcode is 16*9+8 bytes, so if you have 9 directional / point lights and
-  then use `SPLight` to write the ambient light, it will overflow the buffer by
-  8 bytes and corrupt memory.
+- Anywhere you are still using `SPLight` after this, use `SPLight` only for
+  directional / point lights and use `SPAmbient` for ambient lights. Directional
+  / point lights are 16 bytes and ambient are 8, and the first 8 bytes are the
+  same for both types, so normally it's okay to use `SPLight` instead of
+  `SPAmbient` to write ambient lights too. However, the memory space reserved
+  for lights in the microcode is 16*9+8 bytes, so if you have 9 directional /
+  point lights and then use `SPLight` to write the ambient light, it will
+  overflow the buffer by 8 bytes and corrupt memory.
+- Once you have made the above change for `SPAmbient`, increase the maximum
+  number of lights in your engine from 7 to 9.
+- Change your game engine lighting code to set the `type` / `pad1` field to 0 in
+  the initialization of any directional light (`Light_t` and derived structs
+  like `Light` or `Lightsn`). Then, enable the microcode build option
+  `CFG_ALWAYS_LIGHTING_POSITIONAL`. This will ignore the state of the
+  `G_LIGHTING_POSITIONAL` geometry mode bit in all display lists, meaning both
+  directional and point lights are supported for all display lists (including
+  vanilla), and the light will be identified as directional if `type` == 0 or
+  point if `kc` > 0 (`kc` and `type` are the same byte). The reason this is not
+  enabled by default is that `pad1` is normally unused padding, so it can be set
+  to any value in directional lights, and then `G_LIGHTING_POSITIONAL` being
+  cleared means "interpret all lights as directional regardless of that value".
 - Consider setting lights once before rendering a scene and all actors, rather
   than setting lights before rendering each actor. OoT does the latter to
   emulate point lights in a scene with a directional light recomputed per actor.
-  You can now just send those to the RSP as real point lights.
-- Re-export as many display lists (scenes, objects, skeletons, etc.) as possible
-  with fast64 set to F3DEX3 mode, to take advantage of the substantially larger
-  vertex buffer and triangle packing commands. For any display lists which are
-  not feasible to re-export (e.g. vanilla assets), manually add
-  `G_LIGHTING_POSITIONAL` to `SP*GeometryMode` commands to ensure they can
-  receive point lighting.
+  Once you have `CFG_ALWAYS_LIGHTING_POSITIONAL`, you can now just send those to
+  the RSP as real point lights, regardless of whether the display lists are
+  vanilla or new.
 
 
 ### C GBI Backwards Compatibility with F3DEX2
@@ -198,3 +231,62 @@ them binary incompatible:
   changed, but `LookAt_t` and all the larger data structures such as `Lightsn`,
   `Lights*`, and `PosLights*` have changed.
 - `g*SPPerspNormalize` binary encoding has changed.
+
+## What are the tradeoffs for all these new features?
+
+### Overlay 4
+
+F3DEX2 contains Overlay 2, which does lighting, and Overlay 3, which does
+clipping (run on any large triangle which extends a large distance offscreen).
+These overlays are more RSP assembly code which are loaded into the same space
+in IMEM. If the wrong overlay is loaded when the other is needed, the proper
+one is loaded and then code jumps to it. Display lists which do not use lighting
+can stay on Overlay 3 at all times. Display lists for things that are typically
+relatively small on screen, such as characters, can stay on Overlay 2 at all
+times, because even when a triangle overlaps the edge of the screen, it
+typically moves fully off the screen and is discarded before it reaches the
+clipping bounds (2x the screen size).
+
+In F3DEX2, the only case where the overlays are swapped frequently is for
+scenes with lighting, because they have large triangles which often extend far
+offscreen (Overlay 3) but also need lighting (Overlay 2). Worst case, the RSP
+will load Overlay 2 once for every `SPVertex` command and then load Overlay 3
+for every set of `SP*Triangle*` commands.
+
+(If you're curious, Overlays 0 and 1 are not related to 2 and 3, and have to do
+with starting and stopping RSP tasks. During normal display list execution,
+Overlay 1 is always loaded.)
+
+F3DEX3 introduces a third overlay, Overlay 4, which can occupy the same IMEM as
+Overlay 2 and 3. This overlay contains code to compute the inverse transpose of
+the model matrix M (abbreviated as mIT), and also contains code for handling
+certain display list commands which are rarely executed (`SPLightToRDP`,
+`SPFlagsDram`, `SPModifyVertex`, `SPBranchZ`, and the codepath for `SPMatrix`
+with `G_MTX_MUL` set). The computation of mIT is needed whenever vertices are
+loaded, lighting is enabled, and mIT is out of date (i.e. M has been updated).
+In other words, for every moving object or skeleton limb which has lighting
+enabled, the RSP has to load Overlay 4 once to compute mIT and then load Overlay
+2 to do all the lighting.
+
+Loading the IMEM overlay space with Overlay 4 and then reloading Overlay 2 into
+the same space takes about 14 microseconds of DRAM time including overheads.
+This means, for a scene containing 100 moving objects / skeleton limbs in your
+scene, the memory will be occupied for an additional 1.4 ms per frame. Some work
+on the CPU and RDP can overlap with this, but generally you can assume that
+means the frame takes about 1.4 ms longer per 100 matrices. Note that most
+scenes are less complex than this (I'd be impressed if you can make a scene with
+100 nontrivial moving objects / limbs which renders within the 50 ms per frame).
+Particles, which of course occupy a lot of matrices, typically don't have
+lighting, so they will not need either Overlay 2 or 4--please don't use lighting
+on particles in F3DEX3!
+
+If you're wondering why mIT is needed in F3DEX3, it's because normals are
+covectors--they stretch in the opposite direction of an object's scaling. So
+while you multiply a vertex by M to transform it from model space to world
+space, you have to multiply a normal by M inverse transpose to go to world
+space. F3DEX2 solves this problem by instead transforming light directions into
+model space with M transpose, and computing the lighting in model space.
+However, this requires extra DMEM to store the transformed lights, and adds an
+additional performance penalty for point lighting which is absent in F3DEX3.
+Plus, having things in world space enables the cull flags system based on vertex
+distance to the camera, and the Fresnel feature.
