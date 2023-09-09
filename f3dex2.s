@@ -712,7 +712,7 @@ postOvlRA equ $12 // Commonly used locally
 // $v31: general constant values
 
 // Initialization routines
-// Everything up until displaylist_dma will get overwritten by ovl0 and/or ovl1
+// Everything up until ovl01_end will get overwritten by ovl0 and/or ovl1
 start: // This is at IMEM 0x1080, not the start of IMEM
     vadd    $v29, $v29, $v29 // Consume VCO (carry) value possibly set by the previous ucode
     lqv     $v31[0], (v31Value)($zero)
@@ -762,6 +762,7 @@ f3dzex_0000111C:
 load_task_ptr:
     lw      taskDataPtr, OSTask + OSTask_data_ptr
 load_overlay1_init:
+    li      inputBufferPos, 0
     li      cmd_w1_dram, orga(ovl1_start)
     j       load_overlays_0_1
      li     postOvlRA, displaylist_dma
@@ -773,13 +774,17 @@ start_padded_end:
 .orga max(orga(), max(ovl0_padded_end - ovl0_start, ovl1_padded_end - ovl1_start) - 0x80)
 ovl01_end:
 
-displaylist_dma: // loads INPUT_BUFFER_LEN bytes worth of displaylist data via DMA into inputBuffer
-    li      dmaLen, INPUT_BUFFER_LEN - 1               // set the DMA length
-    move    cmd_w1_dram, taskDataPtr                    // set up the DRAM address to read from
-    jal     dma_read_write                              // initiate the DMA read
-     li     dmemAddr, inputBuffer                       // set the address to DMA read to
-    addi    taskDataPtr, taskDataPtr, INPUT_BUFFER_LEN // increment the DRAM address to read from next time
-    li      inputBufferPos, -INPUT_BUFFER_LEN          // reset the DL word index
+displaylist_dma_with_count:
+    andi    inputBufferPos, cmd_w0, 0x00F8             // Byte 3, how many cmds to drop from load
+displaylist_dma:
+    // Load INPUT_BUFFER_LEN - inputBufferPos cmds (inputBufferPos >= 0, mult of 8)
+    addi    inputBufferPos, inputBufferPos, -INPUT_BUFFER_LEN // inputBufferPos = - num cmds
+    sub     dmaLen, $zero, inputBufferPos              // DMA length = -inputBufferPos
+    addi    dmaLen, dmaLen, -1                         // DMA length is always 1 less
+    move    cmd_w1_dram, taskDataPtr                   // set up the DRAM address to read from
+    jal     dma_read_write                             // initiate the DMA read
+     li     dmemAddr, inputBuffer                      // set the address to DMA read to
+    sub     taskDataPtr, taskDataPtr, inputBufferPos   // increment the DRAM address to read from next time
 wait_for_dma_and_run_next_command:
 G_POPMTX_end:
 G_MOVEMEM_end:
@@ -843,11 +848,13 @@ culldl_loop:
      lhu    $11, (vtxSize + VTX_CLIP)($12) // next vertex clip flags
     bne     $12, $3, culldl_loop    // loop until reaching the last vertex
      addi   $12, $12, vtxSize           // advance to the next vertex
+end_dl_no_count:
+    la      cmd_w0, 0                    // Clear count of DL cmds to skip loading
 G_ENDDL_handler:
     lbu     $1, displayListStackLength          // Load the DL stack index
     beqz    $1, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
      addi   $1, $1, -4                          // Decrement the DL stack index
-    j       f3dzex_ovl1_00001020                // has a different version in ovl1
+    j       call_ret_common                // has a different version in ovl1
      lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
 
 G_DMA_IO_handler:
@@ -2057,12 +2064,12 @@ G_DL_handler:
 branch_dl:
     jal     segmented_to_physical
      add    $3, taskDataPtr, inputBufferPos
-    bltz    $2, displaylist_dma         // If the operation is nopush (branch) then simply DMA the new displaylist
+    bltz    $2, displaylist_dma_with_count  // If the operation is nopush (branch) then simply DMA the new displaylist
      move   taskDataPtr, cmd_w1_dram    // Set the task data pointer to the target display list
     sw      $3, (displayListStack)($1)
     addi    $1, $1, 4                   // Increment the DL stack length
-f3dzex_ovl1_00001020:
-    j       displaylist_dma
+call_ret_common:
+    j       displaylist_dma_with_count
      sb     $1, displayListStackLength
 
 G_TEXTURE_handler:
@@ -2152,10 +2159,11 @@ G_FLAGSOPBASE_handler:
     andi    $1, $1, 1               // Only look at bit 0; is 1 if flags cond met
     beqz    $1, run_next_DL_command // Condition not met
      addi   $11, $7, -(G_FLAGSOPBASE + G_FLAGSOP_CALL)
-    bltz    $11, G_ENDDL_handler    // Was one of the cull commands
+    bltz    $11, end_dl_no_count    // Was one of the cull commands
      sll    $2, $7, 28              // Put bit 3 (1=branch, 0=call) into sign bit of $2
+branch_dl_no_count:
     j       branch_dl               // Call or branch based on $2 < 0
-     // Delay slot is harmless.
+     la     cmd_w0, 0               // Clear count of DL cmds to skip loading
 
 G_FLAGSMASKS_handler:
     li      $7, (cullFlags - geometryModeLabel - (0x100 - G_GEOMETRYMODE))
@@ -2530,7 +2538,7 @@ branchwz_return_from_addrs:
     sub     $2, $12, cmd_w1_dram           // subtract the w/z value being tested
     bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
      lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
-    j       branch_dl                  // need $2 < 0 for nopush and cmd_w1_dram
+    j       branch_dl_no_count         // need $2 < 0 for nopush and cmd_w1_dram
      // Next instr is harmless
 
 G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
