@@ -1,13 +1,4 @@
-/*
-Modded GBI for use with F3DEX3 custom microcode.
-Removed:
-- non-F3DEX2 versions of commands. OoT's z_select_static is compiled with
-  F3DEX1, so this one (unused/beta) file doesn't match, but the rest of OoT
-  matches.
-- SGI documentation which is irrelevant or no longer correct
-- stuff for RSP assembly compatibility; with the modern toolchain, a C .h file
-  cannot be included in the microcode.
-*/
+/* Modded GBI for use with F3DEX3 custom microcode. */
 
 #include "mbi.h"
 
@@ -22,73 +13,10 @@ Removed:
 /* Private macro to wrap other macros in do {...} while (0) */
 #define _DW(macro) do {macro} while (0)
 
-#define G_NOOP              0x00
-#define G_RDPHALF_2         0xF1
-#define G_SETOTHERMODE_H    0xE3
-#define G_SETOTHERMODE_L    0xE2
-#define G_RDPHALF_1         0xE1
-#define G_SPNOOP            0xE0
-#define G_ENDDL             0xDF
-#define G_DL                0xDE
-#define G_LOAD_UCODE        0xDD
-#define G_MOVEMEM           0xDC
-#define G_MOVEWORD          0xDB
-#define G_MTX               0xDA
-#define G_GEOMETRYMODE      0xD9
-#define G_POPMTX            0xD8
-#define G_TEXTURE           0xD7
-#define G_DMA_IO            0xD6
-#define G_SPECIAL_1         0xD5
-#define G_SPECIAL_2         0xD4
-#define G_SPECIAL_3         0xD3
-
-#define G_VTX               0x01
-#define G_MODIFYVTX         0x02
-#define G_CULLDL            0x03
-#define G_BRANCH_Z          0x04
-#define G_TRI1              0x05
-#define G_TRI2              0x06
-#define G_QUAD              0x07
-#define G_TRISTRIP          0x08
-#define G_TRIFAN            0x09
-
-/* RDP commands: */
-#define G_SETCIMG           0xFF    /*  -1 */
-#define G_SETZIMG           0xFE    /*  -2 */
-#define G_SETTIMG           0xFD    /*  -3 */
-#define G_SETCOMBINE        0xFC    /*  -4 */
-#define G_SETENVCOLOR       0xFB    /*  -5 */
-#define G_SETPRIMCOLOR      0xFA    /*  -6 */
-#define G_SETBLENDCOLOR     0xF9    /*  -7 */
-#define G_SETFOGCOLOR       0xF8    /*  -8 */
-#define G_SETFILLCOLOR      0xF7    /*  -9 */
-#define G_FILLRECT          0xF6    /* -10 */
-#define G_SETTILE           0xF5    /* -11 */
-#define G_LOADTILE          0xF4    /* -12 */
-#define G_LOADBLOCK         0xF3    /* -13 */
-#define G_SETTILESIZE       0xF2    /* -14 */
-#define G_LOADTLUT          0xF0    /* -16 */
-#define G_RDPSETOTHERMODE   0xEF    /* -17 */
-#define G_SETPRIMDEPTH      0xEE    /* -18 */
-#define G_SETSCISSOR        0xED    /* -19 */
-#define G_SETCONVERT        0xEC    /* -20 */
-#define G_SETKEYR           0xEB    /* -21 */
-#define G_SETKEYGB          0xEA    /* -22 */
-#define G_RDPFULLSYNC       0xE9    /* -23 */
-#define G_RDPTILESYNC       0xE8    /* -24 */
-#define G_RDPPIPESYNC       0xE7    /* -25 */
-#define G_RDPLOADSYNC       0xE6    /* -26 */
-#define G_TEXRECTFLIP       0xE5    /* -27 */
-#define G_TEXRECT           0xE4    /* -28 */
-
-
 /*
  * The following commands are the "generated" RDP commands; the user
  * never sees them, the RSP microcode generates them.
- *
- * The layout of the bits is magical, to save work in the ucode.
- * These id's are -56, -52, -54, -50, -55, -51, -53, -49, ...
- *                                      edge, shade, texture, zbuff bits:  estz
+ *                                    edge, shade, texture, zbuff bits:  estz
  */
 #define G_TRI_FILL              0xC8    /* fill triangle:            11001000 */
 #define G_TRI_SHADE             0xCC    /* shade triangle:           11001100 */
@@ -99,24 +27,88 @@ Removed:
 #define G_TRI_TXTR_ZBUFF        0xCB    /* texture, zbuff triangle:  11001011 */
 #define G_TRI_SHADE_TXTR_ZBUFF  0xCF    /* shade, txtr, zbuff trngl: 11001111 */
 
-/*
- * A TRI_FILL triangle is just the edges. You need to set the DP
- * to use primcolor, in order to see anything. (it is NOT a triangle
- * that gets rendered in 'fill mode'. Triangles can't be rendered
- * in 'fill mode')
- *
- * A TRI_SHADE is a gouraud triangle that has colors interpolated.
- * Flat-shaded triangles (from the software) are still gouraud shaded,
- * it's just the colors are all the same and the deltas are 0.
- *
- * Other triangle types, and combinations are more obvious.
- */
-
-/* masks to build RDP triangle commands: */
+/* masks to create the above: */
 #define G_RDP_TRI_FILL_MASK     0x08
 #define G_RDP_TRI_SHADE_MASK    0x04
 #define G_RDP_TRI_TXTR_MASK     0x02
 #define G_RDP_TRI_ZBUFF_MASK    0x01
+
+/*
+ * GBI commands in order
+ */
+/*#define G_SPECIAL_3       0xD3  not supported in F3DEX3 */
+/*#define G_SPECIAL_2       0xD4  not supported in F3DEX3 */
+/*#define G_SPECIAL_1       0xD5  not supported in F3DEX3 */
+#define G_DMA_IO            0xD6
+#define G_TEXTURE           0xD7
+#define G_POPMTX            0xD8
+#define G_GEOMETRYMODE      0xD9
+#define G_MTX               0xDA
+#define G_MOVEWORD          0xDB
+#define G_MOVEMEM           0xDC
+#define G_LOAD_UCODE        0xDD
+#define G_DL                0xDE
+#define G_ENDDL             0xDF
+#define G_SPNOOP            0xE0
+#define G_RDPHALF_1         0xE1
+#define G_SETOTHERMODE_L    0xE2
+#define G_SETOTHERMODE_H    0xE3
+#define G_TEXRECT           0xE4
+#define G_TEXRECTFLIP       0xE5
+#define G_RDPLOADSYNC       0xE6
+#define G_RDPPIPESYNC       0xE7
+#define G_RDPTILESYNC       0xE8
+#define G_RDPFULLSYNC       0xE9
+#define G_SETKEYGB          0xEA
+#define G_SETKEYR           0xEB
+#define G_SETCONVERT        0xEC
+#define G_SETSCISSOR        0xED
+#define G_SETPRIMDEPTH      0xEE
+#define G_RDPSETOTHERMODE   0xEF
+#define G_LOADTLUT          0xF0
+#define G_RDPHALF_2         0xF1
+#define G_SETTILESIZE       0xF2
+#define G_LOADBLOCK         0xF3
+#define G_LOADTILE          0xF4
+#define G_SETTILE           0xF5
+#define G_FILLRECT          0xF6
+#define G_SETFILLCOLOR      0xF7
+#define G_SETFOGCOLOR       0xF8
+#define G_SETBLENDCOLOR     0xF9
+#define G_SETPRIMCOLOR      0xFA
+#define G_SETENVCOLOR       0xFB
+#define G_SETCOMBINE        0xFC
+#define G_SETTIMG           0xFD
+#define G_SETZIMG           0xFE
+#define G_SETCIMG           0xFF
+#define G_NOOP              0x00
+#define G_VTX               0x01
+#define G_MODIFYVTX         0x02
+#define G_CULLDL            0x03
+#define G_BRANCH_WZ         0x04
+#define G_TRI1              0x05
+#define G_TRI2              0x06
+#define G_QUAD              0x07
+#define G_TRISTRIP          0x08
+#define G_TRIFAN            0x09
+#define G_FLAGSMASKS        0x0A
+#define G_FLAGSVERTS        0x0B
+#define G_FLAGS1VERT        0x0C
+#define G_FLAGSDRAM         0x0D
+#define G_LIGHTTORDP        0x0E
+/* no command               0x0F */
+#define G_FLAGSOPBASE       0x10
+
+/* masks to combine with G_FLAGSOPBASE */
+#define G_FLAGSOP_SOME_NOTALL 0x01
+#define G_FLAGSOP_ALL_NOTALL 0x02
+#define G_FLAGSOP_CULL 0x00
+#define G_FLAGSOP_CALL 0x04
+#define G_FLAGSOP_BRANCH 0x08
+
+/* names differ between F3DEX2 and F3DZEX */
+#define G_BRANCH_Z G_BRANCH_WZ
+#define G_BRANCH_W G_BRANCH_WZ
 
 /*
  * Coordinate shift values, number of bits of fraction
@@ -157,24 +149,18 @@ Removed:
  * flags for G_SETGEOMETRYMODE
  * (this rendering state is maintained in RSP)
  *
- * Further explanation:
- * G_SHADE is necessary in order to see the color that you passed
- * down with the vertex. If G_SHADE isn't set, you need to set the DP
- * appropriately and use primcolor to see anything.
- *
- * G_SHADING_SMOOTH enabled means use all 3 colors of the triangle.
- * If it is not set, then do 'flat shading', where only one vertex color
- * is used (and all 3 vertices are set to that same color by the ucode)
- * See the man page for gSP1Triangle().
- *
+ * Note that flat shading, i.e. not G_SHADING_SMOOTH, sets shade RGB for all
+ * three verts to the value of the first vertex in the triangle. Shade alpha is
+ * still separate for each vertex, which is desired behavior for fog but not for
+ * any other F3DEX3 effects which use shade alpha.
  */
 #define G_ZBUFFER               0x00000001
-#define G_TEXTURE_ENABLE        0x00000000  /* 0x2; actually supported in vanilla, ignored in mod */
+#define G_TEXTURE_ENABLE        0x00000000  /* actually 2, but do not set or may hang */
 #define G_SHADE                 0x00000004
-#define G_ATTROFFSET_ST_ENABLE  0x00000100
 #define G_CULL_FRONT            0x00000200
 #define G_CULL_BACK             0x00000400
 #define G_CULL_BOTH             0x00000600
+#define G_ATTROFFSET_ST_ENABLE  0x00000100
 #define G_ATTROFFSET_Z_ENABLE   0x00000800
 #define G_PACKED_NORMALS        0x00001000
 #define G_LIGHTTOALPHA          0x00002000
@@ -185,8 +171,8 @@ Removed:
 #define G_TEXTURE_GEN           0x00040000
 #define G_TEXTURE_GEN_LINEAR    0x00080000
 #define G_LOD                   0x00100000  /* Ignored by all F3DEX* variants */
-#define G_SHADING_SMOOTH        0x00200000  /* flat or smooth shaded */
-#define G_LIGHTING_POSITIONAL   0x00400000
+#define G_SHADING_SMOOTH        0x00200000
+#define G_LIGHTING_POSITIONAL   0x00400000  /* Ignored by F3DEX3, assumed always on */
 #define G_CLIPPING              0x00800000  /* Ignored by all F3DEX* variants */
 
 /*
@@ -818,10 +804,8 @@ Removed:
 #define G_DL_PUSH       0
 #define G_DL_NOPUSH     1
 
-/*
- * BEGIN C-specific section: (typedef's)
- */
-#if defined(_LANGUAGE_C) || defined(_LANGUAGE_C_PLUS_PLUS)
+/* Number of display list commands loaded at once into RSP DMEM */
+#define G_INPUT_BUFFER_CMDS 21
 
 /*
  * Data Structures
@@ -863,7 +847,7 @@ typedef struct {
     short          ob[3];   /* x, y, z */
     union {
         unsigned short packedNormals;
-        unsigned short flag;    /* for no-code-changes GBI backwards compatibility */
+        unsigned short flag;    /* for GBI backwards compatibility */
     };
     short          tc[2];   /* texture coord */
     unsigned char  cn[4];   /* color & alpha */
@@ -986,21 +970,23 @@ typedef union {
  * Each of these indexes an entry in a dmem table which points to an arbitrarily
  * sized block of dmem in which to store the result of a DMA.
  */
-/* 0,4 are reserved by G_MTX */
-# define G_MV_MMTX      2
-# define G_MV_PMTX      6
-# define G_MV_VIEWPORT  8
-# define G_MV_LIGHT     10
+#define G_MV_TEMPMTX0  0  /* for internal use by G_MTX multiply mode */
+#define G_MV_MMTX      2
+#define G_MV_TEMPMTX1  4  /* for internal use by G_MTX multiply mode */
+#define G_MV_VPMTX     6
+#define G_MV_VIEWPORT  8
+#define G_MV_LIGHT     10
 /* G_MV_POINT is no longer supported because the internal vertex format is no
 longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 /* G_MV_MATRIX is no longer supported because there is no MVP matrix in F3DEX3. */
+#define G_MV_PMTX G_MV_VPMTX /* backwards compatibility */
 
 /*
  * MOVEWORD indices
  * Each of these indexes an entry in a dmem table which points to a word in dmem
  * where an immediate word will be stored.
  */
-#define G_MW_MODS           0x00 /* replaces G_MW_MATRIX which is no longer supported */
+#define G_MW_FX             0x00 /* replaces G_MW_MATRIX which is no longer supported */
 #define G_MW_NUMLIGHT       0x02
 #define G_MW_PERSPNORM      0x04 /* replaces G_MW_CLIP which is no longer supported */
 #define G_MW_SEGMENT        0x06
@@ -1011,95 +997,102 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 /*
  * These are offsets from the address in the dmem table
  */
-#define G_MWO_NUMLIGHT          0x00
+#define G_MWO_NUMLIGHT           0x00
 
-#define G_MWO_SEGMENT_0         0x00
-#define G_MWO_SEGMENT_1         0x01
-#define G_MWO_SEGMENT_2         0x02
-#define G_MWO_SEGMENT_3         0x03
-#define G_MWO_SEGMENT_4         0x04
-#define G_MWO_SEGMENT_5         0x05
-#define G_MWO_SEGMENT_6         0x06
-#define G_MWO_SEGMENT_7         0x07
-#define G_MWO_SEGMENT_8         0x08
-#define G_MWO_SEGMENT_9         0x09
-#define G_MWO_SEGMENT_A         0x0A
-#define G_MWO_SEGMENT_B         0x0B
-#define G_MWO_SEGMENT_C         0x0C
-#define G_MWO_SEGMENT_D         0x0D
-#define G_MWO_SEGMENT_E         0x0E
-#define G_MWO_SEGMENT_F         0x0F
-#define G_MWO_FOG               0x00
+#define G_MWO_SEGMENT_0          0x00
+#define G_MWO_SEGMENT_1          0x01
+#define G_MWO_SEGMENT_2          0x02
+#define G_MWO_SEGMENT_3          0x03
+#define G_MWO_SEGMENT_4          0x04
+#define G_MWO_SEGMENT_5          0x05
+#define G_MWO_SEGMENT_6          0x06
+#define G_MWO_SEGMENT_7          0x07
+#define G_MWO_SEGMENT_8          0x08
+#define G_MWO_SEGMENT_9          0x09
+#define G_MWO_SEGMENT_A          0x0A
+#define G_MWO_SEGMENT_B          0x0B
+#define G_MWO_SEGMENT_C          0x0C
+#define G_MWO_SEGMENT_D          0x0D
+#define G_MWO_SEGMENT_E          0x0E
+#define G_MWO_SEGMENT_F          0x0F
+#define G_MWO_FOG                0x00
 
 /* These are deprecated and no longer needed. */
-#define G_MWO_aLIGHT_1          0x00
-#define G_MWO_bLIGHT_1          0x04
-#define G_MWO_aLIGHT_2          0x10
-#define G_MWO_bLIGHT_2          0x14
-#define G_MWO_aLIGHT_3          0x20
-#define G_MWO_bLIGHT_3          0x24
-#define G_MWO_aLIGHT_4          0x30
-#define G_MWO_bLIGHT_4          0x34
-#define G_MWO_aLIGHT_5          0x40
-#define G_MWO_bLIGHT_5          0x44
-#define G_MWO_aLIGHT_6          0x50
-#define G_MWO_bLIGHT_6          0x54
-#define G_MWO_aLIGHT_7          0x60
-#define G_MWO_bLIGHT_7          0x64
-#define G_MWO_aLIGHT_8          0x70
-#define G_MWO_bLIGHT_8          0x74
-#define G_MWO_aLIGHT_9          0x80
-#define G_MWO_bLIGHT_9          0x84
-#define G_MWO_aLIGHT_10         0x90
-#define G_MWO_bLIGHT_10         0x94
+#define G_MWO_aLIGHT_1           0x00
+#define G_MWO_bLIGHT_1           0x04
+#define G_MWO_aLIGHT_2           0x10
+#define G_MWO_bLIGHT_2           0x14
+#define G_MWO_aLIGHT_3           0x20
+#define G_MWO_bLIGHT_3           0x24
+#define G_MWO_aLIGHT_4           0x30
+#define G_MWO_bLIGHT_4           0x34
+#define G_MWO_aLIGHT_5           0x40
+#define G_MWO_bLIGHT_5           0x44
+#define G_MWO_aLIGHT_6           0x50
+#define G_MWO_bLIGHT_6           0x54
+#define G_MWO_aLIGHT_7           0x60
+#define G_MWO_bLIGHT_7           0x64
+#define G_MWO_aLIGHT_8           0x70
+#define G_MWO_bLIGHT_8           0x74
+#define G_MWO_aLIGHT_9           0x80
+#define G_MWO_bLIGHT_9           0x84
+#define G_MWO_aLIGHT_10          0x90
+#define G_MWO_bLIGHT_10          0x94
 
-#define G_MWO_POINT_RGBA        0x10
-#define G_MWO_POINT_ST          0x14
-#define G_MWO_POINT_XYSCREEN    0x18
-#define G_MWO_POINT_ZSCREEN     0x1C
+#define G_MWO_POINT_RGBA         0x10
+#define G_MWO_POINT_ST           0x14
+#define G_MWO_POINT_XYSCREEN     0x18 /* not recommended to use, won't work if */
+#define G_MWO_POINT_ZSCREEN      0x1C /* the tri gets clipped */
 
-#define G_MWO_CLIP_MOD_SETTINGS 0x00
-#define G_MWO_AMB_OCCLUSION     0x04
-#define G_MWO_FRESNEL           0x08
-#define G_MWO_ATTR_OFFSET_ST    0x0C
-#define G_MWO_ATTR_OFFSET_Z     0x10
+#define G_MWO_AMB_OCCLUSION      0x00
+#define G_MWO_FRESNEL            0x04
+#define G_MWO_ATTR_OFFSET_ST     0x08
+#define G_MWO_ATTR_OFFSET_Z      0x0C
+#define G_MWO_NORMALSMODE        0x0E
+#define G_MWO_ALPHA_COMPARE_CULL 0x12
+
+/* See SPNormalsMode */
+#define G_NORMALSMODE_FAST       0x00
+#define G_NORMALSMODE_AUTO       0x01
+#define G_NORMALSMODE_MANUAL     0x02
+
 
 /*
  * Light structure.
- *
- * Note: only directional (infinite) lights are currently supported.
  *
  * Note: the weird order is for the DMEM alignment benefit of
  * the microcode.
  */
 
 typedef struct {
-    unsigned char col[3];   /* diffuse light value (rgba) */
-    union {
-        unsigned char type; /* MUST SET TO 0 to indicate directional light */
-        char pad1;          /* for no-code-changes GBI backwards compatibility */
-    };
-    unsigned char colc[3];  /* copy of diffuse light value (rgba) */
+    unsigned char col[3];   /* diffuse light color (rgb) */
+    unsigned char type;     /* formerly pad1; MUST SET TO 0 to indicate directional light */
+    unsigned char colc[3];  /* copy of diffuse light color (rgb) */
     char          pad2;
     signed char   dir[3];   /* direction of light (normalized) */
     char          pad3;
 } Light_t;
 
 typedef struct {
-    unsigned char col[3];         /* diffuse light value (rgba) */
-    unsigned char kc;             /* positional lighting enable flag & constant attenuation Kc */
-    unsigned char colc[3];        /* copy of diffuse light value (rgba) */
-    unsigned char kl;             /* linear attenuation Kl */
-    short pos[3];                 /* light position x, y, z integer part */
-    unsigned char kq;             /* quadratic attenuation Kq */
+    unsigned char col[3];   /* point light color (rgb) */
+    unsigned char kc;       /* point light enable flag (> 0) & constant attenuation Kc */
+    unsigned char colc[3];  /* copy of point light color (rgb) */
+    unsigned char kl;       /* linear attenuation Kl */
+    short pos[3];           /* light position x, y, z in world space */
+    unsigned char kq;       /* quadratic attenuation Kq */
 } PosLight_t;
 
 typedef struct {
-    unsigned char col[3];   /* ambient light value (rgba) */
+    unsigned char col[3];   /* ambient light color (rgb) */
     char          pad1;
-    unsigned char colc[3];  /* copy of ambient light value (rgba) */
+    unsigned char colc[3];  /* copy of ambient light color (rgb) */
     char          pad2;
 } Ambient_t;
+
+typedef struct {
+    short pos[3];
+    short pad;
+} CameraWorld_t;
 
 typedef struct {
     signed char   dir[3];   /* direction of lookat (normalized) */
@@ -1107,7 +1100,7 @@ typedef struct {
 } LookAt_t;
 
 typedef struct {
-    LookAt_t      l;    /* for backwards compatibility */
+    LookAt_t      l;        /* for backwards compatibility */
 } LookAtWrapper;
 
 typedef struct {
@@ -1133,6 +1126,11 @@ typedef union {
     Light_t    l;
     long long int force_structure_alignment[2];
 } PosLight;
+
+typedef union {
+    CameraWorld_t c;
+    long long int force_structure_alignment[1];
+} CameraWorld;
 
 typedef union {
     LookAtWrapper l[2];
@@ -1497,8 +1495,8 @@ typedef struct {
             }}                                  \
         },                                      \
         {{                                      \
-            { ar, ag, ab}, 0,                   \
-            { ar, ag, ab}, 0,                   \
+            { ar, ag, ab }, 0,                  \
+            { ar, ag, ab }, 0,                  \
         }}                                      \
     }
 
@@ -1555,8 +1553,8 @@ typedef struct {
             }}                                  \
         },                                      \
         {{                                      \
-            { ar, ag, ab}, 0,                   \
-            { ar, ag, ab}, 0,                   \
+            { ar, ag, ab }, 0,                  \
+            { ar, ag, ab }, 0,                  \
         }}                                      \
     }
     
@@ -1619,8 +1617,8 @@ typedef struct {
             }}                                  \
         },                                      \
         {{                                      \
-            { ar, ag, ab}, 0,                   \
-            { ar, ag, ab}, 0,                   \
+            { ar, ag, ab }, 0,                  \
+            { ar, ag, ab }, 0,                  \
         }}                                      \
     }
 
@@ -2083,10 +2081,13 @@ _DW({                                                   \
 #define gSPNoOp(pkt)    gDma0p(pkt, G_SPNOOP, 0, 0)
 #define gsSPNoOp()      gsDma0p(    G_SPNOOP, 0, 0)
 
-# define    gSPMatrix(pkt, m, p)                                    \
+#define gSPMatrix(pkt, m, p) \
         gDma2p((pkt),G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH, 0)
-# define    gsSPMatrix(m, p)                                        \
+#define gsSPMatrix(m, p) \
         gsDma2p(     G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH, 0)
+
+
+#define G_MAX_VERTS 56
 
 /*
  *        +--------+----+---+---+----+------+-+
@@ -2095,7 +2096,7 @@ _DW({                                                   \
  *        | |seg|         address             |
  *        +-+---+-----------------------------+
  */
-# define    gSPVertex(pkt, v, n, v0)                \
+#define gSPVertex(pkt, v, n, v0)                    \
 _DW({                                               \
     Gfx *_g = (Gfx *)(pkt);                         \
                                                     \
@@ -2105,7 +2106,7 @@ _DW({                                               \
     _g->words.w1 = (unsigned int)(v);               \
 })
 
-# define    gsSPVertex(v, n, v0)    \
+#define gsSPVertex(v, n, v0)        \
 {                                   \
    (_SHIFTL(G_VTX,      24, 8) |    \
     _SHIFTL((n),        12, 8) |    \
@@ -2113,17 +2114,56 @@ _DW({                                               \
     (unsigned int)(v)               \
 }
 
-
-# define gSPViewport(pkt, v)                                        \
+#define gSPViewport(pkt, v) \
         gDma2p((pkt), G_MOVEMEM, (v), sizeof(Vp), G_MV_VIEWPORT, 0)
-# define gsSPViewport(v)                                            \
+#define gsSPViewport(v) \
         gsDma2p(      G_MOVEMEM, (v), sizeof(Vp), G_MV_VIEWPORT, 0)
 
-#define gSPDisplayList(pkt,dl)  gDma1p(pkt, G_DL, dl, 0, G_DL_PUSH)
-#define gsSPDisplayList(   dl)  gsDma1p(    G_DL, dl, 0, G_DL_PUSH)
+/*
+ * Display list control flow
+ */
 
-#define gSPBranchList(pkt,dl)   gDma1p(pkt, G_DL, dl, 0, G_DL_NOPUSH)
-#define gsSPBranchList(   dl)   gsDma1p(    G_DL, dl, 0, G_DL_NOPUSH)
+#define _gSPDisplayListRaw(pkt,dl,v)  gDma1p(pkt, G_DL, dl, v, G_DL_PUSH)
+#define _gsSPDisplayListRaw(   dl,v)  gsDma1p(    G_DL, dl, v, G_DL_PUSH)
+
+#define _gSPBranchListRaw(pkt,dl,v)   gDma1p(pkt, G_DL, dl, v, G_DL_NOPUSH)
+#define _gsSPBranchListRaw(   dl,v)   gsDma1p(    G_DL, dl, v, G_DL_NOPUSH)
+
+#define _gSPEndDisplayListRaw(pkt,v)  gDma0p(pkt, G_ENDDL, 0, v)
+#define _gsSPEndDisplayListRaw(v)     gsDma0p(    G_ENDDL, 0, v)
+
+/* Converts a total expected count of DL commands to a number of bytes to
+initially NOT load into the DL command buffer. */
+#define _HINTVALUE(count) \
+    (((count) > 0 && ((count) % G_INPUT_BUFFER_CMDS) > 0) ? \
+    ((G_INPUT_BUFFER_CMDS - ((count) % G_INPUT_BUFFER_CMDS)) << 3) : 0)
+
+/* Optimization for reduced memory traffic. In count, put the estimated number
+of DL commands in the target DL (the DL being called / jumped to, or the DL
+being returned to, starting from the next command to be executed) up to and
+including the next call / jump / return. Normally, for SPDisplayList, this is
+just the total number of commands in the target DL. The actual on-screen
+result will not change regardless of the value of count, but the performance
+will be best if count is correct, and potentially worse than not specifying
+count if it is wrong. */
+
+#define gSPDisplayListHint(pkt, dl, count) _gSPDisplayListRaw(pkt, dl, _HINTVALUE(count))
+#define gsSPDisplayListHint(    dl, count) _gsSPDisplayListRaw(    dl, _HINTVALUE(count))
+
+#define gSPBranchListHint(pkt, dl, count) _gSPBranchListRaw( pkt, dl, _HINTVALUE(count))
+#define gsSPBranchListHint(    dl, count) _gsSPBranchListRaw(     dl, _HINTVALUE(count))
+
+#define gSPEndDisplayListHint(pkt, count) _gSPEndDisplayListRaw( pkt, _HINTVALUE(count))
+#define gsSPEndDisplayListHint(    count) _gsSPEndDisplayListRaw(     _HINTVALUE(count))
+    
+#define gSPDisplayList(pkt, dl) _gSPDisplayListRaw(pkt, dl, 0)
+#define gsSPDisplayList(    dl) _gsSPDisplayListRaw(    dl, 0)
+
+#define gSPBranchList(pkt, dl)  _gSPBranchListRaw( pkt, dl, 0)
+#define gsSPBranchList(    dl)  _gsSPBranchListRaw(     dl, 0)
+
+#define gSPEndDisplayList(pkt)  _gSPEndDisplayListRaw( pkt, 0)
+#define gsSPEndDisplayList(  )  _gsSPEndDisplayListRaw(     0)
 
 /*
  * RSP short command (no DMA required) macros
@@ -2212,6 +2252,10 @@ _DW({                                       \
     gsDma1p(      G_MOVEWORD, data, offset, index)
 
 
+/*
+ * Triangle commands
+ */
+
 #define __gsSP1Triangle_w1(v0, v1, v2)    \
    (_SHIFTL((v0) * 2, 16, 8) |              \
     _SHIFTL((v1) * 2,  8, 8) |              \
@@ -2293,22 +2337,10 @@ _DW({                                                                   \
 }
 
 
-#define gSPCullDisplayList(pkt,vstart,vend)             \
-_DW({                                                   \
-    Gfx *_g = (Gfx *)(pkt);                             \
-                                                        \
-    _g->words.w0 = (_SHIFTL(G_CULLDL,     24, 8) |      \
-                    _SHIFTL((vstart) * 2,  0, 16));     \
-    _g->words.w1 = _SHIFTL((vend) * 2, 0, 16);          \
-})
 
-#define gsSPCullDisplayList(vstart,vend)    \
-{                                           \
-   (_SHIFTL(G_CULLDL,     24, 8) |          \
-    _SHIFTL((vstart) * 2,  0, 16)),         \
-    _SHIFTL((vend) * 2, 0, 16)              \
-}
-
+/*
+ * Moveword commands
+ */
 
 #define gSPSegment(pkt, segment, base)              \
     gMoveWd(pkt, G_MW_SEGMENT, (segment) * 4, base)
@@ -2317,6 +2349,7 @@ _DW({                                                   \
 
 /*
  * Clipping Macros - Deprecated, encodes SP no-ops
+ * It is not possible to change the clip ratio from 2 in F3DEX3.
  */
 #define gSPClipRatio(pkt, r) gSPNoOp(pkt)
 #define gsSPClipRatio(r) gsSPNoOp()
@@ -2327,6 +2360,166 @@ _DW({                                                   \
  */
 #define gSPForceMatrix(pkt, mptr) gSPNoOp(pkt)
 #define gsSPForceMatrix(mptr)    gsSPNoOp()
+
+/*
+ * Ambient occlusion
+ * Enabled with the G_AMBOCCLUSION bit in geometry mode.
+ * Each of these factors sets how much ambient occlusion affects lights of
+ * the given type (ambient, directional). They are u16s.
+ * 
+ * When building the model, you must encode the amount of ambient occlusion at
+ * each vertex--effectively the shadow map for the model--in vertex alpha, where
+ * 00 means darkest and FF means lightest. Then, the factors set with the
+ * SPAmbOcclusion command determine how much the vertex alpha values affect the
+ * light intensity. For example, if the ambient factor is set to 0x8000, this
+ * means that in the darkest parts of the model, the ambient light intensity
+ * will be reduced by 50%, and in the lightest parts of the model, the ambient
+ * light intensity won't be reduced at all.
+ * 
+ * The default is amb = 0xFFFF (ambient light fully affected by vertex alpha)
+ * and dir = 0xA000 (directional lights 62% affected by vertex alpha).
+ * 
+ * The reason you'd want to use ambient occlusion rather than just darkening
+ * the vertex colors is that with ambient occlusion, the geometry can still be
+ * fully lit up by point lights (or directional lights if you set the dir factor
+ * to zero here). In contrast, if you darken the vertex colors, the geometry
+ * will always be that much darker. The reason you'd want to use these factors
+ * to modify ambient occlusion rather than just manually scaling and offsetting
+ * all the vertex alpha values is to allow the lighting to be adjusted on the
+ * fly or after the model is made.
+ */
+#define gSPAmbOcclusion(pkt, amb, dir) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_AMB_OCCLUSION, \
+        (_SHIFTL(amb, 16, 16) | _SHIFTL(dir, 0, 16)))
+
+#define gsSPAmbOcclusion(amb, dir) \
+    gsMoveWd(G_MW_FX, G_MWO_AMB_OCCLUSION, \
+        (_SHIFTL(amb, 16, 16) | _SHIFTL(dir, 0, 16)))
+
+/*
+ * Fresnel
+ * Enabled with the G_FRESNEL bit in geometry mode.
+ * The dot product between a vertex normal and the vector from the vertex to the
+ * camera is computed. The offset and scale here convert this to a shade alpha
+ * value. This is useful for making surfaces fade between transparent when
+ * viewed straight-on and opaque when viewed at a large angle, or for applying a
+ * fake "outline" around the border of meshes.
+ * 
+ * offset = Dot product value, in 0000 - 7FFF, which gives shade alpha = 0
+ * Let k = dot product value, in 0000 - 7FFF, which gives shade alpha = FF.
+ * Then scale = 0.7FFF / (k - offset) as s7.8 fixed point.
+ * Alternatively, shade alpha [0000 - 7FFF] =
+ * scale [-80.00 - 7F.FF] * (dot product [0000 - 7FFF] - offset)
+ * Examples:
+ * 1. Grazing -> 00; normal -> FF
+ *    Then set offset = 0000, scale = 0100 = 01.00
+ * 2. Grazing -> FF; normal -> 00
+ *    Then set offset = 7FFF, scale = FF00 = FF.00 = -01.00
+ * 3. 30 degrees (0.5f or 4000) -> FF; 60 degrees (0.86f or 6ED9) -> 00
+ *    Then set offset = 6ED9, scale = FD45 = FD.45 = -02.BB = 1 / (0.5f - 0.86f)
+ */
+#define gSPFresnel(pkt, offset, scale) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_FRESNEL, \
+        (_SHIFTL(offset, 16, 16) | _SHIFTL(scale, 0, 16)))
+
+#define gsSPFresnel(offset, scale) \
+    gsMoveWd(G_MW_FX, G_MWO_FRESNEL, \
+        (_SHIFTL(offset, 16, 16) | _SHIFTL(scale, 0, 16)))
+
+/*
+ * Attribute offsets
+ * These are added to ST or Z values after vertices are loaded and transformed.
+ * They are all s16s.
+ * For ST, the addition is after the multiplication for ST scale in SPTexture.
+ * For Z, this simply adds to the Z offset from the viewport.
+ * Whether each feature is enabled or disabled at a given time is determined
+ * by bits in the geometry mode.
+ * Normally you would use ST offsets for UV scrolling, and you would use a Z
+ * offset of -2 (which it is set to by default) to fix decal mode. For the
+ * latter, enable the Z offset and set the Z mode to opaque.
+ */
+#define gSPAttrOffsetST(pkt, s, t) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_ST, \
+        (_SHIFTL(s, 16, 16) | _SHIFTL(t, 0, 16)))
+
+#define gsSPAttrOffsetST(s, t) \
+    gsMoveWd(G_MW_FX, G_MWO_ATTR_OFFSET_ST, \
+        (_SHIFTL(s, 16, 16) | _SHIFTL(t, 0, 16)))
+       
+#define gSPAttrOffsetZ(pkt, z) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_Z, \
+        (_SHIFTL(z, 16, 16)))
+
+#define gsSPAttrOffsetZ(z) \
+    gsMoveWd(G_MW_FX, G_MWO_ATTR_OFFSET_Z, \
+        (_SHIFTL(z, 16, 16)))
+
+/*
+ * Normals mode: How to handle transformation of vertex normals from model to
+ * world space for lighting.
+ * 
+ * If mode = G_NORMALSMODE_FAST, transforms normals from model space to world space
+ * with the M matrix. This is correct if the object's transformation matrix
+ * stack only included translations, rotations, and uniform scale (i.e. same
+ * scale in X, Y, and Z); otherwise, if the transformation matrix has nonuniform
+ * scale or shear, the lighting on the object will be subtly wrong.
+ * 
+ * If mode = G_NORMALSMODE_AUTO, transforms normals from model space to world
+ * space with M inverse transpose, which renders lighting correctly for the
+ * object regardless of its transformation matrix (nonuniform scale or shear is
+ * okay). Whenever vertices are drawn with lighting enabled after M has been
+ * changed, computes M inverse transpose from M. This requires swapping to
+ * overlay 4 for M inverse transpose and then back to overlay 2 for lighting,
+ * which produces roughly 3.5 us of extra DRAM traffic. This performance penalty
+ * happens effectively once per matrix, which is once per normal object or
+ * separated limb or about twice per flex skeleton limb. So in a scene with lots
+ * of complex skeletons, this may have a noticeable performance impact.
+ * 
+ * If mode = G_NORMALSMODE_MANUAL, uses M inverse transpose for correct results
+ * like G_NORMALSMODE_AUTO, but it never internally computes M inverse
+ * transpose. You have to upload M inverse transpose to the RSP using
+ * SPMITMatrix every time you change the M matrix. The DRAM traffic for the
+ * extra matrix uploads is much smaller than the overlay swaps, so if you can
+ * efficiently compute M inverse transpose on the CPU, this may be faster than
+ * M_NORMALSMODE_AUTO.
+ * 
+ * Recommended to leave this set to G_NORMALSMODE_FAST generally, and only set
+ * it to G_NORMALSMODE_AUTO for specific objects at times when they actually
+ * have a nonuniform scale. For example, G_NORMALSMODE_FAST it for Mario
+ * generally, but G_NORMALSMODE_AUTO temporarily while he is squashed.
+ */
+#define gSPNormalsMode(pkt, mode) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_NORMALSMODE, mode)
+
+#define gsSPNormalsMode(mode) \
+    gsMoveWd(G_MW_FX, G_MWO_NORMALSMODE, mode)
+
+/*
+ * See SPNormalsMode. mtx is the address of the M inverse transpose matrix. This
+ * is like Mtx, but with only three rows instead of four, and a total size of
+ * 0x30 bytes instead of 0x40. The six 64-bit words comprising this matrix are
+ * as follows, with each column being a short and -- meaning padding / ignored
+ * value:
+ * 0x00: XX XY XZ -- (int parts)
+ * 0x08: YX YY YZ -- (int parts)
+ * 0x10: ZX ZY ZZ -- (int parts)
+ * 0x18: XX XY XZ -- (frac parts)
+ * 0x20: YX YY YZ -- (frac parts)
+ * 0x28: ZX ZY ZZ -- (frac parts)
+ * The matrix values must also be scaled down so that the matrix norm is <= 1,
+ * i.e. multiplying this matrix by any vector length <= 1 must produce a vector
+ * with length <= 1. Normally, M scales things down substantially, so M inverse
+ * transpose natively would scale them up substantially; you need to apply a
+ * constant scale to counteract this. One easy way to do this is compute M
+ * inverse transpose normally, then scale it so until the maximum absolute
+ * value of any element is 0.5. Because of this scaling, you can also skip the
+ * part of the inverse computation where you compute the determinant and divide
+ * by it, cause you're going to rescale it arbitrarily anyway.
+ */
+#define gSPMITMatrix(pkt, mtx) \
+        gDma2p((pkt), G_MOVEMEM, (mtx), 0x30, G_MV_MMTX, 0x80)
+#define gsSPMITMatrix(mtx) \
+        gsDma2p(      G_MOVEMEM, (mtx), 0x30, G_MV_MMTX, 0x80)
 
 
 /*
@@ -2352,6 +2545,24 @@ _DW({                                               \
     _SHIFTL((vtx) * 2,    0, 16)),          \
     (unsigned int)(val)                     \
 }
+
+
+#define gSPCullDisplayList(pkt,vstart,vend)             \
+_DW({                                                   \
+    Gfx *_g = (Gfx *)(pkt);                             \
+                                                        \
+    _g->words.w0 = (_SHIFTL(G_CULLDL,     24, 8) |      \
+                    _SHIFTL((vstart) * 2,  0, 16));     \
+    _g->words.w1 = _SHIFTL((vend) * 2, 0, 16);          \
+})
+
+#define gsSPCullDisplayList(vstart,vend)    \
+{                                           \
+   (_SHIFTL(G_CULLDL,     24, 8) |          \
+    _SHIFTL((vstart) * 2,  0, 16)),         \
+    _SHIFTL((vend) * 2, 0, 16)              \
+}
+
 
 /*
  *  gSPBranchLessZ   Branch DL if (vtx.z) less than or equal (zval).
@@ -2524,6 +2735,9 @@ _DW({                                               \
 /*
  * Lighting Macros
  */
+
+#define G_MAX_LIGHTS 9
+
 #define NUML(n)    ((n) * 0x10)
 /*
  * F3DEX3 properly supports zero lights, so there is no need to use these macros
@@ -2539,10 +2753,11 @@ _DW({                                               \
 #define NUMLIGHTS_7 7
 #define NUMLIGHTS_8 8
 #define NUMLIGHTS_9 9
+
 /*
  * n should be an integer 0-9. F3DEX3 supports between 0 and 9 directional /
  * point lights, plus one required ambient light.
- * NOTE: in addition to the number of directional lights specified,
+ * NOTE: in addition to the number of directional/point lights specified,
  *       there is always 1 ambient light
  */
 #define gSPNumLights(pkt, n)                            \
@@ -2573,7 +2788,7 @@ _DW({                                               \
  * New code should not generally use SPLight, and instead use SPSetLights to set
  * all lights in one memory transaction.
  */
-#define _LIGHT_TO_OFFSET(n) (((n) - 1) * 0x10 + 8) /* The + 8 skips lookat */
+#define _LIGHT_TO_OFFSET(n) (((n) - 1) * 0x10 + 0x10) /* The + 0x10 skips cam pos and lookat */
 #define gSPLight(pkt, l, n) \
     gDma2p((pkt), G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
 #define gsSPLight(l, n) \
@@ -2630,11 +2845,11 @@ _DW({\
 #define gSPSetLights(pkt, n, name) \
 _DW({ \
     gSPNumLights(pkt, n); \
-    gDma2p((pkt),  G_MOVEMEM, &name, (n) * 0x10 + 8, G_MV_LIGHT, 8); \
+    gDma2p((pkt),  G_MOVEMEM, &name, (n) * 0x10 + 8, G_MV_LIGHT, 0x10); \
 })
 #define gsSPSetLights(n, name) \
     gsSPNumLights(n), \
-    gsDma2p(G_MOVEMEM, &name, (n) * 0x10 + 8, G_MV_LIGHT, 8)
+    gsDma2p(G_MOVEMEM, &name, (n) * 0x10 + 8, G_MV_LIGHT, 0x10)
 
 #define  gSPSetLights0(pkt, name)  gSPSetLights(pkt, 0, name)
 #define gsSPSetLights0(name)      gsSPSetLights(     0, name)
@@ -2659,13 +2874,23 @@ _DW({ \
 
 
 /*
+ * Camera world position. Set this whenever you set the VP matrix, viewport, etc.
+ * cam is the name/address of a CameraWorld struct.
+ */
+#define gSPCameraWorld(pkt, cam) \
+    gDma2p((pkt), G_MOVEMEM, (cam), sizeof(CameraWorld), G_MV_LIGHT, 0)
+#define gsSPCameraWorld(cam) \
+    gsDma2p(      G_MOVEMEM, (cam), sizeof(CameraWorld), G_MV_LIGHT, 0)
+
+
+/*
  * Reflection/Hiliting Macros.
  * la is the name/address of a LookAt struct.
  */
 #define gSPLookAt(pkt, la) \
-    gDma2p((pkt), G_MOVEMEM, (la), sizeof(LookAt), G_MV_LIGHT, 0)
+    gDma2p((pkt), G_MOVEMEM, (la), sizeof(LookAt), G_MV_LIGHT, 8)
 #define gsSPLookAt(la) \
-    gsDma2p(      G_MOVEMEM, (la), sizeof(LookAt), G_MV_LIGHT, 0)
+    gsDma2p(      G_MOVEMEM, (la), sizeof(LookAt), G_MV_LIGHT, 8)
  
 /*
  * These versions are deprecated, please use g*SPLookAt. The two directions
@@ -2738,83 +2963,6 @@ _DW({ \
        (_SHIFTL((128000 / ((max) - (min))), 16, 16) |               \
         _SHIFTL(((500 - (min)) * 256 / ((max) - (min))), 0, 16)))
 
-/*
- * Clip mod settings
- * cr: Clip ratio, strongly suggest always setting to 2, may not work correctly
- *     with other settings.
- * large: Number of scanlines high a triangle is to be considered large. You can
- *     tune this for best clipping performance. Default 60.
- */
-#define gSPClipModSettings(pkt, cr, large) \
-    gMoveWd(pkt, G_MW_MODS, G_MWO_CLIP_MOD_SETTINGS, \
-        (_SHIFTL(cr, 16, 16) | _SHIFTL(large, 2, 14)))
-
-#define gsSPClipModSettings(cr, large) \
-    gsMoveWd(G_MW_MODS, G_MWO_CLIP_MOD_SETTINGS, \
-        (_SHIFTL(cr, 16, 16) | _SHIFTL(large, 2, 14)))
-
-/*
- * Attribute offsets
- * These are added to ST or Z values after vertices are loaded and transformed.
- * They are all s16s.
- * For ST, the addition is after the multiplication for ST scale in SPTexture.
- * For Z, this simply adds to the Z offset from the viewport.
- * Whether each feature is enabled or disabled at a given time is determined
- * by bits in the geometry mode.
- * Normally you would use ST offsets for UV scrolling, and you would use a Z
- * offset of -2 (which it is set to by default) to fix decal mode. For the
- * latter, enable the Z offset and set the Z mode to opaque.
- */
-#define gSPAttrOffsetST(pkt, s, t) \
-    gMoveWd(pkt, G_MW_MODS, G_MWO_ATTR_OFFSET_ST, \
-        (_SHIFTL(s, 16, 16) | _SHIFTL(t, 0, 16)))
-
-#define gsSPAttrOffsetST(s, t) \
-   gsMoveWd(G_MW_MODS, G_MWO_ATTR_OFFSET_ST, \
-       (_SHIFTL(s, 16, 16) | _SHIFTL(t, 0, 16)))
-       
-#define gSPAttrOffsetZ(pkt, z) \
-  gMoveWd(pkt, G_MW_MODS, G_MWO_ATTR_OFFSET_Z, \
-      (_SHIFTL(z, 16, 16)))
-
-#define gsSPAttrOffsetZ(s, t) \
- gsMoveWd(G_MW_MODS, G_MWO_ATTR_OFFSET_Z, \
-     (_SHIFTL(z, 16, 16)))
-
-/*
- * Ambient occlusion
- * Enabled with the G_AMBOCCLUSION bit in geometry mode.
- * Each of these factors sets how much ambient occlusion affects lights of
- * the given type (ambient, directional). They are u16s.
- * 
- * When building the model, you must encode the amount of ambient occlusion at
- * each vertex--effectively the shadow map for the model--in vertex alpha, where
- * 00 means darkest and FF means lightest. Then, the factors set with the
- * SPAmbOcclusion command determine how much the vertex alpha values affect the
- * light intensity. For example, if the ambient factor is set to 0x8000, this
- * means that in the darkest parts of the model, the ambient light intensity
- * will be reduced by 50%, and in the lightest parts of the model, the ambient
- * light intensity won't be reduced at all.
- * 
- * The default is amb = 0xFFFF (ambient light fully affected by vertex alpha)
- * and dir = 0xA000 (directional lights 62% affected by vertex alpha).
- * 
- * The reason you'd want to use ambient occlusion rather than just darkening
- * the vertex colors is that with ambient occlusion, the geometry can still be
- * fully lit up by point lights (or directional lights if you set the dir factor
- * to zero here). In contrast, if you darken the vertex colors, the geometry
- * will always be that much darker. The reason you'd want to use these factors
- * to modify ambient occlusion rather than just manually scaling and offsetting
- * all the vertex alpha values is to allow the lighting to be adjusted on the
- * fly or after the model is made.
- */
-#define gSPAmbOcclusion(pkt, amb, dir) \
-    gMoveWd(pkt, G_MW_MODS, G_MWO_AMB_OCCLUSION, \
-        (_SHIFTL(amb, 16, 16) | _SHIFTL(dir, 0, 16)))
-
-#define gsSPAmbOcclusion(amb, dir) \
-    gsMoveWd(G_MW_MODS, G_MWO_AMB_OCCLUSION, \
-        (_SHIFTL(amb, 16, 16) | _SHIFTL(dir, 0, 16)))
 
 /*
  * Macros to turn texture on/off
@@ -2874,20 +3022,6 @@ _DW({                                                       \
 # define gsSPPopMatrixN(n, num)     gsDma2p(      G_POPMTX, (num) * 64, 64, 2, 0)
 # define gSPPopMatrix(pkt, n)       gSPPopMatrixN((pkt), (n), 1)
 # define gsSPPopMatrix(n)           gsSPPopMatrixN(      (n), 1)
-
-#define gSPEndDisplayList(pkt)              \
-_DW({                                       \
-    Gfx *_g = (Gfx *)(pkt);                 \
-                                            \
-    _g->words.w0 = _SHIFTL(G_ENDDL, 24, 8); \
-    _g->words.w1 = 0;                       \
-})
-
-#define gsSPEndDisplayList()    \
-{                               \
-    _SHIFTL(G_ENDDL, 24, 8),    \
-    0                           \
-}
 
 /*
  *  One gSPGeometryMode(pkt,c,s) GBI is equal to these two GBIs.
@@ -4603,7 +4737,5 @@ _DW({                                                   \
 #define gDPNoOpOpenDisp(pkt, file, line)    gDma1p(pkt, G_NOOP, file, line, 7)
 #define gDPNoOpCloseDisp(pkt, file, line)   gDma1p(pkt, G_NOOP, file, line, 8)
 #define gDPNoOpTag3(pkt, type, data, n)     gDma1p(pkt, G_NOOP, data, n, type)
-
-#endif
 
 #endif /* MOD_ULTRA64_GBI_H */

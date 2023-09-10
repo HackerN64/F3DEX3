@@ -261,7 +261,7 @@ tempHalfword2:
 lightBufferLookat:
     .skip 8 // s8 X0, Y0, Z0, dummy, X1, Y1, Z1, dummy
 lightBufferMain:
-    .skip (MAX_LIGHTS * lightSize)
+    .skip (G_MAX_LIGHTS * lightSize)
 lightBufferAmbient:
     .skip 8 // just colors for ambient light
 ltBufOfs equ (lightBufferMain - altBase)
@@ -317,7 +317,7 @@ tempHalfword1:
     .dh 0x0000 // Overwritten by movewords to above and below, can be used as temp
 
     .db 0
-lightCorrectScales:
+normalsMode:
     .db 0     // Overwrites above
 
 alphaCompareCullMode:
@@ -366,7 +366,7 @@ jumpTableEntry ovl234_ovl4_entrypoint  // G_MTX (multiply)
 jumpTableEntry G_MOVEMEM_end           // G_MOVEMEM, G_MTX (load)
 
 // RDP/Immediate Command Jump Table
-jumpTableEntry G_DMA_IO_handler
+jumpTableEntry ovl234_ovl4_entrypoint // G_DMA_IO
 jumpTableEntry G_TEXTURE_handler
 jumpTableEntry G_POPMTX_handler
 jumpTableEntry G_GEOMETRYMODE_handler
@@ -449,7 +449,7 @@ clipPoly2:                              //  \ / \ / \
 
 // Vertex buffer in RSP internal format
 vertexBuffer:
-    .skip (MAX_VERTS * vtxSize)
+    .skip (G_MAX_VERTS * vtxSize)
 
 .if . > OS_YIELD_DATA_SIZE - 8
     // OS_YIELD_DATA_SIZE (0xC00) bytes of DMEM are saved; the last two words are
@@ -857,16 +857,6 @@ G_ENDDL_handler:
     j       call_ret_common                // has a different version in ovl1
      lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
 
-G_DMA_IO_handler:
-    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
-     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
-    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
-    // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
-    // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
-    sra     dmemAddr, dmemAddr, 2
-    j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
-     li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
-     
 G_MOVEWORD_handler:
     srl     $2, cmd_w0, 16                              // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
     lhu     $12, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
@@ -1326,7 +1316,7 @@ vtx_setup_skip_load:
     lqv     vM2F,     (mMatrix + 0x30)($zero)
     lbu     $11, mITValid                      // 0 if matrix invalid, 1 if valid
     vcopy   vM1I,  vM0I
-    lbu     $12, lightCorrectScales            // 0 if don't use mIT, 1 if use
+    lbu     $12, normalsMode                   // bit 0 clear if don't compute mIT, set if do
     vcopy   vM3I,  vM2I
     ldv     vM1I[0],  (mMatrix + 0x08)($zero)
     vcopy   vM1F,  vM0F
@@ -1336,7 +1326,7 @@ vtx_setup_skip_load:
     sltiu   $11, $11, 1                        // 0 if matrix valid, 1 if invalid
     srl     $7, $5, 9                          // G_LIGHTING in bit 1
     and     $7, $7, $11                        // If lighting enabled and need to update matrix,
-    and     $7, $7, $12                        // and using mIT,
+    and     $7, $7, $12                        // and computing mIT,
     ldv     vM3F[0],  (mMatrix + 0x38)($zero)
     ldv     vM0I[8],  (mMatrix + 0x00)($zero)
     ldv     vM2I[8],  (mMatrix + 0x10)($zero)
@@ -2227,21 +2217,21 @@ lt_continue_setup:
     vabs    vPairNrml, $v30, vPairNrml     // Apply sign of original X and Y to new X and Y
     vmrg    vPairNrml, vPairNrml, vPackZ[0h]  // Move Z to elements 2, 6
 lt_skip_packed_normals:
-    // Transform normals by M, in case not lightCorrectScales.
+    // Transform normals by M, in case normalsMode = G_NORMALSMODE_FAST.
     vclr    vLtOne
     vsub    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; offset alpha, will be fixed later
     lbu     curLight, numLightsxSize
     vmudn   $v29, vM0F, vPairNrml[0h]
-    lbu     $11, lightCorrectScales($zero)
+    lbu     $11, normalsMode($zero)
     vmadh   $v29, vM0I, vPairNrml[0h]
     vmadn   $v29, vM1F, vPairNrml[1h]
     addi    curLight, curLight, altBase // Point to ambient light
     vmadh   $v29, vM1I, vPairNrml[1h]
     vmadn   $v10, vM2F, vPairNrml[2h] // $v10 = normals frac
     vmadh   $v23, vM2I, vPairNrml[2h] // $v23 = normals int
-    beqz    $11, lt_after_xfrm_normals
+    beqz    $11, lt_after_xfrm_normals // Skip if G_NORMALSMODE_FAST
      vadd   vLtOne, vLtOne, $v31[2] // 1; vLtOne = 1
-    // Doing correct scales. Load M inverse transpose.
+    // Transform normals by M inverse transpose, for G_NORMALSMODE_AUTO or G_NORMALSMODE_MANUAL
     lqv     vLtMIT0I,    (mITMatrix + 0x00)($zero) // x int, y int
     lqv     vLtMIT2I,    (mITMatrix + 0x10)($zero) // z int, x frac
     lqv     vLtMIT1F,    (mITMatrix + 0x20)($zero) // y frac, z frac
@@ -2274,9 +2264,9 @@ lt_after_xfrm_normals:
      luv    vPairLt, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
     // Set up ambient occlusion: light *= (factor * (alpha - 1) + 1)
     vmudm   $v25, vPairRGBA, vSTOfs[2] // (alpha - 1) * aoAmb factor; elems 3, 7
-    sll     $12, $5, 17 // G_LIGHTING_POSITIONAL = 0x00400000; $5 is middle 16 bits so 0x00004000
+    //sll     $12, $5, 17 // G_LIGHTING_POSITIONAL = 0x00400000; $5 is middle 16 bits so 0x00004000
     vcopy   vPairNrml, $v23
-    sra     $12, $12, 31 // All 1s if point lighting enabled, else all 0s
+    //sra     $12, $12, 31 // All 1s if point lighting enabled, else all 0s
     vadd    $v25, $v25, $v31[7] // 0x7FFF = 1 in s.15; elems 3, 7
     vmulf   vPairLt, vPairLt, $v25[3h] // light color *= ambient factor
 lt_loop:
@@ -2288,7 +2278,7 @@ lt_loop:
     lbu     $11,     (ltBufOfs + 3 - lightSize)(curLight) // Light type / constant attenuation
     beq     curLight, altBaseReg, lt_post
      vmrg   $v23, $v23, $v25                              // $v23 = light direction
-    and     $11, $11, $12 // Mask away if point lighting disabled
+    //and     $11, $11, $12 // Mask away if point lighting disabled
     bnez    $11, lt_point
      luv    vLtColor,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
     vmulf   $v23, $v23, vPairNrml // Light dir * normalized normals
@@ -2497,6 +2487,8 @@ ovl4_select_instr:
     beq     $12, $7, G_FLAGSDRAM_handler
      li     $11, G_MODIFYVTX
     beq     $11, $7, G_MODIFYVTX_handler
+     li     $12, G_DMA_IO
+    beq     $12, $7, G_DMA_IO_handler
      // Otherwise G_LIGHTTORDP, which starts with a harmless instruction
 
 G_LIGHTTORDP_handler:
@@ -2518,7 +2510,17 @@ G_FLAGSDRAM_handler:
     lw      cmd_w0, tempMemRounded($zero)
     j       G_FLAGSMASKS_handler
      lw     cmd_w1_dram, (tempMemRounded + 4)($zero)
-     
+
+G_DMA_IO_handler:
+    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
+     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
+    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
+    // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
+    // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
+    sra     dmemAddr, dmemAddr, 2
+    j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
+     li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
+
 G_MODIFYVTX_handler:
     j       vtx_addrs_from_cmd          // byte 3 = vtx being modified; addr -> $12
      li     $11, modifyvtx_return_from_addrs

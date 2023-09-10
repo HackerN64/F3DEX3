@@ -35,20 +35,22 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   vertex normal and the vector from the vertex to the camera is computed. A
   settable scale and offset from `SPFresnel` converts this to a shade alpha
   value. This is useful for making surfaces fade between transparent when viewed
-  straight-on and  opaque when viewed at a large angle, or for applying a fake
+  straight-on and opaque when viewed at a large angle, or for applying a fake
   "outline" around the border of meshes.
 - New geometry mode bits `G_ATTROFFSET_ST_ENABLE` and `G_ATTROFFSET_Z_ENABLE`
   apply settable offsets to vertex ST (`SPAttrOffsetST`) and/or Z
   (`SPAttrOffsetZ`) values. These offsets are applied after their respective
-  scales. For Z, this fixes decal mode. For ST, this enables UV scrolling
-  without CPU intervention.
+  scales. For Z, this enables a method of drawing coplanar surfaces like decals
+  but without the Z fighting which can happen with the RDP's native decal mode.
+  For ST, this enables UV scrolling without CPU intervention.
 
 ### Improved existing features
 
-- Point lighting redesigned. Improved appearance when light is close to object.
-  Fixed 2*Z bug. Quadratic point light attenuation factor is now an E3M5
-  floating-point number. The performance penalty for enabling point lighting,
-  and for each additional point light, has been reduced.
+- Point lighting has been redesigned. The appearance when a light is close to an
+  object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where a Z
+  component was accidentally doubled in the point lighting calculations. The
+  quadratic point light attenuation factor is now an E3M5 floating-point number.
+  The performance penalty for point lighting has been reduced.
 - Maximum number of directional / point lights raised from 7 to 9. Minimum
   number of directional / point lights lowered from 1 to 0 (F3DEX2 required at
   least one). Also supports loading all lights in one DMA transfer
@@ -73,40 +75,43 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   parameters are encoded in the command. With some limitations, this allows the
   tint colors of cel shading to match scene lighting with no code intervention.
   Possibly useful for other lighting-dependent effects.
-- New cull flags system replaces `SPBranchZ` and `SPCullDL` (these are still
-  supported, but are slower). This system uses a 24 bit flags value kept in
-  DMEM.
-    - `SPFlagsVerts`: Loads up to 32 vertex positions, encoded as XYZ0 shorts
-      (no ST / RGBA). These do not overwrite or affect the vertex buffer. Sets
-      "bit 1" if at least one vert is closer to the camera than the threshold
-      in world coords (i.e. object is close, should use higher LoD). Sets
-      "bit 0" if "bit 1" is set AND if at least one vert is on the screen side
-      of each clip plane (i.e. object is close enough and not culled due to
-      offscreen). The shift of "bit 0" / "bit 1" within the flags word is
-      selected by a field in the command.
-    - `SPFlags1Vert`: Same as `SPFlagsVerts`, but for one vertex only, which is
-      encoded in the command instead of taking a DMA transfer.
-    - `SPFlagsDist`: Sets the distance threshold in the RDP generic word
-      (`G_RDPHALF_1`). The only other commands which overwrite this are
-      `SPBranchLessZ*`, `SPLoadUcode*`, `SP*TextureRectangle*`, `DPWord`, and
-      `SPPerspNormalize`.
-    - `SPFlagsLoad` / `SPFlagsSet` / `SPFlagsClear` / `SPFlagsModify`: All the
-      same underlying instruction `SPFlagsMasks`. Instruction contains a 24 bit
-      mask which is ANDed with the flags word, and then a 24 bit mask which is
-      ORed with the flags word. `SPFlagsLoad` clears all flags then sets
-      selected flags. `SPFlagsSet` just sets the selected flags and
-      `SPFlagsClear` just clears the selected flags. `SPFlagsModify` sets flags
-      within a selectable group.
-    - `SPFlagsDram`: Loads 64 bits from the given segmented address, and then
-      applies it to the flags as an AND and OR mask like the previous
-      instruction.
-    - `SPCullFlagsNone`, `SPCullFlagsSome`, `SPCullFlagsAll`, `SPCullFlagsNotAll`:
-      24 bit mask. Cull (`SPEndDisplayList`) if none, some (at least one), all,
-      or not all (at least one clear) of the flags within the mask are set.
-    - `SPBranchFlagsNone`, `SPBranchFlagsSome`, `SPBranchFlagsAll`,
-      `SPBranchFlagsNotAll`: same but branch (jump) to segmented address.
-    - `SPCallFlagsNone`, `SPCallFlagsSome`, `SPCallFlagsAll`, `SPCallFlagsNotAll`:
-      same but call segmented address.
+
+### Cull flags system
+
+A new cull flags system replaces `SPBranchZ` and `SPCullDL` (these are still
+supported, but are slower). This system uses a 24 bit flags value kept in
+DMEM.
+- `SPFlagsVerts`: Loads up to 32 vertex positions, encoded as XYZ0 shorts
+  (no ST / RGBA). These do not overwrite or affect the vertex buffer. Sets
+  "bit 1" if at least one vert is closer to the camera than the threshold
+  in world coords (i.e. object is close, should use higher LoD). Sets
+  "bit 0" if "bit 1" is set AND if at least one vert is on the screen side
+  of each clip plane (i.e. object is close enough and not culled due to
+  offscreen). The shift of "bit 0" / "bit 1" within the flags word is
+  selected by a field in the command.
+- `SPFlags1Vert`: Same as `SPFlagsVerts`, but for one vertex only, which is
+  encoded in the command instead of taking a DMA transfer.
+- `SPFlagsDist`: Sets the distance threshold in the RDP generic word
+  (`G_RDPHALF_1`). The only other commands which overwrite this are
+  `SPBranchLessZ*`, `SPLoadUcode*`, `SP*TextureRectangle*`, `DPWord`, and
+  `SPPerspNormalize`.
+- `SPFlagsLoad` / `SPFlagsSet` / `SPFlagsClear` / `SPFlagsModify`: All the
+  same underlying instruction `SPFlagsMasks`. Instruction contains a 24 bit
+  mask which is ANDed with the flags word, and then a 24 bit mask which is
+  ORed with the flags word. `SPFlagsLoad` clears all flags then sets
+  selected flags. `SPFlagsSet` just sets the selected flags and
+  `SPFlagsClear` just clears the selected flags. `SPFlagsModify` sets flags
+  within a selectable group.
+- `SPFlagsDram`: Loads 64 bits from the given segmented address, and then
+  applies it to the flags as an AND and OR mask like the previous
+  instruction.
+- `SPCullFlagsNone`, `SPCullFlagsSome`, `SPCullFlagsAll`, `SPCullFlagsNotAll`:
+  24 bit mask. Cull (`SPEndDisplayList`) if none, some (at least one), all,
+  or not all (at least one clear) of the flags within the mask are set.
+- `SPBranchFlagsNone`, `SPBranchFlagsSome`, `SPBranchFlagsAll`,
+  `SPBranchFlagsNotAll`: same but branch (jump) to segmented address.
+- `SPCallFlagsNone`, `SPCallFlagsSome`, `SPCallFlagsAll`, `SPCallFlagsNotAll`:
+  same but call segmented address.
 
 
 ## Porting Your Romhack Codebase to F3DEX3
@@ -117,18 +122,13 @@ F3DEX2 at the C GBI level. So, for an OoT or MM codebase, just use the new
 small changes in the OoT codebase are needed from there. However, more changes
 are recommended to increase performance and enable new features.
 
-### Select Microcode Options
-
-There are only two build-time options for F3DEX3.
-- Enable `CFG_G_BRANCH_W` if the microcode is replacing F3DZEX, otherwise do not
-  enable this option if the microcode is replacing F3DEX2 or an earlier F3D
-  version. Enabling this option makes `SPBranchLessZ*` use the vertex's W
-  coordinate, otherwise it uses the screen Z coordinate. New display lists
-  should use the cull flags system instead of `SPBranchLessZ*`, so this only
-  matters for vanilla display lists used in your romhack.
-- Enable `CFG_ALWAYS_LIGHTING_POSITIONAL` if you have made minor changes to
-  your engine's lighting system (see below); disable it if you are just starting
-  the process of porting a new game to F3DEX3.
+There is only one build-time option for F3DEX3: enable `CFG_G_BRANCH_W` if the
+microcode is replacing F3DZEX, otherwise do not enable this option if the
+microcode is replacing F3DEX2 or an earlier F3D version. Enabling this option
+makes `SPBranchLessZ*` use the vertex's W coordinate, otherwise it uses the
+screen Z coordinate. New display lists should use the cull flags system instead
+of `SPBranchLessZ*`, so this only matters for vanilla display lists used in your
+romhack.
   
 ### Required Changes
 
@@ -136,6 +136,18 @@ There are only two build-time options for F3DEX3.
   needed to not use things which have been removed from the GBI (see GBI Changes
   section below). Use the compiler errors to guide you for what to remove;
   these removals do not affect normal game functionality.
+- Change your game engine lighting code to set the `type` field to 0 in the
+  initialization of any directional light (`Light_t` and derived structs like
+  `Light` or `Lightsn`). F3DEX3 ignores the state of the `G_LIGHTING_POSITIONAL`
+  geometry mode bit in all display lists, meaning both directional and point
+  lights are supported for all display lists (including vanilla). The light is
+  identified as directional if `type` == 0 or point if `kc` > 0 (`kc` and `type`
+  are the same byte). This change is required because otherwise garbage nonzero
+  values may be put in the padding byte, leading directional lights to be
+  misinterpreted as point lights.
+- Be aware that far clipping is completely removed in F3DEX3. Far clipping is
+  not used in OoT or in levels in SM64; however, it is used on the SM64 title
+  screen for the zoom-in on Mario's face, so this will look slightly different.
 
 ### Recommended Changes (Non-Lighting)
 
@@ -143,7 +155,9 @@ There are only two build-time options for F3DEX3.
   etc.), also set the camera world position with `SPCameraWorld`. This is
   required for the cull flags system and for Fresnel.
 - Clean up any code using the deprecated, hacky `SPLookAtX` and `SPLookAtY` to
-  use `SPLookAt` instead (only a few lines change).
+  use `SPLookAt` instead (this is only a few lines change).
+- Other nop commands
+- Don't use matrix multiply in the RSP
 - Re-export as many display lists (scenes, objects, skeletons, etc.) as possible
   with fast64 set to F3DEX3 mode, to take advantage of the substantially larger
   vertex buffer and triangle packing commands.
@@ -162,23 +176,15 @@ There are only two build-time options for F3DEX3.
   overflow the buffer by 8 bytes and corrupt memory.
 - Once you have made the above change for `SPAmbient`, increase the maximum
   number of lights in your engine from 7 to 9.
-- Change your game engine lighting code to set the `type` / `pad1` field to 0 in
-  the initialization of any directional light (`Light_t` and derived structs
-  like `Light` or `Lightsn`). Then, enable the microcode build option
-  `CFG_ALWAYS_LIGHTING_POSITIONAL`. This will ignore the state of the
-  `G_LIGHTING_POSITIONAL` geometry mode bit in all display lists, meaning both
-  directional and point lights are supported for all display lists (including
-  vanilla), and the light will be identified as directional if `type` == 0 or
-  point if `kc` > 0 (`kc` and `type` are the same byte). The reason this is not
-  enabled by default is that `pad1` is normally unused padding, so it can be set
-  to any value in directional lights, and then `G_LIGHTING_POSITIONAL` being
-  cleared means "interpret all lights as directional regardless of that value".
 - Consider setting lights once before rendering a scene and all actors, rather
   than setting lights before rendering each actor. OoT does the latter to
   emulate point lights in a scene with a directional light recomputed per actor.
-  Once you have `CFG_ALWAYS_LIGHTING_POSITIONAL`, you can now just send those to
-  the RSP as real point lights, regardless of whether the display lists are
-  vanilla or new.
+  You can now just send those to the RSP as real point lights, regardless of
+  whether the display lists are vanilla or new.
+- If you are porting a game which already had point lighting (e.g. Majora's
+  Mask), note that the point light kc, kl, and kq factors have been changed, so
+  you will need to redesign how game engine light parameters (e.g. "light
+  radius") map to these parameters.
 
 
 ### C GBI Backwards Compatibility with F3DEX2

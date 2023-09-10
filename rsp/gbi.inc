@@ -24,7 +24,7 @@ G_TEXTURE_GEN           equ 0x00040000
 G_TEXTURE_GEN_LINEAR    equ 0x00080000
 //G_LOD                 equ 0x00100000 // Ignored by all F3DEX* variants
 G_SHADING_SMOOTH        equ 0x00200000
-G_LIGHTING_POSITIONAL   equ 0x00400000
+//G_LIGHTING_POSITIONAL equ 0x00400000 // Ignored by F3DEX3, assumed always on
 //G_CLIPPING            equ 0x00800000 // Ignored by all F3DEX* variants
 // The top byte holds the geometry mode opcode.
 
@@ -111,10 +111,14 @@ G_MV_PMTX     equ 0x06
 G_MV_VIEWPORT equ 0x08
 G_MV_LIGHT    equ 0x0A
 
-MAX_LIGHTS equ 9 // 9 directional / point lights, plus ambient light (and lookat)
+G_NORMALSMODE_FAST equ 0x00
+G_NORMALSMODE_AUTO equ 0x01
+G_NORMALSMODE_MANUAL equ 0x02
+
+G_MAX_LIGHTS equ 9 // 9 directional / point lights, plus ambient light (and lookat)
 lightSize equ 0x10
 
-MAX_VERTS equ 56
+G_MAX_VERTS equ 56
 
 // Input Vertex structure offsets, should match Vtx structure in gbi.h
 inputVtxSize equ 0x10
