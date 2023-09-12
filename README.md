@@ -78,9 +78,83 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
 
 ### Cull flags system
 
-A new cull flags system replaces `SPBranchZ` and `SPCullDL` (these are still
-supported, but are slower). This system uses a 24 bit flags value kept in
-DMEM.
+Managing what is drawn at runtime based on what is in front of the camera is an
+important part of performance optimization. F3DEX2 provided two types of this
+management:
+- For culling things which are outside the camera viewport: disable lighting in
+  the geometry mode. Load a set of 8 vertices which forms an axis-aligned
+  bounding box around the object (actually, the microcode supports up to 32
+  vertices, and they can form any convex hull around the object, not just an
+  axis-aligned bounding box). While the vertices are loaded, their clip flags
+  are generated. Run `SPCullDL` and provide the indices of the vertices to
+  examine. The clip flags of the vertices are examined and if there is any
+  screen clipping plane where all vertices are on the far side of, the object is
+  fully offscreen and effectively `SPEndDisplayList` is run to cull the current
+  object.
+- For switching between display lists representing the same object at different
+  levels of detail depending on distance: disable lighting in the geometry mode.
+  Load one vertex which represents the position of the object. Run `SPBranchZ`
+  which compares the vertex's screen space Z position (or in F3DZEX, the clip
+  space W position) to a given value. If the vertex is closer to the camera than
+  that value, effectively `SPBranchList` is run to jump to the higher LoD
+  version.
+
+The new cull flags system improves upon these features in the following ways:
+- The vertices which are being examined for their positions are 8 bytes each
+  (X Y Z 0 shorts), not full vertices with ignored ST and RGBA, halving their
+  space occupied in the object/scene and the memory traffic.
+- These vertices are loaded into a temporary buffer and do not overwrite the
+  vertex buffer, in case needed values were being kept there.
+- Not only is lighting computation never performed on these vertices regardless
+  of the lighting geometry mode flags (manually disabling lighting is not
+  necessary), a large chunk of the per-vertex processing is also skipped.
+- Instead of comparing screen Z or clip W, which are obnoxious to calculate and
+  depend on VP and viewport values, the vertices are compared by distance to
+  the camera in world space.
+- The on-screen and closer results are stored into a 24-bit flags value, and
+  actions can then be taken based on masked groups of flags from this saved
+  value.
+- The developer is not limited to "end display list if offscreen" and "branch
+  display list if closer than value". The three actions of end display list,
+  branch to display list, and call display list can be mapped to conditions
+  being met or not met.
+- The same flags value can also be modified directly by DL commands, or masks
+  can be loaded from DRAM and applied to it, to allow code to more easily affect
+  the rendering of objects.
+
+Here is an example of how this system can save both RDP time and memory
+bandwidth, on top of the savings due to the shorter vertex encoding. Suppose you
+have a material for a house chimney, and five houses in your scene which all
+have chimneys.
+- Set the max distance to the camera parameter as appropriate for the scene so
+  that the chimneys will disappear if they are very far away.
+- Load vertices with the new system which describe the convex hull of the first
+  chimney. Set bits 0 and 1 of the flags: 1 means the chimney was close enough,
+  and 0 means it was both close enough and on screen from clipping.
+- Load vertices for the convex hull of the second chimney, setting bits 2 and 3.
+- Repeat for the other chimneys, now occupying a total of bits 0-9.
+- Return if none of the bits are set in the mask of bits {0, 2, 4, 6, 8}. This
+  means, continue if at least one chimney needs to be drawn. Note that this is
+  not equivalent to having one big bounding box covering all the chimneys--this
+  big box may be on screen even if the individual chimneys are not.
+- Run the material setup for the chimney bricks, including the relatively
+  expensive texture load on the RDP. This will have gotten skipped if none of
+  the chimneys are on screen.
+- Branch to Point A in the display list if none of the bits are set in the mask
+  of bits {0}. This means, the first chimney does not need to be drawn because
+  it was off screen or too far away. This saves both loading its vertices, and
+  loading its bounding box again, since the results from the first time are
+  reused.
+- Load the verts for the first chimney.
+- Draw the tris for the first chimney.
+- [Point A] Branch to Point B if none of the bits are set in the mask of bits
+  {2}. Same as above.
+- Repeat for the other chimneys.
+- The last chimney would return if none of the bits were set in its mask, rather
+  than branching forward.
+- Return.
+
+The GBI for all of this looks like:
 - `SPFlagsVerts`: Loads up to 32 vertex positions, encoded as XYZ0 shorts
   (no ST / RGBA). These do not overwrite or affect the vertex buffer. Sets
   "bit 1" if at least one vert is closer to the camera than the threshold
@@ -112,6 +186,11 @@ DMEM.
   `SPBranchFlagsNotAll`: same but branch (jump) to segmented address.
 - `SPCallFlagsNone`, `SPCallFlagsSome`, `SPCallFlagsAll`, `SPCallFlagsNotAll`:
   same but call segmented address.
+
+`SPCullDL` and `SPBranchZ` are still supported for backwards compatibility.
+`SPCullDL` is just like in F3DEX2 but this will be slower than the new system.
+`SPBranchZ` is moved to overlay 4 (see below) so it will be slower than it was
+in F3DEX2.
 
 
 ## Porting Your Romhack Codebase to F3DEX3
@@ -275,16 +354,16 @@ enabled, the RSP has to load Overlay 4 once to compute mIT and then load Overlay
 2 to do all the lighting.
 
 Loading the IMEM overlay space with Overlay 4 and then reloading Overlay 2 into
-the same space takes about 14 microseconds of DRAM time including overheads.
+the same space takes about 3.5 microseconds of DRAM time including overheads.
 This means, for a scene containing 100 moving objects / skeleton limbs in your
 scene, the memory will be occupied for an additional 1.4 ms per frame. Some work
 on the CPU and RDP can overlap with this, but generally you can assume that
-means the frame takes about 1.4 ms longer per 100 matrices. Note that most
-scenes are less complex than this (I'd be impressed if you can make a scene with
-100 nontrivial moving objects / limbs which renders within the 50 ms per frame).
-Particles, which of course occupy a lot of matrices, typically don't have
-lighting, so they will not need either Overlay 2 or 4--please don't use lighting
-on particles in F3DEX3!
+means the frame takes about 350 microseconds longer per 100 matrices. Note that
+most scenes are less complex than this (I'd be impressed if you can make a scene
+with 100 nontrivial moving objects / limbs which renders within the 50 ms per
+frame). Particles, which of course occupy a lot of matrices, typically don't
+have lighting, so they will not need either Overlay 2 or 4--please don't use
+lighting on particles in F3DEX3!
 
 If you're wondering why mIT is needed in F3DEX3, it's because normals are
 covectors--they stretch in the opposite direction of an object's scaling. So

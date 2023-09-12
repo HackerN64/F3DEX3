@@ -321,9 +321,9 @@ normalsMode:
     .db 0     // Overwrites above
 
 alphaCompareCullMode:
-    .db 0x00 // 0 = disabled, 1 = cull if all < value, -1 = cull if all > value
-alphaCompareCullValue:
-    .db 0x00 // Alpha value, 00 - FF
+    .db 0x00 // 0 = disabled, 1 = cull if all < thresh, -1 = cull if all >= thresh
+alphaCompareCullThresh:
+    .db 0x00 // Alpha threshold, 00 - FF
 tempHalfword3:
     .dh 0x0000 // Overwritten by movewords to above and below, can be used as temp
 
@@ -1720,17 +1720,18 @@ tri_skip_flat_shading:
     vmudl   $v29, $v20, $v30[7] // 0x0020
     beqz    $20, tri_skip_alpha_compare_cull
      sub    $5, $5, $11
+    // Alpha compare culling
     vge     $v26, tV1AtI, tV2AtI
-    lbu     $19, alphaCompareCullValue
+    lbu     $19, alphaCompareCullThresh
     vlt     $v27, tV1AtI, tV2AtI
     bgtz    $20, @@skip1
-     vge    $v26, $v26, tV3AtI
-    vlt     $v26, $v27, tV3AtI
+     vge    $v26, $v26, tV3AtI // If alphaCompareCullMode > 0, $v26 = max of 3 verts
+    vlt     $v26, $v27, tV3AtI // else if < 0, $v26 = min of 3 verts
 @@skip1: // $v26 elem 3 has max or min alpha value
     mfc2    $24, $v26[6]
-    sub     $24, $24, $19 // sign bit set if (max/min) < value
-    xor     $24, $24, $20 // xor sign bit with condition
-    bltz    $24, return_routine
+    sub     $24, $24, $19 // sign bit set if (max/min) < thresh
+    xor     $24, $24, $20 // invert sign bit if other cond. Sign bit set -> cull
+    bltz    $24, return_routine // if max < thresh or if min >= thresh.
 tri_skip_alpha_compare_cull:
      vmadm  $v22, $v22, $v30[7] // 0x0020
     sub     $11, $5, $8
@@ -2492,8 +2493,10 @@ ovl4_select_instr:
      // Otherwise G_LIGHTTORDP, which starts with a harmless instruction
 
 G_LIGHTTORDP_handler:
-    lhu     $1, (inputBufferEnd - 0x7)(inputBufferPos) // Middle 16 bits of first word = addr of light
-    andi    $2, cmd_w0, 0x00FF           // Low 8 bits of first word = alpha
+    lbu     $11, numLightsxSize          // Ambient light
+    lbu     $1, (inputBufferEnd - 0x6)(inputBufferPos) // Byte 2 = light count from end * size
+    andi    $2, cmd_w0, 0x00FF           // Byte 3 = alpha
+    sub     $1, $11, $1                  // Light address; byte 2 counts from end
     lw      $3, (lightBufferMain)($1)    // Load light RGB
     move    cmd_w0, cmd_w1_dram          // Move second word to first (cmd byte, prim level)
     andi    $3, $3, 0xFF00               // Get rid of whatever was in alpha value

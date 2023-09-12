@@ -1048,13 +1048,18 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_MWO_FRESNEL            0x04
 #define G_MWO_ATTR_OFFSET_ST     0x08
 #define G_MWO_ATTR_OFFSET_Z      0x0C
-#define G_MWO_NORMALSMODE        0x0E
+#define G_MWO_NORMALS_MODE       0x0E
 #define G_MWO_ALPHA_COMPARE_CULL 0x12
 
 /* See SPNormalsMode */
-#define G_NORMALSMODE_FAST       0x00
-#define G_NORMALSMODE_AUTO       0x01
-#define G_NORMALSMODE_MANUAL     0x02
+#define G_NORMALS_MODE_FAST      0x00
+#define G_NORMALS_MODE_AUTO      0x01
+#define G_NORMALS_MODE_MANUAL    0x02
+
+/* See SPAlphaCompareCull */
+#define G_ALPHA_COMPARE_CULL_DISABLE  0
+#define G_ALPHA_COMPARE_CULL_NORMAL   1
+#define G_ALPHA_COMPARE_CULL_REVERSE -1
 
 
 /*
@@ -2123,39 +2128,48 @@ _DW({                                               \
  * Display list control flow
  */
 
-#define _gSPDisplayListRaw(pkt,dl,v)  gDma1p(pkt, G_DL, dl, v, G_DL_PUSH)
-#define _gsSPDisplayListRaw(   dl,v)  gsDma1p(    G_DL, dl, v, G_DL_PUSH)
+#define _gSPDisplayListRaw(pkt,dl,hint)  gDma1p(pkt, G_DL, dl, hint, G_DL_PUSH)
+#define _gsSPDisplayListRaw(   dl,hint)  gsDma1p(    G_DL, dl, hint, G_DL_PUSH)
 
-#define _gSPBranchListRaw(pkt,dl,v)   gDma1p(pkt, G_DL, dl, v, G_DL_NOPUSH)
-#define _gsSPBranchListRaw(   dl,v)   gsDma1p(    G_DL, dl, v, G_DL_NOPUSH)
+#define _gSPBranchListRaw(pkt,dl,hint)   gDma1p(pkt, G_DL, dl, hint, G_DL_NOPUSH)
+#define _gsSPBranchListRaw(   dl,hint)   gsDma1p(    G_DL, dl, hint, G_DL_NOPUSH)
 
-#define _gSPEndDisplayListRaw(pkt,v)  gDma0p(pkt, G_ENDDL, 0, v)
-#define _gsSPEndDisplayListRaw(v)     gsDma0p(    G_ENDDL, 0, v)
+#define _gSPEndDisplayListRaw(pkt,hint)  gDma0p(pkt, G_ENDDL, 0, hint)
+#define _gsSPEndDisplayListRaw(hint)     gsDma0p(    G_ENDDL, 0, hint)
 
-/* Converts a total expected count of DL commands to a number of bytes to
-initially NOT load into the DL command buffer. */
-#define _HINTVALUE(count) \
+/*
+ * Converts a total expected count of DL commands to a number of bytes to
+ * initially NOT load into the DL command buffer.
+ */
+#define _DLHINTVALUE(count) \
     (((count) > 0 && ((count) % G_INPUT_BUFFER_CMDS) > 0) ? \
     ((G_INPUT_BUFFER_CMDS - ((count) % G_INPUT_BUFFER_CMDS)) << 3) : 0)
 
-/* Optimization for reduced memory traffic. In count, put the estimated number
-of DL commands in the target DL (the DL being called / jumped to, or the DL
-being returned to, starting from the next command to be executed) up to and
-including the next call / jump / return. Normally, for SPDisplayList, this is
-just the total number of commands in the target DL. The actual on-screen
-result will not change regardless of the value of count, but the performance
-will be best if count is correct, and potentially worse than not specifying
-count if it is wrong. */
+/*
+ * Optimization for reduced memory traffic. In count, put the estimated number
+ * of DL commands in the target DL (the DL being called / jumped to, or the DL
+ * being returned to, starting from the next command to be executed) up to and
+ * including the next call / jump / return. Normally, for SPDisplayList, this is
+ * just the total number of commands in the target DL. The actual on-screen
+ * result will not change regardless of the value of count, but the performance
+ * will be best if count is correct, and potentially worse than not specifying
+ * count if it is wrong.
+ * Feature suggested by Kaze Emanuar
+*/
 
-#define gSPDisplayListHint(pkt, dl, count) _gSPDisplayListRaw(pkt, dl, _HINTVALUE(count))
-#define gsSPDisplayListHint(    dl, count) _gsSPDisplayListRaw(    dl, _HINTVALUE(count))
+#define gSPDisplayListHint(pkt, dl, count) _gSPDisplayListRaw(pkt, dl, _DLHINTVALUE(count))
+#define gsSPDisplayListHint(    dl, count) _gsSPDisplayListRaw(    dl, _DLHINTVALUE(count))
 
-#define gSPBranchListHint(pkt, dl, count) _gSPBranchListRaw( pkt, dl, _HINTVALUE(count))
-#define gsSPBranchListHint(    dl, count) _gsSPBranchListRaw(     dl, _HINTVALUE(count))
+#define gSPBranchListHint(pkt, dl, count) _gSPBranchListRaw( pkt, dl, _DLHINTVALUE(count))
+#define gsSPBranchListHint(    dl, count) _gsSPBranchListRaw(     dl, _DLHINTVALUE(count))
 
-#define gSPEndDisplayListHint(pkt, count) _gSPEndDisplayListRaw( pkt, _HINTVALUE(count))
-#define gsSPEndDisplayListHint(    count) _gsSPEndDisplayListRaw(     _HINTVALUE(count))
-    
+#define gSPEndDisplayListHint(pkt, count) _gSPEndDisplayListRaw( pkt, _DLHINTVALUE(count))
+#define gsSPEndDisplayListHint(    count) _gsSPEndDisplayListRaw(     _DLHINTVALUE(count))
+
+/*
+ * Normal control flow commands; same as above but with hint of 0
+ */
+
 #define gSPDisplayList(pkt, dl) _gSPDisplayListRaw(pkt, dl, 0)
 #define gsSPDisplayList(    dl) _gsSPDisplayListRaw(    dl, 0)
 
@@ -2285,7 +2299,6 @@ _DW({                                       \
 #define gSP1Triangle(pkt, v0, v1, v2, flag)                 \
 _DW({                                                       \
     Gfx *_g = (Gfx *)(pkt);                                 \
-                                                            \
     _g->words.w0 = (_SHIFTL(G_TRI1, 24, 8) |                \
                     __gsSP1Triangle_w1f(v0, v1, v2, flag)); \
     _g->words.w1 = 0;                                       \
@@ -2303,7 +2316,6 @@ _DW({                                                       \
 #define gSP1Quadrangle(pkt, v0, v1, v2, v3, flag)                   \
 _DW({                                                               \
     Gfx *_g = (Gfx *)(pkt);                                         \
-                                                                    \
     _g->words.w0 = (_SHIFTL(G_QUAD, 24, 8) |                        \
                     __gsSP1Quadrangle_w1f(v0, v1, v2, v3, flag));   \
     _g->words.w1 = (__gsSP1Quadrangle_w2f(v0, v1, v2, v3, flag));   \
@@ -2316,14 +2328,12 @@ _DW({                                                               \
     __gsSP1Quadrangle_w2f(v0, v1, v2, v3, flag)     \
 }
 
-
 /***
  ***  2 Triangles
  ***/
 #define gSP2Triangles(pkt, v00, v01, v02, flag0, v10, v11, v12, flag1)  \
 _DW({                                                                   \
     Gfx *_g = (Gfx *)(pkt);                                             \
-                                                                        \
     _g->words.w0 = (_SHIFTL(G_TRI2, 24, 8) |                            \
                     __gsSP1Triangle_w1f(v00, v01, v02, flag0));         \
     _g->words.w1 =  __gsSP1Triangle_w1f(v10, v11, v12, flag1);          \
@@ -2336,6 +2346,55 @@ _DW({                                                                   \
     __gsSP1Triangle_w1f(v10, v11, v12, flag1)                       \
 }
 
+/*
+ * 5 Triangles base commands
+ */
+#define _gSP5Triangles(pkt, cmd, v1, v2, v3, v4, v5, v6, v7) \
+_DW({                                                        \
+    Gfx *_g = (Gfx *)(pkt);                                  \
+    _g->words.w0 = (_SHIFTL(cmd,    24, 8) |                 \
+                    _SHIFTL((v1)*2, 16, 8) |                 \
+                    _SHIFTL((v2)*2,  8, 8) |                 \
+                    _SHIFTL((v3)*2,  0, 8));                 \
+    _g->words.w1 = (_SHIFTL((v4)*2, 24, 8) |                 \
+                    _SHIFTL((v5)*2, 16, 8) |                 \
+                    _SHIFTL((v6)*2,  8, 8) |                 \
+                    _SHIFTL((v7)*2,  0, 8));                 \
+})
+#define _gsSP5Triangles(cmd, v1, v2, v3, v4, v5, v6, v7)     \
+{                                                            \
+    (_SHIFTL(cmd,    24, 8) |                                \
+     _SHIFTL((v1)*2, 16, 8) |                                \
+     _SHIFTL((v2)*2,  8, 8) |                                \
+     _SHIFTL((v3)*2,  0, 8)),                                \
+    (_SHIFTL((v4)*2, 24, 8) |                                \
+     _SHIFTL((v5)*2, 16, 8) |                                \
+     _SHIFTL((v6)*2,  8, 8) |                                \
+     _SHIFTL((v7)*2,  0, 8))                                 \
+})
+/*
+ * 5 Triangles in strip arrangement. Draws the following tris:
+ * v1-v2-v3, v3-v2-v4, v3-v4-v5, v5-v4-v6, v5-v6-v7
+ * If you want to draw fewer tris, set indices to -1 from the right.
+ * e.g. to draw 4 tris, set v7 to -1; to draw 3 tris, set v6 to -1
+ * Note that any set of 3 adjacent tris can be drawn with either SPTriStrip
+ * or SPTriFan. For arbitrary sets of 4 adjacent tris, four out of five of them
+ * can be drawn with one of SPTriStrip or SPTriFan. The 4-triangle formation
+ * which can't be drawn with either command looks like the Triforce.
+ */
+#define gSPTriStrip(pkt, v1, v2, v3, v4, v5, v6, v7) \
+    _gSP5Triangles(pkt, G_TRISTRIP, v1, v2, v3, v4, v5, v6, v7)
+#define gsSPTriStrip(v1, v2, v3, v4, v5, v6, v7) \
+    _gsSP5Triangles(G_TRISTRIP, v1, v2, v3, v4, v5, v6, v7)
+/*
+ * 5 Triangles in fan arrangement. Draws the following tris:
+ * v1-v2-v3, v1-v3-v4, v1-v4-v5, v1-v5-v6, v1-v6-v7
+ * Otherwise works the same as SPTriStrip, see above.
+ */
+#define gSPTriFan(pkt, v1, v2, v3, v4, v5, v6, v7) \
+    _gSP5Triangles(pkt, G_TRIFAN, v1, v2, v3, v4, v5, v6, v7)
+#define gsSPTriFan(v1, v2, v3, v4, v5, v6, v7) \
+    _gsSP5Triangles(G_TRIFAN, v1, v2, v3, v4, v5, v6, v7)
 
 
 /*
@@ -2343,9 +2402,9 @@ _DW({                                                                   \
  */
 
 #define gSPSegment(pkt, segment, base)              \
-    gMoveWd(pkt, G_MW_SEGMENT, (segment) * 4, base)
+    gMoveWd(pkt, G_MW_SEGMENT, (segment) * 4, (base))
 #define gsSPSegment(segment, base)                  \
-    gsMoveWd(    G_MW_SEGMENT, (segment) * 4, base)
+    gsMoveWd(    G_MW_SEGMENT, (segment) * 4, (base))
 
 /*
  * Clipping Macros - Deprecated, encodes SP no-ops
@@ -2390,14 +2449,14 @@ _DW({                                                                   \
  */
 #define gSPAmbOcclusion(pkt, amb, dir) \
     gMoveWd(pkt, G_MW_FX, G_MWO_AMB_OCCLUSION, \
-        (_SHIFTL(amb, 16, 16) | _SHIFTL(dir, 0, 16)))
+        (_SHIFTL((amb), 16, 16) | _SHIFTL((dir), 0, 16)))
 
 #define gsSPAmbOcclusion(amb, dir) \
     gsMoveWd(G_MW_FX, G_MWO_AMB_OCCLUSION, \
-        (_SHIFTL(amb, 16, 16) | _SHIFTL(dir, 0, 16)))
+        (_SHIFTL((amb), 16, 16) | _SHIFTL((dir), 0, 16)))
 
 /*
- * Fresnel
+ * Fresnel - Feature suggested by thecozies
  * Enabled with the G_FRESNEL bit in geometry mode.
  * The dot product between a vertex normal and the vector from the vertex to the
  * camera is computed. The offset and scale here convert this to a shade alpha
@@ -2420,11 +2479,11 @@ _DW({                                                                   \
  */
 #define gSPFresnel(pkt, offset, scale) \
     gMoveWd(pkt, G_MW_FX, G_MWO_FRESNEL, \
-        (_SHIFTL(offset, 16, 16) | _SHIFTL(scale, 0, 16)))
+        (_SHIFTL((offset), 16, 16) | _SHIFTL((scale), 0, 16)))
 
 #define gsSPFresnel(offset, scale) \
     gsMoveWd(G_MW_FX, G_MWO_FRESNEL, \
-        (_SHIFTL(offset, 16, 16) | _SHIFTL(scale, 0, 16)))
+        (_SHIFTL((offset), 16, 16) | _SHIFTL((scale), 0, 16)))
 
 /*
  * Attribute offsets
@@ -2440,31 +2499,31 @@ _DW({                                                                   \
  */
 #define gSPAttrOffsetST(pkt, s, t) \
     gMoveWd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_ST, \
-        (_SHIFTL(s, 16, 16) | _SHIFTL(t, 0, 16)))
+        (_SHIFTL((s), 16, 16) | _SHIFTL((t), 0, 16)))
 
 #define gsSPAttrOffsetST(s, t) \
     gsMoveWd(G_MW_FX, G_MWO_ATTR_OFFSET_ST, \
-        (_SHIFTL(s, 16, 16) | _SHIFTL(t, 0, 16)))
+        (_SHIFTL((s), 16, 16) | _SHIFTL((t), 0, 16)))
        
 #define gSPAttrOffsetZ(pkt, z) \
     gMoveWd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_Z, \
-        (_SHIFTL(z, 16, 16)))
+        (_SHIFTL((z), 16, 16)))
 
 #define gsSPAttrOffsetZ(z) \
     gsMoveWd(G_MW_FX, G_MWO_ATTR_OFFSET_Z, \
-        (_SHIFTL(z, 16, 16)))
+        (_SHIFTL((z), 16, 16)))
 
 /*
  * Normals mode: How to handle transformation of vertex normals from model to
  * world space for lighting.
  * 
- * If mode = G_NORMALSMODE_FAST, transforms normals from model space to world space
- * with the M matrix. This is correct if the object's transformation matrix
- * stack only included translations, rotations, and uniform scale (i.e. same
- * scale in X, Y, and Z); otherwise, if the transformation matrix has nonuniform
- * scale or shear, the lighting on the object will be subtly wrong.
+ * If mode = G_NORMALS_MODE_FAST, transforms normals from model space to world
+ * space with the M matrix. This is correct if the object's transformation
+ * matrix stack only included translations, rotations, and uniform scale (i.e.
+ * same scale in X, Y, and Z); otherwise, if the transformation matrix has
+ * nonuniform scale or shear, the lighting on the object will be subtly wrong.
  * 
- * If mode = G_NORMALSMODE_AUTO, transforms normals from model space to world
+ * If mode = G_NORMALS_MODE_AUTO, transforms normals from model space to world
  * space with M inverse transpose, which renders lighting correctly for the
  * object regardless of its transformation matrix (nonuniform scale or shear is
  * okay). Whenever vertices are drawn with lighting enabled after M has been
@@ -2475,37 +2534,36 @@ _DW({                                                                   \
  * separated limb or about twice per flex skeleton limb. So in a scene with lots
  * of complex skeletons, this may have a noticeable performance impact.
  * 
- * If mode = G_NORMALSMODE_MANUAL, uses M inverse transpose for correct results
- * like G_NORMALSMODE_AUTO, but it never internally computes M inverse
+ * If mode = G_NORMALS_MODE_MANUAL, uses M inverse transpose for correct results
+ * like G_NORMALS_MODE_AUTO, but it never internally computes M inverse
  * transpose. You have to upload M inverse transpose to the RSP using
  * SPMITMatrix every time you change the M matrix. The DRAM traffic for the
  * extra matrix uploads is much smaller than the overlay swaps, so if you can
  * efficiently compute M inverse transpose on the CPU, this may be faster than
- * M_NORMALSMODE_AUTO.
+ * M_NORMALS_MODE_AUTO.
  * 
- * Recommended to leave this set to G_NORMALSMODE_FAST generally, and only set
- * it to G_NORMALSMODE_AUTO for specific objects at times when they actually
- * have a nonuniform scale. For example, G_NORMALSMODE_FAST it for Mario
- * generally, but G_NORMALSMODE_AUTO temporarily while he is squashed.
+ * Recommended to leave this set to G_NORMALS_MODE_FAST generally, and only set
+ * it to G_NORMALS_MODE_AUTO for specific objects at times when they actually
+ * have a nonuniform scale. For example, G_NORMALS_MODE_FAST it for Mario
+ * generally, but G_NORMALS_MODE_AUTO temporarily while he is squashed.
  */
 #define gSPNormalsMode(pkt, mode) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_NORMALSMODE, mode)
+    gMoveWd(pkt, G_MW_FX, G_MWO_NORMALS_MODE, (mode))
 
 #define gsSPNormalsMode(mode) \
-    gsMoveWd(G_MW_FX, G_MWO_NORMALSMODE, mode)
+    gsMoveWd(G_MW_FX, G_MWO_NORMALS_MODE, (mode))
+
+typedef union {
+    struct {
+        s16 intPart[3][4];  /* Fourth row containing translations is omitted. */
+        u16 fracPart[3][4]; /* Also the fourth column data is ignored, need not be 0. */
+    };
+    long long int force_structure_alignment;
+} MITMtx;
 
 /*
- * See SPNormalsMode. mtx is the address of the M inverse transpose matrix. This
- * is like Mtx, but with only three rows instead of four, and a total size of
- * 0x30 bytes instead of 0x40. The six 64-bit words comprising this matrix are
- * as follows, with each column being a short and -- meaning padding / ignored
- * value:
- * 0x00: XX XY XZ -- (int parts)
- * 0x08: YX YY YZ -- (int parts)
- * 0x10: ZX ZY ZZ -- (int parts)
- * 0x18: XX XY XZ -- (frac parts)
- * 0x20: YX YY YZ -- (frac parts)
- * 0x28: ZX ZY ZZ -- (frac parts)
+ * See SPNormalsMode. mtx is the address of a MITMtx (M inverse transpose).
+ * 
  * The matrix values must also be scaled down so that the matrix norm is <= 1,
  * i.e. multiplying this matrix by any vector length <= 1 must produce a vector
  * with length <= 1. Normally, M scales things down substantially, so M inverse
@@ -2516,10 +2574,58 @@ _DW({                                                                   \
  * part of the inverse computation where you compute the determinant and divide
  * by it, cause you're going to rescale it arbitrarily anyway.
  */
-#define gSPMITMatrix(pkt, mtx) \
-        gDma2p((pkt), G_MOVEMEM, (mtx), 0x30, G_MV_MMTX, 0x80)
+#define gSPMITMatrix(pkt, mit) \
+        gDma2p((pkt), G_MOVEMEM, (mit), sizeof(MITMtx), G_MV_MMTX, 0x80)
 #define gsSPMITMatrix(mtx) \
-        gsDma2p(      G_MOVEMEM, (mtx), 0x30, G_MV_MMTX, 0x80)
+        gsDma2p(      G_MOVEMEM, (mit), sizeof(MITMtx), G_MV_MMTX, 0x80)
+
+/*
+ * Alpha compare culling. Optimization for cel shading, could also be used for
+ * other scenarios where lots of tris are being drawn with alpha compare.
+ * 
+ * If mode == G_ALPHA_COMPARE_CULL_DISABLED, tris are drawn normally.
+ * 
+ * If mode == G_ALPHA_COMPARE_CULL_NORMAL, tris are culled in the RSP if the
+ * shade alpha (alpha being sent to the RDP, which may be the original vertex
+ * alpha, fog, light level, or Fresnel) of all three vertices of that tri is
+ * less than the specified value. This is intended to be used with alpha compare
+ * (G_AC_THRESHOLD) with blend color alpha set to the same value as here. Any
+ * triangle where all three of its verts are less than this value will never
+ * have any fragments (pixels) drawn by the RDP, but this tri still takes up
+ * RDP time and memory bandwidth, so this command culls it early on the RSP
+ * instead.
+ * 
+ * If mode == G_ALPHA_COMPARE_CULL_REVERSE, 
+cull if shade_alpha >= rsp_value
+RDP does cull if cc_alpha < blend_alpha
+cc_alpha = 0x100 - shade_alpha
+0x100 - shade_alpha < blend_alpha
+0x100 - blend_alpha < shade_alpha
+shade_alpha > 0x100 - blend_alpha
+shade_alpha >= 0x101 - blend_alpha
+
+RDP only: thresh
+Light side:                                Dark side:
+draw if shade_alpha >= thresh              draw if shade_alpha < thresh
+cull if shade_alpha < thresh               cull if shade_alpha >= thresh
+cull if cc_alpha < thresh                  cull if 0x100 - cc_alpha >= thresh
+RDP does cull if cc_alpha < blend_alpha    cull if 0x100 - thresh >= cc_alpha
+therefore blend_alpha = thresh             cull if 0x101 - thresh > cc_alpha
+                                           cull if cc_alpha < 0x101 - thresh
+                                           RDP does cull if cc_alpha < blend_alpha
+                                           therefore blend_alpha = 0x101 - thresh
+
+ */
+#define _ALPHACOMPWORD(mode, value) \
+    (((mode) == G_ALPHA_COMPARE_CULL_NORMAL) ? \
+        (_SHIFTL((mode), 24, 8) | _SHIFTL((value), 16, 8)) : \
+    (((mode) == G_ALPHA_COMPARE_CULL_REVERSE) ? \
+        (_SHIFTL((mode), 24, 8) | _SHIFTL((value), 16, 8)) : \
+    0))
+#define gSPAlphaCompareCull(pkt, mode, value) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, _ALPHACOMPWORD(mode, value))
+#define gsSPAlphaCompareCull(mode, value) \
+    gsMoveWd(G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, _ALPHACOMPWORD(mode, value))
 
 
 /*
