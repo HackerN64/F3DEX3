@@ -208,7 +208,7 @@ makes `SPBranchLessZ*` use the vertex's W coordinate, otherwise it uses the
 screen Z coordinate. New display lists should use the cull flags system instead
 of `SPBranchLessZ*`, so this only matters for vanilla display lists used in your
 romhack.
-  
+
 ### Required Changes
 
 - A few small modifications to `ucode_disas.c` and `lookathil.c` in OoT are
@@ -225,8 +225,10 @@ romhack.
   values may be put in the padding byte, leading directional lights to be
   misinterpreted as point lights.
 - Be aware that far clipping is completely removed in F3DEX3. Far clipping is
-  not used in OoT or in levels in SM64; however, it is used on the SM64 title
-  screen for the zoom-in on Mario's face, so this will look slightly different.
+  not intentionally used for performance or aesthetic reasons in levels in
+  either SM64 or OoT, though it can be seen in certain extreme cases. However,
+  it is used on the SM64 title screen for the zoom-in on Mario's face, so this
+  will look slightly different.
 
 ### Recommended Changes (Non-Lighting)
 
