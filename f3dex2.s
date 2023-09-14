@@ -274,7 +274,7 @@ texgenLinearCoeffs:
     .dh 0x44D3
     .dh 0x6CB3
     
-// For SPFlagsVerts / SPCullFlags* / etc.
+// For SPCullVerts etc.
 cullFlags:
     .dw 0x00000000
 
@@ -398,11 +398,10 @@ jumpTableEntry G_TRI2_handler
 jumpTableEntry G_QUAD_handler
 jumpTableEntry G_TRISTRIP_handler
 jumpTableEntry G_TRIFAN_handler
-jumpTableEntry G_FLAGSMASKS_handler
-jumpTableEntry G_FLAGSVERTS_handler
-jumpTableEntry G_FLAGS1VERT_handler
-jumpTableEntry ovl234_ovl4_entrypoint // G_FLAGSDRAM
-jumpTableEntry ovl234_ovl4_entrypoint // G_LIGHTTORDP
+jumpTableEntry G_LIGHTTORDP_handler
+jumpTableEntry G_CULLVERTS_handler
+jumpTableEntry G_CULLRET_handler
+jumpTableEntry G_CULLBRANCH_handler
 
 gCullMagicNumbers:
 // Values added to cross product (16-bit sign extended).
@@ -803,9 +802,7 @@ run_next_DL_command:
     addi    inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
     // $7 must retain the command byte for load_mtx and overlay 4 stuff
     // $11 must contain the handler called for G_SETOTHERMODE_H_handler and G_TEXRECTFLIP_handler
-    // $1 must remain zero to save an instr in G_FLAGS1VERT_handler
-    addi    $3, $7, -G_FLAGSOPBASE                      // If >= G_FLAGSOPBASE, use handler
-    bgez    $3, G_FLAGSOPBASE_handler
+    // $1 must remain zero (not currently needed)
      addi   $2, $7, -G_VTX                              // If >= G_VTX, use jump table
     bgez    $2, do_cmd_jump_table                       // $2 is the index
      addi   $11, $2, (cmdJumpTablePositive - cmdJumpTableForwardBack) / 2 // Will be interpreted relative to other jump table
@@ -1221,72 +1218,68 @@ ovl3_padded_end:
 .orga max(max(ovl2_padded_end - ovl2_start, ovl4_padded_end - ovl4_start) + orga(ovl3_start), orga())
 ovl234_end:
 
-G_FLAGS1VERT_handler:
-    // $1 is zero (0 vertices left to process, treated like 1) from run_next_DL_command
-    li      $6, 0                              // Output bit 1, whether any vtx near enough
-    addi    inputVtxPos, inputBufferPos, -6    // Input vertex starts 2 bytes into last cmd
-    j       vtx_setup_skip_load
-     // Intentionally executing next instr to set $5 = 0
-
-G_FLAGSVERTS_handler:
+G_CULLVERTS_handler:
     li      $5, 0                              // Disable lighting (all geometry mode bits)
-    lhu     $1, (inputBufferEnd - 0x06)(inputBufferPos) // Bytes 2-3 = size in bytes
-    li      $6, 0                              // Output bit 1, whether any vtx near enough
+    andi    $1, cmd_w0, 0x7FF8                 // Bytes 2-3 = size in bytes
+    li      $6, 0                              // Track whether any vtx near enough
     j       vtx_common_setup
      li     $12, (clipTempVertsEnd & 0xFFF8)   // Address of end of load region
 
-flagsverts_setup_end:
+cullverts_setup_end:
     jal     while_wait_dma_busy                // Wait for vertex load to finish
-     llv    vVpScl[0], rdpHalf1Val($zero)  // Dist compare int / frac; reg not used on this path
-    ldv     vVpOfs[0], (cameraWorldPos - altBase)(altBaseReg) // Camera world pos
-    ldv     vVpOfs[8], (cameraWorldPos - altBase)(altBaseReg)
-    li      $9, CLIP_MOD_MASK_SCRN_ALL         // Output bit 0, whether all vertices offscreen
-flagsverts_loop:
+     llv    vVpScl[0], rdpHalf1Val($zero)      // W compare int / frac; reg not used on this path
+    li      $9, CLIP_MOD_MASK_SCRN_ALL         // Track whether all vertices offscreen
+cullverts_loop:
     j       vtx_load_skip1st
-     ldv    vPairPosI[8], (8)(inputVtxPos)          // Load second vertex
-flagsverts_after_xfrm:
-    // World space XYZ in vPairPosI/F; clip space coords in vPairTPosI/F elem 3 and 7.
-    vsub    $v28, vPairPosI, vVpOfs            // Vertex - camera
+     ldv    vPairPosI[8], (8)(inputVtxPos)     // Load second vertex
+cullverts_after_xfrm:
+    // Clip space coords in vPairTPosI/F.
+    vch     $v29, vPairTPosI, vPairTPosI[3h]   // Clip screen high
+    vcl     $v29, vPairTPosF, vPairTPosF[3h]   // Clip screen low
     addi    $1, $1, 0x10                       // Has had - 2*inputVtxsize, need - 2*8 instead
-    vmudh   $v29, $v28, $v28                   // Squared
-    vreadacc $v28, ACC_MIDDLE                  // Have to separately read because clamped
-    vreadacc $v30, ACC_UPPER
-    vch     $v29, vPairTPosI, vPairTPosI[3h] // Clip screen high
-    vcl     $v29, vPairTPosF, vPairTPosF[3h] // Clip screen low
-    vaddc   $v28, $v28, $v28[1h]               // Sum into X
-    cfc2    $20, $vcc
-    vadd    $v30, $v30, $v30[1h]
-    vaddc   $v28, $v28, $v28[2h]
-    vadd    $v30, $v30, $v30[2h]
-    vsubc   $v29, $v28, vVpScl[1]          // Compare dist frac
+    cfc2    $20, $vcc                          // Get clip results
+    vsubc   $v29, vPairTPosF, vVpScl[1]        // Compare dist frac
     and     $9, $9, $20                        // Combine screen clip mask for first vtx
-    vlt     $v29, $v30, vVpScl[0]          // Compare dist int, bits 0 and 4
+    vlt     $v29, vPairTPosI, vVpScl[0]        // Compare dist int, bits 3 and 7
     cfc2    $11, $vcc                          // Get compare results
+    sll     $12, $11, 28                       // First vtx dist -> bit 31
     bltz    $1, @@skip                         // Only one of two verts valid
-     or     $6, $6, $11                        // Combine first vtx near result
-    srl     $11, $11, 4                        // Second vtx near result -> bit 0
-    or      $6, $6, $11                        // Combine second vtx near result
+     or     $6, $6, $12                        // Combine first vtx near result
+    sll     $12, $11, 24                       // Second vtx near result -> bit 31
+    or      $6, $6, $12                        // Combine second vtx near result
     srl     $20, $20, 4                        // Shift second vertex screen clipping to first slots
     and     $9, $9, $20                        // Combine screen clip mask for second vtx
 @@skip:
-    sltiu   $24, $9, 1                         // Set bit 0 if no clip planes left
+    addi    $24, $9, -1                        // Set sign bit if no verts left
     and     $24, $24, $6                       // And at least one vertex near enough
-    bnez    $24, flagsverts_early_return       // If 1, early return
+    bltz    $24, cullverts_early_return        // If sign bit set, early return
      addi   inputVtxPos, inputVtxPos, -0x10    // Has had + 2*inputVtxSize, need + 2*8 instead
-    bgtz    $1, flagsverts_loop                // > 0 verts remain, continue
-flagsverts_early_return:
-     lbu    $11, (inputBufferEnd - 0x07)(inputBufferPos) // Shift amount
-    lw      $20, cullFlags                     // Current flags
-    sll     $6, $6, 1                          // Shift near result to bit 1
-    or      $24, $24, $6                       // Bit 1 = near, bit 0 = near and on screen
-    li      $12, 3                             // Initial bitmask
-    sllv    $12, $12, $11                      // Shift 3 to desired bits
-    sllv    $24, $24, $11                      // Shift new flags to desired bits
-    nor     $12, $12, $zero                    // Negate shifted 3
-    and     $20, $20, $12                      // Mask away old values of bits
-    or      $20, $20, $24                      // Insert new values of bits
+    bgtz    $1, cullverts_loop                 // > 0 verts remain, continue
+cullverts_early_return:
+     lui    $11, 0x8000                        // Mask for only sign bit
+    and     $24, $24, $11                      // Keep only sign bit
+    lb      $2, (inputBufferEnd - 0x07)(inputBufferPos) // Byte 1 = -1 for keep value, 0 for clear
+    lw      $1, cullFlags                      // Load current flags value
+    and     $1, $1, $2                         // Clear old value if don't need
+    srl     $1, $1, 1                          // Push stack of bits
+    or      $1, $1, $24                        // Insert new value
     j       run_next_DL_command
-     sw     $20, cullFlags                     // Store updated flags
+     sw     $1, cullFlags                      // Store updated flags
+
+G_CULLRET_handler:
+    lw      $1, cullFlags
+    bnez    $1, run_next_DL_command            // End DL if all flags clear
+     nop
+    j       G_ENDDL_handler
+     // Next instr harmless
+    
+G_CULLBRANCH_handler:
+    lw      $1, cullFlags
+    sll     $2, $1, 1                          // Pop value
+    bltz    $1, run_next_DL_command            // If flag popped set, continue DL
+     sw     $2, cullFlags
+    j       G_DL_handler                       // Jump or call
+     // Next instr harmless
 
 G_VTX_handler:
     lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // Size in inputVtxSize units
@@ -1297,7 +1290,7 @@ G_VTX_handler:
      li     $11, vtx_return_from_addrs
 vtx_return_from_addrs:
     lhu     $5, geometryModeLabel + 1          // Middle 2 bytes
-    li      $6, -1                             // For flagsverts, negative means normal vtx load
+    li      $6, -1                             // For cullverts, negative means normal vtx load
     andi    $12, $12, 0xFFF8                   // Round down end addr to DMA word; one input vtx still fits in one internal vtx
     mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
 vtx_common_setup:
@@ -1351,7 +1344,7 @@ vtx_after_calc_mit:
     ldv     vVP0I[8],  (vpMatrix  + 0x00)($zero)
     ldv     vVP2I[8], (vpMatrix  + 0x10)($zero)
     ldv     vVP0F[8], (vpMatrix  + 0x20)($zero)
-    bgez    $6, flagsverts_setup_end
+    bgez    $6, cullverts_setup_end
      ldv    vVP2F[8], (vpMatrix  + 0x30)($zero)
 vtx_setup_constants:
 /*
@@ -1461,7 +1454,7 @@ vtx_load_skip1st:
     vmadl   $v29, vVP2F, vPairPosF[2h]
     vmadm   $v29, vVP2I, vPairPosF[2h]
     vmadn   vPairTPosF, vVP2F, vPairPosI[2h]
-    bgez    $6, flagsverts_after_xfrm // >= 0 for flagsverts, < 0 for normal vtx
+    bgez    $6, cullverts_after_xfrm // >= 0 for cullverts, < 0 for normal vtx
      vmadh  vPairTPosI, vVP2I, vPairPosI[2h]
     vmudm   $v29, vPairST, vSTScl     // Scale ST; must be after texgen
     vmadh   vPairST, vSTOfs, $v31[2] // + 1 * ST offset
@@ -2139,25 +2132,17 @@ G_SETOTHERMODE_L_handler:
     j       G_RDP_handler
      lw     cmd_w1_dram, otherMode1
 
-G_FLAGSOPBASE_handler:
-    lw      $1, cullFlags
-    sll     $11, $7, 30             // Shift bit 1 of cmd (none / all) into sign bit
-    sra     $11, $11, 31            // Copy to all bits
-    xor     $1, $1, $11             // Invert current flags if all / notall
-    and     $1, $1, cmd_w0          // Mask to only the flags we care about
-    sltiu   $1, $1, 1               // Set bit 0 if less than 1 unsigned (== 0)
-    xor     $1, $1, $7              // Invert condition if some / notall
-    andi    $1, $1, 1               // Only look at bit 0; is 1 if flags cond met
-    beqz    $1, run_next_DL_command // Condition not met
-     addi   $11, $7, -(G_FLAGSOPBASE + G_FLAGSOP_CALL)
-    bltz    $11, end_dl_no_count    // Was one of the cull commands
-     sll    $2, $7, 28              // Put bit 3 (1=branch, 0=call) into sign bit of $2
-branch_dl_no_count:
-    j       branch_dl               // Call or branch based on $2 < 0
-     la     cmd_w0, 0               // Clear count of DL cmds to skip loading
+G_LIGHTTORDP_handler:
+    lbu     $11, numLightsxSize          // Ambient light
+    lbu     $1, (inputBufferEnd - 0x6)(inputBufferPos) // Byte 2 = light count from end * size
+    andi    $2, cmd_w0, 0x00FF           // Byte 3 = alpha
+    sub     $1, $11, $1                  // Light address; byte 2 counts from end
+    lw      $3, (lightBufferMain)($1)    // Load light RGB
+    move    cmd_w0, cmd_w1_dram          // Move second word to first (cmd byte, prim level)
+    andi    $3, $3, 0xFF00               // Get rid of whatever was in alpha value
+    j       G_RDP_handler                // Send to RDP
+     or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
 
-G_FLAGSMASKS_handler:
-    li      $7, (cullFlags - geometryModeLabel - (0x100 - G_GEOMETRYMODE))
 G_GEOMETRYMODE_handler: // $7 = G_GEOMETRYMODE (as negative) if jumped here
     lw      $11, (geometryModeLabel + (0x100 - G_GEOMETRYMODE))($7) // load the geometry mode value
     and     $11, $11, cmd_w0        // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
@@ -2484,35 +2469,12 @@ ovl4_select_instr:
     beq     $12, $7, G_MTX_end
      li     $11, G_BRANCH_WZ
     beq     $11, $7, G_BRANCH_WZ_handler
-     li     $12, G_FLAGSDRAM
-    beq     $12, $7, G_FLAGSDRAM_handler
-     li     $11, G_MODIFYVTX
-    beq     $11, $7, G_MODIFYVTX_handler
-     li     $12, G_DMA_IO
-    beq     $12, $7, G_DMA_IO_handler
+     li     $12, G_MODIFYVTX
+    beq     $12, $7, G_MODIFYVTX_handler
+     li     $11, G_DMA_IO
+    beq     $11, $7, G_DMA_IO_handler
      // Otherwise G_LIGHTTORDP, which starts with a harmless instruction
-
-G_LIGHTTORDP_handler:
-    lbu     $11, numLightsxSize          // Ambient light
-    lbu     $1, (inputBufferEnd - 0x6)(inputBufferPos) // Byte 2 = light count from end * size
-    andi    $2, cmd_w0, 0x00FF           // Byte 3 = alpha
-    sub     $1, $11, $1                  // Light address; byte 2 counts from end
-    lw      $3, (lightBufferMain)($1)    // Load light RGB
-    move    cmd_w0, cmd_w1_dram          // Move second word to first (cmd byte, prim level)
-    andi    $3, $3, 0xFF00               // Get rid of whatever was in alpha value
-    j       G_RDP_handler                // Send to RDP
-     or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
-    
-G_FLAGSDRAM_handler:
-    jal     segmented_to_physical
-     li     dmemAddr, tempMemRounded
-    jal     dma_read_write
-     li     dmaLen, 7
-    jal     while_wait_dma_busy
-     nop
-    lw      cmd_w0, tempMemRounded($zero)
-    j       G_FLAGSMASKS_handler
-     lw     cmd_w1_dram, (tempMemRounded + 4)($zero)
+     nop    // TODO
 
 G_DMA_IO_handler:
     jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
@@ -2543,8 +2505,9 @@ branchwz_return_from_addrs:
     sub     $2, $12, cmd_w1_dram           // subtract the w/z value being tested
     bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
      lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
-    j       branch_dl_no_count         // need $2 < 0 for nopush and cmd_w1_dram
-     // Next instr is harmless
+    j       branch_dl         // need $2 < 0 for nopush and cmd_w1_dram
+     move   cmd_w0, $zero
+     // TODO; make this branch_dl_no_count
 
 G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
 output_mtx  equ $19

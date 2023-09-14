@@ -86,18 +86,11 @@ G_TRI2            equ 0x06
 G_QUAD            equ 0x07
 G_TRISTRIP        equ 0x08
 G_TRIFAN          equ 0x09
-G_FLAGSMASKS      equ 0x0A
-G_FLAGSVERTS      equ 0x0B
-G_FLAGS1VERT      equ 0x0C
-G_FLAGSDRAM       equ 0x0D
-G_LIGHTTORDP      equ 0x0E
-// 0x0F
-G_FLAGSOPBASE     equ 0x10
-G_FLAGSOP_SOME_NOTALL equ 0x01
-G_FLAGSOP_ALL_NOTALL equ 0x02
-G_FLAGSOP_CULL equ 0x00
-G_FLAGSOP_CALL equ 0x04
-G_FLAGSOP_BRANCH equ 0x08
+G_LIGHTTORDP      equ 0x0A
+G_CULLVERTS       equ 0x0B
+G_CULLRET         equ 0x0C
+G_CULLBRANCH      equ 0x0D
+
 
 G_BRANCH_Z equ G_BRANCH_WZ
 G_BRANCH_W equ G_BRANCH_WZ
