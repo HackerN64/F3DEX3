@@ -54,15 +54,13 @@ G_RDPFULLSYNC     equ 0xe9
 G_SETKEYGB        equ 0xea
 G_SETKEYR         equ 0xeb
 G_SETCONVERT      equ 0xec
-// G_RDP_handler group end ^
-G_SETSCISSOR      equ 0xed
+G_SETSCISSOR      equ 0xed // separate handler
 G_SETPRIMDEPTH    equ 0xee
-G_RDPSETOTHERMODE equ 0xef
+G_RDPSETOTHERMODE equ 0xef // separate handler
 G_LOADTLUT        equ 0xf0
-G_RDPHALF_2       equ 0xf1
-// G_RDP_handler group start v
+G_RDPHALF_2       equ 0xf1 // separate handler
 G_SETTILESIZE     equ 0xf2
-G_LOADBLOCK       equ 0xf3
+G_LOADBLOCK       equ 0xf3 // separate handler
 G_LOADTILE        equ 0xf4
 G_SETTILE         equ 0xf5
 G_FILLRECT        equ 0xf6

@@ -338,6 +338,17 @@ clipCondShifts:
     .db CLIP_SHIFT_NX
     .db CLIP_SHIFT_PX
 
+lastImageSet:
+    .dw 0
+    
+.if (. & 7) != 0
+    .error "Wrong alignment before attrOffsetST"
+.endif
+lastLoadBlockLow:
+    .dw 0
+lastLoadBlockHigh:
+    .dw 0
+
 // "Forward declaration" of temporary matrix in clipTempVerts scratch space, aligned to 16 bytes
 tempMemRounded equ ((clipTempVerts + 15) & ~15)
 
@@ -382,13 +393,7 @@ jumpTableEntry G_SETOTHERMODE_L_handler
 jumpTableEntry G_SETOTHERMODE_H_handler
 jumpTableEntry G_TEXRECT_handler
 jumpTableEntry G_TEXRECTFLIP_handler
-cmdJumpTableForwardBack:
-jumpTableEntry G_SETSCISSOR_handler
-jumpTableEntry G_RDP_handler     // G_SETPRIMDEPTH
-jumpTableEntry G_RDPSETOTHERMODE_handler
-jumpTableEntry G_RDP_handler     // G_LOADTLUT
-jumpTableEntry G_RDPHALF_2_handler
-cmdJumpTablePositive:
+cmdJumpTable:
 jumpTableEntry G_VTX_handler
 jumpTableEntry ovl234_ovl4_entrypoint // G_MODIFYVTX
 jumpTableEntry G_CULLDL_handler
@@ -801,28 +806,29 @@ run_next_DL_command:
     vadd    vOne, vZero, $v31[2]                        // 1; set up vOne for each command
     addi    inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
     // $7 must retain the command byte for load_mtx and overlay 4 stuff
-    // $11 must contain the handler called for G_SETOTHERMODE_H_handler and G_TEXRECTFLIP_handler
+    // $11 must contain the handler called for several handlers
     // $1 must remain zero (not currently needed)
      addi   $2, $7, -G_VTX                              // If >= G_VTX, use jump table
     bgez    $2, do_cmd_jump_table                       // $2 is the index
-     addi   $11, $2, (cmdJumpTablePositive - cmdJumpTableForwardBack) / 2 // Will be interpreted relative to other jump table
-    addi    $2, $2, G_VTX - (0xFF00 | G_SETTIMG)        // If >= G_SETTIMG, use handler; for G_NOOP, this puts
-    bgez    $2, G_SETxIMG_handler                       // garbage in second word, but normal handler does anyway
-     addi   $3, $2, G_SETTIMG - G_SETTILESIZE           // If >= G_SETTILESIZE, use handler
-    bgez    $3, G_RDP_handler
-     addi   $11, $3, G_SETTILESIZE - G_SETSCISSOR       // If >= G_SETSCISSOR, use jump table
-    bgez    $11, do_cmd_jump_table
-     nop
-    addi    $11, $11, G_SETSCISSOR - G_RDPLOADSYNC      // If >= G_RDPLOADSYNC, use handler; for the syncs, this
-    bgez    $11, G_RDP_handler                          // stores the second command word, but that's fine
+     addi   $3, $2, G_VTX - (0xFF00 | G_SETTIMG)        // If >= G_SETTIMG, use handler; for G_NOOP, this puts
+    bgez    $3, G_SETxIMG_handler                       // garbage in second word, but normal handler does anyway
+     addi   $2, $3, G_SETTIMG - G_RDPLOADSYNC           // If >= G_RDPLOADSYNC, use handler
+    bgez    $2, rdp_handler_pre                         // Otherwise $2 (negative) is the index
 do_cmd_jump_table:
-     sll    $11, $11, 1                                 // Multiply jump table index in $2 by 2 for addr offset
-    lhu     $11, cmdJumpTableForwardBack($11)           // Load address of handler from jump table
+     sll    $11, $2, 1                                  // Multiply jump table index by 2 for addr offset
+    lhu     $11, cmdJumpTable($11)                      // Load address of handler from jump table
     jr      $11                                         // Jump to handler
-     // Delay slot is harmless; $ra never holds anything useful here.
-     
-G_SETxIMG_handler:
-    li      $ra, G_RDP_handler            // Load the RDP command handler into the return address, then fall through to convert the address to virtual
+     // Delay slot is harmless.
+    
+G_MOVEWORD_handler:
+    srl     $2, cmd_w0, 16                              // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
+    lhu     $12, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
+do_moveword:
+    add     $12, $12, cmd_w0        // adds the offset in the command word to the address from the table (the upper 4 bytes are effectively ignored)
+    j       run_next_DL_command     // process the next command
+     sw     cmd_w1_dram, ($12)      // moves the specified value (in cmd_w1_dram) into the word (offset + moveword_table[index])
+
+    
 // Converts the segmented address in cmd_w1_dram to the corresponding physical address
 segmented_to_physical:
     srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
@@ -854,19 +860,42 @@ G_ENDDL_handler:
     j       call_ret_common                // has a different version in ovl1
      lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
 
-G_MOVEWORD_handler:
-    srl     $2, cmd_w0, 16                              // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
-    lhu     $12, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
-do_moveword:
-    add     $12, $12, cmd_w0        // adds the offset in the command word to the address from the table (the upper 4 bytes are effectively ignored)
-    j       run_next_DL_command     // process the next command
-     sw     cmd_w1_dram, ($12)      // moves the specified value (in cmd_w1_dram) into the word (offset + moveword_table[index])
-
+G_LOADBLOCK_handler:
+    lw      $2, lastLoadBlockLow
+    lw      $3, lastLoadBlockHigh
+    sw      cmd_w1_dram, lastLoadBlockLow
+    bne     $2, cmd_w1_dram, G_RDP_handler // If command is different, run command
+     sw     cmd_w0, lastLoadBlockHigh
+    bne     $3, cmd_w0, G_RDP_handler
+     nop
+    j       run_next_DL_command
+     // Next instr is harmless
+    
 G_RDPHALF_2_handler:
     ldv     $v29[0], (texrectWord1)($zero)
     lw      cmd_w0, rdpHalf1Val                 // load the RDPHALF1 value into w0
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
-    sdv     $v29[0], -8(rdpCmdBufPtr)
+    j       G_RDP_handler
+     sdv    $v29[0], -8(rdpCmdBufPtr)
+
+G_SETxIMG_handler:
+    jal     segmented_to_physical
+     lw     $2, lastImageSet              // Last image physical address set in RDP
+    beq     cmd_w1_dram, $2, rdp_handler_pre
+     sw     cmd_w1_dram, lastImageSet     // Store new address
+    sdv     vZero, (lastLoadBlockLow - altBase)(altBaseReg) // Clear last load block
+setximg_post:
+    // Fall through; $7 has not been changed so this will fall through to G_RDP_handler
+rdp_handler_pre:
+    li      $2, (0xFF00 | G_LOADBLOCK)
+    beq     $2, $7, G_LOADBLOCK_handler
+     li     $3, (0xFF00 | G_RDPHALF_2)
+    beq     $3, $7, G_RDPHALF_2_handler
+     li     $2, (0xFF00 | G_RDPSETOTHERMODE)
+    beq     $2, $7, G_RDPSETOTHERMODE_handler
+     li     $3, (0xFF00 | G_SETSCISSOR)
+    beq     $3, $7, G_SETSCISSOR_handler
+     // Otherwise real G_RDP command. Next instr is harmless in branch case
 G_RDP_handler:
     sw      cmd_w1_dram, 4(rdpCmdBufPtr)        // Add the second word of the command to the RDP command buffer
 G_SYNC_handler:
@@ -2068,11 +2097,11 @@ G_RDPHALF_1_handler:
      sw     cmd_w1_dram, (texrectWord2 - G_TEXRECTFLIP_handler)($11)
      
 G_SETSCISSOR_handler:
-    li      $11, scissorUpLeft - (otherMode0 - G_RDPSETOTHERMODE_handler)
-G_RDPSETOTHERMODE_handler: // $11 contains address of handler
-    sw      cmd_w0, (otherMode0 - G_RDPSETOTHERMODE_handler)($11) // Record the local otherMode0 copy
+    li      $7, scissorUpLeft - (otherMode0 + (0x100 - G_RDPSETOTHERMODE))
+G_RDPSETOTHERMODE_handler: // $7 contains command byte, -(0x100 - G_RDPSETOTHERMODE)
+    sw      cmd_w0, (otherMode0 + (0x100 - G_RDPSETOTHERMODE))($7)
     j       G_RDP_handler            // Send the command to the RDP
-     sw     cmd_w1_dram, (otherMode1 - G_RDPSETOTHERMODE_handler)($11) // Record the local otherMode1 copy
+     sw     cmd_w1_dram, (otherMode1 + (0x100 - G_RDPSETOTHERMODE))($7)
 
 G_POPMTX_handler:
     lw      $11, matrixStackPtr             // Get the current matrix stack pointer
@@ -2465,13 +2494,13 @@ ovl234_clipping_entrypoint_ovl4ver:  // same IMEM address as ovl234_clipping_ent
 
 ovl4_select_instr:
     beq     $11, $7, calc_mit // otherwise $7 = command byte
-     li     $12, G_MTX
+     li     $12, (0xFF00 | G_MTX)
     beq     $12, $7, G_MTX_end
      li     $11, G_BRANCH_WZ
     beq     $11, $7, G_BRANCH_WZ_handler
      li     $12, G_MODIFYVTX
     beq     $12, $7, G_MODIFYVTX_handler
-     li     $11, G_DMA_IO
+     li     $11, (0xFF00 | G_DMA_IO)
     beq     $11, $7, G_DMA_IO_handler
      // Otherwise G_LIGHTTORDP, which starts with a harmless instruction
      nop    // TODO
