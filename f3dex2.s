@@ -274,9 +274,13 @@ texgenLinearCoeffs:
     .dh 0x44D3
     .dh 0x6CB3
     
-// For SPCullVerts etc.
-cullFlags:
-    .dw 0x00000000
+lastImageSet:
+    .dw 0
+    
+lastLoadBlockLow:
+    .dw 0
+lastLoadBlockHigh:
+    .dw 0
 
 fxParams:
 
@@ -331,23 +335,16 @@ tempHalfword3:
 numLightsxSize:
     .db 0   // Overwrites above
     
+// For SPCullVerts etc.
+cullFlags:
+    .dw 0x00000000
+
 // Constants for clipping algorithm
 clipCondShifts:
     .db CLIP_SHIFT_NY
     .db CLIP_SHIFT_PY
     .db CLIP_SHIFT_NX
     .db CLIP_SHIFT_PX
-
-lastImageSet:
-    .dw 0
-    
-.if (. & 7) != 0
-    .error "Wrong alignment before attrOffsetST"
-.endif
-lastLoadBlockLow:
-    .dw 0
-lastLoadBlockHigh:
-    .dw 0
 
 // "Forward declaration" of temporary matrix in clipTempVerts scratch space, aligned to 16 bytes
 tempMemRounded equ ((clipTempVerts + 15) & ~15)
@@ -779,7 +776,7 @@ start_padded_end:
 ovl01_end:
 
 displaylist_dma_with_count:
-    andi    inputBufferPos, cmd_w0, 0x00F8             // Byte 3, how many cmds to drop from load
+    andi    inputBufferPos, cmd_w0, 0x00F8             // Byte 3, how many cmds to drop from load (max 0xA0)
 displaylist_dma:
     // Load INPUT_BUFFER_LEN - inputBufferPos cmds (inputBufferPos >= 0, mult of 8)
     addi    inputBufferPos, inputBufferPos, -INPUT_BUFFER_LEN // inputBufferPos = - num cmds
@@ -818,26 +815,29 @@ do_cmd_jump_table:
      sll    $11, $2, 1                                  // Multiply jump table index by 2 for addr offset
     lhu     $11, cmdJumpTable($11)                      // Load address of handler from jump table
     jr      $11                                         // Jump to handler
-     // Delay slot is harmless.
-    
-G_MOVEWORD_handler:
-    srl     $2, cmd_w0, 16                              // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
-    lhu     $12, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
-do_moveword:
-    add     $12, $12, cmd_w0        // adds the offset in the command word to the address from the table (the upper 4 bytes are effectively ignored)
-    j       run_next_DL_command     // process the next command
-     sw     cmd_w1_dram, ($12)      // moves the specified value (in cmd_w1_dram) into the word (offset + moveword_table[index])
+     // Delay slot must be harmless and not affect $1, $7, $11
 
-    
-// Converts the segmented address in cmd_w1_dram to the corresponding physical address
-segmented_to_physical:
-    srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
-    andi    $11, $11, 0x3C                // Clear the bottom 2 bits that remained during the shift
-    lw      $11, (segmentTable)($11)      // Get the current address of the segment
-    sll     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address to the left so that the top 8 bits are shifted out
-    srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
-    jr      $ra
-     add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
+G_CULLBRANCH_handler:
+    lw      $12, cullFlags
+    sll     $2, $12, 1                // Pop value
+    bltz    $12, run_next_DL_command  // If flag popped set, continue DL
+     sw     $2, cullFlags             // Store updated value
+    bgez    $2, G_DL_handler          // Next flag is clear, so will branch if we are branching
+     nop                              // to another SPCullBranch, so leave count at 0xA0 (one instr)
+    andi    cmd_w0, cmd_w0, 0xFF00    // Clear byte 3 (count of how many cmds to drop)
+G_DL_handler:
+    lbu     $1, displayListStackLength  // Get the DL stack length
+    sll     $2, cmd_w0, 15              // Shifts the push/nopush value to the highest bit in $2
+branch_dl:
+    jal     segmented_to_physical
+     add    $3, taskDataPtr, inputBufferPos
+    bltz    $2, displaylist_dma_with_count  // If the operation is nopush then load new cmds
+     move   taskDataPtr, cmd_w1_dram    // Set the task data pointer to the target display list
+    sw      $3, (displayListStack)($1)
+    addi    $1, $1, 4                   // Increment the DL stack length
+call_ret_common:
+    j       displaylist_dma_with_count
+     sb     $1, displayListStackLength
 
 G_CULLDL_handler:
     j       vtx_addrs_from_cmd           // Load start vtx addr in $12, end vtx in $3
@@ -851,53 +851,44 @@ culldl_loop:
      lhu    $11, (vtxSize + VTX_CLIP)($12) // next vertex clip flags
     bne     $12, $3, culldl_loop    // loop until reaching the last vertex
      addi   $12, $12, vtxSize           // advance to the next vertex
-end_dl_no_count:
-    la      cmd_w0, 0                    // Clear count of DL cmds to skip loading
-G_ENDDL_handler:
-    lbu     $1, displayListStackLength          // Load the DL stack index
-    beqz    $1, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
-     addi   $1, $1, -4                          // Decrement the DL stack index
-    j       call_ret_common                // has a different version in ovl1
-     lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
+    j       G_ENDDL_handler
+     la     cmd_w0, 0                    // Clear count of DL cmds to skip loading
 
-G_LOADBLOCK_handler:
-    lw      $2, lastLoadBlockLow
-    lw      $3, lastLoadBlockHigh
-    sw      cmd_w1_dram, lastLoadBlockLow
-    bne     $2, cmd_w1_dram, G_RDP_handler // If command is different, run command
-     sw     cmd_w0, lastLoadBlockHigh
-    bne     $3, cmd_w0, G_RDP_handler
-     nop
-    j       run_next_DL_command
-     // Next instr is harmless
-    
-G_RDPHALF_2_handler:
-    ldv     $v29[0], (texrectWord1)($zero)
-    lw      cmd_w0, rdpHalf1Val                 // load the RDPHALF1 value into w0
-    addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
-    j       G_RDP_handler
-     sdv    $v29[0], -8(rdpCmdBufPtr)
+G_CULLRET_handler:
+    lw      $1, cullFlags
+    bnez    $1, run_next_DL_command             // End DL if all flags clear
+G_ENDDL_handler:
+     lbu    $2, displayListStackLength          // Load the DL stack index
+    beqz    $2, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
+     addi   $2, $2, -4                          // Decrement the DL stack index
+    j       call_ret_common                     // has a different version in ovl1
+     lw     taskDataPtr, (displayListStack)($2) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
 
 G_SETxIMG_handler:
     jal     segmented_to_physical
      lw     $2, lastImageSet              // Last image physical address set in RDP
-    beq     cmd_w1_dram, $2, rdp_handler_pre
+    beq     cmd_w1_dram, $2, G_RDP_handler // If same address, skip clearing last cmd
      sw     cmd_w1_dram, lastImageSet     // Store new address
-    sdv     vZero, (lastLoadBlockLow - altBase)(altBaseReg) // Clear last load block
-setximg_post:
-    // Fall through; $7 has not been changed so this will fall through to G_RDP_handler
+    sw      $zero, lastLoadBlockHigh      // High contains cmd byte so 0 never == new cmd
+    // $7 is still the SETxIMG cmd ID so this will go to G_RDP_handler
 rdp_handler_pre:
-    li      $2, (0xFF00 | G_LOADBLOCK)
-    beq     $2, $7, G_LOADBLOCK_handler
-     li     $3, (0xFF00 | G_RDPHALF_2)
+    li      $3, (0xFF00 | G_RDPHALF_2)
     beq     $3, $7, G_RDPHALF_2_handler
      li     $2, (0xFF00 | G_RDPSETOTHERMODE)
     beq     $2, $7, G_RDPSETOTHERMODE_handler
      li     $3, (0xFF00 | G_SETSCISSOR)
     beq     $3, $7, G_SETSCISSOR_handler
-     // Otherwise real G_RDP command. Next instr is harmless in branch case
+     li     $2, (0xFF00 | G_LOADBLOCK)
+    bne     $2, $7, G_RDP_handler // If not load block, go to general handler
+G_LOADBLOCK_handler:
+     lw     $11, lastLoadBlockLow
+    lw      $12, lastLoadBlockHigh
+    sw      cmd_w1_dram, lastLoadBlockLow
+    bne     $11, cmd_w1_dram, G_RDP_handler // If command is different from last, run command
+     sw     cmd_w0, lastLoadBlockHigh
+    beq     $12, cmd_w0, run_next_DL_command // If command is the same, skip command
 G_RDP_handler:
-    sw      cmd_w1_dram, 4(rdpCmdBufPtr)        // Add the second word of the command to the RDP command buffer
+     sw     cmd_w1_dram, 4(rdpCmdBufPtr)        // Add the second word of the command to the RDP command buffer
 G_SYNC_handler:
     sw      cmd_w0, 0(rdpCmdBufPtr)         // Add the command word to the RDP command buffer
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8   // Increment the next RDP command pointer by 2 words
@@ -1294,21 +1285,6 @@ cullverts_early_return:
     or      $1, $1, $24                        // Insert new value
     j       run_next_DL_command
      sw     $1, cullFlags                      // Store updated flags
-
-G_CULLRET_handler:
-    lw      $1, cullFlags
-    bnez    $1, run_next_DL_command            // End DL if all flags clear
-     nop
-    j       G_ENDDL_handler
-     // Next instr harmless
-    
-G_CULLBRANCH_handler:
-    lw      $1, cullFlags
-    sll     $2, $1, 1                          // Pop value
-    bltz    $1, run_next_DL_command            // If flag popped set, continue DL
-     sw     $2, cullFlags
-    j       G_DL_handler                       // Jump or call
-     // Next instr harmless
 
 G_VTX_handler:
     lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // Size in inputVtxSize units
@@ -2071,38 +2047,6 @@ ovl0_padded_end:
 
 ovl1_start:
 
-G_DL_handler:
-    lbu     $1, displayListStackLength  // Get the DL stack length
-    sll     $2, cmd_w0, 15              // Shifts the push/nopush value to the highest bit in $2
-branch_dl:
-    jal     segmented_to_physical
-     add    $3, taskDataPtr, inputBufferPos
-    bltz    $2, displaylist_dma_with_count  // If the operation is nopush (branch) then simply DMA the new displaylist
-     move   taskDataPtr, cmd_w1_dram    // Set the task data pointer to the target display list
-    sw      $3, (displayListStack)($1)
-    addi    $1, $1, 4                   // Increment the DL stack length
-call_ret_common:
-    j       displaylist_dma_with_count
-     sb     $1, displayListStackLength
-
-G_TEXTURE_handler:
-    li      $11, textureSettings1 - (texrectWord1 - G_TEXRECTFLIP_handler)  // Calculate the offset from texrectWord1 and $11 for saving to textureSettings
-G_TEXRECT_handler: // $11 contains address of handler
-G_TEXRECTFLIP_handler:
-    // Stores first command word into textureSettings for gSPTexture, 0x00D0 for gSPTextureRectangle/Flip
-    sw      cmd_w0, (texrectWord1 - G_TEXRECTFLIP_handler)($11)
-G_RDPHALF_1_handler:
-    j       run_next_DL_command
-    // Stores second command word into textureSettings for gSPTexture, 0x00D4 for gSPTextureRectangle/Flip, 0x00D8 for G_RDPHALF_1
-     sw     cmd_w1_dram, (texrectWord2 - G_TEXRECTFLIP_handler)($11)
-     
-G_SETSCISSOR_handler:
-    li      $7, scissorUpLeft - (otherMode0 + (0x100 - G_RDPSETOTHERMODE))
-G_RDPSETOTHERMODE_handler: // $7 contains command byte, -(0x100 - G_RDPSETOTHERMODE)
-    sw      cmd_w0, (otherMode0 + (0x100 - G_RDPSETOTHERMODE))($7)
-    j       G_RDP_handler            // Send the command to the RDP
-     sw     cmd_w1_dram, (otherMode1 + (0x100 - G_RDPSETOTHERMODE))($7)
-
 G_POPMTX_handler:
     lw      $11, matrixStackPtr             // Get the current matrix stack pointer
     lw      $2, OSTask + OSTask_dram_stack  // Read the location of the dram stack
@@ -2161,6 +2105,56 @@ G_SETOTHERMODE_L_handler:
     j       G_RDP_handler
      lw     cmd_w1_dram, otherMode1
 
+G_SETSCISSOR_handler:
+    li      $7, scissorUpLeft - (otherMode0 + (0x100 - G_RDPSETOTHERMODE))
+G_RDPSETOTHERMODE_handler: // $7 contains command byte, -(0x100 - G_RDPSETOTHERMODE)
+    sw      cmd_w0, (otherMode0 + (0x100 - G_RDPSETOTHERMODE))($7)
+    j       G_RDP_handler            // Send the command to the RDP
+     sw     cmd_w1_dram, (otherMode1 + (0x100 - G_RDPSETOTHERMODE))($7)
+
+G_GEOMETRYMODE_handler: // $7 = G_GEOMETRYMODE (as negative) if jumped here
+    lw      $11, (geometryModeLabel + (0x100 - G_GEOMETRYMODE))($7) // load the geometry mode value
+    and     $11, $11, cmd_w0        // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
+    or      $11, $11, cmd_w1_dram   // sets the flags in cmd_w1_dram (set in g*SPSetGeometryMode)
+    j       run_next_DL_command     // run the next DL command
+     sw     $11, (geometryModeLabel + (0x100 - G_GEOMETRYMODE))($7)  // update the geometry mode value
+
+G_TEXTURE_handler:
+    li      $11, textureSettings1 - (texrectWord1 - G_TEXRECTFLIP_handler)  // Calculate the offset from texrectWord1 and $11 for saving to textureSettings
+G_TEXRECT_handler: // $11 contains address of handler
+G_TEXRECTFLIP_handler:
+    // Stores first command word into textureSettings for gSPTexture, 0x00D0 for gSPTextureRectangle/Flip
+    sw      cmd_w0, (texrectWord1 - G_TEXRECTFLIP_handler)($11)
+G_RDPHALF_1_handler:
+    j       run_next_DL_command
+    // Stores second command word into textureSettings for gSPTexture, 0x00D4 for gSPTextureRectangle/Flip, 0x00D8 for G_RDPHALF_1
+     sw     cmd_w1_dram, (texrectWord2 - G_TEXRECTFLIP_handler)($11)
+
+G_RDPHALF_2_handler:
+    ldv     $v29[0], (texrectWord1)($zero)
+    lw      cmd_w0, rdpHalf1Val                 // load the RDPHALF1 value into w0
+    addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
+    j       G_RDP_handler
+     sdv    $v29[0], -8(rdpCmdBufPtr)
+
+G_MOVEWORD_handler:
+    srl     $2, cmd_w0, 16                              // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
+    lhu     $12, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
+do_moveword:
+    add     $12, $12, cmd_w0        // adds the offset in the command word to the address from the table (the upper 4 bytes are effectively ignored)
+    j       run_next_DL_command     // process the next command
+     sw     cmd_w1_dram, ($12)      // moves the specified value (in cmd_w1_dram) into the word (offset + moveword_table[index])
+
+// Converts the segmented address in cmd_w1_dram to the corresponding physical address
+segmented_to_physical:
+    srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
+    andi    $11, $11, 0x3C                // Clear the bottom 2 bits that remained during the shift
+    lw      $11, (segmentTable)($11)      // Get the current address of the segment
+    sll     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address to the left so that the top 8 bits are shifted out
+    srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
+    jr      $ra
+     add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
+
 G_LIGHTTORDP_handler:
     lbu     $11, numLightsxSize          // Ambient light
     lbu     $1, (inputBufferEnd - 0x6)(inputBufferPos) // Byte 2 = light count from end * size
@@ -2171,13 +2165,6 @@ G_LIGHTTORDP_handler:
     andi    $3, $3, 0xFF00               // Get rid of whatever was in alpha value
     j       G_RDP_handler                // Send to RDP
      or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
-
-G_GEOMETRYMODE_handler: // $7 = G_GEOMETRYMODE (as negative) if jumped here
-    lw      $11, (geometryModeLabel + (0x100 - G_GEOMETRYMODE))($7) // load the geometry mode value
-    and     $11, $11, cmd_w0        // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
-    or      $11, $11, cmd_w1_dram   // sets the flags in cmd_w1_dram (set in g*SPSetGeometryMode)
-    j       run_next_DL_command     // run the next DL command
-     sw     $11, (geometryModeLabel + (0x100 - G_GEOMETRYMODE))($7)  // update the geometry mode value
 
 ovl1_end:
 .align 8
