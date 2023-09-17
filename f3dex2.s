@@ -780,11 +780,10 @@ displaylist_dma_with_count:
 displaylist_dma:
     // Load INPUT_BUFFER_LEN - inputBufferPos cmds (inputBufferPos >= 0, mult of 8)
     addi    inputBufferPos, inputBufferPos, -INPUT_BUFFER_LEN // inputBufferPos = - num cmds
-    sub     dmaLen, $zero, inputBufferPos              // DMA length = -inputBufferPos
-    addi    dmaLen, dmaLen, -1                         // DMA length is always 1 less
+    xori    dmaLen, inputBufferPos, 0xFFFF             // DMA length = -inputBufferPos - 1 = ones compliment
     move    cmd_w1_dram, taskDataPtr                   // set up the DRAM address to read from
     jal     dma_read_write                             // initiate the DMA read
-     li     dmemAddr, inputBuffer                      // set the address to DMA read to
+     addi   dmemAddr, inputBufferPos, inputBufferEnd   // set the address to DMA read to
     sub     taskDataPtr, taskDataPtr, inputBufferPos   // increment the DRAM address to read from next time
 wait_for_dma_and_run_next_command:
 G_POPMTX_end:
@@ -794,18 +793,18 @@ G_SPNOOP_handler:
 run_next_DL_command:
      mfc0   $1, SP_STATUS                               // load the status word into register $1
     vclr    vZero                                       // Zero vZero for each command
-    lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // load the command word into cmd_w0
     beqz    inputBufferPos, displaylist_dma             // load more DL commands if none are left
      andi   $1, $1, SP_STATUS_SIG0                      // check if the task should yield
-    sra     $7, cmd_w0, 24                              // extract DL command byte from command word
+    lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // load the command word into cmd_w0
     bnez    $1, load_overlay_0_and_enter                // load and execute overlay 0 if yielding; $1 > 0
-     lw     cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
+     sra    $7, cmd_w0, 24                              // extract DL command byte from command word
+    lw      cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
     vadd    vOne, vZero, $v31[2]                        // 1; set up vOne for each command
     addi    inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
     // $7 must retain the command byte for load_mtx and overlay 4 stuff
     // $11 must contain the handler called for several handlers
     // $1 must remain zero (not currently needed)
-     addi   $2, $7, -G_VTX                              // If >= G_VTX, use jump table
+    addi    $2, $7, -G_VTX                              // If >= G_VTX, use jump table
     bgez    $2, do_cmd_jump_table                       // $2 is the index
      addi   $3, $2, G_VTX - (0xFF00 | G_SETTIMG)        // If >= G_SETTIMG, use handler; for G_NOOP, this puts
     bgez    $3, G_SETxIMG_handler                       // garbage in second word, but normal handler does anyway
@@ -822,17 +821,25 @@ G_CULLBRANCH_handler:
     sll     $2, $12, 1                // Pop value
     bltz    $12, run_next_DL_command  // If flag popped set, continue DL
      sw     $2, cullFlags             // Store updated value
-    bgez    $2, G_DL_handler          // Next flag is clear, so will branch if we are branching
-     nop                              // to another SPCullBranch, so leave count at 0xA0 (one instr)
+    bgez    $2, G_DL_handler          // Next flag is clear, so will branch if we are branching to
+     nop                              // another SPCullBranch, so leave count at 0xA0 (one instr)
     andi    cmd_w0, cmd_w0, 0xFF00    // Clear byte 3 (count of how many cmds to drop)
 G_DL_handler:
     lbu     $1, displayListStackLength  // Get the DL stack length
     sll     $2, cmd_w0, 15              // Shifts the push/nopush value to the highest bit in $2
 branch_dl:
     jal     segmented_to_physical
-     add    $3, taskDataPtr, inputBufferPos
-    bltz    $2, displaylist_dma_with_count  // If the operation is nopush then load new cmds
-     move   taskDataPtr, cmd_w1_dram    // Set the task data pointer to the target display list
+     add    $3, taskDataPtr, inputBufferPos // Current DL pos to push on stack
+    sub     $11, cmd_w1_dram, taskDataPtr   // Negative how far new target is behind current end
+    bgez    $2, call_dl                     // Push = call = flag is clear
+     move   taskDataPtr, cmd_w1_dram        // Set the new DL to the target display list
+    bgez    $11, displaylist_dma_with_count // If new target is ahead of current end, load it
+     sub    $12, cmd_w1_dram, $3            // How far new target is ahead of current pos
+    bltz    $12, displaylist_dma_with_count // If new target is behind current pos, load it
+     move   inputBufferPos, $11             // New negative pos in buffer
+    j       run_next_DL_command             // Don't load anything
+     sub    taskDataPtr, cmd_w1_dram, $11   // Restore original taskDataPtr value
+call_dl:
     sw      $3, (displayListStack)($1)
     addi    $1, $1, 4                   // Increment the DL stack length
 call_ret_common:
@@ -2521,9 +2528,8 @@ branchwz_return_from_addrs:
     sub     $2, $12, cmd_w1_dram           // subtract the w/z value being tested
     bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
      lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
-    j       branch_dl         // need $2 < 0 for nopush and cmd_w1_dram
-     move   cmd_w0, $zero
-     // TODO; make this branch_dl_no_count
+    j       branch_dl                    // need $2 < 0 for nopush and cmd_w1_dram
+     move   cmd_w0, $zero                // No count of DL cmds to skip
 
 G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
 output_mtx  equ $19
