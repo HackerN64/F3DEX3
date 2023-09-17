@@ -839,6 +839,7 @@ branch_dl:
      move   inputBufferPos, $11             // New negative pos in buffer
     j       run_next_DL_command             // Don't load anything
      sub    taskDataPtr, cmd_w1_dram, $11   // Restore original taskDataPtr value
+
 call_dl:
     sw      $3, (displayListStack)($1)
     addi    $1, $1, 4                   // Increment the DL stack length
@@ -862,14 +863,14 @@ culldl_loop:
      la     cmd_w0, 0                    // Clear count of DL cmds to skip loading
 
 G_CULLRET_handler:
-    lw      $1, cullFlags
-    bnez    $1, run_next_DL_command             // End DL if all flags clear
+    lw      $2, cullFlags
+    bnez    $2, run_next_DL_command             // End DL if all flags clear
 G_ENDDL_handler:
-     lbu    $2, displayListStackLength          // Load the DL stack index
-    beqz    $2, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
-     addi   $2, $2, -4                          // Decrement the DL stack index
+     lbu    $1, displayListStackLength          // Load the DL stack index
+    beqz    $1, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
+     addi   $1, $1, -4                          // Decrement the DL stack index
     j       call_ret_common                     // has a different version in ovl1
-     lw     taskDataPtr, (displayListStack)($2) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
+     lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
 
 G_SETxIMG_handler:
     jal     segmented_to_physical
