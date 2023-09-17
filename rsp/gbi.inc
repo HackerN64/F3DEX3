@@ -85,9 +85,9 @@ G_QUAD            equ 0x07
 G_TRISTRIP        equ 0x08
 G_TRIFAN          equ 0x09
 G_LIGHTTORDP      equ 0x0A
-G_CULLVERTS       equ 0x0B
-G_CULLRETURN      equ 0x0C
-G_CULLBRANCH      equ 0x0D
+G_BOUNDINGVERTS   equ 0x0B
+G_RETURNNONEVISIBLE equ 0x0C
+G_POPBRANCHCALL   equ 0x0D
 
 
 G_BRANCH_Z equ G_BRANCH_WZ

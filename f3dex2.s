@@ -335,8 +335,8 @@ tempHalfword3:
 numLightsxSize:
     .db 0   // Overwrites above
     
-// For SPCullVerts etc.
-cullFlags:
+// For SPBoundingVerts etc.
+boundingFlags:
     .dw 0x00000000
 
 // Constants for clipping algorithm
@@ -401,9 +401,9 @@ jumpTableEntry G_QUAD_handler
 jumpTableEntry G_TRISTRIP_handler
 jumpTableEntry G_TRIFAN_handler
 jumpTableEntry G_LIGHTTORDP_handler
-jumpTableEntry G_CULLVERTS_handler
-jumpTableEntry G_CULLRETURN_handler
-jumpTableEntry G_CULLBRANCH_handler
+jumpTableEntry G_BOUNDINGVERTS_handler
+jumpTableEntry G_RETURNNONEVISIBLE_handler
+jumpTableEntry G_POPBRANCHCALL_handler
 
 gCullMagicNumbers:
 // Values added to cross product (16-bit sign extended).
@@ -814,8 +814,8 @@ do_cmd_jump_table:
      sll    $11, $2, 1                                  // Multiply jump table index by 2 for addr offset
     lhu     $11, cmdJumpTable($11)                      // Load address of handler from jump table
     jr      $11                                         // Jump to handler
-G_CULLRETURN_handler: // Delay slot must not affect $1, $7, $11
-     lw     $12, cullFlags                      // Do not move, needed for G_CULLBRANCH_handler
+G_RETURNNONEVISIBLE_handler: // Delay slot must not affect $1, $7, $11
+     lw     $12, boundingFlags                  // Do not move, needed for G_POPBRANCHCALL_handler
     bnez    $12, run_next_DL_command            // End DL if all flags clear
 G_ENDDL_handler:
      lbu    $5, displayListStackLength          // Load the DL stack index
@@ -825,15 +825,15 @@ G_ENDDL_handler:
      lw     taskDataPtr, (displayListStack)($5) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
 
 G_DL_handler:
-G_CULLBRANCH_handler:
-    bltz    $7, skip_cullbranch        // Cmd negative = G_DL
+G_POPBRANCHCALL_handler:
+    bltz    $7, skip_popbranchcall     // Cmd negative = G_DL
      sll    $2, cmd_w0, 15             // Shifts the push/nopush value to the highest bit in $2
     sll     $1, $12, 1                 // Flags already in $12; pop value
     xor     $12, $12, $2               // Swap whether to continue or not based on call/branch
     bgez    $12, run_next_DL_command   // If flag popped set (1) and is branch (1), continue DL
-     sw     $1, cullFlags              // Store updated value
-skip_cullbranch:
-    // Next flag is clear, so will branch if we are branching to another SPCullBranch,
+     sw     $1, boundingFlags          // Store updated value
+skip_popbranchcall:
+    // Next flag is clear, so will branch if we are branching to another SPPopBranchNotVisible,
     // so leave count at 0xA0 (one instr). Or, is G_DL and $1 = 0.
     bgez    $1, branch_dl                   // Skip clearing the count
      lbu    $5, displayListStackLength      // Get the DL stack length
@@ -871,7 +871,7 @@ culldl_loop:
     bne     $12, $3, culldl_loop    // loop until reaching the last vertex
      addi   $12, $12, vtxSize           // advance to the next vertex
     j       G_ENDDL_handler
-     la     cmd_w0, 0                    // Clear count of DL cmds to skip loading
+     li     cmd_w0, 0                    // Clear count of DL cmds to skip loading
 
 G_SETxIMG_handler:
     jal     segmented_to_physical
@@ -1247,21 +1247,21 @@ ovl3_padded_end:
 .orga max(max(ovl2_padded_end - ovl2_start, ovl4_padded_end - ovl4_start) + orga(ovl3_start), orga())
 ovl234_end:
 
-G_CULLVERTS_handler:
+G_BOUNDINGVERTS_handler:
+    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // Bytes 1-2: size in bytes
     li      $5, 0                              // Disable lighting (all geometry mode bits)
-    andi    $1, cmd_w0, 0x7FF8                 // Bytes 2-3 = size in bytes
     li      $6, 0                              // Track whether any vtx near enough
     j       vtx_common_setup
      li     $12, (clipTempVertsEnd & 0xFFF8)   // Address of end of load region
 
-cullverts_setup_end:
+boundingverts_setup_end:
     jal     while_wait_dma_busy                // Wait for vertex load to finish
      llv    vVpScl[0], rdpHalf1Val($zero)      // W compare int / frac; reg not used on this path
     li      $9, CLIP_MOD_MASK_SCRN_ALL         // Track whether all vertices offscreen
-cullverts_loop:
+boundingverts_loop:
     j       vtx_load_skip1st
      ldv    vPairPosI[8], (8)(inputVtxPos)     // Load second vertex
-cullverts_after_xfrm:
+boundingverts_after_xfrm:
     // Clip space coords in vPairTPosI/F.
     vch     $v29, vPairTPosI, vPairTPosI[3h]   // Clip screen high
     vcl     $v29, vPairTPosF, vPairTPosF[3h]   // Clip screen low
@@ -1281,22 +1281,22 @@ cullverts_after_xfrm:
 @@skip:
     addi    $24, $9, -1                        // Set sign bit if no verts left
     and     $24, $24, $6                       // And at least one vertex near enough
-    bltz    $24, cullverts_early_return        // If sign bit set, early return
+    bltz    $24, boundingverts_early_return    // If sign bit set, early return
      addi   inputVtxPos, inputVtxPos, -0x10    // Has had + 2*inputVtxSize, need + 2*8 instead
-    bgtz    $1, cullverts_loop                 // > 0 verts remain, continue
-cullverts_early_return:
+    bgtz    $1, boundingverts_loop             // > 0 verts remain, continue
+boundingverts_early_return:
      lui    $11, 0x8000                        // Mask for only sign bit
     and     $24, $24, $11                      // Keep only sign bit
-    lb      $2, (inputBufferEnd - 0x07)(inputBufferPos) // Byte 1 = -1 for keep value, 0 for clear
-    lw      $1, cullFlags                      // Load current flags value
+    lb      $2, (inputBufferEnd - 0x05)(inputBufferPos) // Byte 3 = -1 for keep value, 0 for clear
+    lw      $1, boundingFlags                  // Load current flags value
     and     $1, $1, $2                         // Clear old value if don't need
     srl     $1, $1, 1                          // Push stack of bits
     or      $1, $1, $24                        // Insert new value
     j       run_next_DL_command
-     sw     $1, cullFlags                      // Store updated flags
+     sw     $1, boundingFlags                  // Store updated flags
 
 G_VTX_handler:
-    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // Size in inputVtxSize units
+    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // Bytes 1-2: size in bytes
     srl     $2, cmd_w0, 11                     // n << 1
     sub     $2, cmd_w0, $2                     // v0 << 1
     sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
@@ -1304,7 +1304,7 @@ G_VTX_handler:
      li     $11, vtx_return_from_addrs
 vtx_return_from_addrs:
     lhu     $5, geometryModeLabel + 1          // Middle 2 bytes
-    li      $6, -1                             // For cullverts, negative means normal vtx load
+    li      $6, -1                             // For boundingverts, negative means normal vtx load
     andi    $12, $12, 0xFFF8                   // Round down end addr to DMA word; one input vtx still fits in one internal vtx
     mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
 vtx_common_setup:
@@ -1358,7 +1358,7 @@ vtx_after_calc_mit:
     ldv     vVP0I[8],  (vpMatrix  + 0x00)($zero)
     ldv     vVP2I[8], (vpMatrix  + 0x10)($zero)
     ldv     vVP0F[8], (vpMatrix  + 0x20)($zero)
-    bgez    $6, cullverts_setup_end
+    bgez    $6, boundingverts_setup_end
      ldv    vVP2F[8], (vpMatrix  + 0x30)($zero)
 vtx_setup_constants:
 /*
@@ -1468,7 +1468,7 @@ vtx_load_skip1st:
     vmadl   $v29, vVP2F, vPairPosF[2h]
     vmadm   $v29, vVP2I, vPairPosF[2h]
     vmadn   vPairTPosF, vVP2F, vPairPosI[2h]
-    bgez    $6, cullverts_after_xfrm // >= 0 for cullverts, < 0 for normal vtx
+    bgez    $6, boundingverts_after_xfrm // >= 0 for boundingverts, < 0 for normal vtx
      vmadh  vPairTPosI, vVP2I, vPairPosI[2h]
     vmudm   $v29, vPairST, vSTScl     // Scale ST; must be after texgen
     vmadh   vPairST, vSTOfs, $v31[2] // + 1 * ST offset

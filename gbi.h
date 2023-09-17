@@ -92,9 +92,9 @@
 #define G_TRISTRIP          0x08
 #define G_TRIFAN            0x09
 #define G_LIGHTTORDP        0x0A
-#define G_CULLVERTS         0x0B
-#define G_CULLRETURN           0x0C
-#define G_CULLBRANCH        0x0D
+#define G_BOUNDINGVERTS     0x0B
+#define G_RETURNNONEVISIBLE 0x0C
+#define G_POPBRANCHCALL     0x0D
 
 /* names differ between F3DEX2 and F3DZEX */
 #define G_BRANCH_Z G_BRANCH_WZ
@@ -164,9 +164,9 @@
 #define G_ALPHA_COMPARE_CULL_BELOW    1
 #define G_ALPHA_COMPARE_CULL_ABOVE   -1
 
-/* See SPCullVerts */
-#define G_CULLVERTS_CLEAR  0
-#define G_CULLVERTS_PUSH  -1
+/* See SPBoundingVerts */
+#define G_BOUNDINGVERTS_REPLACE  0
+#define G_BOUNDINGVERTS_PUSH    -1
 
 /*
  * MOVEMEM indices
@@ -253,7 +253,7 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_MWO_ATTR_OFFSET_Z      0x0C
 #define G_MWO_NORMALS_MODE       0x0E
 #define G_MWO_ALPHA_COMPARE_CULL 0x12
-#define G_MWO_CULL_FLAGS         0x18
+#define G_MWO_BOUNDING_FLAGS     0x18
 
 /*
  * RDP command argument defines
@@ -943,6 +943,16 @@ typedef union {
     long long int force_structure_alignment;
 } Vtx;
 
+typedef struct {
+    short pos[3];
+    short pad; /* value ignored, need not be 0 */
+} PlainVtx_t;
+
+typedef union {
+    PlainVtx_t c;
+    long long int force_structure_alignment;
+} PlainVtx;
+
 /*
  * Triangle face
  */
@@ -1070,11 +1080,6 @@ typedef struct {
 } Ambient_t;
 
 typedef struct {
-    short pos[3];
-    short pad;
-} CameraWorld_t;
-
-typedef struct {
     signed char   dir[3];   /* direction of lookat (normalized) */
     char          pad1;
 } LookAt_t;
@@ -1106,11 +1111,6 @@ typedef union {
     Light_t    l;
     long long int force_structure_alignment[2];
 } PosLight;
-
-typedef union {
-    CameraWorld_t c;
-    long long int force_structure_alignment[1];
-} CameraWorld;
 
 typedef union {
     LookAtWrapper l[2];
@@ -2712,8 +2712,8 @@ _DW({                                               \
 /*
  * Vanilla F3D* display list culling based on screen clip flags of range of
  * loaded verts. Executes SPEndDisplayList if the convex hull formed by the
- * specified range of already-loaded vertices is offscreen. Prefer SPCullVerts /
- * SPCullReturn / SPCullBranch in new code.
+ * specified range of already-loaded vertices is offscreen. Prefer
+ * SPBoundingVerts and related cmds in new code.
  */
 #define gSPCullDisplayList(pkt,vstart,vend)             \
 _DW({                                                   \
@@ -2733,7 +2733,7 @@ _DW({                                                   \
 
 /*
  * gSPBranchLessZ   Branch DL if (vtx.z) less than or equal (zval).
- * Prefer SPCullVerts / SPCullReturn / SPCullBranch in new code.
+ * Prefer SPBoundingVerts and related cmds in new code.
  * Also note that this uses W in F3DZEX / CFG_G_BRANCH_W, in which case all the
  * Z calculations below are wrong and raw values must be used.
  *
@@ -2830,66 +2830,160 @@ _DW({                                               \
     (unsigned int)(zval),                   \
 }
 
+/*
+ * Sets the W value to compare vertices to in SPBoundingVerts. This is a 32-bit
+ * value in s15.16 format. Vertices whose transformed W value is greater than
+ * or equal to this value will be considered "not visible".
+ * 
+ * This uses the generic RDP word. The other commands which will overwrite this
+ * value are:
+ * - SPBranchLess*
+ * - All TextureRectangle commands
+ * - SPPerspNormalize
+ * - SPLoadUcode*
+ * - DPWord
+ */
+#define gSPWFarThreshold(pkt, w) gImmp1(pkt, G_RDPHALF_1, (w))
+#define gsSPWFarThreshold(w)     gsImmp1(    G_RDPHALF_1, (w))
 
 /*
- * Return from the current display list if the WHOLE 32-bit cull flags word is
- * zero, i.e. none of the previous SPCullVerts commands set their flags.
+ * Load a set of vertices defining a bounding convex shape around a sub-object,
+ * compute whether it is visible, and store the result to the bounding flags
+ * word.
+ * 
+ * There are two components to visibility:
+ * 1. If there is any screen clipping plane (four sides of the screen or
+ *    behind-the-camera) which all verts are on the far side of (i.e. offscreen
+ *    or behind the camera), the sub-object is invisible.
+ * 2. If all verts have a transformed (clip space) W value greater than or equal
+ *    to the threshold set with SPWFarThreshold, the sub-object is invisible.
+ * 
+ * The processing uses an early return, so as soon as at least one vertex is
+ * close enough and at least one vertex is on the screen side of each clip
+ * plane, the object is visible and the result is written. The flag is set if
+ * the object is visible or cleared if the object is invisible.
+ * 
+ * v: Address / name of an array containing a set of PlainVtx values (positions
+ * only, no ST or RGBA). These vertices define a convex hull around a sub-
+ * object. This may be, but is not required to be, an axis-aligned bounding box.
+ * For example, for a flat object, you could provide the four corners of the
+ * plane containing the object. For a sphere, an octahedron containing the
+ * sphere has less wasted space than a cube, and it is only six vertices rather
+ * than eight.
+ * 
+ * n: Number of vertices, between 1 and 32. These vertices are loaded into
+ * temporary memory and do not affect or overwrite the vertex buffer.
+ * 
+ * mode:
+ * - G_BOUNDINGVERTS_REPLACE: clear the existing contents of the bounding flags
+ *   word, and replace the first (MSB) flag with the result of this operation.
+ *   For if this is the first or only sub-object within the larger object.
+ * - G_BOUNDINGVERTS_PUSH: keep the existing contents of the bounding flags word
+ *   and push the result of this operation onto the "stack" in that word. The
+ *   word is 32 bits so you can load up to 32 sets of bounding vertices at a
+ *   time, i.e. have up to 32 sub-objects within one larger object.
  */
-#define _gSPCullReturnRaw(pkt,hint)  gDma0p(pkt, G_CULLRETURN, 0, hint)
-#define _gsSPCullReturnRaw(hint)     gsDma0p(    G_CULLRETURN, 0, hint)
+#define _BOUNDINGVERTS_W0(n, mode)                                   \
+    (_SHIFTL(G_VTX,  24, 8) |                                        \
+     _SHIFTL((n),    11, 5) | /* Bytes 1-2, size in bytes, max 32 */ \
+     _SHIFTL((mode),  0, 8))
+#define gSPBoundingVerts(pkt, v, n, mode)      \
+_DW({                                          \
+    Gfx *_g = (Gfx *)(pkt);                    \
+    _g->words.w0 = _BOUNDINGVERTS_W0(n, mode); \
+    _g->words.w1 = (unsigned int)(v);          \
+})
+#define gsSPBoundingVerts(v, n, mode) \
+{                                     \
+   _BOUNDINGVERTS_W0(n, mode),        \
+    (unsigned int)(v)                 \
+}
+
+/*
+ * Return from the current display list if none of the previous SPBoundingVerts
+ * commands set their flags, i.e. if the WHOLE 32-bit bounding flags word is
+ * zero.
+ */
+#define _gSPReturnNoneVisibleRaw(pkt,hint)  gDma0p(pkt, G_RETURNNONEVISIBLE, 0, hint)
+#define _gsSPReturnNoneVisibleRaw(hint)     gsDma0p(    G_RETURNNONEVISIBLE, 0, hint)
 /* Hint version -- use whenever possible. See SPEndDisplayListHint. */
-#define gSPCullReturnHint(pkt, count) _gSPCullReturnRaw( pkt, _DLHINTVALUE(count))
-#define gsSPCullReturnHint(    count) _gsSPCullReturnRaw(     _DLHINTVALUE(count))
+#define gSPReturnNoneVisibleHint(pkt, count) _gSPReturnNoneVisibleRaw( pkt, _DLHINTVALUE(count))
+#define gsSPReturnNoneVisibleHint(    count) _gsSPReturnNoneVisibleRaw(     _DLHINTVALUE(count))
 /* Non-hint version. */
-#define gSPCullReturn(pkt)  _gSPCullReturn( pkt, 0)
-#define gsSPCullReturn(  )  _gsSPCullReturn(     0)
+#define gSPReturnNoneVisible(pkt)  _gSPReturnNoneVisibleRaw( pkt, 0)
+#define gsSPReturnNoneVisible(  )  _gsSPReturnNoneVisibleRaw(     0)
 
 /*
- * Pop the highest flag from the 32-bit cull flags word, and branch if
- * it is clear (i.e. if the part of the object was offscreen).
+ * Pop the highest flag from the 32-bit bounding flags word, and branch if
+ * it is clear, i.e. bounding verts were not visible. This can branch past
+ * drawing the sub-object to cull it, or branch to a low-poly version of it.
  */
-#define _gSPCullCallRaw(pkt,dl,hint)   gDma1p(pkt, G_CULLBRANCH, dl, hint, G_DL_PUSH)
-#define _gsSPCullCallRaw(   dl,hint)   gsDma1p(    G_CULLBRANCH, dl, hint, G_DL_PUSH)
-#define _gSPCullBranchRaw(pkt,dl,hint) gDma1p(pkt, G_CULLBRANCH, dl, hint, G_DL_NOPUSH)
-#define _gsSPCullBranchRaw(   dl,hint) gsDma1p(    G_CULLBRANCH, dl, hint, G_DL_NOPUSH)
+#define _gSPPopBranchNotVisibleRaw(pkt,dl,hint) \
+    gDma1p(pkt, G_POPBRANCHCALL, dl, hint, G_DL_NOPUSH)
+#define _gsSPPopBranchNotVisibleRaw(   dl,hint) \
+    gsDma1p(    G_POPBRANCHCALL, dl, hint, G_DL_NOPUSH)
 /*
- * Hint versions -- use whenever possible. See SPDisplayListHint.
+ * Hint version -- use whenever possible. See SPBranchListHint.
  * 
  * There is an additional clever optimization here. The hint is for if the
  * branch is taken, so in the case of offscreen objects, normally the next
- * command being jumped to is another SPCullBranch. So, normally the hint is 1.
- * However, the microcode also looks at the *next* flag--the one which that
- * future SPCullBranch command will look at. If that flag is set, that next
- * command won't branch but will continue to draw something. So in this case,
- * the microcode clears the current SPCullBranch command's hint value, so that
- * a full buffer of DL commands is loaded rather than just one.
+ * command being jumped to is another SPPopBranchNotVisibleHint. So, normally
+ * the hint is 1. However, the microcode also looks at the *next* flag--the one
+ * which that future SPPopBranchNotVisibleHint command will look at. If that
+ * flag is set, that next command won't branch but will continue to draw
+ * something. So in this case, the microcode clears the current
+ * SPPopBranchNotVisibleHint command's hint value, so that a full buffer of DL
+ * commands is loaded rather than just one.
  */
-#define gSPDisplayListHint(pkt, dl, count) _gSPDisplayListRaw(pkt, dl, _DLHINTVALUE(count))
-#define gsSPDisplayListHint(    dl, count) _gsSPDisplayListRaw(    dl, _DLHINTVALUE(count))
-#define gSPBranchListHint(pkt, dl, count) _gSPBranchListRaw( pkt, dl, _DLHINTVALUE(count))
-#define gsSPBranchListHint(    dl, count) _gsSPBranchListRaw(     dl, _DLHINTVALUE(count))
-/* Non-hint versions. */
-#define gSPDisplayList(pkt, dl) _gSPDisplayListRaw(pkt, dl, 0)
-#define gsSPDisplayList(    dl) _gsSPDisplayListRaw(    dl, 0)
-#define gSPBranchList(pkt, dl)  _gSPBranchListRaw( pkt, dl, 0)
-#define gsSPBranchList(    dl)  _gsSPBranchListRaw(     dl, 0)
-
-
+#define gSPPopBranchNotVisibleHint(pkt, dl, count) \
+    _gSPPopBranchNotVisibleRaw( pkt, dl, _DLHINTVALUE(count))
+#define gsSPPopBranchNotVisibleHint(    dl, count) \
+    _gsSPPopBranchNotVisibleRaw(     dl, _DLHINTVALUE(count))
+/* Non-hint version. */
+#define gSPPopBranchNotVisible(pkt, dl)  \
+    _gSPPopBranchNotVisibleRaw( pkt, dl, 0)
+#define gsSPPopBranchNotVisible(    dl)  \
+    _gsSPPopBranchNotVisibleRaw(     dl, 0)
 
 /*
- * Loads the cull flags value used by SPCullVerts / SPCullReturn / SPCullBranch.
- * This can be used to programmatically enable / disable parts of a DL.
- * 
- * The cull flags value is a 32-bit word where flags are pushed / popped to the
- * MSB. So for example, to set a single flag to 1 which will be checked with
- * SPCullBranch or SPCullReturn, write the value 0x80000000. Or, to set a value
- * which will branch-notbranch-branch-notbranch on the next four SPCullBranch
- * commands, write the value 0x50000000.
+ * Pop the highest flag from the 32-bit bounding flags word, and call another
+ * display list if it is set, i.e. bounding verts were visible. Note that if
+ * you are just trying to draw or not draw objects based on whether they are
+ * onscreen, it is recommended to put the drawing DL inline and use
+ * SPPopBranchNotVisibleHint to branch past it. If you are only checking a
+ * single set of bounding verts, use SPReturnNoneVisibleHint instead.
  */
-#define gSPLoadCullFlags(pkt, flags) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_CULL_FLAGS, (flags))
-#define gsSPLoadCullFlags(amb, flags) \
-    gsMoveWd(G_MW_FX, G_MWO_CULL_FLAGS, (flags))
+#define _gSPPopCallVisibleRaw(pkt,dl,hint) \
+    gDma1p(pkt, G_POPBRANCHCALL, dl, hint, G_DL_PUSH)
+#define _gsSPPopCallVisibleRaw(   dl,hint) \
+    gsDma1p(    G_POPBRANCHCALL, dl, hint, G_DL_PUSH)
+/* Hint version -- use whenever possible. See SPDisplayListHint. */
+#define gSPPopCallVisibleHint(pkt, dl, count) \
+    _gSPPopCallVisibleRaw( pkt, dl, _DLHINTVALUE(count))
+#define gsSPPopCallVisibleHint(    dl, count) \
+    _gsSPPopCallVisibleRaw(     dl, _DLHINTVALUE(count))
+/* Non-hint version. */
+#define gSPPopCallVisible(pkt, dl)  \
+    _gSPPopCallVisibleRaw( pkt, dl, 0)
+#define gsSPPopCallVisible(    dl)  \
+    _gsSPPopCallVisibleRaw(     dl, 0)
+
+/*
+ * Loads the bounding flags value used by SPBoundingVerts,
+ * SPPopBranchNotVisibleHint, etc. This can be used to programmatically enable /
+ * disable parts of a DL.
+ * 
+ * The bounding flags value is a 32-bit word where flags are pushed / popped to
+ * the MSB. So for example, to set a single flag to 1 which will be checked with
+ * SPPopBranchNotVisibleHint or SPPopCallVisibleHint, write the value
+ * 0x80000000. Or, to set a value which will branch-notbranch-branch-notbranch
+ * on the next four SPPopBranchNotVisibleHint commands, write the value
+ * 0x50000000.
+ */
+#define gSPLoadBoundingFlags(pkt, flags) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_BOUNDING_FLAGS, (flags))
+#define gsSPLoadBoundingFlags(amb, flags) \
+    gsMoveWd(G_MW_FX, G_MWO_BOUNDING_FLAGS, (flags))
 
 
 /*
@@ -3033,12 +3127,12 @@ _DW({ \
 
 /*
  * Camera world position for Fresnel. Set this whenever you set the VP matrix,
- * viewport, etc. cam is the name/address of a CameraWorld struct.
+ * viewport, etc. cam is the name/address of a PlainVtx struct.
  */
 #define gSPCameraWorld(pkt, cam) \
-    gDma2p((pkt), G_MOVEMEM, (cam), sizeof(CameraWorld), G_MV_LIGHT, 0)
+    gDma2p((pkt), G_MOVEMEM, (cam), sizeof(PlainVtx), G_MV_LIGHT, 0)
 #define gsSPCameraWorld(cam) \
-    gsDma2p(      G_MOVEMEM, (cam), sizeof(CameraWorld), G_MV_LIGHT, 0)
+    gsDma2p(      G_MOVEMEM, (cam), sizeof(PlainVtx), G_MV_LIGHT, 0)
 
 
 /*
@@ -3509,6 +3603,41 @@ _DW({                                                   \
     _SHIFTL(b,  8, 8) |                     \
     _SHIFTL(a,  0, 8))                      \
 }
+
+/*
+ * Send the color of the specified light to one of the RDP's color registers.
+ * light is the index of a light in the RSP counting from the end, i.e. 0 is
+ * the ambient light, 1 is the last directional / point light, etc. The RGB
+ * color of the selected light is combined with the alpha specified in this
+ * command as word 1 of a RDP command, and word 0 is specified in this command.
+ * Specialized versions are provided below for prim color and env color, but
+ * any RDP color command could be specified this way.
+ */
+#define gSPLightToRDP(pkt, light, alpha, word0)    \
+_DW({                                              \
+    Gfx *_g = (Gfx *)(pkt);                        \
+    _g->words.w0 = (_SHIFTL(G_LIGHTTORDP, 24, 8) | \
+                    _SHIFTL(light * 0x10,  8, 8) | \
+                    _SHIFTL(alpha,         0, 8)); \
+    _g->words.w1 = (word0);                        \
+})
+#define gsDPLightToRDP(m, light, alpha, word0) \
+{                                              \
+   (_SHIFTL(G_LIGHTTORDP, 24, 8) |             \
+    _SHIFTL(light * 0x10,  8, 8) |             \
+    _SHIFTL(alpha,         0, 8)),             \
+   (word0)                                     \
+}
+#define gSPLightToPrimColor(pkt, light, alpha, m, l) \
+    gSPLightToRDP(pkt, light, alpha,                 \
+        (_SHIFTL(G_SETPRIMCOLOR, 24, 8) | _SHIFTL(m, 8, 8) | _SHIFTL(l, 0, 8)))
+#define gsSPLightToPrimColor(light, alpha, m, l) \
+    gsSPLightToRDP(light, alpha,                 \
+        (_SHIFTL(G_SETPRIMCOLOR, 24, 8) | _SHIFTL(m, 8, 8) | _SHIFTL(l, 0, 8)))
+#define gSPLightToEnvColor(pkt, light, alpha) \
+    gSPLightToRDP(pkt, light, alpha, _SHIFTL(G_SETENVCOLOR, 24, 8))
+#define gsSPLightToEnvColor(light, alpha) \
+    gsSPLightToRDP(light, alpha, _SHIFTL(G_SETENVCOLOR, 24, 8))
 
 /*
  * gDPSetOtherMode (This is for expert user.)
