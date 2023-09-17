@@ -2,8 +2,8 @@
 
 #include "mbi.h"
 
-#ifndef MOD_ULTRA64_GBI_H
-#define MOD_ULTRA64_GBI_H
+#ifndef F3DEX3_H
+#define F3DEX3_H
 
 #define F3DEX_GBI_2 1
 #define F3DEX_GBI_3 1
@@ -91,63 +91,30 @@
 #define G_QUAD              0x07
 #define G_TRISTRIP          0x08
 #define G_TRIFAN            0x09
-#define G_FLAGSMASKS        0x0A
-#define G_FLAGSVERTS        0x0B
-#define G_FLAGS1VERT        0x0C
-#define G_FLAGSDRAM         0x0D
-#define G_LIGHTTORDP        0x0E
-/* no command               0x0F */
-#define G_FLAGSOPBASE       0x10
-
-/* masks to combine with G_FLAGSOPBASE */
-#define G_FLAGSOP_SOME_NOTALL 0x01
-#define G_FLAGSOP_ALL_NOTALL 0x02
-#define G_FLAGSOP_CULL 0x00
-#define G_FLAGSOP_CALL 0x04
-#define G_FLAGSOP_BRANCH 0x08
+#define G_LIGHTTORDP        0x0A
+#define G_CULLVERTS         0x0B
+#define G_CULLRETURN           0x0C
+#define G_CULLBRANCH        0x0D
 
 /* names differ between F3DEX2 and F3DZEX */
 #define G_BRANCH_Z G_BRANCH_WZ
 #define G_BRANCH_W G_BRANCH_WZ
 
 /*
- * Coordinate shift values, number of bits of fraction
+ * RSP command argument and misc defines
  */
-#define G_TEXTURE_IMAGE_FRAC    2
-#define G_TEXTURE_SCALE_FRAC    16
-#define G_SCALE_FRAC            8
-#define G_ROTATE_FRAC           16
 
-/*
- * Maximum z-buffer value, used to initialize the z-buffer.
- * Note : this number is NOT the viewport z-scale constant.
- * See the comment next to G_MAXZ for more info.
- */
-#define G_MAXFBZ    0x3FFF  /* 3b exp, 11b mantissa */
+/* Maximum number of transformed vertices kept in buffer in RSP DMEM */
+#define G_MAX_VERTS 56
 
-#define GPACK_RGBA5551(r, g, b, a) \
-        ((((r) << 8) & 0xF800) |   \
-         (((g) << 3) & 0x07C0) |   \
-         (((b) >> 2) & 0x003E) |   \
-          ((a) & 1))
+/* Maximum number of directional / point lights, not counting ambient */
+#define G_MAX_LIGHTS 9
 
-#define GPACK_IA16(i, a)    (((i) << 8) | (a))
-
-#define GPACK_ZDZ(z, dz)    (((z) << 2) | (dz))
-
-/*
- * G_MTX: parameter flags
- */
-# define G_MTX_MODELVIEW    0x00    /* matrix types */
-# define G_MTX_PROJECTION   0x04
-# define G_MTX_MUL          0x00    /* concat or load */
-# define G_MTX_LOAD         0x02
-# define G_MTX_NOPUSH       0x00    /* push or not */
-# define G_MTX_PUSH         0x01
+/* Maximum number of display list commands loaded at once into RSP DMEM */
+#define G_INPUT_BUFFER_CMDS 21
 
 /*
  * flags for G_SETGEOMETRYMODE
- * (this rendering state is maintained in RSP)
  *
  * Note that flat shading, i.e. not G_SHADING_SMOOTH, sets shade RGB for all
  * three verts to the value of the first vertex in the triangle. Shade alpha is
@@ -174,6 +141,148 @@
 #define G_SHADING_SMOOTH        0x00200000
 #define G_LIGHTING_POSITIONAL   0x00400000  /* Ignored by F3DEX3, assumed always on */
 #define G_CLIPPING              0x00800000  /* Ignored by all F3DEX* variants */
+
+/* See SPDisplayList / SPBranchList */
+#define G_DL_PUSH       0
+#define G_DL_NOPUSH     1
+
+/* See SPMatrix */
+#define G_MTX_MODELVIEW    0x00    /* matrix types */
+#define G_MTX_PROJECTION   0x04
+#define G_MTX_MUL          0x00    /* concat or load */
+#define G_MTX_LOAD         0x02
+#define G_MTX_NOPUSH       0x00    /* push or not */
+#define G_MTX_PUSH         0x01
+
+/* See SPNormalsMode */
+#define G_NORMALS_MODE_FAST      0x00
+#define G_NORMALS_MODE_AUTO      0x01
+#define G_NORMALS_MODE_MANUAL    0x02
+
+/* See SPAlphaCompareCull */
+#define G_ALPHA_COMPARE_CULL_DISABLE  0
+#define G_ALPHA_COMPARE_CULL_BELOW    1
+#define G_ALPHA_COMPARE_CULL_ABOVE   -1
+
+/* See SPCullVerts */
+#define G_CULLVERTS_CLEAR  0
+#define G_CULLVERTS_PUSH  -1
+
+/*
+ * MOVEMEM indices
+ * Each of these indexes an entry in a dmem table which points to an arbitrarily
+ * sized block of dmem in which to store the result of a DMA.
+ */
+#define G_MV_TEMPMTX0  0  /* for internal use by G_MTX multiply mode */
+#define G_MV_MMTX      2
+#define G_MV_TEMPMTX1  4  /* for internal use by G_MTX multiply mode */
+#define G_MV_VPMTX     6
+#define G_MV_VIEWPORT  8
+#define G_MV_LIGHT     10
+/* G_MV_POINT is no longer supported because the internal vertex format is no
+longer a multiple of 8 (DMA word). This was not used in any command anyway. */
+/* G_MV_MATRIX is no longer supported because there is no MVP matrix in F3DEX3. */
+#define G_MV_PMTX G_MV_VPMTX /* backwards compatibility */
+
+/*
+ * MOVEWORD indices
+ * Each of these indexes an entry in a dmem table which points to a word in dmem
+ * where an immediate word will be stored.
+ */
+#define G_MW_FX             0x00 /* replaces G_MW_MATRIX which is no longer supported */
+#define G_MW_NUMLIGHT       0x02
+#define G_MW_PERSPNORM      0x04 /* replaces G_MW_CLIP which is no longer supported */
+#define G_MW_SEGMENT        0x06
+#define G_MW_FOG            0x08
+#define G_MW_LIGHTCOL       0x0A
+/* G_MW_FORCEMTX is no longer supported because there is no MVP matrix in F3DEX3. */
+
+/*
+ * These are offsets from the address in the dmem table
+ */
+#define G_MWO_NUMLIGHT           0x00
+#define G_MWO_FOG                0x00
+
+#define G_MWO_SEGMENT_0          0x00
+#define G_MWO_SEGMENT_1          0x01
+#define G_MWO_SEGMENT_2          0x02
+#define G_MWO_SEGMENT_3          0x03
+#define G_MWO_SEGMENT_4          0x04
+#define G_MWO_SEGMENT_5          0x05
+#define G_MWO_SEGMENT_6          0x06
+#define G_MWO_SEGMENT_7          0x07
+#define G_MWO_SEGMENT_8          0x08
+#define G_MWO_SEGMENT_9          0x09
+#define G_MWO_SEGMENT_A          0x0A
+#define G_MWO_SEGMENT_B          0x0B
+#define G_MWO_SEGMENT_C          0x0C
+#define G_MWO_SEGMENT_D          0x0D
+#define G_MWO_SEGMENT_E          0x0E
+#define G_MWO_SEGMENT_F          0x0F
+
+/* These are deprecated and no longer needed. */
+#define G_MWO_aLIGHT_1           0x00
+#define G_MWO_bLIGHT_1           0x04
+#define G_MWO_aLIGHT_2           0x10
+#define G_MWO_bLIGHT_2           0x14
+#define G_MWO_aLIGHT_3           0x20
+#define G_MWO_bLIGHT_3           0x24
+#define G_MWO_aLIGHT_4           0x30
+#define G_MWO_bLIGHT_4           0x34
+#define G_MWO_aLIGHT_5           0x40
+#define G_MWO_bLIGHT_5           0x44
+#define G_MWO_aLIGHT_6           0x50
+#define G_MWO_bLIGHT_6           0x54
+#define G_MWO_aLIGHT_7           0x60
+#define G_MWO_bLIGHT_7           0x64
+#define G_MWO_aLIGHT_8           0x70
+#define G_MWO_bLIGHT_8           0x74
+#define G_MWO_aLIGHT_9           0x80
+#define G_MWO_bLIGHT_9           0x84
+#define G_MWO_aLIGHT_10          0x90
+#define G_MWO_bLIGHT_10          0x94
+
+#define G_MWO_POINT_RGBA         0x10
+#define G_MWO_POINT_ST           0x14
+#define G_MWO_POINT_XYSCREEN     0x18 /* not recommended to use, won't work if */
+#define G_MWO_POINT_ZSCREEN      0x1C /* the tri gets clipped */
+
+#define G_MWO_AMB_OCCLUSION      0x00
+#define G_MWO_FRESNEL            0x04
+#define G_MWO_ATTR_OFFSET_ST     0x08
+#define G_MWO_ATTR_OFFSET_Z      0x0C
+#define G_MWO_NORMALS_MODE       0x0E
+#define G_MWO_ALPHA_COMPARE_CULL 0x12
+#define G_MWO_CULL_FLAGS         0x18
+
+/*
+ * RDP command argument defines
+ */
+
+/*
+ * Coordinate shift values, number of bits of fraction
+ */
+#define G_TEXTURE_IMAGE_FRAC    2
+#define G_TEXTURE_SCALE_FRAC    16
+#define G_SCALE_FRAC            8
+#define G_ROTATE_FRAC           16
+
+/*
+ * Maximum z-buffer value, used to initialize the z-buffer.
+ * Note : this number is NOT the viewport z-scale constant.
+ * See the comment next to G_MAXZ for more info.
+ */
+#define G_MAXFBZ    0x3FFF  /* 3b exp, 11b mantissa */
+
+#define GPACK_RGBA5551(r, g, b, a) \
+        ((((r) << 8) & 0xF800) |   \
+         (((g) << 3) & 0x07C0) |   \
+         (((b) >> 2) & 0x003E) |   \
+          ((a) & 1))
+
+#define GPACK_IA16(i, a)    (((i) << 8) | (a))
+
+#define GPACK_ZDZ(z, dz)    (((z) << 2) | (dz))
 
 /*
  * G_SETIMG fmt: set image formats
@@ -800,44 +909,8 @@
 #define G_SC_ODD_INTERLACE  3
 #define G_SC_EVEN_INTERLACE 2
 
-/* flags to inhibit pushing of the display list (on branch) */
-#define G_DL_PUSH       0
-#define G_DL_NOPUSH     1
-
-/* Number of display list commands loaded at once into RSP DMEM */
-#define G_INPUT_BUFFER_CMDS 21
-
 /*
  * Data Structures
- *
- * NOTE:
- * The DMA transfer hardware requires 64-bit aligned, 64-bit multiple-
- * sized transfers. This important hardware optimization is unfortunately
- * reflected in the programming interface, with some structures
- * padded and alignment enforced.
- *
- * Since structures are aligned to the boundary of the "worst-case"
- * element, we can't depend on the C compiler to align things
- * properly.
- *
- * 64-bit structure alignment is enforced by wrapping structures with
- * unions that contain a dummy "long long int".  Why this works is
- * explained in the ANSI C Spec, or on page 186 of the second edition
- * of K&R, "The C Programming Language".
- *
- * The price we pay for this is a little awkwardness referencing the
- * structures through the union. There is no memory penalty, since
- * all the structures are at least 64-bits the dummy alignment field
- * does not increase the size of the union.
- *
- * Static initialization of these union structures works because
- * the ANSI C spec states that static initialization for unions
- * works by using the first union element. We put the dummy alignment
- * field last for this reason.
- *
- * (it's possible a newer 64-bit compiler from MIPS might make this
- * easier with a flag, but we can't wait for it...)
- *
  */
 
 /*
@@ -925,7 +998,6 @@ typedef union {
  */
 
 /*
- *
  * This magic value is the maximum INTEGER z-range of the hardware
  * (there are also 16-bits of fraction, which are introduced during
  * any transformations). This is not just a good idea, it's the law.
@@ -964,103 +1036,6 @@ typedef union {
     Vp_t vp;
     long long int force_structure_alignment;
 } Vp;
-
-/*
- * MOVEMEM indices
- * Each of these indexes an entry in a dmem table which points to an arbitrarily
- * sized block of dmem in which to store the result of a DMA.
- */
-#define G_MV_TEMPMTX0  0  /* for internal use by G_MTX multiply mode */
-#define G_MV_MMTX      2
-#define G_MV_TEMPMTX1  4  /* for internal use by G_MTX multiply mode */
-#define G_MV_VPMTX     6
-#define G_MV_VIEWPORT  8
-#define G_MV_LIGHT     10
-/* G_MV_POINT is no longer supported because the internal vertex format is no
-longer a multiple of 8 (DMA word). This was not used in any command anyway. */
-/* G_MV_MATRIX is no longer supported because there is no MVP matrix in F3DEX3. */
-#define G_MV_PMTX G_MV_VPMTX /* backwards compatibility */
-
-/*
- * MOVEWORD indices
- * Each of these indexes an entry in a dmem table which points to a word in dmem
- * where an immediate word will be stored.
- */
-#define G_MW_FX             0x00 /* replaces G_MW_MATRIX which is no longer supported */
-#define G_MW_NUMLIGHT       0x02
-#define G_MW_PERSPNORM      0x04 /* replaces G_MW_CLIP which is no longer supported */
-#define G_MW_SEGMENT        0x06
-#define G_MW_FOG            0x08
-#define G_MW_LIGHTCOL       0x0A
-/* G_MW_FORCEMTX is no longer supported because there is no MVP matrix in F3DEX3. */
-
-/*
- * These are offsets from the address in the dmem table
- */
-#define G_MWO_NUMLIGHT           0x00
-
-#define G_MWO_SEGMENT_0          0x00
-#define G_MWO_SEGMENT_1          0x01
-#define G_MWO_SEGMENT_2          0x02
-#define G_MWO_SEGMENT_3          0x03
-#define G_MWO_SEGMENT_4          0x04
-#define G_MWO_SEGMENT_5          0x05
-#define G_MWO_SEGMENT_6          0x06
-#define G_MWO_SEGMENT_7          0x07
-#define G_MWO_SEGMENT_8          0x08
-#define G_MWO_SEGMENT_9          0x09
-#define G_MWO_SEGMENT_A          0x0A
-#define G_MWO_SEGMENT_B          0x0B
-#define G_MWO_SEGMENT_C          0x0C
-#define G_MWO_SEGMENT_D          0x0D
-#define G_MWO_SEGMENT_E          0x0E
-#define G_MWO_SEGMENT_F          0x0F
-#define G_MWO_FOG                0x00
-
-/* These are deprecated and no longer needed. */
-#define G_MWO_aLIGHT_1           0x00
-#define G_MWO_bLIGHT_1           0x04
-#define G_MWO_aLIGHT_2           0x10
-#define G_MWO_bLIGHT_2           0x14
-#define G_MWO_aLIGHT_3           0x20
-#define G_MWO_bLIGHT_3           0x24
-#define G_MWO_aLIGHT_4           0x30
-#define G_MWO_bLIGHT_4           0x34
-#define G_MWO_aLIGHT_5           0x40
-#define G_MWO_bLIGHT_5           0x44
-#define G_MWO_aLIGHT_6           0x50
-#define G_MWO_bLIGHT_6           0x54
-#define G_MWO_aLIGHT_7           0x60
-#define G_MWO_bLIGHT_7           0x64
-#define G_MWO_aLIGHT_8           0x70
-#define G_MWO_bLIGHT_8           0x74
-#define G_MWO_aLIGHT_9           0x80
-#define G_MWO_bLIGHT_9           0x84
-#define G_MWO_aLIGHT_10          0x90
-#define G_MWO_bLIGHT_10          0x94
-
-#define G_MWO_POINT_RGBA         0x10
-#define G_MWO_POINT_ST           0x14
-#define G_MWO_POINT_XYSCREEN     0x18 /* not recommended to use, won't work if */
-#define G_MWO_POINT_ZSCREEN      0x1C /* the tri gets clipped */
-
-#define G_MWO_AMB_OCCLUSION      0x00
-#define G_MWO_FRESNEL            0x04
-#define G_MWO_ATTR_OFFSET_ST     0x08
-#define G_MWO_ATTR_OFFSET_Z      0x0C
-#define G_MWO_NORMALS_MODE       0x0E
-#define G_MWO_ALPHA_COMPARE_CULL 0x12
-
-/* See SPNormalsMode */
-#define G_NORMALS_MODE_FAST      0x00
-#define G_NORMALS_MODE_AUTO      0x01
-#define G_NORMALS_MODE_MANUAL    0x02
-
-/* See SPAlphaCompareCull */
-#define G_ALPHA_COMPARE_CULL_DISABLE  0
-#define G_ALPHA_COMPARE_CULL_NORMAL   1
-#define G_ALPHA_COMPARE_CULL_REVERSE -1
-
 
 /*
  * Light structure.
@@ -2091,8 +2066,10 @@ _DW({                                                   \
 #define gsSPMatrix(m, p) \
         gsDma2p(     G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH, 0)
 
-
-#define G_MAX_VERTS 56
+#define gSPPopMatrixN(pkt, n, num) gDma2p((pkt), G_POPMTX, (num) * 64, 64, 2, 0)
+#define gsSPPopMatrixN(n, num)     gsDma2p(      G_POPMTX, (num) * 64, 64, 2, 0)
+#define gSPPopMatrix(pkt, n)       gSPPopMatrixN((pkt), (n), 1)
+#define gsSPPopMatrix(n)           gsSPPopMatrixN(      (n), 1)
 
 /*
  *        +--------+----+---+---+----+------+-+
@@ -2178,6 +2155,79 @@ _DW({                                               \
 
 #define gSPEndDisplayList(pkt)  _gSPEndDisplayListRaw( pkt, 0)
 #define gsSPEndDisplayList(  )  _gsSPEndDisplayListRaw(     0)
+
+
+/*
+ * gSPLoadUcode   RSP loads specified ucode.
+ *
+ * uc_start  = ucode text section start
+ * uc_dstart = ucode data section start
+ */
+#define gSPLoadUcodeEx(pkt, uc_start, uc_dstart, uc_dsize)  \
+_DW({                                                       \
+    Gfx *_g = (Gfx *)(pkt);                                 \
+                                                            \
+    _g->words.w0 = _SHIFTL(G_RDPHALF_1, 24, 8);             \
+    _g->words.w1 = (unsigned int)(uc_dstart);               \
+                                                            \
+    _g = (Gfx *)(pkt);                                      \
+                                                            \
+    _g->words.w0 = (_SHIFTL(G_LOAD_UCODE,        24,  8) |  \
+                    _SHIFTL((int)(uc_dsize) - 1,  0, 16));  \
+    _g->words.w1 = (unsigned int)(uc_start);                \
+})
+
+#define gsSPLoadUcodeEx(uc_start, uc_dstart, uc_dsize)  \
+{                                                       \
+    _SHIFTL(G_RDPHALF_1, 24, 8),                        \
+    (unsigned int)(uc_dstart),                          \
+},                                                      \
+{                                                       \
+   (_SHIFTL(G_LOAD_UCODE,        24,  8) |              \
+    _SHIFTL((int)(uc_dsize) - 1,  0, 16)),              \
+    (unsigned int)(uc_start),                           \
+}
+
+#define gSPLoadUcode(pkt, uc_start, uc_dstart)  \
+        gSPLoadUcodeEx((pkt), (uc_start), (uc_dstart), SP_UCODE_DATA_SIZE)
+#define gsSPLoadUcode(uc_start, uc_dstart)      \
+        gsSPLoadUcodeEx((uc_start), (uc_dstart), SP_UCODE_DATA_SIZE)
+
+#define gSPLoadUcodeL(pkt, ucode)                                   \
+        gSPLoadUcode((pkt), OS_K0_TO_PHYSICAL(& ucode##TextStart),  \
+                            OS_K0_TO_PHYSICAL(& ucode##DataStart))
+#define gsSPLoadUcodeL(ucode)                                       \
+        gsSPLoadUcode(      OS_K0_TO_PHYSICAL(& ucode##TextStart),  \
+                            OS_K0_TO_PHYSICAL(& ucode##DataStart))
+
+/*
+ * gSPDma_io  DMA to/from DMEM/IMEM for DEBUG.
+ */
+#define gSPDma_io(pkt, flag, dmem, dram, size)      \
+_DW({                                               \
+    Gfx *_g = (Gfx *)(pkt);                         \
+                                                    \
+    _g->words.w0 = (_SHIFTL(G_DMA_IO, 24, 8) |      \
+                    _SHIFTL((flag), 23, 1) |        \
+                    _SHIFTL((dmem) / 8, 13, 10) |   \
+                    _SHIFTL((size) - 1, 0, 12));    \
+    _g->words.w1 = (unsigned int)(dram);            \
+})
+
+#define gsSPDma_io(flag, dmem, dram, size)  \
+{                                           \
+   (_SHIFTL(G_DMA_IO,   24,  8) |           \
+    _SHIFTL((flag),     23,  1) |           \
+    _SHIFTL((dmem) / 8, 13, 10) |           \
+    _SHIFTL((size) - 1,  0, 12)),           \
+    (unsigned int)(dram)                    \
+}
+
+#define gSPDmaRead(pkt,dmem,dram,size)  gSPDma_io((pkt),0,(dmem),(dram),(size))
+#define gsSPDmaRead(dmem,dram,size)     gsSPDma_io(     0,(dmem),(dram),(size))
+#define gSPDmaWrite(pkt,dmem,dram,size) gSPDma_io((pkt),1,(dmem),(dram),(size))
+#define gsSPDmaWrite(dmem,dram,size)    gsSPDma_io(     1,(dmem),(dram),(size))
+
 
 /*
  * RSP short command (no DMA required) macros
@@ -2406,6 +2456,9 @@ _DW({                                                        \
 #define gsSPSegment(segment, base)                  \
     gsMoveWd(    G_MW_SEGMENT, (segment) * 4, (base))
 
+#define gSPPerspNormalize(pkt, s)   gMoveWd(pkt, G_MW_PERSPNORM, 0, (s))
+#define gsSPPerspNormalize(s)       gsMoveWd(    G_MW_PERSPNORM, 0, (s))
+
 /*
  * Clipping Macros - Deprecated, encodes SP no-ops
  * It is not possible to change the clip ratio from 2 in F3DEX3.
@@ -2444,8 +2497,9 @@ _DW({                                                        \
  * to zero here). In contrast, if you darken the vertex colors, the geometry
  * will always be that much darker. The reason you'd want to use these factors
  * to modify ambient occlusion rather than just manually scaling and offsetting
- * all the vertex alpha values is to allow the lighting to be adjusted on the
- * fly or after the model is made.
+ * all the vertex alpha values is to allow the behavior to differ between
+ * ambient and directional lights, and to allow the lighting to be adjusted on
+ * the fly or after the model is made.
  */
 #define gSPAmbOcclusion(pkt, amb, dir) \
     gMoveWd(pkt, G_MW_FX, G_MWO_AMB_OCCLUSION, \
@@ -2463,6 +2517,9 @@ _DW({                                                        \
  * value. This is useful for making surfaces fade between transparent when
  * viewed straight-on and opaque when viewed at a large angle, or for applying a
  * fake "outline" around the border of meshes.
+ * 
+ * If using Fresnel, you need to set the camera world position whenever you set
+ * the VP matrix, viewport, etc. See SPCameraWorld.
  * 
  * offset = Dot product value, in 0000 - 7FFF, which gives shade alpha = 0
  * Let k = dot product value, in 0000 - 7FFF, which gives shade alpha = FF.
@@ -2492,7 +2549,8 @@ _DW({                                                        \
  * For ST, the addition is after the multiplication for ST scale in SPTexture.
  * For Z, this simply adds to the Z offset from the viewport.
  * Whether each feature is enabled or disabled at a given time is determined
- * by bits in the geometry mode.
+ * by the G_ATTROFFSET_ST_ENABLE and G_ATTROFFSET_Z_ENABLE bits respectively in
+ * the geometry mode.
  * Normally you would use ST offsets for UV scrolling, and you would use a Z
  * offset of -2 (which it is set to by default) to fix decal mode. For the
  * latter, enable the Z offset and set the Z mode to opaque.
@@ -2544,7 +2602,7 @@ _DW({                                                        \
  * 
  * Recommended to leave this set to G_NORMALS_MODE_FAST generally, and only set
  * it to G_NORMALS_MODE_AUTO for specific objects at times when they actually
- * have a nonuniform scale. For example, G_NORMALS_MODE_FAST it for Mario
+ * have a nonuniform scale. For example, G_NORMALS_MODE_FAST for Mario
  * generally, but G_NORMALS_MODE_AUTO temporarily while he is squashed.
  */
 #define gSPNormalsMode(pkt, mode) \
@@ -2564,7 +2622,7 @@ typedef union {
 /*
  * See SPNormalsMode. mtx is the address of a MITMtx (M inverse transpose).
  * 
- * The matrix values must also be scaled down so that the matrix norm is <= 1,
+ * The matrix values must be scaled down so that the matrix norm is <= 1,
  * i.e. multiplying this matrix by any vector length <= 1 must produce a vector
  * with length <= 1. Normally, M scales things down substantially, so M inverse
  * transpose natively would scale them up substantially; you need to apply a
@@ -2585,47 +2643,42 @@ typedef union {
  * 
  * If mode == G_ALPHA_COMPARE_CULL_DISABLED, tris are drawn normally.
  * 
- * If mode == G_ALPHA_COMPARE_CULL_NORMAL, tris are culled in the RSP if the
- * shade alpha (alpha being sent to the RDP, which may be the original vertex
- * alpha, fog, light level, or Fresnel) of all three vertices of that tri is
- * less than the specified value. This is intended to be used with alpha compare
- * (G_AC_THRESHOLD) with blend color alpha set to the same value as here. Any
- * triangle where all three of its verts are less than this value will never
- * have any fragments (pixels) drawn by the RDP, but this tri still takes up
- * RDP time and memory bandwidth, so this command culls it early on the RSP
- * instead.
+ * Otherwise:
+ * - "vertex alpha" means the post-transform alpha value at each vertex being
+ *   sent to the RDP. This may be the original model vertex alpha, fog, light
+ *   level (for cel shading), or Fresnel.
+ * - Assuming a cel shading context: you have a threshold value thresh, you draw
+ *   tris once and want to write all pixels where shade alpha >= thresh. Then
+ *   you change color settings and draw tris again, and want to write all other
+ *   pixels, i.e. where shade alpha < thresh.
  * 
- * If mode == G_ALPHA_COMPARE_CULL_REVERSE, 
-cull if shade_alpha >= rsp_value
-RDP does cull if cc_alpha < blend_alpha
-cc_alpha = 0x100 - shade_alpha
-0x100 - shade_alpha < blend_alpha
-0x100 - blend_alpha < shade_alpha
-shade_alpha > 0x100 - blend_alpha
-shade_alpha >= 0x101 - blend_alpha
-
-RDP only: thresh
-Light side:                                Dark side:
-draw if shade_alpha >= thresh              draw if shade_alpha < thresh
-cull if shade_alpha < thresh               cull if shade_alpha >= thresh
-cull if cc_alpha < thresh                  cull if 0x100 - cc_alpha >= thresh
-RDP does cull if cc_alpha < blend_alpha    cull if 0x100 - thresh >= cc_alpha
-therefore blend_alpha = thresh             cull if 0x101 - thresh > cc_alpha
-                                           cull if cc_alpha < 0x101 - thresh
-                                           RDP does cull if cc_alpha < blend_alpha
-                                           therefore blend_alpha = 0x101 - thresh
-
+ * For the light pass:
+ * - Set blend color alpha to thresh
+ * - Set CC alpha cycle 1 (or only cycle) to (shade alpha - 0) * tex alpha + 0
+ * - The RDP will draw pixels whenever shade alpha >= thresh (with binary alpha
+ *   from the texture)
+ * - Set mode = G_ALPHA_COMPARE_CULL_BELOW in SPAlphaCompareCull, and thresh
+ * - The RSP will cull any tris where all three vertex alpha values (i.e. light
+ *   level) are < thresh
+ * 
+ * For the dark pass:
+ * - Set blend color alpha to 0x101 - thresh (yes, not 0xFF - thresh).
+ * - Set CC alpha cycle 1 (or only cycle) to (1 - shade alpha) * tex alpha + 0
+ * - The RDP will draw pixels whenever shade alpha < thresh (with binary alpha
+ *   from the texture)
+ * - Set mode = G_ALPHA_COMPARE_CULL_ABOVE in SPAlphaCompareCull, and thresh
+ * - The RSP will cull any tris where all three vertex alpha values (i.e. light
+ *   level) are >= thresh
+ * 
+ * The idea is to cull tris early on the RSP which won't have any of their
+ * fragments drawn on the RDP, to save RDP time and memory bandwidth.
  */
-#define _ALPHACOMPWORD(mode, value) \
-    (((mode) == G_ALPHA_COMPARE_CULL_NORMAL) ? \
-        (_SHIFTL((mode), 24, 8) | _SHIFTL((value), 16, 8)) : \
-    (((mode) == G_ALPHA_COMPARE_CULL_REVERSE) ? \
-        (_SHIFTL((mode), 24, 8) | _SHIFTL((value), 16, 8)) : \
-    0))
-#define gSPAlphaCompareCull(pkt, mode, value) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, _ALPHACOMPWORD(mode, value))
-#define gsSPAlphaCompareCull(mode, value) \
-    gsMoveWd(G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, _ALPHACOMPWORD(mode, value))
+#define _ALPHACOMPWORD(mode, thresh) \
+    (_SHIFTL((mode), 24, 8) | _SHIFTL((thresh), 16, 8))
+#define gSPAlphaCompareCull(pkt, mode, thresh) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, _ALPHACOMPWORD(mode, thresh))
+#define gsSPAlphaCompareCull(mode, thresh) \
+    gsMoveWd(G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, _ALPHACOMPWORD(mode, thresh))
 
 
 /*
@@ -2652,7 +2705,16 @@ _DW({                                               \
     (unsigned int)(val)                     \
 }
 
+/*
+ * Display list optimization / object culling
+ */
 
+/*
+ * Vanilla F3D* display list culling based on screen clip flags of range of
+ * loaded verts. Executes SPEndDisplayList if the convex hull formed by the
+ * specified range of already-loaded vertices is offscreen. Prefer SPCullVerts /
+ * SPCullReturn / SPCullBranch in new code.
+ */
 #define gSPCullDisplayList(pkt,vstart,vend)             \
 _DW({                                                   \
     Gfx *_g = (Gfx *)(pkt);                             \
@@ -2669,9 +2731,11 @@ _DW({                                                   \
     _SHIFTL((vend) * 2, 0, 16)              \
 }
 
-
 /*
- *  gSPBranchLessZ   Branch DL if (vtx.z) less than or equal (zval).
+ * gSPBranchLessZ   Branch DL if (vtx.z) less than or equal (zval).
+ * Prefer SPCullVerts / SPCullReturn / SPCullBranch in new code.
+ * Also note that this uses W in F3DZEX / CFG_G_BRANCH_W, in which case all the
+ * Z calculations below are wrong and raw values must be used.
  *
  *  dl   = DL branch to
  *  vtx  = Vertex
@@ -2766,83 +2830,71 @@ _DW({                                               \
     (unsigned int)(zval),                   \
 }
 
-/*
- * gSPLoadUcode   RSP loads specified ucode.
- *
- * uc_start  = ucode text section start
- * uc_dstart = ucode data section start
- */
-#define gSPLoadUcodeEx(pkt, uc_start, uc_dstart, uc_dsize)  \
-_DW({                                                       \
-    Gfx *_g = (Gfx *)(pkt);                                 \
-                                                            \
-    _g->words.w0 = _SHIFTL(G_RDPHALF_1, 24, 8);             \
-    _g->words.w1 = (unsigned int)(uc_dstart);               \
-                                                            \
-    _g = (Gfx *)(pkt);                                      \
-                                                            \
-    _g->words.w0 = (_SHIFTL(G_LOAD_UCODE,        24,  8) |  \
-                    _SHIFTL((int)(uc_dsize) - 1,  0, 16));  \
-    _g->words.w1 = (unsigned int)(uc_start);                \
-})
-
-#define gsSPLoadUcodeEx(uc_start, uc_dstart, uc_dsize)  \
-{                                                       \
-    _SHIFTL(G_RDPHALF_1, 24, 8),                        \
-    (unsigned int)(uc_dstart),                          \
-},                                                      \
-{                                                       \
-   (_SHIFTL(G_LOAD_UCODE,        24,  8) |              \
-    _SHIFTL((int)(uc_dsize) - 1,  0, 16)),              \
-    (unsigned int)(uc_start),                           \
-}
-
-#define gSPLoadUcode(pkt, uc_start, uc_dstart)  \
-        gSPLoadUcodeEx((pkt), (uc_start), (uc_dstart), SP_UCODE_DATA_SIZE)
-#define gsSPLoadUcode(uc_start, uc_dstart)      \
-        gsSPLoadUcodeEx((uc_start), (uc_dstart), SP_UCODE_DATA_SIZE)
-
-#define gSPLoadUcodeL(pkt, ucode)                                   \
-        gSPLoadUcode((pkt), OS_K0_TO_PHYSICAL(& ucode##TextStart),  \
-                            OS_K0_TO_PHYSICAL(& ucode##DataStart))
-#define gsSPLoadUcodeL(ucode)                                       \
-        gsSPLoadUcode(      OS_K0_TO_PHYSICAL(& ucode##TextStart),  \
-                            OS_K0_TO_PHYSICAL(& ucode##DataStart))
-
 
 /*
- * gSPDma_io  DMA to/from DMEM/IMEM for DEBUG.
+ * Return from the current display list if the WHOLE 32-bit cull flags word is
+ * zero, i.e. none of the previous SPCullVerts commands set their flags.
  */
-#define gSPDma_io(pkt, flag, dmem, dram, size)      \
-_DW({                                               \
-    Gfx *_g = (Gfx *)(pkt);                         \
-                                                    \
-    _g->words.w0 = (_SHIFTL(G_DMA_IO, 24, 8) |      \
-                    _SHIFTL((flag), 23, 1) |        \
-                    _SHIFTL((dmem) / 8, 13, 10) |   \
-                    _SHIFTL((size) - 1, 0, 12));    \
-    _g->words.w1 = (unsigned int)(dram);            \
-})
-
-#define gsSPDma_io(flag, dmem, dram, size)  \
-{                                           \
-   (_SHIFTL(G_DMA_IO,   24,  8) |           \
-    _SHIFTL((flag),     23,  1) |           \
-    _SHIFTL((dmem) / 8, 13, 10) |           \
-    _SHIFTL((size) - 1,  0, 12)),           \
-    (unsigned int)(dram)                    \
-}
-
-#define gSPDmaRead(pkt,dmem,dram,size)  gSPDma_io((pkt),0,(dmem),(dram),(size))
-#define gsSPDmaRead(dmem,dram,size)     gsSPDma_io(     0,(dmem),(dram),(size))
-#define gSPDmaWrite(pkt,dmem,dram,size) gSPDma_io((pkt),1,(dmem),(dram),(size))
-#define gsSPDmaWrite(dmem,dram,size)    gsSPDma_io(     1,(dmem),(dram),(size))
+#define _gSPCullReturnRaw(pkt,hint)  gDma0p(pkt, G_CULLRETURN, 0, hint)
+#define _gsSPCullReturnRaw(hint)     gsDma0p(    G_CULLRETURN, 0, hint)
+/* Hint version -- use whenever possible. See SPEndDisplayListHint. */
+#define gSPCullReturnHint(pkt, count) _gSPCullReturnRaw( pkt, _DLHINTVALUE(count))
+#define gsSPCullReturnHint(    count) _gsSPCullReturnRaw(     _DLHINTVALUE(count))
+/* Non-hint version. */
+#define gSPCullReturn(pkt)  _gSPCullReturn( pkt, 0)
+#define gsSPCullReturn(  )  _gsSPCullReturn(     0)
 
 /*
- * Lighting Macros
+ * Pop the highest flag from the 32-bit cull flags word, and branch if
+ * it is clear (i.e. if the part of the object was offscreen).
  */
+#define _gSPCullCallRaw(pkt,dl,hint)   gDma1p(pkt, G_CULLBRANCH, dl, hint, G_DL_PUSH)
+#define _gsSPCullCallRaw(   dl,hint)   gsDma1p(    G_CULLBRANCH, dl, hint, G_DL_PUSH)
+#define _gSPCullBranchRaw(pkt,dl,hint) gDma1p(pkt, G_CULLBRANCH, dl, hint, G_DL_NOPUSH)
+#define _gsSPCullBranchRaw(   dl,hint) gsDma1p(    G_CULLBRANCH, dl, hint, G_DL_NOPUSH)
+/*
+ * Hint versions -- use whenever possible. See SPDisplayListHint.
+ * 
+ * There is an additional clever optimization here. The hint is for if the
+ * branch is taken, so in the case of offscreen objects, normally the next
+ * command being jumped to is another SPCullBranch. So, normally the hint is 1.
+ * However, the microcode also looks at the *next* flag--the one which that
+ * future SPCullBranch command will look at. If that flag is set, that next
+ * command won't branch but will continue to draw something. So in this case,
+ * the microcode clears the current SPCullBranch command's hint value, so that
+ * a full buffer of DL commands is loaded rather than just one.
+ */
+#define gSPDisplayListHint(pkt, dl, count) _gSPDisplayListRaw(pkt, dl, _DLHINTVALUE(count))
+#define gsSPDisplayListHint(    dl, count) _gsSPDisplayListRaw(    dl, _DLHINTVALUE(count))
+#define gSPBranchListHint(pkt, dl, count) _gSPBranchListRaw( pkt, dl, _DLHINTVALUE(count))
+#define gsSPBranchListHint(    dl, count) _gsSPBranchListRaw(     dl, _DLHINTVALUE(count))
+/* Non-hint versions. */
+#define gSPDisplayList(pkt, dl) _gSPDisplayListRaw(pkt, dl, 0)
+#define gsSPDisplayList(    dl) _gsSPDisplayListRaw(    dl, 0)
+#define gSPBranchList(pkt, dl)  _gSPBranchListRaw( pkt, dl, 0)
+#define gsSPBranchList(    dl)  _gsSPBranchListRaw(     dl, 0)
 
-#define G_MAX_LIGHTS 9
+
+
+/*
+ * Loads the cull flags value used by SPCullVerts / SPCullReturn / SPCullBranch.
+ * This can be used to programmatically enable / disable parts of a DL.
+ * 
+ * The cull flags value is a 32-bit word where flags are pushed / popped to the
+ * MSB. So for example, to set a single flag to 1 which will be checked with
+ * SPCullBranch or SPCullReturn, write the value 0x80000000. Or, to set a value
+ * which will branch-notbranch-branch-notbranch on the next four SPCullBranch
+ * commands, write the value 0x50000000.
+ */
+#define gSPLoadCullFlags(pkt, flags) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_CULL_FLAGS, (flags))
+#define gsSPLoadCullFlags(amb, flags) \
+    gsMoveWd(G_MW_FX, G_MWO_CULL_FLAGS, (flags))
+
+
+/*
+ * Lighting Commands
+ */
 
 #define NUML(n)    ((n) * 0x10)
 /*
@@ -2980,8 +3032,8 @@ _DW({ \
 
 
 /*
- * Camera world position. Set this whenever you set the VP matrix, viewport, etc.
- * cam is the name/address of a CameraWorld struct.
+ * Camera world position for Fresnel. Set this whenever you set the VP matrix,
+ * viewport, etc. cam is the name/address of a CameraWorld struct.
  */
 #define gSPCameraWorld(pkt, cam) \
     gDma2p((pkt), G_MOVEMEM, (cam), sizeof(CameraWorld), G_MV_LIGHT, 0)
@@ -3120,14 +3172,6 @@ _DW({                                                       \
    (_SHIFTL((s), 16, 16) |                              \
     _SHIFTL((t),  0, 16))                               \
 }
-
-#define gSPPerspNormalize(pkt, s)   gMoveWd(pkt, G_MW_PERSPNORM, 0, (s))
-#define gsSPPerspNormalize(s)       gsMoveWd(    G_MW_PERSPNORM, 0, (s))
-
-# define gSPPopMatrixN(pkt, n, num) gDma2p((pkt), G_POPMTX, (num) * 64, 64, 2, 0)
-# define gsSPPopMatrixN(n, num)     gsDma2p(      G_POPMTX, (num) * 64, 64, 2, 0)
-# define gSPPopMatrix(pkt, n)       gSPPopMatrixN((pkt), (n), 1)
-# define gsSPPopMatrix(n)           gsSPPopMatrixN(      (n), 1)
 
 /*
  *  One gSPGeometryMode(pkt,c,s) GBI is equal to these two GBIs.
@@ -4844,4 +4888,4 @@ _DW({                                                   \
 #define gDPNoOpCloseDisp(pkt, file, line)   gDma1p(pkt, G_NOOP, file, line, 8)
 #define gDPNoOpTag3(pkt, type, data, n)     gDma1p(pkt, G_NOOP, data, n, type)
 
-#endif /* MOD_ULTRA64_GBI_H */
+#endif /* F3DEX3_H */

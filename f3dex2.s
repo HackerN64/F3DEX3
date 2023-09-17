@@ -402,7 +402,7 @@ jumpTableEntry G_TRISTRIP_handler
 jumpTableEntry G_TRIFAN_handler
 jumpTableEntry G_LIGHTTORDP_handler
 jumpTableEntry G_CULLVERTS_handler
-jumpTableEntry G_CULLRET_handler
+jumpTableEntry G_CULLRETURN_handler
 jumpTableEntry G_CULLBRANCH_handler
 
 gCullMagicNumbers:
@@ -803,7 +803,7 @@ run_next_DL_command:
     addi    inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
     // $7 must retain the command byte for load_mtx and overlay 4 stuff
     // $11 must contain the handler called for several handlers
-    // $1 must remain zero (not currently needed)
+    // $1 must remain zero
     addi    $2, $7, -G_VTX                              // If >= G_VTX, use jump table
     bgez    $2, do_cmd_jump_table                       // $2 is the index
      addi   $3, $2, G_VTX - (0xFF00 | G_SETTIMG)        // If >= G_SETTIMG, use handler; for G_NOOP, this puts
@@ -814,19 +814,30 @@ do_cmd_jump_table:
      sll    $11, $2, 1                                  // Multiply jump table index by 2 for addr offset
     lhu     $11, cmdJumpTable($11)                      // Load address of handler from jump table
     jr      $11                                         // Jump to handler
-     // Delay slot must be harmless and not affect $1, $7, $11
+G_CULLRETURN_handler: // Delay slot must not affect $1, $7, $11
+     lw     $12, cullFlags                      // Do not move, needed for G_CULLBRANCH_handler
+    bnez    $12, run_next_DL_command            // End DL if all flags clear
+G_ENDDL_handler:
+     lbu    $5, displayListStackLength          // Load the DL stack index
+    beqz    $5, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
+     addi   $5, $5, -4                          // Decrement the DL stack index
+    j       call_ret_common                     // has a different version in ovl1
+     lw     taskDataPtr, (displayListStack)($5) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
 
-G_CULLBRANCH_handler:
-    lw      $12, cullFlags
-    sll     $2, $12, 1                // Pop value
-    bltz    $12, run_next_DL_command  // If flag popped set, continue DL
-     sw     $2, cullFlags             // Store updated value
-    bgez    $2, G_DL_handler          // Next flag is clear, so will branch if we are branching to
-     nop                              // another SPCullBranch, so leave count at 0xA0 (one instr)
-    andi    cmd_w0, cmd_w0, 0xFF00    // Clear byte 3 (count of how many cmds to drop)
 G_DL_handler:
-    lbu     $1, displayListStackLength  // Get the DL stack length
-    sll     $2, cmd_w0, 15              // Shifts the push/nopush value to the highest bit in $2
+G_CULLBRANCH_handler:
+    bltz    $7, skip_cullbranch        // Cmd negative = G_DL
+     sll    $2, cmd_w0, 15             // Shifts the push/nopush value to the highest bit in $2
+    sll     $1, $12, 1                 // Flags already in $12; pop value
+    xor     $12, $12, $2               // Swap whether to continue or not based on call/branch
+    bgez    $12, run_next_DL_command   // If flag popped set (1) and is branch (1), continue DL
+     sw     $1, cullFlags              // Store updated value
+skip_cullbranch:
+    // Next flag is clear, so will branch if we are branching to another SPCullBranch,
+    // so leave count at 0xA0 (one instr). Or, is G_DL and $1 = 0.
+    bgez    $1, branch_dl                   // Skip clearing the count
+     lbu    $5, displayListStackLength      // Get the DL stack length
+    andi    cmd_w0, cmd_w0, 0xFF00          // Clear byte 3 (count of how many cmds to drop)
 branch_dl:
     jal     segmented_to_physical
      add    $3, taskDataPtr, inputBufferPos // Current DL pos to push on stack
@@ -841,11 +852,11 @@ branch_dl:
      sub    taskDataPtr, cmd_w1_dram, $11   // Restore original taskDataPtr value
 
 call_dl:
-    sw      $3, (displayListStack)($1)
-    addi    $1, $1, 4                   // Increment the DL stack length
+    sw      $3, (displayListStack)($5)
+    addi    $5, $5, 4                   // Increment the DL stack length
 call_ret_common:
     j       displaylist_dma_with_count
-     sb     $1, displayListStackLength
+     sb     $5, displayListStackLength
 
 G_CULLDL_handler:
     j       vtx_addrs_from_cmd           // Load start vtx addr in $12, end vtx in $3
@@ -861,16 +872,6 @@ culldl_loop:
      addi   $12, $12, vtxSize           // advance to the next vertex
     j       G_ENDDL_handler
      la     cmd_w0, 0                    // Clear count of DL cmds to skip loading
-
-G_CULLRET_handler:
-    lw      $2, cullFlags
-    bnez    $2, run_next_DL_command             // End DL if all flags clear
-G_ENDDL_handler:
-     lbu    $1, displayListStackLength          // Load the DL stack index
-    beqz    $1, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
-     addi   $1, $1, -4                          // Decrement the DL stack index
-    j       call_ret_common                     // has a different version in ovl1
-     lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
 
 G_SETxIMG_handler:
     jal     segmented_to_physical

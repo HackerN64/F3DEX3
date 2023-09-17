@@ -86,7 +86,7 @@ G_TRISTRIP        equ 0x08
 G_TRIFAN          equ 0x09
 G_LIGHTTORDP      equ 0x0A
 G_CULLVERTS       equ 0x0B
-G_CULLRET         equ 0x0C
+G_CULLRETURN      equ 0x0C
 G_CULLBRANCH      equ 0x0D
 
 
