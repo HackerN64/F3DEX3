@@ -374,6 +374,8 @@ jumpTableEntry ovl234_ovl4_entrypoint  // G_MTX (multiply)
 jumpTableEntry G_MOVEMEM_end           // G_MOVEMEM, G_MTX (load)
 
 // RDP/Immediate Command Jump Table
+jumpTableEntry G_RETURNNONEVISIBLE_handler
+jumpTableEntry G_BOUNDINGVERTS_handler
 jumpTableEntry ovl234_ovl4_entrypoint // G_DMA_IO
 jumpTableEntry G_TEXTURE_handler
 jumpTableEntry G_POPMTX_handler
@@ -398,12 +400,10 @@ jumpTableEntry ovl234_ovl4_entrypoint // G_BRANCH_WZ
 jumpTableEntry G_TRI1_handler
 jumpTableEntry G_TRI2_handler
 jumpTableEntry G_QUAD_handler
+jumpTableEntry G_POPBRANCHCALL_handler
 jumpTableEntry G_TRISTRIP_handler
 jumpTableEntry G_TRIFAN_handler
 jumpTableEntry G_LIGHTTORDP_handler
-jumpTableEntry G_BOUNDINGVERTS_handler
-jumpTableEntry G_RETURNNONEVISIBLE_handler
-jumpTableEntry G_POPBRANCHCALL_handler
 
 gCullMagicNumbers:
 // Values added to cross product (16-bit sign extended).

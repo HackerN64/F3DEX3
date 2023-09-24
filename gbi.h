@@ -36,9 +36,9 @@
 /*
  * GBI commands in order
  */
-/*#define G_SPECIAL_3       0xD3  not supported in F3DEX3 */
-/*#define G_SPECIAL_2       0xD4  not supported in F3DEX3 */
-/*#define G_SPECIAL_1       0xD5  not supported in F3DEX3 */
+/*#define G_SPECIAL_3       0xD3  no-op in F3DEX2 */
+#define G_RETURNNONEVISIBLE 0xD4 /* = G_SPECIAL_2, no-op in F3DEX2 */
+#define G_BOUNDINGVERTS     0xD5 /* = G_SPECIAL_1, triggered MVP recalculation, not supported in F3DEX3 */
 #define G_DMA_IO            0xD6
 #define G_TEXTURE           0xD7
 #define G_POPMTX            0xD8
@@ -89,12 +89,10 @@
 #define G_TRI1              0x05
 #define G_TRI2              0x06
 #define G_QUAD              0x07
-#define G_TRISTRIP          0x08
-#define G_TRIFAN            0x09
-#define G_LIGHTTORDP        0x0A
-#define G_BOUNDINGVERTS     0x0B
-#define G_RETURNNONEVISIBLE 0x0C
-#define G_POPBRANCHCALL     0x0D
+#define G_POPBRANCHCALL     0x08 /* = G_LINE3D was a no-op in F3DEX2, has been removed */
+#define G_TRISTRIP          0x09
+#define G_TRIFAN            0x0A
+#define G_LIGHTTORDP        0x0B
 
 /* names differ between F3DEX2 and F3DZEX */
 #define G_BRANCH_Z G_BRANCH_WZ
@@ -2835,8 +2833,8 @@ _DW({                                               \
  * value in s15.16 format. Vertices whose transformed W value is greater than
  * or equal to this value will be considered "not visible".
  * 
- * This uses the generic RDP word. The other commands which will overwrite this
- * value are:
+ * This uses the generic RDP word (a 32-bit variable in RSP DMEM). The other
+ * commands which overwrite the value stored in this word are:
  * - SPBranchLess*
  * - All TextureRectangle commands
  * - SPPerspNormalize
@@ -2858,35 +2856,38 @@ _DW({                                               \
  * 2. If all verts have a transformed (clip space) W value greater than or equal
  *    to the threshold set with SPWFarThreshold, the sub-object is invisible.
  * 
+ * The flag in the bounding flags word is set if the object is visible or
+ * cleared if the object is invisible. The flag is always written to the MSB of
+ * the word; for what happens to the other bits, see mode below.
+ * 
  * The processing uses an early return, so as soon as at least one vertex is
  * close enough and at least one vertex is on the screen side of each clip
- * plane, the object is visible and the result is written. The flag is set if
- * the object is visible or cleared if the object is invisible.
+ * plane, the object is visible and the result is written. 
  * 
  * v: Address / name of an array containing a set of PlainVtx values (positions
  * only, no ST or RGBA). These vertices define a convex hull around a sub-
  * object. This may be, but is not required to be, an axis-aligned bounding box.
  * For example, for a flat object, you could provide the four corners of the
- * plane containing the object. For a sphere, an octahedron containing the
- * sphere has less wasted space than a cube, and it is only six vertices rather
- * than eight.
+ * plane containing the object. If your object is a sphere, a bounding
+ * octahedron containing the sphere has less wasted space than a cube, and it is
+ * only six vertices rather than eight.
  * 
  * n: Number of vertices, between 1 and 32. These vertices are loaded into
  * temporary memory and do not affect or overwrite the vertex buffer.
  * 
  * mode:
- * - G_BOUNDINGVERTS_REPLACE: clear the existing contents of the bounding flags
- *   word, and replace the first (MSB) flag with the result of this operation.
- *   For if this is the first or only sub-object within the larger object.
- * - G_BOUNDINGVERTS_PUSH: keep the existing contents of the bounding flags word
- *   and push the result of this operation onto the "stack" in that word. The
- *   word is 32 bits so you can load up to 32 sets of bounding vertices at a
- *   time, i.e. have up to 32 sub-objects within one larger object.
+ * - G_BOUNDINGVERTS_REPLACE: The bounding flags word is cleared before the
+ *   result of this operation is written. For if this is the first or only
+ *   sub-object within the larger object.
+ * - G_BOUNDINGVERTS_PUSH: The bounding flags word is shifted right one bit,
+ *   forming a stack with the new result pushed onto it. The word is 32 bits so
+ *   you can load up to 32 sets of bounding vertices at a time, i.e. have up to
+ *   32 sub-objects within one larger object.
  */
-#define _BOUNDINGVERTS_W0(n, mode)                                   \
-    (_SHIFTL(G_VTX,  24, 8) |                                        \
-     _SHIFTL((n),    11, 5) | /* Bytes 1-2, size in bytes, max 32 */ \
-     _SHIFTL((mode),  0, 8))
+#define _BOUNDINGVERTS_W0(n, mode)                                            \
+    (_SHIFTL(G_BOUNDINGVERTS, 24, 8) |                                        \
+     _SHIFTL((n),             11, 6) | /* Bytes 1-2, size in bytes, max 32 */ \
+     _SHIFTL((mode),           0, 8))
 #define gSPBoundingVerts(pkt, v, n, mode)      \
 _DW({                                          \
     Gfx *_g = (Gfx *)(pkt);                    \
@@ -2931,7 +2932,7 @@ _DW({                                          \
  * the hint is 1. However, the microcode also looks at the *next* flag--the one
  * which that future SPPopBranchNotVisibleHint command will look at. If that
  * flag is set, that next command won't branch but will continue to draw
- * something. So in this case, the microcode clears the current
+ * something. So if the next flag is set, the microcode clears the current
  * SPPopBranchNotVisibleHint command's hint value, so that a full buffer of DL
  * commands is loaded rather than just one.
  */
@@ -3007,10 +3008,8 @@ _DW({                                          \
 #define NUMLIGHTS_9 9
 
 /*
- * n should be an integer 0-9. F3DEX3 supports between 0 and 9 directional /
- * point lights, plus one required ambient light.
- * NOTE: in addition to the number of directional/point lights specified,
- *       there is always 1 ambient light
+ * Number of directional / point lights, in the range 0-9. There is also always
+ * one ambient light not counted in this number.
  */
 #define gSPNumLights(pkt, n)                            \
     gMoveWd(pkt, G_MW_NUMLIGHT, G_MWO_NUMLIGHT, NUML(n))
@@ -3036,7 +3035,7 @@ _DW({                                          \
  * 9 directional / point lights, you must use SPAmbient to load light 9
  * (LIGHT_10) with an ambient light. (That is, the memory for light 9 (LIGHT_10)
  * is only sizeof(Ambient), so if you load this with SPLight, it will overwrite
- * other DMEM and crash.)
+ * other DMEM and corrupt unrelated things.)
  * New code should not generally use SPLight, and instead use SPSetLights to set
  * all lights in one memory transaction.
  */
@@ -3809,36 +3808,59 @@ _DW({                                                               \
 }
 
 /*
- *  For RCP 2.0, the maximum number of texels that can be loaded
- *  using a load_block command is 2048.  In order to load the total
- *  4kB of Tmem, change the texel size when loading to be G_IM_SIZ_16b,
- *  then change the tile to the proper texel size after the load.
- *  The g*DPLoadTextureBlock macros already do this, so this change
- *  will be transparent if you use these macros.  If you use
- *  the g*DPLoadBlock macros directly, you will need to handle this
- *  tile manipulation yourself.  RJM.
+ * A new optimization in F3DEX3 discards a DPLoadBlock command if it is
+ * identical to the last DPLoadBlock command sent to the RDP. It also tracks
+ * the last DPSet*Img command sent and if a different image is set, the "last
+ * DPLoadBlock" memory is reset so the next DPLoadBlock will never be discarded.
+ * This of course saves RDP time if the same material is run repeatedly for
+ * many instances of the same object (assuming the object only has one texture
+ * and it is not CI).
+ * 
+ * The only way this can fail is when loading the same image to two addresses
+ * in TMEM but with the same tile (e.g. G_TX_LOADTILE) for multitexture (or for
+ * strange custom texture setups). This is not an issue for fast64 exports as if
+ * you create multitexture with the same texture twice, it only loads it once
+ * and points both render tiles to the same TMEM. Vanilla OoT does the same
+ * thing for the water. However, it is possible to write a DL which this
+ * optimization breaks.
+ * 
+ * This command `DPLoadBlockTag` can solve that problem: put a different
+ * arbitrary value in the tag field of each command, for example an incrementing
+ * counter. Then the commands will compare as different in the RSP and the
+ * second will not be discarded. The bits used for the tag are ignored by the
+ * RDP.
  */
-#define gDPLoadBlock(pkt, tile, uls, ult, lrs, dxt)                 \
+#define gDPLoadBlockTag(pkt, tag, tile, uls, ult, lrs, dxt)         \
 _DW({                                                               \
     Gfx *_g = (Gfx *)(pkt);                                         \
-                                                                    \
     _g->words.w0 = (_SHIFTL(G_LOADBLOCK, 24,  8) |                  \
                     _SHIFTL(uls,         12, 12) |                  \
                     _SHIFTL(ult,          0, 12));                  \
-    _g->words.w1 = (_SHIFTL(tile,                         24,  3) | \
+    _g->words.w1 = (_SHIFTL(tag,                          27,  5) | \
+                    _SHIFTL(tile,                         24,  3) | \
                     _SHIFTL(MIN(lrs, G_TX_LDBLK_MAX_TXL), 12, 12) | \
                     _SHIFTL(dxt,                           0, 12)); \
 })
-
-#define gsDPLoadBlock(tile, uls, ult, lrs, dxt)         \
+#define gsDPLoadBlockTag(tag, tile, uls, ult, lrs, dxt) \
 {                                                       \
    (_SHIFTL(G_LOADBLOCK, 24,  8) |                      \
     _SHIFTL(uls,         12, 12) |                      \
     _SHIFTL(ult,          0, 12)),                      \
-   (_SHIFTL(tile,                           24,  3) |   \
+   (_SHIFTL(tag,                            27,  5) |   \
+    _SHIFTL(tile,                           24,  3) |   \
     _SHIFTL((MIN(lrs, G_TX_LDBLK_MAX_TXL)), 12, 12) |   \
     _SHIFTL(dxt,                             0, 12))    \
 }
+
+/*
+ * Use __LINE__ as the tag to get different commands. Repeats every 32 lines.
+ * See DPLoadBlockTag above.
+ */
+#define gDPLoadBlock(pkt, tile, uls, ult, lrs, dxt) \
+    gDPLoadBlockTag(pkt, __LINE__, tile, uls, ult, lrs, dxt)
+#define gsDPLoadBlock(tile, uls, ult, lrs, dxt) \
+    gsDPLoadBlockTag(__LINE__, tile, uls, ult, lrs, dxt)
+
 
 #define gDPLoadTLUTCmd(pkt, tile, count)        \
 _DW({                                           \

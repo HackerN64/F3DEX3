@@ -44,27 +44,16 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   but without the Z fighting which can happen with the RDP's native decal mode.
   For ST, this enables UV scrolling without CPU intervention.
 
-### Improved existing features
-
-- Point lighting has been redesigned. The appearance when a light is close to an
-  object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where a Z
-  component was accidentally doubled in the point lighting calculations. The
-  quadratic point light attenuation factor is now an E3M5 floating-point number.
-  The performance penalty for point lighting has been reduced.
-- Maximum number of directional / point lights raised from 7 to 9. Minimum
-  number of directional / point lights lowered from 1 to 0 (F3DEX2 required at
-  least one). Also supports loading all lights in one DMA transfer
-  (`SPSetLights`), rather than one per light.
-- Clipped triangles are drawn by minimal overlapping scanlines algorithm; this
-  slightly improves RDP draw time for large tris.
-
-### New GBI features
+### New commands for performance
 
 - New `SPTriangleStrip` and `SPTriangleFan` commands pack up to 5 tris into one
   64-bit GBI command (up from 2 tris in F3DEX2). In any given object, most tris
   can be drawn with these commands, with only a few at the end drawn with
   `SP2Triangles` or `SP1Triangle`, so this cuts the triangle portion of display
   lists roughly in half.
+- New system for culling objects which are offscreen or far away, which saves
+  memory traffic, RSP time, and even RDP time compared to the old commands
+  `SPCullDL` and `SPBranchLessZ*`. See "Bounding vertices system" below.
 - New `SPAlphaCompareCull` command enables culling of triangles whose computed
   shade alpha values are all below or above a settable threshold. This
   substantially reduces the performance penalty of cel shading--only tris which
@@ -76,30 +65,101 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   tint colors of cel shading to match scene lighting with no code intervention.
   Possibly useful for other lighting-dependent effects.
 
-### Cull flags system
+### Improved existing features
 
-Managing what is drawn at runtime based on what is in front of the camera is an
-important part of performance optimization. F3DEX2 provided two types of this
-management:
-- For culling things which are outside the camera viewport: disable lighting in
-  the geometry mode. Load a set of 8 vertices which forms an axis-aligned
-  bounding box around the object (actually, the microcode supports up to 32
-  vertices, and they can form any convex hull around the object, not just an
-  axis-aligned bounding box). While the vertices are loaded, their clip flags
-  are generated. Run `SPCullDL` and provide the indices of the vertices to
-  examine. The clip flags of the vertices are examined and if there is any
-  screen clipping plane where all vertices are on the far side of, the object is
-  fully offscreen and effectively `SPEndDisplayList` is run to cull the current
-  object.
-- For switching between display lists representing the same object at different
-  levels of detail depending on distance: disable lighting in the geometry mode.
-  Load one vertex which represents the position of the object. Run `SPBranchZ`
-  which compares the vertex's screen space Z position (or in F3DZEX, the clip
-  space W position) to a given value. If the vertex is closer to the camera than
-  that value, effectively `SPBranchList` is run to jump to the higher LoD
-  version.
+- Point lighting has been redesigned. The appearance when a light is close to an
+  object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where a Z
+  component was accidentally doubled in the point lighting calculations. The
+  quadratic point light attenuation factor is now an E3M5 floating-point number.
+  The performance penalty for point lighting has been reduced.
+- Maximum number of directional / point lights raised from 7 to 9. Minimum
+  number of directional / point lights lowered from 1 to 0 (F3DEX2 required at
+  least one). Also supports loading all lights in one DMA transfer
+  (`SPSetLights`), rather than one per light.
 
-The new cull flags system improves upon these features in the following ways:
+### HLE-compatible cycle-shaving optimizations for Kaze Emanuar
+
+- The 56 vertex buffer is compatible with Kaze's supported HLE because it
+  incorrectly supports 64 vertices for all microcodes.
+- The new culling system is compatible with Kaze's supported HLE because it uses
+  command encodings which were previously treated as no-ops, and DLs can be
+  structured so that if all the new commands are ignored, the full objects are
+  always drawn.
+- "Hints" system encodes the expected size of the target display list into call,
+  branch, and return DL commands. This allows only the needed number of DL
+  commands in the next DL to be fetched, rather than always fetching full
+  buffers, saving some DRAM traffic (maybe around 100 us per frame).
+- Microcode discards certain texture loads if they are identical to the last
+  texture load. This dramatically reduces the performance penalty of repeatedly
+  loading the same texture for instances of the same object--assuming the
+  objects have only one texture, that texture is not CI, and that texture is of
+  appropriate size so that it is loaded with `DPLoadBlock` rather than
+  `DPLoadTile`.
+- Clipped triangles are drawn by minimal overlapping scanlines algorithm; this
+  slightly improves RDP draw time for large tris (max of about 500 us per frame,
+  usually much less or zero)
+
+
+## Bounding vertices system
+
+The features of this system are easiest to understand with an example. Suppose
+you have five houses in a scene, and each house has a chimney. The following
+display list draws the chimneys, but culls each one if it is offscreen or too
+far away, and skips the texture and material load if they are ALL not drawn.
+
+```
+Gfx chimneys_dl[] = {
+// Set the W value representing the threshold at which the chimneys will be
+// culled if they are farther than this. If you don't want objects to disappear
+// no matter how far away they are, use 0x7FFFFFFF here.
+gsSPWFarThreshold(0x01000000),
+// Load vertices representing a bounding shape around one chimney, and check if
+// this is on screen and close enough. Initialize the bounding flags results.
+gsSPBoundingVerts(house1ChimneyBoundingBox, 8, G_BOUNDINGVERTS_REPLACE),
+// Load bounding boxes around the other chimneys. Push each result on the stack.
+gsSPBoundingVerts(house2ChimneyBoundingBox, 8, G_BOUNDINGVERTS_PUSH),
+gsSPBoundingVerts(house3ChimneyBoundingBox, 8, G_BOUNDINGVERTS_PUSH),
+gsSPBoundingVerts(house4ChimneyBoundingBox, 8, G_BOUNDINGVERTS_PUSH),
+gsSPBoundingVerts(house5ChimneyBoundingBox, 8, G_BOUNDINGVERTS_PUSH),
+// Return from this DL--skip the texture load--if all chimneys are invisible.
+gsSPReturnNoneVisibleHint(1), // About hints: see SPEndDisplayListHint
+// Load the chimney material.
+gsDPLoadTextureBlock(...),
+...
+// Pop the visibility flag for chimney 5. If it is clear, branch past drawing
+// chimney 5.
+gsSPPopBranchNotVisibleHint(chimneys_dl_4, 1),
+// Draw chimney 5.
+gsSPVertex(...),
+gsSP2Triangles(...),
+...
+// no gsSPEndDisplayList(); continue directly into the next display list.
+};
+Gfx chimneys_dl_4[] = {
+// Pop the visibility flag for chimney 4. If it is clear, branch past drawing
+// chimney 4.
+gsSPPopBranchNotVisibleHint(chimneys_dl_3, 1),
+// Draw chimney 4.
+gsSPVertex(...),
+gsSP2Triangles(...),
+...
+};
+Gfx chimneys_dl_3[] = {
+// Repeat until chimney 1.
+// Instead of popping the visibility flag for chimney 1, just return if
+// invisible.
+gsSPReturnNoneVisibleHint(1),
+// Draw chimney 1.
+gsSPVertex(...),
+gsSP2Triangles(...),
+...
+gsSPEndDisplayList()
+};
+
+```
+
+The advantages of this system over the old `SPCullDL` and `SPBranchLessZ*` system
+are:
 - The vertices which are being examined for their positions are 8 bytes each
   (X Y Z 0 shorts), not full vertices with ignored ST and RGBA, halving their
   space occupied in the object/scene and the memory traffic.
@@ -108,89 +168,33 @@ The new cull flags system improves upon these features in the following ways:
 - Not only is lighting computation never performed on these vertices regardless
   of the lighting geometry mode flags (manually disabling lighting is not
   necessary), a large chunk of the per-vertex processing is also skipped.
-- Instead of comparing screen Z or clip W, which are obnoxious to calculate and
-  depend on VP and viewport values, the vertices are compared by distance to
-  the camera in world space.
-- The on-screen and closer results are stored into a 24-bit flags value, and
-  actions can then be taken based on masked groups of flags from this saved
-  value.
-- The developer is not limited to "end display list if offscreen" and "branch
-  display list if closer than value". The three actions of end display list,
-  branch to display list, and call display list can be mapped to conditions
-  being met or not met.
-- The same flags value can also be modified directly by DL commands, or masks
-  can be loaded from DRAM and applied to it, to allow code to more easily affect
-  the rendering of objects.
+- Both on-screen and distance are evaluated as part of the same operation,
+  unlike vanilla where these were evaluated separately (and practically,
+  `SPBranchLessZ*` was used rarely and only for LoD, not for distance culling).
+- W is used to represent depth like in F3DZEX. Using W instead of Z to represent
+  distance makes its computation independent of obscure RDP Z-buffer parameters.
+  Unlike comparing distance in world coordinates, W is correlated to the
+  object's effective size on screen; in other words, if you zoom in the camera
+  without moving it, objects which were previously too far away will reappear.
+- Results from many sub-objects are pushed into the same bounding flags value.
+  Not only does this allow materials to be skipped, but the flags can then be
+  popped and the individual sub-objects culled without any further processing.
+- The bounding flags value can be written directly with `SPLoadBoundingFlags`,
+  allowing parts of DLs to be easily enabled or disabled from CPU code.
+- F3DEX3 also provides `SPPopCallVisible`; F3DEX2 did not directly have a method
+  for calling display lists based on culling results, only branching. Note that
+  it is generally recommended to use the pattern in the code example above
+  rather than calling sub-DLs with `SPPopCallVisible`, due to DL command buffer
+  considerations and HLE compatibility.
 
-Here is an example of how this system can save both RDP time and memory
-bandwidth, on top of the savings due to the shorter vertex encoding. Suppose you
-have a material for a house chimney, and five houses in your scene which all
-have chimneys.
-- Set the max distance to the camera parameter as appropriate for the scene so
-  that the chimneys will disappear if they are very far away.
-- Load vertices with the new system which describe the convex hull of the first
-  chimney. Set bits 0 and 1 of the flags: 1 means the chimney was close enough,
-  and 0 means it was both close enough and on screen from clipping.
-- Load vertices for the convex hull of the second chimney, setting bits 2 and 3.
-- Repeat for the other chimneys, now occupying a total of bits 0-9.
-- Return if none of the bits are set in the mask of bits {0, 2, 4, 6, 8}. This
-  means, continue if at least one chimney needs to be drawn. Note that this is
-  not equivalent to having one big bounding box covering all the chimneys--this
-  big box may be on screen even if the individual chimneys are not.
-- Run the material setup for the chimney bricks, including the relatively
-  expensive texture load on the RDP. This will have gotten skipped if none of
-  the chimneys are on screen.
-- Branch to Point A in the display list if none of the bits are set in the mask
-  of bits {0}. This means, the first chimney does not need to be drawn because
-  it was off screen or too far away. This saves both loading its vertices, and
-  loading its bounding box again, since the results from the first time are
-  reused.
-- Load the verts for the first chimney.
-- Draw the tris for the first chimney.
-- [Point A] Branch to Point B if none of the bits are set in the mask of bits
-  {2}. Same as above.
-- Repeat for the other chimneys.
-- The last chimney would return if none of the bits were set in its mask, rather
-  than branching forward.
-- Return.
+`SPCullDL` and `SPBranchLessZ*` are still supported for backwards compatibility.
+`SPCullDL` is just like in F3DEX2 but the new system will be faster than it.
+`SPBranchLessZ*` is moved to overlay 4 (see below) so it will be slower than it
+was in F3DEX2.
 
-The GBI for all of this looks like:
-- `SPFlagsVerts`: Loads up to 32 vertex positions, encoded as XYZ0 shorts
-  (no ST / RGBA). These do not overwrite or affect the vertex buffer. Sets
-  "bit 1" if at least one vert is closer to the camera than the threshold
-  in world coords (i.e. object is close, should use higher LoD). Sets
-  "bit 0" if "bit 1" is set AND if at least one vert is on the screen side
-  of each clip plane (i.e. object is close enough and not culled due to
-  offscreen). The shift of "bit 0" / "bit 1" within the flags word is
-  selected by a field in the command.
-- `SPFlags1Vert`: Same as `SPFlagsVerts`, but for one vertex only, which is
-  encoded in the command instead of taking a DMA transfer.
-- `SPFlagsDist`: Sets the distance threshold in the RDP generic word
-  (`G_RDPHALF_1`). The only other commands which overwrite this are
-  `SPBranchLessZ*`, `SPLoadUcode*`, `SP*TextureRectangle*`, `DPWord`, and
-  `SPPerspNormalize`.
-- `SPFlagsLoad` / `SPFlagsSet` / `SPFlagsClear` / `SPFlagsModify`: All the
-  same underlying instruction `SPFlagsMasks`. Instruction contains a 24 bit
-  mask which is ANDed with the flags word, and then a 24 bit mask which is
-  ORed with the flags word. `SPFlagsLoad` clears all flags then sets
-  selected flags. `SPFlagsSet` just sets the selected flags and
-  `SPFlagsClear` just clears the selected flags. `SPFlagsModify` sets flags
-  within a selectable group.
-- `SPFlagsDram`: Loads 64 bits from the given segmented address, and then
-  applies it to the flags as an AND and OR mask like the previous
-  instruction.
-- `SPCullFlagsNone`, `SPCullFlagsSome`, `SPCullFlagsAll`, `SPCullFlagsNotAll`:
-  24 bit mask. Cull (`SPEndDisplayList`) if none, some (at least one), all,
-  or not all (at least one clear) of the flags within the mask are set.
-- `SPBranchFlagsNone`, `SPBranchFlagsSome`, `SPBranchFlagsAll`,
-  `SPBranchFlagsNotAll`: same but branch (jump) to segmented address.
-- `SPCallFlagsNone`, `SPCallFlagsSome`, `SPCallFlagsAll`, `SPCallFlagsNotAll`:
-  same but call segmented address.
-
-`SPCullDL` and `SPBranchZ` are still supported for backwards compatibility.
-`SPCullDL` is just like in F3DEX2 but this will be slower than the new system.
-`SPBranchZ` is moved to overlay 4 (see below) so it will be slower than it was
-in F3DEX2.
+Also note that bounding shapes do not have to be axis-aligned bounding boxes;
+they did not have to be in previous F3D* versions either. Any convex shape
+containing your object is allowed; for more info see `SPBoundingVerts`.
 
 
 ## Porting Your Romhack Codebase to F3DEX3
