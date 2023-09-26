@@ -2596,7 +2596,7 @@ _DW({                                                        \
  * SPMITMatrix every time you change the M matrix. The DRAM traffic for the
  * extra matrix uploads is much smaller than the overlay swaps, so if you can
  * efficiently compute M inverse transpose on the CPU, this may be faster than
- * M_NORMALS_MODE_AUTO.
+ * G_NORMALS_MODE_AUTO.
  * 
  * Recommended to leave this set to G_NORMALS_MODE_FAST generally, and only set
  * it to G_NORMALS_MODE_AUTO for specific objects at times when they actually

@@ -68,7 +68,7 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
 ### Improved existing features
 
 - Point lighting has been redesigned. The appearance when a light is close to an
-  object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where a Z
+  object has been improved. Fixed a bug in F3DEX2 point lighting where a Z
   component was accidentally doubled in the point lighting calculations. The
   quadratic point light attenuation factor is now an E3M5 floating-point number.
   The performance penalty for point lighting has been reduced.
@@ -79,7 +79,7 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
 
 ### HLE-compatible cycle-shaving optimizations for Kaze Emanuar
 
-- The 56 vertex buffer is compatible with Kaze's supported HLE because it
+- The 56 vertex buffer is compatible with Kaze's supported HLE because that HLE
   incorrectly supports 64 vertices for all microcodes.
 - The new culling system is compatible with Kaze's supported HLE because it uses
   command encodings which were previously treated as no-ops, and DLs can be
@@ -88,7 +88,8 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
 - "Hints" system encodes the expected size of the target display list into call,
   branch, and return DL commands. This allows only the needed number of DL
   commands in the next DL to be fetched, rather than always fetching full
-  buffers, saving some DRAM traffic (maybe around 100 us per frame).
+  buffers, saving some DRAM traffic (maybe around 100 us per frame). The bits
+  used for this are ignored by HLE.
 - Microcode discards certain texture loads if they are identical to the last
   texture load. This dramatically reduces the performance penalty of repeatedly
   loading the same texture for instances of the same object--assuming the
@@ -158,8 +159,8 @@ gsSPEndDisplayList()
 
 ```
 
-The advantages of this system over the old `SPCullDL` and `SPBranchLessZ*` system
-are:
+The advantages of this system over the old `SPCullDL` and `SPBranchLessZ*`
+system are:
 - The vertices which are being examined for their positions are 8 bytes each
   (X Y Z 0 shorts), not full vertices with ignored ST and RGBA, halving their
   space occupied in the object/scene and the memory traffic.
@@ -209,9 +210,9 @@ There is only one build-time option for F3DEX3: enable `CFG_G_BRANCH_W` if the
 microcode is replacing F3DZEX, otherwise do not enable this option if the
 microcode is replacing F3DEX2 or an earlier F3D version. Enabling this option
 makes `SPBranchLessZ*` use the vertex's W coordinate, otherwise it uses the
-screen Z coordinate. New display lists should use the cull flags system instead
-of `SPBranchLessZ*`, so this only matters for vanilla display lists used in your
-romhack.
+screen Z coordinate. New display lists should use the bounding vertices system
+instead of `SPBranchLessZ*`, so this only matters for vanilla display lists used
+in your romhack.
 
 ### Required Changes
 
@@ -236,16 +237,24 @@ romhack.
 
 ### Recommended Changes (Non-Lighting)
 
-- Whenever your code sends camera properties to the RSP (VP matrix, viewport,
-  etc.), also set the camera world position with `SPCameraWorld`. This is
-  required for the cull flags system and for Fresnel.
+- If you are using Fresnel at all, whenever your code sends camera properties to
+  the RSP (VP matrix, viewport, etc.), also send the camera world position to
+  the RSP with `SPCameraWorld`.
 - Clean up any code using the deprecated, hacky `SPLookAtX` and `SPLookAtY` to
-  use `SPLookAt` instead (this is only a few lines change).
-- Other nop commands
-- Don't use matrix multiply in the RSP
+  use `SPLookAt` instead (this is only a few lines change). Also remove any
+  code which writes `SPClipRatio` or `SPForceMatrix`--these are now no-ops, so
+  you might as well not write them.
+- Make sure your game engine computes a matrix stack on the CPU and sends the
+  final matrix for each object / limb to the RSP, rather than multiplying
+  matrices on the RSP (i.e. avoid using `G_MTX_MUL` in `SPMatrix`). OoT already
+  does this for precision / accuracy reasons and only uses `G_MTX_MUL` in a
+  couple obscure places; it is okay to leave those. This is because the
+  `G_MTX_MUL` mode of `SPMatrix` has been moved to Overlay 4 in F3DEX3, making
+  it substantially slower than it was in F3DEX2. It still functions the same
+  though so you can use it if it's really needed.
 - Re-export as many display lists (scenes, objects, skeletons, etc.) as possible
   with fast64 set to F3DEX3 mode, to take advantage of the substantially larger
-  vertex buffer and triangle packing commands.
+  vertex buffer, triangle packing commands, "hints" system, etc.
 
 ### Recommended Changes (Lighting)
 
@@ -271,38 +280,41 @@ romhack.
   you will need to redesign how game engine light parameters (e.g. "light
   radius") map to these parameters.
 
-
 ### C GBI Backwards Compatibility with F3DEX2
 
 F3DEX3 is backwards compatible with F3DEX2 at the C GBI level for all commands
 except:
 
+- The `G_SPECIAL_*` command IDs have been removed. `G_SPECIAL_2` and
+  `G_SPECIAL_3` were no-ops in F3DEX2, and `G_SPECIAL_1` was a trigger to
+  recalculate the MVP matrix. There is no MVP matrix in F3DEX3 so this is
+  useless.
 - `G_LINE3D` (and `Gfx.line`) has been removed. This command did not actually
   work in F3DEX2 (it behaved as a no-op).
-- `G_MW_CLIP` has been removed, and `g*SPClipRatio` has been converted into a
+- `G_MW_CLIP` has been removed, and `SPClipRatio` has been converted into a
   no-op. Clipping is handled differently in F3DEX3 and cannot be changed from 2.
-- `G_MV_MATRIX` and `G_MW_FORCEMTX` have been removed, and `g*SPForceMatrix` has
-  been converted into a no-op. This is because there is no MVP matrix in F3DEX3.
-- `G_MVO_LOOKATX` and `G_MVO_LOOKATY` have been removed, and `g*SPLookAtX` and
-  `g*SPLookAtY` are deprecated. `g*SPLookAtX` has been changed to set both
-  directions and `g*SPLookAtY` has been converted to a no-op. To set the lookat
-  directions, use `g*SPLookAt`. The lookat directions are now in one 8-byte DMA
+- `G_MV_MATRIX`, `G_MW_MATRIX`, and `G_MW_FORCEMTX` have been removed, and
+  `SPForceMatrix` has been converted into a no-op. This is because there is no
+  MVP matrix in F3DEX3.
+- `G_MVO_LOOKATX` and `G_MVO_LOOKATY` have been removed, and `SPLookAtX` and
+  `SPLookAtY` are deprecated. `SPLookAtX` has been changed to set both
+  directions and `SPLookAtY` has been converted to a no-op. To set the lookat
+  directions, use `SPLookAt`. The lookat directions are now in one 8-byte DMA
   word, so they must always be set at the same time as each other. Most of the
   non-functional fields (e.g. color) of `LookAt` and its sub-types have been
   removed, so code which accesses these fields needs to change. Code which only
   accesses lookat directions should be compatible with no changes.
-- TODO update: `g*SPLight` cannot be used to load an ambient light into light 7 (`LIGHT_8`).
-  It can be used to load directional, point, or ambient lights into lights 0-6
-  (`LIGHT_1` through `LIGHT_7`). To load an ambient light into light 7
-  (`LIGHT_8`) (or to load an ambient light into any slot), use `g*SPAmbient`.
-  Note that you can now load all your lights with one command, `g*SPSetLights`;
-  there is no need to set them one-at-a-time with `g*SPLight` (though you can).
+- As discussed above, the `pad1` field of `Light_t` is renamed to `type` and
+  must be set to zero.
+- If you do not raise the maximum number of lights from 7 to 9, the lighting GBI
+  commands are backwards compatible. However, if you do raise the number of
+  lights, you must use `SPAmbient` to write the ambient light, as discussed
+  above. Note that you can now load all your lights with one command,
+  `SPSetLights`.
 - `G_MV_POINT` has been removed. This was not used in any command; it would have
   likely been used for debugging to copy vertices from DMEM to examine them.
-  This does not affect `g*SPModifyVertex`, which is still supported.
-
- need relatively minor fixes due to
-using removed things. The rest of the OoT codebase does not need code changes.
+  This does not affect `g*SPModifyVertex`, which is still supported, though this
+  is moved to Overlay 4 so it will be slower than in F3DEX2.
 
 ### Binary Display List Backwards Compatibility with F3DEX2
 
@@ -316,12 +328,14 @@ The deprecated commands mentioned above in the C GBI section have had their
 encodings changed (the original encodings will do bad things / crash). In
 addition, the following other commands have had their encodings changed, making
 them binary incompatible:
-- All lighting-related commands, e.g. `gdSPDefLights*`, `g*SPNumLights`,
-  `g*SPLight`, `g*SPLightColor`, `g*SPSetLights*`, `g*SPLookAt`. The basic
-  lighting data structures `Light_t`, `PosLight_t`, and `Ambient_t` have not
-  changed, but `LookAt_t` and all the larger data structures such as `Lightsn`,
-  `Lights*`, and `PosLights*` have changed.
+- All lighting-related commands, e.g. `gdSPDefLights*`, `SPNumLights`,
+  `SPLight`, `SPLightColor`, `SPLookAt`. The basic lighting data structures
+  `Light_t`, `PosLight_t`, and `Ambient_t` have not changed (except for the
+  requirement to set `type` to zero in directional lights), but `LookAt_t` and
+  all the larger data structures such as `Lightsn`, `Lights*`, and `PosLights*`
+  have changed.
 - `g*SPPerspNormalize` binary encoding has changed.
+
 
 ## What are the tradeoffs for all these new features?
 
@@ -349,35 +363,76 @@ with starting and stopping RSP tasks. During normal display list execution,
 Overlay 1 is always loaded.)
 
 F3DEX3 introduces a third overlay, Overlay 4, which can occupy the same IMEM as
-Overlay 2 and 3. This overlay contains code to compute the inverse transpose of
-the model matrix M (abbreviated as mIT), and also contains code for handling
-certain display list commands which are rarely executed (`SPLightToRDP`,
-`SPFlagsDram`, `SPModifyVertex`, `SPBranchZ`, and the codepath for `SPMatrix`
-with `G_MTX_MUL` set). The computation of mIT is needed whenever vertices are
-loaded, lighting is enabled, and mIT is out of date (i.e. M has been updated).
-In other words, for every moving object or skeleton limb which has lighting
-enabled, the RSP has to load Overlay 4 once to compute mIT and then load Overlay
-2 to do all the lighting.
+Overlay 2 and 3. This overlay contains handlers for:
+- Computing the inverse transpose of the model matrix M (abbreviated as mIT),
+  discussed below
+- The codepath for `SPMatrix` with `G_MTX_MUL` set
+- `SPBranchLessZ*`
+- `SPModifyVertex`
+- `SPDma_io`
 
-Loading the IMEM overlay space with Overlay 4 and then reloading Overlay 2 into
-the same space takes about 3.5 microseconds of DRAM time including overheads.
-This means, for a scene containing 100 moving objects / skeleton limbs in your
-scene, the memory will be occupied for an additional 1.4 ms per frame. Some work
-on the CPU and RDP can overlap with this, but generally you can assume that
-means the frame takes about 350 microseconds longer per 100 matrices. Note that
-most scenes are less complex than this (I'd be impressed if you can make a scene
-with 100 nontrivial moving objects / limbs which renders within the 50 ms per
-frame). Particles, which of course occupy a lot of matrices, typically don't
-have lighting, so they will not need either Overlay 2 or 4--please don't use
-lighting on particles in F3DEX3!
+Whenever any of these features is needed, the RSP has to swap to Overlay 4. The
+next time lighting or clipping is needed, the RSP has to then swap back to
+Overlay 2 or 3. The round-trip of these two overlay loads takes about 3.5
+microseconds of DRAM time including overheads. Fortunately, all the above
+features other than the mIT matrix are rarely or never used.
 
-If you're wondering why mIT is needed in F3DEX3, it's because normals are
-covectors--they stretch in the opposite direction of an object's scaling. So
-while you multiply a vertex by M to transform it from model space to world
-space, you have to multiply a normal by M inverse transpose to go to world
-space. F3DEX2 solves this problem by instead transforming light directions into
-model space with M transpose, and computing the lighting in model space.
-However, this requires extra DMEM to store the transformed lights, and adds an
-additional performance penalty for point lighting which is absent in F3DEX3.
-Plus, having things in world space enables the cull flags system based on vertex
-distance to the camera, and the Fresnel feature.
+The mIT matrix is needed in F3DEX3 because normals are covectors--they stretch
+in the opposite direction of an object's scaling. So while you multiply a vertex
+by M to transform it from model space to world space, you have to multiply a
+normal by M inverse transpose to go to world space. F3DEX2 solves this problem
+by instead transforming light directions into model space with M transpose, and
+computing the lighting in model space. However, this requires extra DMEM to
+store the transformed lights, and adds an additional performance penalty for
+point lighting which is absent in F3DEX3. Plus, having world space normals
+enables the Fresnel feature.
+
+If an object's transformation matrix stack only included translations,
+rotations, and uniform scale (i.e. same scale in X, Y, and Z), then M inverse
+transpose is just a rescaled version of M, and the normals can be transformed
+with M directly. It is only when the matrix includes nonuniform scales or shear
+that M inverse transpose differs from M. The difference gets larger as the scale
+or shear gets more extreme.
+
+F3DEX3 provides three options for handling this (see `SPNormalsMode`):
+- `G_NORMALS_MODE_FAST`: Use M to transform normals. No performance penalty.
+  Lighting will be slightly wrong for objects with nonuniform scale or shear.
+- `G_NORMALS_MODE_AUTO`: The RSP will automatically compute M inverse transpose
+  whenever M changes. Costs about 3.5 microseconds of DRAM time per matrix, i.e.
+  per object or skeleton limb which has lighting enabled. Lighting is correct
+  for nonuniform scale or shear.
+- `G_NORMALS_MODE_MANUAL`: You compute M inverse transpose on the CPU and
+  manually upload it to the RSP every time M changes.
+
+It is recommended to use `G_NORMALS_MODE_FAST` (the default) for most things,
+and use `G_NORMALS_MODE_AUTO` only for objects while they currently have a
+nonuniform scale (e.g. Mario only while he is squashed).
+
+### Optimizing for RSP code size
+
+A number of over-zealous optimizations in F3DEX2 which saved a cycle or two but
+took several more instructions have been removed. F3DEX3 will be slightly slower
+than F3DEX2 in RSP cycles (not DRAM traffic or RDP time), especially for large
+quantities of very short commands. Note that for certain codepaths such as point
+lighting, the RSP will now be faster than in F3DEX2, and the improved
+performance from all the new microcode features should more than make up for
+these slight reductions in efficiency.
+
+### Far clipping removal
+
+The removal of far clipping saved a substantial amount of DMEM.
+
+### RDP temporary buffers shrinking
+
+In FIFO version of F3DEX2, there are two DMEM buffers to hold RDP commands
+generated by the microcode, which are swapped and copied to the FIFO in DRAM.
+These each had the capacity of between two and three full-size triangle commands
+(i.e. triangles with shade, texture, and Z-buffer). For short commands (e.g.
+texture loads, color combiner, etc.) there is a minor performance gain from
+having longer buffers in DMEM which are swapped to DRAM less frequently. And, if
+a substantial portion of triangles were rendered without shade or texture such
+that three tris could fit per buffer, being able to fit the three tris would
+also slightly improve performance. However, in practice, the vast majority of
+the FIFO is occupied by these full-size tris, so the buffers are effectively
+only two tris in size because a third tri can't fit. So, their size has been
+reduce to two tris, saving a substantial amount of DMEM.
