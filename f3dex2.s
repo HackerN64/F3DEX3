@@ -2490,48 +2490,13 @@ ovl234_clipping_entrypoint_ovl4ver:  // same IMEM address as ovl234_clipping_ent
 
 ovl4_select_instr:
     beq     $11, $7, calc_mit // otherwise $7 = command byte
-     li     $12, (0xFF00 | G_MTX)
-    beq     $12, $7, G_MTX_end
-     li     $11, G_BRANCH_WZ
-    beq     $11, $7, G_BRANCH_WZ_handler
-     li     $12, G_MODIFYVTX
-    beq     $12, $7, G_MODIFYVTX_handler
-     li     $11, (0xFF00 | G_DMA_IO)
-    beq     $11, $7, G_DMA_IO_handler
-     // Otherwise G_LIGHTTORDP, which starts with a harmless instruction
-     nop    // TODO
-
-G_DMA_IO_handler:
-    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
-     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
-    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
-    // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
-    // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
-    sra     dmemAddr, dmemAddr, 2
-    j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
-     li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
-
-G_MODIFYVTX_handler:
-    j       vtx_addrs_from_cmd          // byte 3 = vtx being modified; addr -> $12
-     li     $11, modifyvtx_return_from_addrs
-modifyvtx_return_from_addrs:
-    j       do_moveword                 // Moveword adds cmd_w0 to $12 for final addr
-     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)
-
-G_BRANCH_WZ_handler:
-    j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $12
-     li     $11, branchwz_return_from_addrs
-branchwz_return_from_addrs:
-.if CFG_G_BRANCH_W                            // G_BRANCH_W/G_BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
-    lh      $12, VTX_W_INT($12)         // read the w coordinate of the vertex (f3dzex)
-.else
-    lw      $12, VTX_SCR_Z($12)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
-.endif
-    sub     $2, $12, cmd_w1_dram           // subtract the w/z value being tested
-    bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
-     lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
-    j       branch_dl                    // need $2 < 0 for nopush and cmd_w1_dram
-     move   cmd_w0, $zero                // No count of DL cmds to skip
+     li     $12, G_BRANCH_WZ
+    beq     $12, $7, G_BRANCH_WZ_handler
+     li     $11, G_MODIFYVTX
+    beq     $11, $7, G_MODIFYVTX_handler
+     li     $12, (0xFF00 | G_DMA_IO)
+    beq     $12, $7, G_DMA_IO_handler
+     // Otherwise G_MTX_end, which starts with a harmless instruction
 
 G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
 output_mtx  equ $19
@@ -2570,6 +2535,38 @@ input_mtx_0 equ $21
     sqv     $v7[0], 0x0030(output_mtx)
     j       run_next_DL_command
      sqv    $v6[0], 0x0010(output_mtx)
+
+G_DMA_IO_handler:
+    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
+     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
+    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
+    // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
+    // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
+    sra     dmemAddr, dmemAddr, 2
+    j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
+     li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
+
+G_MODIFYVTX_handler:
+    j       vtx_addrs_from_cmd          // byte 3 = vtx being modified; addr -> $12
+     li     $11, modifyvtx_return_from_addrs
+modifyvtx_return_from_addrs:
+    j       do_moveword                 // Moveword adds cmd_w0 to $12 for final addr
+     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)
+
+G_BRANCH_WZ_handler:
+    j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $12
+     li     $11, branchwz_return_from_addrs
+branchwz_return_from_addrs:
+.if CFG_G_BRANCH_W                            // G_BRANCH_W/G_BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
+    lh      $12, VTX_W_INT($12)         // read the w coordinate of the vertex (f3dzex)
+.else
+    lw      $12, VTX_SCR_Z($12)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
+.endif
+    sub     $2, $12, cmd_w1_dram           // subtract the w/z value being tested
+    bgez    $2, run_next_DL_command           // if vtx.w/z >= cmd w/z, continue running this DL
+     lw     cmd_w1_dram, rdpHalf1Val          // load the RDPHALF1 value as the location to branch to
+    j       branch_dl                    // need $2 < 0 for nopush and cmd_w1_dram
+     move   cmd_w0, $zero                // No count of DL cmds to skip
 
 calc_mit:
     /*

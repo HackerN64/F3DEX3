@@ -90,7 +90,7 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   commands in the next DL to be fetched, rather than always fetching full
   buffers, saving some DRAM traffic (maybe around 100 us per frame). The bits
   used for this are ignored by HLE.
-- Microcode discards certain texture loads if they are identical to the last
+- F3DEX3 discards certain texture loads if they are identical to the last
   texture load. This dramatically reduces the performance penalty of repeatedly
   loading the same texture for instances of the same object--assuming the
   objects have only one texture, that texture is not CI, and that texture is of
@@ -98,7 +98,7 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
   `DPLoadTile`.
 - Clipped triangles are drawn by minimal overlapping scanlines algorithm; this
   slightly improves RDP draw time for large tris (max of about 500 us per frame,
-  usually much less or zero)
+  usually much less or zero).
 
 
 ## Bounding vertices system
@@ -169,6 +169,9 @@ system are:
 - Not only is lighting computation never performed on these vertices regardless
   of the lighting geometry mode flags (manually disabling lighting is not
   necessary), a large chunk of the per-vertex processing is also skipped.
+- The per-vertex processing uses an early return, so once the object is
+  determined to be visible, no further vertices are processed. (This only saves
+  RSP time, not DRAM traffic, as all the vertices are loaded at the beginning.)
 - Both on-screen and distance are evaluated as part of the same operation,
   unlike vanilla where these were evaluated separately (and practically,
   `SPBranchLessZ*` was used rarely and only for LoD, not for distance culling).
@@ -180,6 +183,9 @@ system are:
 - Results from many sub-objects are pushed into the same bounding flags value.
   Not only does this allow materials to be skipped, but the flags can then be
   popped and the individual sub-objects culled without any further processing.
+  Examining bounding shapes around multiple sub-objects can often determine that
+  all the sub-objects are offscreen, while one giant bounding shape containing
+  all the sub-objects may be onscreen.
 - The bounding flags value can be written directly with `SPLoadBoundingFlags`,
   allowing parts of DLs to be easily enabled or disabled from CPU code.
 - F3DEX3 also provides `SPPopCallVisible`; F3DEX2 did not directly have a method
@@ -200,40 +206,64 @@ containing your object is allowed; for more info see `SPBoundingVerts`.
 
 ## Porting Your Romhack Codebase to F3DEX3
 
-With a couple minor exceptions, F3DEX3 is generally backwards compatible with
-F3DEX2 at the C GBI level. So, for an OoT or MM codebase, just use the new
-`gbi.h` and the new microcode and clean/rebuild your project; only a couple very
-small changes in the OoT codebase are needed from there. However, more changes
-are recommended to increase performance and enable new features.
+For an OoT codebase, only a few minor changes are required to use F3DEX3.
+However, more changes are recommended to increase performance and enable new
+features.
 
 There is only one build-time option for F3DEX3: enable `CFG_G_BRANCH_W` if the
-microcode is replacing F3DZEX, otherwise do not enable this option if the
-microcode is replacing F3DEX2 or an earlier F3D version. Enabling this option
-makes `SPBranchLessZ*` use the vertex's W coordinate, otherwise it uses the
-screen Z coordinate. New display lists should use the bounding vertices system
-instead of `SPBranchLessZ*`, so this only matters for vanilla display lists used
-in your romhack.
+microcode is replacing F3DZEX (i.e. OoT or MM), otherwise do not enable this
+option if the microcode is replacing F3DEX2 or an earlier F3D version (i.e.
+SM64). Enabling this option makes `SPBranchLessZ*` use the vertex's W
+coordinate, otherwise it uses the screen Z coordinate. New display lists should
+use the bounding vertices system instead of `SPBranchLessZ*`, so this only
+matters for vanilla display lists used in your romhack.
+
+How to modify the microcode in your HackerOoT based romhack (steps may be
+similar for other games):
+- Replace `include/ultra64/gbi.h` in your romhack with `gbi.h` from this repo.
+- Make the "Required Changes" listed below.
+- Build this repo (`make F3DEX3`).
+- Copy the microcode binaries (`build/F3DEX3/F3DEX3.code` and
+  `build/F3DEX3/F3DEX3.data`) to somewhere in your romhack repo, e.g. `data`.
+- In `data/rsp.rodata.s`, change the line between `fifoTextStart` and
+  `fifoTextEnd` to `.incbin "data/F3DEX3.code"` (or wherever you put the
+  binary), and similarly change the line between `fifoDataStart` and
+  `fifoDataEnd` to `.incbin "data/F3DEX3.data"`. After both the `fifoTextEnd`
+  and `fifoDataEnd` labels, add a line `.balign 16`.
+- If you are planning to ever update the microcode binaries in the future,
+  add the following to the Makefile of your romhack, after the section starting
+  with `build/data/%.o` (i.e. two lines after that, with a blank line before
+  and after): `build/data/rsp.rodata.s: data/F3DEX3.code data/F3DEX3.data`. It
+  is not a mistake that this new line you are adding won't have a second
+  indented line after it; it is like the `message_data_static` lines below that.
+  This will tell `make` to rebuild `rsp.rodata.s` whenever the microcode
+  binaries are changed.
+- Clean and build your romhack (`make clean`, `make`).
+- Test your romhack and confirm that everything works as intended.
+- Make as many of the "Recommended changes" listed below as possible.
 
 ### Required Changes
 
-- A few small modifications to `ucode_disas.c` and `lookathil.c` in OoT are
-  needed to not use things which have been removed from the GBI (see GBI Changes
-  section below). Use the compiler errors to guide you for what to remove;
-  these removals do not affect normal game functionality.
-- Change your game engine lighting code to set the `type` field to 0 in the
-  initialization of any directional light (`Light_t` and derived structs like
-  `Light` or `Lightsn`). F3DEX3 ignores the state of the `G_LIGHTING_POSITIONAL`
-  geometry mode bit in all display lists, meaning both directional and point
-  lights are supported for all display lists (including vanilla). The light is
-  identified as directional if `type` == 0 or point if `kc` > 0 (`kc` and `type`
-  are the same byte). This change is required because otherwise garbage nonzero
-  values may be put in the padding byte, leading directional lights to be
-  misinterpreted as point lights.
-- Be aware that far clipping is completely removed in F3DEX3. Far clipping is
-  not intentionally used for performance or aesthetic reasons in levels in
-  either SM64 or OoT, though it can be seen in certain extreme cases. However,
-  it is used on the SM64 title screen for the zoom-in on Mario's face, so this
-  will look slightly different.
+- Remove uses of obscure GBI features which have been removed in F3DEX3 (see
+  "C GBI Compatibility" section below for full list). In OoT, the only changes
+  needed are:
+    - In `src/code/ucode_disas.c`, remove the switch statement cases for
+      `G_LINE3D`, `G_MW_CLIP`, `G_MV_MATRIX`, `G_MVO_LOOKATX`, and
+      `G_MVO_LOOKATY`.
+    - In `src/libultra/gu/lookathil.c`, remove the lines which set the `col`,
+    - `colc`, and `pad` fields.
+- Change your game engine lighting code to set the `type` (formerly `pad1`)
+  field to 0 in the initialization of any directional light (`Light_t` and
+  derived structs like `Light` or `Lightsn`). F3DEX3 ignores the state of the
+  `G_LIGHTING_POSITIONAL` geometry mode bit in all display lists, meaning both
+  directional and point lights are supported for all display lists (including
+  vanilla). The light is identified as directional if `type` == 0 or point if
+  `kc` > 0 (`kc` and `type` are the same byte). This change is required because
+  otherwise garbage nonzero values may be put in the padding byte, leading
+  directional lights to be misinterpreted as point lights.
+    - The change needed in OoT is: in `src/code/z_lights.c`, in
+      `Lights_BindPoint`, `Lights_BindDirectional`, and `Lights_NewAndDraw`, set
+      `l.type` to 0 right before setting `l.col`.
 
 ### Recommended Changes (Non-Lighting)
 
@@ -249,12 +279,20 @@ in your romhack.
   matrices on the RSP (i.e. avoid using `G_MTX_MUL` in `SPMatrix`). OoT already
   does this for precision / accuracy reasons and only uses `G_MTX_MUL` in a
   couple obscure places; it is okay to leave those. This is because the
-  `G_MTX_MUL` mode of `SPMatrix` has been moved to Overlay 4 in F3DEX3, making
-  it substantially slower than it was in F3DEX2. It still functions the same
-  though so you can use it if it's really needed.
+  `G_MTX_MUL` mode of `SPMatrix` has been moved to Overlay 4 in F3DEX3 (see
+  below), making it substantially slower than it was in F3DEX2. It still
+  functions the same though so you can use it if it's really needed.
 - Re-export as many display lists (scenes, objects, skeletons, etc.) as possible
   with fast64 set to F3DEX3 mode, to take advantage of the substantially larger
   vertex buffer, triangle packing commands, "hints" system, etc.
+- Once everything in your romhack is ported to F3DEX3 and everything is stable,
+  `#define NO_SYNCS_IN_TEXTURE_LOADS` and fix any crashes or graphical issues
+  that arise. Display lists exported from fast64 already do not contain these
+  syncs, but vanilla display lists or custom ones using the texture loading
+  multi-command macros do. Disabling the syncs saves a few percent of RDP cycles
+  for each material setup; what percentage this is of the total RDP time depends
+  on how many triangles are typically drawn between each material change. For
+  more information, see the GBI documentation near this define.
 
 ### Recommended Changes (Lighting)
 
@@ -280,7 +318,10 @@ in your romhack.
   you will need to redesign how game engine light parameters (e.g. "light
   radius") map to these parameters.
 
-### C GBI Backwards Compatibility with F3DEX2
+
+## Backwards Compatibility with F3DEX2
+
+### C GBI Compatibility
 
 F3DEX3 is backwards compatible with F3DEX2 at the C GBI level for all commands
 except:
@@ -314,9 +355,9 @@ except:
 - `G_MV_POINT` has been removed. This was not used in any command; it would have
   likely been used for debugging to copy vertices from DMEM to examine them.
   This does not affect `g*SPModifyVertex`, which is still supported, though this
-  is moved to Overlay 4 so it will be slower than in F3DEX2.
+  is moved to Overlay 4 (see below) so it will be slower than in F3DEX2.
 
-### Binary Display List Backwards Compatibility with F3DEX2
+### Binary Display List Compatibility
 
 F3DEX3 is generally binary backwards compatible with OoT-style display lists for
 objects, scenes, etc. It is not compatible at the binary level with SM64-style
@@ -334,7 +375,7 @@ them binary incompatible:
   requirement to set `type` to zero in directional lights), but `LookAt_t` and
   all the larger data structures such as `Lightsn`, `Lights*`, and `PosLights*`
   have changed.
-- `g*SPPerspNormalize` binary encoding has changed.
+- `SPPerspNormalize` binary encoding has changed.
 
 
 ## What are the tradeoffs for all these new features?
@@ -362,8 +403,8 @@ for every set of `SP*Triangle*` commands.
 with starting and stopping RSP tasks. During normal display list execution,
 Overlay 1 is always loaded.)
 
-F3DEX3 introduces a third overlay, Overlay 4, which can occupy the same IMEM as
-Overlay 2 and 3. This overlay contains handlers for:
+F3DEX3 introduces Overlay 4, which can occupy the same IMEM as Overlay 2 and 3.
+This overlay contains handlers for:
 - Computing the inverse transpose of the model matrix M (abbreviated as mIT),
   discussed below
 - The codepath for `SPMatrix` with `G_MTX_MUL` set
@@ -411,28 +452,35 @@ nonuniform scale (e.g. Mario only while he is squashed).
 ### Optimizing for RSP code size
 
 A number of over-zealous optimizations in F3DEX2 which saved a cycle or two but
-took several more instructions have been removed. F3DEX3 will be slightly slower
-than F3DEX2 in RSP cycles (not DRAM traffic or RDP time), especially for large
-quantities of very short commands. Note that for certain codepaths such as point
-lighting, the RSP will now be faster than in F3DEX2, and the improved
+took several more instructions have been removed. F3DEX3 will often be slightly
+slower than F3DEX2 in RSP cycles (not DRAM traffic or RDP time), especially for
+large quantities of very short commands. Note that for certain codepaths such as
+point lighting, the RSP will now be faster than in F3DEX2, and the improved
 performance from all the new microcode features should more than make up for
 these slight reductions in efficiency.
 
 ### Far clipping removal
 
-The removal of far clipping saved a substantial amount of DMEM.
+Far clipping is completely removed in F3DEX3. Far clipping is not intentionally
+used for performance or aesthetic reasons in levels in vanilla SM64 or OoT,
+though it can be seen in certain extreme cases. However, it is used on the SM64
+title screen for the zoom-in on Mario's face, so this will look slightly
+different.
+
+The removal of far clipping saved a bunch of DMEM space, and enabled other
+changes to the clipping implementation which saved even more DMEM space.
 
 ### RDP temporary buffers shrinking
 
-In FIFO version of F3DEX2, there are two DMEM buffers to hold RDP commands
+In FIFO versions of F3DEX2, there are two DMEM buffers to hold RDP commands
 generated by the microcode, which are swapped and copied to the FIFO in DRAM.
-These each had the capacity of between two and three full-size triangle commands
+These each had the capacity of two-and-a-fraction full-size triangle commands
 (i.e. triangles with shade, texture, and Z-buffer). For short commands (e.g.
 texture loads, color combiner, etc.) there is a minor performance gain from
 having longer buffers in DMEM which are swapped to DRAM less frequently. And, if
 a substantial portion of triangles were rendered without shade or texture such
 that three tris could fit per buffer, being able to fit the three tris would
 also slightly improve performance. However, in practice, the vast majority of
-the FIFO is occupied by these full-size tris, so the buffers are effectively
-only two tris in size because a third tri can't fit. So, their size has been
-reduce to two tris, saving a substantial amount of DMEM.
+the FIFO is occupied by full-size tris, so the buffers are effectively only two
+tris in size because a third tri can't fit. So, their size has been reduced to
+two tris, saving a substantial amount of DMEM.
