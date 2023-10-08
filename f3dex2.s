@@ -818,11 +818,11 @@ G_RETURNNONEVISIBLE_handler: // Delay slot must not affect $1, $7, $11
      lw     $12, boundingFlags                  // Do not move, needed for G_POPBRANCHCALL_handler
     bnez    $12, run_next_DL_command            // End DL if all flags clear
 G_ENDDL_handler:
-     lbu    $5, displayListStackLength          // Load the DL stack index
-    beqz    $5, load_overlay_0_and_enter        // Load overlay 0 if there is no DL return address, to end the graphics task processing; $1 < 0
-     addi   $5, $5, -4                          // Decrement the DL stack index
+     lbu    $1, displayListStackLength          // Load the DL stack index; if end stack,
+    beqz    $1, load_overlay_0_and_enter        // load overlay 0; $1 < 0 signals end
+     addi   $1, $1, -4                          // Decrement the DL stack index
     j       call_ret_common                     // has a different version in ovl1
-     lw     taskDataPtr, (displayListStack)($5) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
+     lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
 
 G_DL_handler:
 G_POPBRANCHCALL_handler:
@@ -836,7 +836,7 @@ skip_popbranchcall:
     // Next flag is clear, so will branch if we are branching to another SPPopBranchNotVisible,
     // so leave count at 0xA0 (one instr). Or, is G_DL and $1 = 0.
     bgez    $1, branch_dl                   // Skip clearing the count
-     lbu    $5, displayListStackLength      // Get the DL stack length
+     lbu    $1, displayListStackLength      // Get the DL stack length
     li      cmd_w0, 0                       // Clear count of how many cmds to drop
 branch_dl:
     jal     segmented_to_physical
@@ -852,11 +852,11 @@ branch_dl:
      sub    taskDataPtr, cmd_w1_dram, $11   // Restore original taskDataPtr value
 
 call_dl:
-    sw      $3, (displayListStack)($5)
-    addi    $5, $5, 4                   // Increment the DL stack length
+    sw      $3, (displayListStack)($1)
+    addi    $1, $1, 4                   // Increment the DL stack length
 call_ret_common:
     j       displaylist_dma_with_count
-     sb     $5, displayListStackLength
+     sb     $1, displayListStackLength
 
 G_CULLDL_handler:
     j       vtx_addrs_from_cmd           // Load start vtx addr in $12, end vtx in $3
