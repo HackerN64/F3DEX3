@@ -3699,8 +3699,8 @@ _DW({                                                   \
  * numbers of cycles. It is the smallest number for load, a medium number for
  * tile, and the largest number for pipe. These syncs do NOT wait until
  * something is finished being used; they just stall for a fixed time.
- * (DPFullSync is different and DOES wait for memory use to be done; that is not
- * considered in this explanation.)
+ * (DPFullSync is different and DOES wait for writebacks to memory to be done;
+ * that is not considered in this explanation.)
  * 
  * Syncs always happen after rendering something and before changing some
  * settings. In other words:
@@ -3738,19 +3738,20 @@ _DW({                                                   \
  * If you are doing multitexture and/or CI texture loads, use a different tile
  * for each load, and then you don't need any syncs in the loads. As an extreme
  * example with two CI textures:
- * - (previous pipe sync, either at the start of this DL or the end of the last)
- * - set tile 7 to load texture 0 CIs
- * - load block on tile 7
- * - set tile 5 to load texture 0 palette
- * - load block on tile 5
- * - set tile 6 to load texture 1 CIs
- * - load block on tile 6
- * - set tile 4 to load texture 1 palette
- * - load block on tile 4
- * - set tile 0 for render texture 0
- * - set tile 1 for render texture 0
- * - set othermode, CC, etc.
- * - draw tris
+ * - previous pipe sync, either at the start of this DL or the end of the last
+ * - set tile 7 to load texture 0 CIs (no syncs)
+ * - load block on tile 7 (no syncs)
+ * - set tile 5 to load texture 0 palette (no syncs)
+ * - load block on tile 5 (no syncs)
+ * - set tile 6 to load texture 1 CIs (no syncs)
+ * - load block on tile 6 (no syncs)
+ * - set tile 4 to load texture 1 palette (no syncs)
+ * - load block on tile 4 (no syncs)
+ * - set tile 0 for render texture 0 (no syncs)
+ * - set tile 1 for render texture 0 (no syncs)
+ * - set othermode, CC, etc. (no syncs)
+ * - draw tris (no syncs)
+ * - next pipe sync, either at the end of this DL or the start of the next
  * Both fast64 and the multi-command macros in this GBI if
  * NO_SYNCS_IN_TEXTURE_LOADS is enabled do this, but if you wrote the DLs by
  * hand or they were vanilla DLs not using the multi-command macros, they may
@@ -3910,7 +3911,7 @@ _DW({                                                               \
  * A new optimization in F3DEX3 discards a DPLoadBlock command if it is
  * identical to the last DPLoadBlock command sent to the RDP. It also tracks
  * the last DPSet*Img command sent and if a different image is set, the "last
- * DPLoadBlock" memory is reset so the next DPLoadBlock will not be discarded.
+ * DPLoadBlock" value is reset so the next DPLoadBlock will not be discarded.
  * This of course saves RDP time if the same material is run repeatedly for
  * many instances of the same object, assuming the object only has one texture
  * and it is not CI.

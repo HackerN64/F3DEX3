@@ -233,11 +233,11 @@ similar for other games):
 - If you are planning to ever update the microcode binaries in the future,
   add the following to the Makefile of your romhack, after the section starting
   with `build/data/%.o` (i.e. two lines after that, with a blank line before
-  and after): `build/data/rsp.rodata.s: data/F3DEX3.code data/F3DEX3.data`. It
+  and after): `build/data/rsp.rodata.o: data/F3DEX3.code data/F3DEX3.data`. It
   is not a mistake that this new line you are adding won't have a second
   indented line after it; it is like the `message_data_static` lines below that.
-  This will tell `make` to rebuild `rsp.rodata.s` whenever the microcode
-  binaries are changed.
+  This will tell `make` to rebuild `rsp.rodata.o`, which includes the microcode
+  binaries, whenever they are changed.
 - Clean and build your romhack (`make clean`, `make`).
 - Test your romhack and confirm that everything works as intended.
 - Make as many of the "Recommended changes" listed below as possible.
@@ -251,7 +251,7 @@ similar for other games):
       `G_LINE3D`, `G_MW_CLIP`, `G_MV_MATRIX`, `G_MVO_LOOKATX`, and
       `G_MVO_LOOKATY`.
     - In `src/libultra/gu/lookathil.c`, remove the lines which set the `col`,
-    - `colc`, and `pad` fields.
+      `colc`, and `pad` fields.
 - Change your game engine lighting code to set the `type` (formerly `pad1`)
   field to 0 in the initialization of any directional light (`Light_t` and
   derived structs like `Light` or `Lightsn`). F3DEX3 ignores the state of the
@@ -274,14 +274,14 @@ similar for other games):
   use `SPLookAt` instead (this is only a few lines change). Also remove any
   code which writes `SPClipRatio` or `SPForceMatrix`--these are now no-ops, so
   you might as well not write them.
-- Make sure your game engine computes a matrix stack on the CPU and sends the
-  final matrix for each object / limb to the RSP, rather than multiplying
-  matrices on the RSP (i.e. avoid using `G_MTX_MUL` in `SPMatrix`). OoT already
-  does this for precision / accuracy reasons and only uses `G_MTX_MUL` in a
-  couple obscure places; it is okay to leave those. This is because the
-  `G_MTX_MUL` mode of `SPMatrix` has been moved to Overlay 4 in F3DEX3 (see
-  below), making it substantially slower than it was in F3DEX2. It still
-  functions the same though so you can use it if it's really needed.
+- Avoid using `G_MTX_MUL` in `SPMatrix`. That is, make sure your game engine
+  computes a matrix stack on the CPU and sends the final matrix for each object
+  / limb to the RSP, rather than multiplying matrices on the RSP. OoT already
+  does the former for precision / accuracy reasons and only uses `G_MTX_MUL` in
+  a couple obscure places; it is okay to leave those. This change is recommended
+  because the `G_MTX_MUL` mode of `SPMatrix` has been moved to Overlay 4 in
+  F3DEX3 (see below), making it substantially slower than it was in F3DEX2. It
+  still functions the same though so you can use it if it's really needed.
 - Re-export as many display lists (scenes, objects, skeletons, etc.) as possible
   with fast64 set to F3DEX3 mode, to take advantage of the substantially larger
   vertex buffer, triangle packing commands, "hints" system, etc.
