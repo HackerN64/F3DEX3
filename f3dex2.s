@@ -780,7 +780,7 @@ displaylist_dma_with_count:
 displaylist_dma:
     // Load INPUT_BUFFER_LEN - inputBufferPos cmds (inputBufferPos >= 0, mult of 8)
     addi    inputBufferPos, inputBufferPos, -INPUT_BUFFER_LEN // inputBufferPos = - num cmds
-    xori    dmaLen, inputBufferPos, 0xFFFF             // DMA length = -inputBufferPos - 1 = ones compliment
+    nor     dmaLen, inputBufferPos, $zero              // DMA length = -inputBufferPos - 1 = ones compliment
     move    cmd_w1_dram, taskDataPtr                   // set up the DRAM address to read from
     jal     dma_read_write                             // initiate the DMA read
      addi   dmemAddr, inputBufferPos, inputBufferEnd   // set the address to DMA read to
@@ -837,7 +837,7 @@ skip_popbranchcall:
     // so leave count at 0xA0 (one instr). Or, is G_DL and $1 = 0.
     bgez    $1, branch_dl                   // Skip clearing the count
      lbu    $5, displayListStackLength      // Get the DL stack length
-    andi    cmd_w0, cmd_w0, 0xFF00          // Clear byte 3 (count of how many cmds to drop)
+    li      cmd_w0, 0                       // Clear count of how many cmds to drop
 branch_dl:
     jal     segmented_to_physical
      add    $3, taskDataPtr, inputBufferPos // Current DL pos to push on stack
@@ -2169,9 +2169,9 @@ G_LIGHTTORDP_handler:
     lbu     $1, (inputBufferEnd - 0x6)(inputBufferPos) // Byte 2 = light count from end * size
     andi    $2, cmd_w0, 0x00FF           // Byte 3 = alpha
     sub     $1, $11, $1                  // Light address; byte 2 counts from end
-    lw      $3, (lightBufferMain)($1)    // Load light RGB
+    lw      $3, (lightBufferMain-1)($1)  // Load light RGB into lower 3 bytes
     move    cmd_w0, cmd_w1_dram          // Move second word to first (cmd byte, prim level)
-    andi    $3, $3, 0xFF00               // Get rid of whatever was in alpha value
+    sll     $3, $3, 8                    // Shift light RGB to upper 3 bytes and clear alpha byte
     j       G_RDP_handler                // Send to RDP
      or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
 

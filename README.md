@@ -470,6 +470,9 @@ different.
 The removal of far clipping saved a bunch of DMEM space, and enabled other
 changes to the clipping implementation which saved even more DMEM space.
 
+NoN (No Nearclipping) is also mandatory in F3DEX3, though this was already the
+microcode option used in OoT.
+
 ### RDP temporary buffers shrinking
 
 In FIFO versions of F3DEX2, there are two DMEM buffers to hold RDP commands

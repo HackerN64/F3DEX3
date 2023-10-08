@@ -155,10 +155,10 @@ VTX_INV_W_INT   equ 0x20
 VTX_INV_W_FRAC  equ 0x22
   VTX_CLIP      equ 0x24
 
-// Clipping flags. Bits 0-3, 8-11, etc. contain garbage (values from another
-// vertex or zeros) and are not used. Also, the bits for comparisons to W in
-// clip ratio scaled clipping are actually for Z, but only X and Y are used in
-// clip ratio scaled clipping.
+// Clipping flags. Initially, only the bits below are valid, and bits 0-3 and
+// 8-11 are from the other vertex of the pair. Once the results are combined and
+// stored to the internal vertex, the bits below are for scaled clipping, and
+// 0-3 and 8-11 (the ones below shifted down 4) are for screen clipping.
 CLIP_SHIFT_NX equ 4
 CLIP_SHIFT_NY equ 5
 CLIP_SHIFT_NZ equ 6
