@@ -1559,6 +1559,32 @@ vtx_skip_fog:
     jr      $ra
      ssv    $v20[4],          (VTX_SCR_Z     )(outputVtxPos)
 
+/*
+// Draft of occlusion plane
+    vclr    $v30
+    vsub    $v26, $v30, $v31[5] // 0x4000; $v26 = 0xC000 = -0x4000
+    vadd    $v30, $v30, $v31[5] // 0x4000; $v30 = 0x4000
+    vmudh   $v20, vPairTPosI, $v31[4] // 4; scale up x and y
+    lqv     $v21, (planeEdgeCoeffs - altBase)(altBaseReg)
+    vmulf   $v29, $v20, $v21[0]        // 4 * X * coef 0
+    vmacf   $v25, $v26, vPairTPosI[1h] //   - Y * 0x4000 (elems 0, 4)
+    vmulf   $v29, $v20, $v21[1]        // 4 * Y * coef 1
+    vmacf   $v26, $v26, vPairTPosI[0h] //   - X * 0x4000 (elems 1, 5)
+    vmulf   $v29, $v20, $v21[2]        // 4 * X * coef 2
+    vmacf   $v28, $v30, vPairTPosI[1h] //   + Y * 0x4000 (elems 2, 6)
+    vmulf   $v29, $v20, $v21[3]        // 4 * Y * coef 3
+    vmacf   $v30, $v30, vPairTPosI[0h] //   + X * 0x4000 (elems 3, 7)
+    ldv     $v21[0], (planeEdgeCoeffs + 8 - altBase)(altBaseReg)
+    vlt     $v29, $v31, $v31[2h]       // Set VCC to 11001100
+    vmrg    $v25, $v25, $v28           // Elems 0, 2, 4, 6
+    vmrg    $v26, $v26, $v30           // Elems 1, 3, 5, 7
+    veq     $v29, $v31, $v31[0q]       // Set VCC to 10101010
+    vmrg    $v25, $v25, $v26           // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
+    vge     $v29, $v25, $v21           // Each compare to coeffs 4-7
+    cfc2    $20, $vcc // TODO process this
+    
+*/
+
 vtx_addrs_from_cmd:
     // Treat eight bytes of last command each as vertex indices << 1
     // inputBufferEnd is close enough to the end of DMEM to fit in signed offset

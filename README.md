@@ -323,8 +323,8 @@ similar for other games):
 
 ### C GBI Compatibility
 
-F3DEX3 is backwards compatible with F3DEX2 at the C GBI level for all commands
-except:
+F3DEX3 is backwards compatible with F3DEX2 at the C GBI level for all features
+and commands except:
 
 - The `G_SPECIAL_*` command IDs have been removed. `G_SPECIAL_2` and
   `G_SPECIAL_3` were no-ops in F3DEX2, and `G_SPECIAL_1` was a trigger to
@@ -333,7 +333,8 @@ except:
 - `G_LINE3D` (and `Gfx.line`) has been removed. This command did not actually
   work in F3DEX2 (it behaved as a no-op).
 - `G_MW_CLIP` has been removed, and `SPClipRatio` has been converted into a
-  no-op. Clipping is handled differently in F3DEX3 and cannot be changed from 2.
+  no-op. Clipping is handled differently in F3DEX3 and the clip ratio cannot be
+  changed from 2.
 - `G_MV_MATRIX`, `G_MW_MATRIX`, and `G_MW_FORCEMTX` have been removed, and
   `SPForceMatrix` has been converted into a no-op. This is because there is no
   MVP matrix in F3DEX3.
@@ -425,10 +426,10 @@ normal by M inverse transpose to go to world space. F3DEX2 solves this problem
 by instead transforming light directions into model space with M transpose, and
 computing the lighting in model space. However, this requires extra DMEM to
 store the transformed lights, and adds an additional performance penalty for
-point lighting which is absent in F3DEX3. Plus, having world space normals
-enables the Fresnel feature.
+point lighting which is absent in F3DEX3. Plus, having world space normals in
+F3DEX3 enables the Fresnel feature.
 
-If an object's transformation matrix stack only included translations,
+If an object's transformation matrix stack only includes translations,
 rotations, and uniform scale (i.e. same scale in X, Y, and Z), then M inverse
 transpose is just a rescaled version of M, and the normals can be transformed
 with M directly. It is only when the matrix includes nonuniform scales or shear
@@ -487,3 +488,16 @@ also slightly improve performance. However, in practice, the vast majority of
 the FIFO is occupied by full-size tris, so the buffers are effectively only two
 tris in size because a third tri can't fit. So, their size has been reduced to
 two tris, saving a substantial amount of DMEM.
+
+## Credits
+
+F3DEX3 modifications from F3DEX2 by Sauraen. If you use F3DEX3 in a romhack,
+please credit "F3DEX3 Microcode - Sauraen" in your project's in-game Staff Roll
+or wherever other contributors to your project are credited.
+
+Other credits:
+- Wiseguy: large chunk of F3DEX2 disassembly documentation and first version of
+  build system
+- Kaze Emanuar: several feature suggestions, testing
+- thecozies: Fresnel feature suggestion
+- Tharo: feature discussions

@@ -2670,12 +2670,12 @@ typedef union {
  * The idea is to cull tris early on the RSP which won't have any of their
  * fragments drawn on the RDP, to save RDP time and memory bandwidth.
  */
-#define _ALPHACOMPWORD(mode, thresh) \
-    (_SHIFTL((mode), 24, 8) | _SHIFTL((thresh), 16, 8))
 #define gSPAlphaCompareCull(pkt, mode, thresh) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, _ALPHACOMPWORD(mode, thresh))
+    gMoveWd(pkt, G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, \
+        (_SHIFTL((mode), 24, 8) | _SHIFTL((thresh), 16, 8)))
 #define gsSPAlphaCompareCull(mode, thresh) \
-    gsMoveWd(G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, _ALPHACOMPWORD(mode, thresh))
+    gsMoveWd(G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, \
+        (_SHIFTL((mode), 24, 8) | _SHIFTL((thresh), 16, 8)))
 
 
 /*
