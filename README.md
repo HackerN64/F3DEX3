@@ -1,4 +1,6 @@
-# F3DEX3
+# F3DEX3 has moved!
+
+**Please go to https://github.com/HackerN64/F3DEX3. This branch is deprecated.**
 
 Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
 
