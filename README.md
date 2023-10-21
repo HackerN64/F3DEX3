@@ -1,8 +1,10 @@
-# F3DEX3 has moved!
-
-**Please go to https://github.com/HackerN64/F3DEX3. This branch is deprecated.**
+# F3DEX3
 
 Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
+Heavily modified version of F3DEX2, partially rewritten from scratch.
+
+**F3DEX3 is in alpha. It is not stable yet for use in romhacks. If you try it,
+you should expect crashes and graphical issues.**
 
 ## Features
 
@@ -104,6 +106,9 @@ Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
 
 
 ## Bounding vertices system
+
+**This system is planned to be removed--Kaze does not believe it will bring
+much extra performance--and replaced with a new occlusion plane system.**
 
 The features of this system are easiest to understand with an example. Suppose
 you have five houses in a scene, and each house has a chimney. The following
@@ -212,31 +217,32 @@ For an OoT codebase, only a few minor changes are required to use F3DEX3.
 However, more changes are recommended to increase performance and enable new
 features.
 
-There is only one build-time option for F3DEX3: enable `CFG_G_BRANCH_W` if the
-microcode is replacing F3DZEX (i.e. OoT or MM), otherwise do not enable this
-option if the microcode is replacing F3DEX2 or an earlier F3D version (i.e.
-SM64). Enabling this option makes `SPBranchLessZ*` use the vertex's W
-coordinate, otherwise it uses the screen Z coordinate. New display lists should
-use the bounding vertices system instead of `SPBranchLessZ*`, so this only
-matters for vanilla display lists used in your romhack.
+There is only one build-time option for F3DEX3: `make F3DEX3_BrW` if the
+microcode is replacing F3DZEX (i.e. OoT or MM), otherwise `make F3DEX3_BrZ` if
+the microcode is replacing F3DEX2 or an earlier F3D version (i.e. SM64). This
+controls whether `SPBranchLessZ*` uses the vertex's W coordinate or screen Z
+coordinate. New display lists should use the bounding vertices system instead of
+`SPBranchLessZ*`, so this only matters for vanilla display lists used in your
+romhack.
 
 How to modify the microcode in your HackerOoT based romhack (steps may be
 similar for other games):
 - Replace `include/ultra64/gbi.h` in your romhack with `gbi.h` from this repo.
 - Make the "Required Changes" listed below.
-- Build this repo (`make F3DEX3`).
-- Copy the microcode binaries (`build/F3DEX3/F3DEX3.code` and
-  `build/F3DEX3/F3DEX3.data`) to somewhere in your romhack repo, e.g. `data`.
+- Build this repo: install the latest version of `armips`, then `make
+  F3DEX3_BrZ` or `make F3DEX3_BrW` (see above).
+- Copy the microcode binaries (`build/F3DEX3_X/F3DEX3_X.code` and
+  `build/F3DEX3_X/F3DEX3_X.data`) to somewhere in your romhack repo, e.g. `data`.
 - In `data/rsp.rodata.s`, change the line between `fifoTextStart` and
-  `fifoTextEnd` to `.incbin "data/F3DEX3.code"` (or wherever you put the
+  `fifoTextEnd` to `.incbin "data/F3DEX3_X.code"` (or wherever you put the
   binary), and similarly change the line between `fifoDataStart` and
-  `fifoDataEnd` to `.incbin "data/F3DEX3.data"`. After both the `fifoTextEnd`
+  `fifoDataEnd` to `.incbin "data/F3DEX3_X.data"`. After both the `fifoTextEnd`
   and `fifoDataEnd` labels, add a line `.balign 16`.
 - If you are planning to ever update the microcode binaries in the future,
   add the following to the Makefile of your romhack, after the section starting
   with `build/data/%.o` (i.e. two lines after that, with a blank line before
-  and after): `build/data/rsp.rodata.o: data/F3DEX3.code data/F3DEX3.data`. It
-  is not a mistake that this new line you are adding won't have a second
+  and after): `build/data/rsp.rodata.o: data/F3DEX3_X.code data/F3DEX3_X.data`.
+  It is not a mistake that this new line you are adding won't have a second
   indented line after it; it is like the `message_data_static` lines below that.
   This will tell `make` to rebuild `rsp.rodata.o`, which includes the microcode
   binaries, whenever they are changed.
@@ -279,22 +285,24 @@ similar for other games):
 - Avoid using `G_MTX_MUL` in `SPMatrix`. That is, make sure your game engine
   computes a matrix stack on the CPU and sends the final matrix for each object
   / limb to the RSP, rather than multiplying matrices on the RSP. OoT already
-  does the former for precision / accuracy reasons and only uses `G_MTX_MUL` in
-  a couple obscure places; it is okay to leave those. This change is recommended
-  because the `G_MTX_MUL` mode of `SPMatrix` has been moved to Overlay 4 in
-  F3DEX3 (see below), making it substantially slower than it was in F3DEX2. It
-  still functions the same though so you can use it if it's really needed.
+  usually does the former for precision / accuracy reasons and only uses
+  `G_MTX_MUL` in a couple places; it is okay to leave those. This change is
+  recommended because the `G_MTX_MUL` mode of `SPMatrix` has been moved to
+  Overlay 4 in F3DEX3 (see below), making it substantially slower than it was in
+  F3DEX2. It still functions the same though so you can use it if it's really
+  needed.
 - Re-export as many display lists (scenes, objects, skeletons, etc.) as possible
   with fast64 set to F3DEX3 mode, to take advantage of the substantially larger
   vertex buffer, triangle packing commands, "hints" system, etc.
 - Once everything in your romhack is ported to F3DEX3 and everything is stable,
-  `#define NO_SYNCS_IN_TEXTURE_LOADS` and fix any crashes or graphical issues
-  that arise. Display lists exported from fast64 already do not contain these
-  syncs, but vanilla display lists or custom ones using the texture loading
-  multi-command macros do. Disabling the syncs saves a few percent of RDP cycles
-  for each material setup; what percentage this is of the total RDP time depends
-  on how many triangles are typically drawn between each material change. For
-  more information, see the GBI documentation near this define.
+  `#define NO_SYNCS_IN_TEXTURE_LOADS` (at the top of, or before including, the
+  GBI) and fix any crashes or graphical issues that arise. Display lists
+  exported from fast64 already do not contain these syncs, but vanilla display
+  lists or custom ones using the texture loading multi-command macros do.
+  Disabling the syncs saves a few percent of RDP cycles for each material setup;
+  what percentage this is of the total RDP time depends on how many triangles
+  are typically drawn between each material change. For more information, see
+  the GBI documentation near this define.
 
 ### Recommended Changes (Lighting)
 
@@ -493,9 +501,10 @@ two tris, saving a substantial amount of DMEM.
 
 ## Credits
 
-F3DEX3 modifications from F3DEX2 by Sauraen. If you use F3DEX3 in a romhack,
-please credit "F3DEX3 Microcode - Sauraen" in your project's in-game Staff Roll
-or wherever other contributors to your project are credited.
+F3DEX3 modifications from F3DEX2 are by Sauraen and are dedicated to the public
+domain. If you use F3DEX3 in a romhack, please credit "F3DEX3 Microcode -
+Sauraen" in your project's in-game Staff Roll or wherever other contributors to
+your project are credited.
 
 Other credits:
 - Wiseguy: large chunk of F3DEX2 disassembly documentation and first version of

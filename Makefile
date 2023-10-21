@@ -2,49 +2,11 @@ MAKEFLAGS += --no-builtin-rules
 MAKEFLAGS += --no-builtin-variables
 .SUFFIXES:
 
-default:
-	@echo 'How to use this Makefile'
-	@echo 'Method 1) Select a microcode, just run e.g. `make F3DZEX_NoN_2.06H`'
-	@echo 'Method 2) `make ok`, builds all ucodes which have MD5 sums, to check if :OK:'
-	@echo 'Method 3) `make all`, builds all ucodes in database'
-	@echo 'Method 4) Custom microcode build via custom.mk file. Create a file custom.mk'
-	@echo 'with contents like this:'
-	@echo 'NAME := your_custom_ucode_name'
-	@echo 'DESCRIPTION := Your Romhack Name'
-	@echo 'ID_STR := Modded F3DZEX by _your_name_, real N64 hardware or RSP LLE is required'
-	@echo '          ^ (this must be the exact number of characters)'
-	@echo 'OPTIONS := CFG_NoN CFG_POINT_LIGHTING etc.'
-	@echo 'Then run `make your_custom_ucode_name`. See the Makefile for the list of options.'
+default: F3DEX3_BrZ F3DEX3_BrW
 
-# With the defaults--all of these options unset--you get 2.08 (Banjo-Tooie),
-# which has none of the bugs / the latest versions of everything, except
-# G_BRANCH_Z (F3DEX2), no point lighting, and no NoN. Enabling the different
-# BUG_ options *gives* you the bugs--the default is always with the bugs fixed.
-# If you are modding and adding options, you just have to add them here, and
-# in the options list for your custom configuration.
+# List of all compile-time options supported by the microcode source.
 ALL_OPTIONS := \
-  CFG_G_BRANCH_W \
-  CFG_XBUS \
-  CFG_NoN \
-  CFG_POINT_LIGHTING \
-  CFG_OLD_TRI_WRITE \
-  CFG_EXTRA_0A_BEFORE_ID_STR \
-  CFG_G_SPECIAL_1_IS_RECALC_MVP \
-  CFG_CLIPPING_SUBDIVIDE_DESCENDING \
-  CFG_DONT_SKIP_FIRST_INSTR_NEW_UCODE \
-  BUG_CLIPPING_FAIL_WHEN_SUM_ZERO \
-  BUG_NO_CLAMP_SCREEN_Z_POSITIVE \
-  BUG_TEXGEN_LINEAR_CLOBBER_S_T \
-  BUG_WRONG_INIT_VZERO \
-  BUG_FAIL_IF_CARRY_SET_AT_INIT \
-  MOD_GENERAL \
-  MOD_RDP_BUFS_2_TRIS \
-  MOD_CMD_JUMP_TABLE \
-  MOD_ATTR_OFFSETS \
-  MOD_CLIP_CHANGES \
-  MOD_CLIP_SUBDIVIDE \
-  MOD_CLIP_EXPERIM \
-  MOD_VL_REWRITE
+  CFG_G_BRANCH_W
   
 ARMIPS ?= armips
 PARENT_OUTPUT_DIR ?= ./build
@@ -120,7 +82,7 @@ define ucode_rule
    -strequ DATA_FILE $$(DATA_FILE) \
    $$(OPTIONS_EQU) \
    $$(OFF_OPTIONS_EQU) \
-   f3dex2.s \
+   f3dex3.s \
    -sym2 $$(SYM_FILE) \
    -temp $$(TEMP_FILE)
   # Microcode target
@@ -148,7 +110,7 @@ define ucode_rule
   $$(CODE_FILE): CODE_FILE:=$$(CODE_FILE)
   $$(CODE_FILE): DATA_FILE:=$$(DATA_FILE)
   # Target recipe
-  $$(CODE_FILE): ./f3dex2.s ./rsp/* ucodes_database.mk $(EXTRA_DEPS) | $$(UCODE_OUTPUT_DIR)
+  $$(CODE_FILE): ./f3dex3.s ./rsp/* $(EXTRA_DEPS) | $$(UCODE_OUTPUT_DIR)
 	@printf "$(INFO)Building microcode: $(NAME): $(DESCRIPTION)$(NO_COL)\n"
 	@$(ARMIPS) -strequ ID_STR "$(ID_STR)" $$(ARMIPS_CMDLINE)
   ifneq ($(MD5_CODE),)
@@ -162,13 +124,18 @@ endef
 
 $(eval $(call reset_vars))
 
-ifneq ("$(wildcard custom.mk)","")
-  include custom.mk
-  EXTRA_DEPS := custom.mk
-  $(eval $(call ucode_rule))
-endif
+NAME := F3DEX3_BrZ
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z version)
+ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_Z version______________________
+OPTIONS := 
+$(eval $(call ucode_rule))
 
-include ucodes_database.mk
+NAME := F3DEX3_BrW
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W version)
+ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_W version______________________
+OPTIONS := \
+  CFG_G_BRANCH_W
+$(eval $(call ucode_rule))
 
 .PHONY: default ok all clean
 
