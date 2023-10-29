@@ -2638,7 +2638,7 @@ typedef union {
  * Alpha compare culling. Optimization for cel shading, could also be used for
  * other scenarios where lots of tris are being drawn with alpha compare.
  * 
- * If mode == G_ALPHA_COMPARE_CULL_DISABLED, tris are drawn normally.
+ * If mode == G_ALPHA_COMPARE_CULL_DISABLE, tris are drawn normally.
  * 
  * Otherwise:
  * - "vertex alpha" means the post-transform alpha value at each vertex being
@@ -3608,8 +3608,9 @@ _DW({                                                   \
  * the ambient light, 1 is the last directional / point light, etc. The RGB
  * color of the selected light is combined with the alpha specified in this
  * command as word 1 of a RDP command, and word 0 is specified in this command.
- * Specialized versions are provided below for prim color and env color, but
- * any RDP color command could be specified this way.
+ * Specialized versions are provided below for prim color and fog color, 
+ * because these are the two versions needed for cel shading, but any RDP color
+ * command could be specified this way.
  */
 #define gSPLightToRDP(pkt, light, alpha, word0)    \
 _DW({                                              \
@@ -3632,10 +3633,10 @@ _DW({                                              \
 #define gsSPLightToPrimColor(light, alpha, m, l) \
     gsSPLightToRDP(light, alpha,                 \
         (_SHIFTL(G_SETPRIMCOLOR, 24, 8) | _SHIFTL(m, 8, 8) | _SHIFTL(l, 0, 8)))
-#define gSPLightToEnvColor(pkt, light, alpha) \
-    gSPLightToRDP(pkt, light, alpha, _SHIFTL(G_SETENVCOLOR, 24, 8))
-#define gsSPLightToEnvColor(light, alpha) \
-    gsSPLightToRDP(light, alpha, _SHIFTL(G_SETENVCOLOR, 24, 8))
+#define gSPLightToFogColor(pkt, light, alpha) \
+    gSPLightToRDP(pkt, light, alpha, _SHIFTL(G_SETFOGCOLOR, 24, 8))
+#define gsSPLightToFogColor(light, alpha) \
+    gsSPLightToRDP(light, alpha, _SHIFTL(G_SETFOGCOLOR, 24, 8))
 
 /*
  * gDPSetOtherMode (This is for expert user.)
