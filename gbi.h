@@ -2659,7 +2659,7 @@ typedef union {
  *   level) are < thresh
  * 
  * For the dark pass:
- * - Set blend color alpha to 0x101 - thresh (yes, not 0xFF - thresh).
+ * - Set blend color alpha to 0x100 - thresh (yes, not 0xFF - thresh).
  * - Set CC alpha cycle 1 (or only cycle) to (1 - shade alpha) * tex alpha + 0
  * - The RDP will draw pixels whenever shade alpha < thresh (with binary alpha
  *   from the texture)
