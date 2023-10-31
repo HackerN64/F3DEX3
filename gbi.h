@@ -3620,12 +3620,12 @@ _DW({                                              \
                     _SHIFTL(alpha,         0, 8)); \
     _g->words.w1 = (word0);                        \
 })
-#define gsDPLightToRDP(m, light, alpha, word0) \
-{                                              \
-   (_SHIFTL(G_LIGHTTORDP, 24, 8) |             \
-    _SHIFTL(light * 0x10,  8, 8) |             \
-    _SHIFTL(alpha,         0, 8)),             \
-   (word0)                                     \
+#define gsSPLightToRDP(light, alpha, word0) \
+{                                           \
+   (_SHIFTL(G_LIGHTTORDP, 24, 8) |          \
+    _SHIFTL(light * 0x10,  8, 8) |          \
+    _SHIFTL(alpha,         0, 8)),          \
+   (word0)                                  \
 }
 #define gSPLightToPrimColor(pkt, light, alpha, m, l) \
     gSPLightToRDP(pkt, light, alpha,                 \
