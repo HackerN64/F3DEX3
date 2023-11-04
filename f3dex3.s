@@ -1475,7 +1475,6 @@ vtx_load_skip1st:
 vtx_store:
     // Inputs: vPairTPosI, vPairTPosF, vPairST, vPairRGBA
     // Locals: $v20, $v21, $v25, $v26, $v28, $v30 ($v29 is temp)
-    // Alive at end for clipping: $v30:$v28 = 1/W, vPairRGBA
     // Scalar regs: secondVtxPos, outputVtxPos; set to the same thing if only write 1 vtx
     // $7 != 0 if fog; temps $11, $12, $20, $24
     vmudl   $v29, vPairTPosF, vSTScl[2] // Persp norm
@@ -1561,27 +1560,29 @@ vtx_skip_fog:
 
 /*
 // Draft of occlusion plane
-    vclr    $v30
-    vsub    $v26, $v30, $v31[5] // 0x4000; $v26 = 0xC000 = -0x4000
-    vadd    $v30, $v30, $v31[5] // 0x4000; $v30 = 0x4000
-    vmudh   $v20, vPairTPosI, $v31[4] // 4; scale up x and y
-    lqv     $v21, (planeEdgeCoeffs - altBase)(altBaseReg)
-    vmulf   $v29, $v20, $v21[0]        // 4 * X * coef 0
-    vmacf   $v25, $v26, vPairTPosI[1h] //   - Y * 0x4000 (elems 0, 4)
-    vmulf   $v29, $v20, $v21[1]        // 4 * Y * coef 1
-    vmacf   $v26, $v26, vPairTPosI[0h] //   - X * 0x4000 (elems 1, 5)
-    vmulf   $v29, $v20, $v21[2]        // 4 * X * coef 2
-    vmacf   $v28, $v30, vPairTPosI[1h] //   + Y * 0x4000 (elems 2, 6)
-    vmulf   $v29, $v20, $v21[3]        // 4 * Y * coef 3
-    vmacf   $v30, $v30, vPairTPosI[0h] //   + X * 0x4000 (elems 3, 7)
-    ldv     $v21[0], (planeEdgeCoeffs + 8 - altBase)(altBaseReg)
-    vlt     $v29, $v31, $v31[2h]       // Set VCC to 11001100
-    vmrg    $v25, $v25, $v28           // Elems 0, 2, 4, 6
-    vmrg    $v26, $v26, $v30           // Elems 1, 3, 5, 7
+    vmudh   $v28, vPairTPosI, $v31[4] // 4; scale up x and y
+    ldv     $v30[0], (planeEdgeCoeffs - altBase)(altBaseReg) // Load coeffs 0-3
+    vlt     $v29, $v31, $v31[2h] // Set VCC to 11001100
+    ldv     $v30[8], (planeEdgeCoeffs - altBase)(altBaseReg) // and for vtx 2
+    vmrg    $v26, $v31, $v31[0] // Signs of $v26 are --++--++
+    // 3 cycles here
+    vabs    $v26, $v26, $v31[5] // $v26 is 0xC000, 0xC000, 0x4000, 0x4000, repeat
+    // 2 cycles here
+    vmulf   $v29, $v30, $v28[0h]       //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
+    vmacf   $v25, $v26, vPairTPosI[1h] // -0x4000*Y1, --, +0x4000*Y1, --, repeat vtx 2
+    vmulf   $v29, $v30, $v28[1h]       // --,    4*Y1*c1, --,    4*Y1*c3, repeat vtx 2
+    vmacf   $v26, $v26, vPairTPosI[0h] // --, -0x4000*X1, --, +0x4000*X1, repeat vtx 2
+    ldv     $v30[0], (planeEdgeCoeffs + 8 - altBase)(altBaseReg) // Load coeffs 4-7
     veq     $v29, $v31, $v31[0q]       // Set VCC to 10101010
+    ldv     $v30[8], (planeEdgeCoeffs + 8 - altBase)(altBaseReg) // and for vtx 2
+    // 2 cycles here
     vmrg    $v25, $v25, $v26           // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
-    vge     $v29, $v25, $v21           // Each compare to coeffs 4-7
+    // 3 cycles here
+    vge     $v29, $v25, $v22           // Each compare to coeffs 4-7
     cfc2    $20, $vcc // TODO process this
+    
+    // Assuming vPairTPos has clip space values...
+    
     
 */
 

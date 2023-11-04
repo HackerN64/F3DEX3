@@ -3085,21 +3085,33 @@ _DW({\
  * transaction.
  * n is the number of directional / point lights, from 0 to 9. There is also
  * always an ambient light.
- * name should be the name of a Lights* or PosLights* struct filled in with all
- * the lighting data. You can use the gdSPDef* macros to fill in the struct or
- * just do it manually. Example:
+ * name should be the NAME of a Lights or PosLights struct (NOT A POINTER)
+ * filled in with all the lighting data. You can use the gdSPDef* macros to fill
+ * in the struct or just do it manually. Example:
  * PosLights2 myLights; // 2 pos + 1 ambient
  * <code to fill in the fields of myLights>
  * gSPSetLights(POLY_OPA_DISP++, 2, myLights);
+ * 
+ * If you need to use a pointer, e.g. if the number of lights is variable at
+ * runtime:
+ * PosLight *lights = memory_allocate((numLights + 1) * sizeof(PosLight));
+ * lights[0].p.pos = ...;
+ * lights[1].l.dir = ...;
+ * ...
+ * lights[numLights].l.col = ambient_color();
+ * gSPSetLights(POLY_OPA_DISP++, numLights, *lights); // <- NOTE DEREFERENCE
+ * 
+ * If you're wondering why this macro takes a name / dereference instead of a
+ * pointer, it's for backwards compatibility.
  */
 #define gSPSetLights(pkt, n, name) \
 _DW({ \
     gSPNumLights(pkt, n); \
-    gDma2p((pkt),  G_MOVEMEM, &name, (n) * 0x10 + 8, G_MV_LIGHT, 0x10); \
+    gDma2p((pkt),  G_MOVEMEM, &(name), (n) * 0x10 + 8, G_MV_LIGHT, 0x10); \
 })
 #define gsSPSetLights(n, name) \
     gsSPNumLights(n), \
-    gsDma2p(G_MOVEMEM, &name, (n) * 0x10 + 8, G_MV_LIGHT, 0x10)
+    gsDma2p(G_MOVEMEM, &(name), (n) * 0x10 + 8, G_MV_LIGHT, 0x10)
 
 #define  gSPSetLights0(pkt, name)  gSPSetLights(pkt, 0, name)
 #define gsSPSetLights0(name)      gsSPSetLights(     0, name)
