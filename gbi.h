@@ -36,8 +36,8 @@
  * GBI commands in order
  */
 /*#define G_SPECIAL_3       0xD3  no-op in F3DEX2 */
-#define G_RETURNNONEVISIBLE 0xD4 /* = G_SPECIAL_2, no-op in F3DEX2 */
-#define G_BOUNDINGVERTS     0xD5 /* = G_SPECIAL_1, triggered MVP recalculation, not supported in F3DEX3 */
+/*#define G_SPECIAL_2       0xD4  no-op in F3DEX2 */
+/*#define G_SPECIAL_1       0xD5  triggered MVP recalculation, not supported in F3DEX3 */
 #define G_DMA_IO            0xD6
 #define G_TEXTURE           0xD7
 #define G_POPMTX            0xD8
@@ -88,10 +88,9 @@
 #define G_TRI1              0x05
 #define G_TRI2              0x06
 #define G_QUAD              0x07
-#define G_POPBRANCHCALL     0x08 /* = G_LINE3D was a no-op in F3DEX2, has been removed */
-#define G_TRISTRIP          0x09
-#define G_TRIFAN            0x0A
-#define G_LIGHTTORDP        0x0B
+#define G_TRISTRIP          0x08 /* = G_LINE3D was a no-op in F3DEX2, has been removed */
+#define G_TRIFAN            0x09
+#define G_LIGHTTORDP        0x0A
 
 /* names differ between F3DEX2 and F3DZEX */
 #define G_BRANCH_Z G_BRANCH_WZ
@@ -160,10 +159,6 @@
 #define G_ALPHA_COMPARE_CULL_DISABLE  0
 #define G_ALPHA_COMPARE_CULL_BELOW    1
 #define G_ALPHA_COMPARE_CULL_ABOVE   -1
-
-/* See SPBoundingVerts */
-#define G_BOUNDINGVERTS_REPLACE  0
-#define G_BOUNDINGVERTS_PUSH    -1
 
 /*
  * MOVEMEM indices
@@ -250,7 +245,6 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_MWO_ATTR_OFFSET_Z      0x0C
 #define G_MWO_NORMALS_MODE       0x0E
 #define G_MWO_ALPHA_COMPARE_CULL 0x12
-#define G_MWO_BOUNDING_FLAGS     0x18
 
 /*
  * RDP command argument defines
@@ -2709,8 +2703,7 @@ _DW({                                               \
 /*
  * Vanilla F3D* display list culling based on screen clip flags of range of
  * loaded verts. Executes SPEndDisplayList if the convex hull formed by the
- * specified range of already-loaded vertices is offscreen. Prefer
- * SPBoundingVerts and related cmds in new code.
+ * specified range of already-loaded vertices is offscreen.
  */
 #define gSPCullDisplayList(pkt,vstart,vend)             \
 _DW({                                                   \
@@ -2730,8 +2723,7 @@ _DW({                                                   \
 
 /*
  * gSPBranchLessZ   Branch DL if (vtx.z) less than or equal (zval).
- * Prefer SPBoundingVerts and related cmds in new code.
- * Also note that this uses W in F3DZEX / CFG_G_BRANCH_W, in which case all the
+ * Note that this uses W in F3DZEX / CFG_G_BRANCH_W, in which case all the
  * Z calculations below are wrong and raw values must be used.
  *
  *  dl   = DL branch to
@@ -2826,164 +2818,6 @@ _DW({                                               \
     _SHIFTL((vtx) * 2,   0, 12)),           \
     (unsigned int)(zval),                   \
 }
-
-/*
- * Sets the W value to compare vertices to in SPBoundingVerts. This is a 32-bit
- * value in s15.16 format. Vertices whose transformed W value is greater than
- * or equal to this value will be considered "not visible".
- * 
- * This uses the generic RDP word (a 32-bit variable in RSP DMEM). The other
- * commands which overwrite the value stored in this word are:
- * - SPBranchLess*
- * - All TextureRectangle commands
- * - SPPerspNormalize
- * - SPLoadUcode*
- * - DPWord
- */
-#define gSPWFarThreshold(pkt, w) gImmp1(pkt, G_RDPHALF_1, (w))
-#define gsSPWFarThreshold(w)     gsImmp1(    G_RDPHALF_1, (w))
-
-/*
- * Load a set of vertices defining a bounding convex shape around a sub-object,
- * compute whether it is visible, and store the result to the bounding flags
- * word.
- * 
- * There are two components to visibility:
- * 1. If there is any screen clipping plane (four sides of the screen or
- *    behind-the-camera) which all verts are on the far side of (i.e. offscreen
- *    or behind the camera), the sub-object is invisible.
- * 2. If all verts have a transformed (clip space) W value greater than or equal
- *    to the threshold set with SPWFarThreshold, the sub-object is invisible.
- * 
- * The flag in the bounding flags word is set if the object is visible or
- * cleared if the object is invisible. The flag is always written to the MSB of
- * the word; for what happens to the other bits, see mode below.
- * 
- * The processing uses an early return, so as soon as at least one vertex is
- * close enough and at least one vertex is on the screen side of each clip
- * plane, the object is visible and the result is written. 
- * 
- * v: Address / name of an array containing a set of PlainVtx values (positions
- * only, no ST or RGBA). These vertices define a convex hull around a sub-
- * object. This may be, but is not required to be, an axis-aligned bounding box.
- * For example, for a flat object, you could provide the four corners of the
- * plane containing the object. If your object is a sphere, a bounding
- * octahedron containing the sphere has less wasted space than a cube, and it is
- * only six vertices rather than eight.
- * 
- * n: Number of vertices, between 1 and 32. These vertices are loaded into
- * temporary memory and do not affect or overwrite the vertex buffer.
- * 
- * mode:
- * - G_BOUNDINGVERTS_REPLACE: The bounding flags word is cleared before the
- *   result of this operation is written. For if this is the first or only
- *   sub-object within the larger object.
- * - G_BOUNDINGVERTS_PUSH: The bounding flags word is shifted right one bit,
- *   forming a stack with the new result pushed onto it. The word is 32 bits so
- *   you can load up to 32 sets of bounding vertices at a time, i.e. have up to
- *   32 sub-objects within one larger object.
- */
-#define _BOUNDINGVERTS_W0(n, mode)                                            \
-    (_SHIFTL(G_BOUNDINGVERTS, 24, 8) |                                        \
-     _SHIFTL((n),             11, 6) | /* Bytes 1-2, size in bytes, max 32 */ \
-     _SHIFTL((mode),           0, 8))
-#define gSPBoundingVerts(pkt, v, n, mode)      \
-_DW({                                          \
-    Gfx *_g = (Gfx *)(pkt);                    \
-    _g->words.w0 = _BOUNDINGVERTS_W0(n, mode); \
-    _g->words.w1 = (unsigned int)(v);          \
-})
-#define gsSPBoundingVerts(v, n, mode) \
-{                                     \
-   _BOUNDINGVERTS_W0(n, mode),        \
-    (unsigned int)(v)                 \
-}
-
-/*
- * Return from the current display list if none of the previous SPBoundingVerts
- * commands set their flags, i.e. if the WHOLE 32-bit bounding flags word is
- * zero.
- */
-#define _gSPReturnNoneVisibleRaw(pkt,hint)  gDma0p(pkt, G_RETURNNONEVISIBLE, 0, hint)
-#define _gsSPReturnNoneVisibleRaw(hint)     gsDma0p(    G_RETURNNONEVISIBLE, 0, hint)
-/* Hint version -- use whenever possible. See SPEndDisplayListHint. */
-#define gSPReturnNoneVisibleHint(pkt, count) _gSPReturnNoneVisibleRaw( pkt, _DLHINTVALUE(count))
-#define gsSPReturnNoneVisibleHint(    count) _gsSPReturnNoneVisibleRaw(     _DLHINTVALUE(count))
-/* Non-hint version. */
-#define gSPReturnNoneVisible(pkt)  _gSPReturnNoneVisibleRaw( pkt, 0)
-#define gsSPReturnNoneVisible(  )  _gsSPReturnNoneVisibleRaw(     0)
-
-/*
- * Pop the highest flag from the 32-bit bounding flags word, and branch if
- * it is clear, i.e. bounding verts were not visible. This can branch past
- * drawing the sub-object to cull it, or branch to a low-poly version of it.
- */
-#define _gSPPopBranchNotVisibleRaw(pkt,dl,hint) \
-    gDma1p(pkt, G_POPBRANCHCALL, dl, hint, G_DL_NOPUSH)
-#define _gsSPPopBranchNotVisibleRaw(   dl,hint) \
-    gsDma1p(    G_POPBRANCHCALL, dl, hint, G_DL_NOPUSH)
-/*
- * Hint version -- use whenever possible. See SPBranchListHint.
- * 
- * There is an additional clever optimization here. The hint is for if the
- * branch is taken, so in the case of offscreen objects, normally the next
- * command being jumped to is another SPPopBranchNotVisibleHint. So, normally
- * the hint is 1. However, the microcode also looks at the *next* flag--the one
- * which that future SPPopBranchNotVisibleHint command will look at. If that
- * flag is set, that next command won't branch but will continue to draw
- * something. So if the next flag is set, the microcode clears the current
- * SPPopBranchNotVisibleHint command's hint value, so that a full buffer of DL
- * commands is loaded rather than just one.
- */
-#define gSPPopBranchNotVisibleHint(pkt, dl, count) \
-    _gSPPopBranchNotVisibleRaw( pkt, dl, _DLHINTVALUE(count))
-#define gsSPPopBranchNotVisibleHint(    dl, count) \
-    _gsSPPopBranchNotVisibleRaw(     dl, _DLHINTVALUE(count))
-/* Non-hint version. */
-#define gSPPopBranchNotVisible(pkt, dl)  \
-    _gSPPopBranchNotVisibleRaw( pkt, dl, 0)
-#define gsSPPopBranchNotVisible(    dl)  \
-    _gsSPPopBranchNotVisibleRaw(     dl, 0)
-
-/*
- * Pop the highest flag from the 32-bit bounding flags word, and call another
- * display list if it is set, i.e. bounding verts were visible. Note that if
- * you are just trying to draw or not draw objects based on whether they are
- * onscreen, it is recommended to put the drawing DL inline and use
- * SPPopBranchNotVisibleHint to branch past it. If you are only checking a
- * single set of bounding verts, use SPReturnNoneVisibleHint instead.
- */
-#define _gSPPopCallVisibleRaw(pkt,dl,hint) \
-    gDma1p(pkt, G_POPBRANCHCALL, dl, hint, G_DL_PUSH)
-#define _gsSPPopCallVisibleRaw(   dl,hint) \
-    gsDma1p(    G_POPBRANCHCALL, dl, hint, G_DL_PUSH)
-/* Hint version -- use whenever possible. See SPDisplayListHint. */
-#define gSPPopCallVisibleHint(pkt, dl, count) \
-    _gSPPopCallVisibleRaw( pkt, dl, _DLHINTVALUE(count))
-#define gsSPPopCallVisibleHint(    dl, count) \
-    _gsSPPopCallVisibleRaw(     dl, _DLHINTVALUE(count))
-/* Non-hint version. */
-#define gSPPopCallVisible(pkt, dl)  \
-    _gSPPopCallVisibleRaw( pkt, dl, 0)
-#define gsSPPopCallVisible(    dl)  \
-    _gsSPPopCallVisibleRaw(     dl, 0)
-
-/*
- * Loads the bounding flags value used by SPBoundingVerts,
- * SPPopBranchNotVisibleHint, etc. This can be used to programmatically enable /
- * disable parts of a DL.
- * 
- * The bounding flags value is a 32-bit word where flags are pushed / popped to
- * the MSB. So for example, to set a single flag to 1 which will be checked with
- * SPPopBranchNotVisibleHint or SPPopCallVisibleHint, write the value
- * 0x80000000. Or, to set a value which will branch-notbranch-branch-notbranch
- * on the next four SPPopBranchNotVisibleHint commands, write the value
- * 0x50000000.
- */
-#define gSPLoadBoundingFlags(pkt, flags) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_BOUNDING_FLAGS, (flags))
-#define gsSPLoadBoundingFlags(amb, flags) \
-    gsMoveWd(G_MW_FX, G_MWO_BOUNDING_FLAGS, (flags))
 
 
 /*

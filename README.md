@@ -55,9 +55,6 @@ you should expect crashes and graphical issues.**
   can be drawn with these commands, with only a few at the end drawn with
   `SP2Triangles` or `SP1Triangle`, so this cuts the triangle portion of display
   lists roughly in half.
-- New system for culling objects which are offscreen or far away, which saves
-  memory traffic, RSP time, and even RDP time compared to the old commands
-  `SPCullDL` and `SPBranchLessZ*`. See "Bounding vertices system" below.
 - New `SPAlphaCompareCull` command enables culling of triangles whose computed
   shade alpha values are all below or above a settable threshold. This
   substantially reduces the performance penalty of cel shading--only tris which
@@ -85,10 +82,6 @@ you should expect crashes and graphical issues.**
 
 - The 56 vertex buffer is compatible with Kaze's supported HLE because that HLE
   incorrectly supports 64 vertices for all microcodes.
-- The new culling system is compatible with Kaze's supported HLE because it uses
-  command encodings which were previously treated as no-ops, and DLs can be
-  structured so that if all the new commands are ignored, the full objects are
-  always drawn.
 - "Hints" system encodes the expected size of the target display list into call,
   branch, and return DL commands. This allows only the needed number of DL
   commands in the next DL to be fetched, rather than always fetching full
@@ -105,112 +98,6 @@ you should expect crashes and graphical issues.**
   usually much less or zero).
 
 
-## Bounding vertices system
-
-**This system is planned to be removed--Kaze does not believe it will bring
-much extra performance--and replaced with a new occlusion plane system.**
-
-The features of this system are easiest to understand with an example. Suppose
-you have five houses in a scene, and each house has a chimney. The following
-display list draws the chimneys, but culls each one if it is offscreen or too
-far away, and skips the texture and material load if they are ALL not drawn.
-
-```
-Gfx chimneys_dl[] = {
-// Set the W value representing the threshold at which the chimneys will be
-// culled if they are farther than this. If you don't want objects to disappear
-// no matter how far away they are, use 0x7FFFFFFF here.
-gsSPWFarThreshold(0x01000000),
-// Load vertices representing a bounding shape around one chimney, and check if
-// this is on screen and close enough. Initialize the bounding flags results.
-gsSPBoundingVerts(house1ChimneyBoundingBox, 8, G_BOUNDINGVERTS_REPLACE),
-// Load bounding boxes around the other chimneys. Push each result on the stack.
-gsSPBoundingVerts(house2ChimneyBoundingBox, 8, G_BOUNDINGVERTS_PUSH),
-gsSPBoundingVerts(house3ChimneyBoundingBox, 8, G_BOUNDINGVERTS_PUSH),
-gsSPBoundingVerts(house4ChimneyBoundingBox, 8, G_BOUNDINGVERTS_PUSH),
-gsSPBoundingVerts(house5ChimneyBoundingBox, 8, G_BOUNDINGVERTS_PUSH),
-// Return from this DL--skip the texture load--if all chimneys are invisible.
-gsSPReturnNoneVisibleHint(1), // About hints: see SPEndDisplayListHint
-// Load the chimney material.
-gsDPLoadTextureBlock(...),
-...
-// Pop the visibility flag for chimney 5. If it is clear, branch past drawing
-// chimney 5.
-gsSPPopBranchNotVisibleHint(chimneys_dl_4, 1),
-// Draw chimney 5.
-gsSPVertex(...),
-gsSP2Triangles(...),
-...
-// no gsSPEndDisplayList(); continue directly into the next display list.
-};
-Gfx chimneys_dl_4[] = {
-// Pop the visibility flag for chimney 4. If it is clear, branch past drawing
-// chimney 4.
-gsSPPopBranchNotVisibleHint(chimneys_dl_3, 1),
-// Draw chimney 4.
-gsSPVertex(...),
-gsSP2Triangles(...),
-...
-};
-Gfx chimneys_dl_3[] = {
-// Repeat until chimney 1.
-// Instead of popping the visibility flag for chimney 1, just return if
-// invisible.
-gsSPReturnNoneVisibleHint(1),
-// Draw chimney 1.
-gsSPVertex(...),
-gsSP2Triangles(...),
-...
-gsSPEndDisplayList()
-};
-
-```
-
-The advantages of this system over the old `SPCullDL` and `SPBranchLessZ*`
-system are:
-- The vertices which are being examined for their positions are 8 bytes each
-  (X Y Z 0 shorts), not full vertices with ignored ST and RGBA, halving their
-  space occupied in the object/scene and the memory traffic.
-- These vertices are loaded into a temporary buffer and do not overwrite the
-  vertex buffer, in case needed values were being kept there.
-- Not only is lighting computation never performed on these vertices regardless
-  of the lighting geometry mode flags (manually disabling lighting is not
-  necessary), a large chunk of the per-vertex processing is also skipped.
-- The per-vertex processing uses an early return, so once the object is
-  determined to be visible, no further vertices are processed. (This only saves
-  RSP time, not DRAM traffic, as all the vertices are loaded at the beginning.)
-- Both on-screen and distance are evaluated as part of the same operation,
-  unlike vanilla where these were evaluated separately (and practically,
-  `SPBranchLessZ*` was used rarely and only for LoD, not for distance culling).
-- W is used to represent depth like in F3DZEX. Using W instead of Z to represent
-  distance makes its computation independent of obscure RDP Z-buffer parameters.
-  Unlike comparing distance in world coordinates, W is correlated to the
-  object's effective size on screen; in other words, if you zoom in the camera
-  without moving it, objects which were previously too far away will reappear.
-- Results from many sub-objects are pushed into the same bounding flags value.
-  Not only does this allow materials to be skipped, but the flags can then be
-  popped and the individual sub-objects culled without any further processing.
-  Examining bounding shapes around multiple sub-objects can often determine that
-  all the sub-objects are offscreen, while one giant bounding shape containing
-  all the sub-objects may be onscreen.
-- The bounding flags value can be written directly with `SPLoadBoundingFlags`,
-  allowing parts of DLs to be easily enabled or disabled from CPU code.
-- F3DEX3 also provides `SPPopCallVisible`; F3DEX2 did not directly have a method
-  for calling display lists based on culling results, only branching. Note that
-  it is generally recommended to use the pattern in the code example above
-  rather than calling sub-DLs with `SPPopCallVisible`, due to DL command buffer
-  considerations and HLE compatibility.
-
-`SPCullDL` and `SPBranchLessZ*` are still supported for backwards compatibility.
-`SPCullDL` is just like in F3DEX2 but the new system will be faster than it.
-`SPBranchLessZ*` is moved to overlay 4 (see below) so it will be slower than it
-was in F3DEX2.
-
-Also note that bounding shapes do not have to be axis-aligned bounding boxes;
-they did not have to be in previous F3D* versions either. Any convex shape
-containing your object is allowed; for more info see `SPBoundingVerts`.
-
-
 ## Porting Your Romhack Codebase to F3DEX3
 
 For an OoT codebase, only a few minor changes are required to use F3DEX3.
@@ -221,9 +108,7 @@ There is only one build-time option for F3DEX3: `make F3DEX3_BrW` if the
 microcode is replacing F3DZEX (i.e. OoT or MM), otherwise `make F3DEX3_BrZ` if
 the microcode is replacing F3DEX2 or an earlier F3D version (i.e. SM64). This
 controls whether `SPBranchLessZ*` uses the vertex's W coordinate or screen Z
-coordinate. New display lists should use the bounding vertices system instead of
-`SPBranchLessZ*`, so this only matters for vanilla display lists used in your
-romhack.
+coordinate.
 
 How to modify the microcode in your HackerOoT based romhack (steps may be
 similar for other games):

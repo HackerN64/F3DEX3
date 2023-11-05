@@ -335,10 +335,6 @@ tempHalfword3:
 numLightsxSize:
     .db 0   // Overwrites above
     
-// For SPBoundingVerts etc.
-boundingFlags:
-    .dw 0x00000000
-
 // Constants for clipping algorithm
 clipCondShifts:
     .db CLIP_SHIFT_NY
@@ -374,8 +370,6 @@ jumpTableEntry ovl234_ovl4_entrypoint  // G_MTX (multiply)
 jumpTableEntry G_MOVEMEM_end           // G_MOVEMEM, G_MTX (load)
 
 // RDP/Immediate Command Jump Table
-jumpTableEntry G_RETURNNONEVISIBLE_handler
-jumpTableEntry G_BOUNDINGVERTS_handler
 jumpTableEntry ovl234_ovl4_entrypoint // G_DMA_IO
 jumpTableEntry G_TEXTURE_handler
 jumpTableEntry G_POPMTX_handler
@@ -400,7 +394,6 @@ jumpTableEntry ovl234_ovl4_entrypoint // G_BRANCH_WZ
 jumpTableEntry G_TRI1_handler
 jumpTableEntry G_TRI2_handler
 jumpTableEntry G_QUAD_handler
-jumpTableEntry G_POPBRANCHCALL_handler
 jumpTableEntry G_TRISTRIP_handler
 jumpTableEntry G_TRIFAN_handler
 jumpTableEntry G_LIGHTTORDP_handler
@@ -615,13 +608,11 @@ postOvlRA equ $12 // Commonly used locally
 // $4: pre-shuffle vertex 1 addr for flat shading during tri write, otherwise unused
 // $5: clipMaskIdx, geometry mode middle 2 bytes during vertex load / lighting,
 //     local
-// $6: geometry mode low byte during tri write, any vtx near enough flag
-//     during bounding verts, local
+// $6: geometry mode low byte during tri write, local
 // $7: command byte when command handler is called, fog flag in vtx write,
 //     mIT recompute flag in Overlay 4, local
 // $8: secondVtxPos, local
-// $9: curLight, clip mask during clipping, all verts offscreen flag during
-//     bounding verts, local
+// $9: curLight, clip mask during clipping, local
 // $10: unused
 // $11: very common local
 // $12: postOvlRA, local
@@ -780,64 +771,42 @@ do_cmd_jump_table:
      sll    $11, $2, 1                                  // Multiply jump table index by 2 for addr offset
     lhu     $11, cmdJumpTable($11)                      // Load address of handler from jump table
     jr      $11                                         // Jump to handler
-G_RETURNNONEVISIBLE_handler: // Delay slot must not affect $1, $7, $11
-     lw     $12, boundingFlags                  // Do not move, needed for G_POPBRANCHCALL_handler
-    bnez    $12, run_next_DL_command            // End DL if all flags clear
-G_ENDDL_handler:
-     lbu    $1, displayListStackLength          // Load the DL stack index; if end stack,
-    beqz    $1, load_overlay_0_and_enter        // load overlay 0; $1 < 0 signals end
-     addi   $1, $1, -4                          // Decrement the DL stack index
-    j       call_ret_common                     // has a different version in ovl1
-     lw     taskDataPtr, (displayListStack)($1) // Load the address of the DL to return to into the taskDataPtr (the current DL address)
-
+     nop // Delay slot must not affect $1, $7, $11
+     
 G_DL_handler:
-G_POPBRANCHCALL_handler:
-    bltz    $7, skip_popbranchcall     // Cmd negative = G_DL
-     sll    $2, cmd_w0, 15             // Shifts the push/nopush value to the highest bit in $2
-    sll     $1, $12, 1                 // Flags already in $12; pop value
-    xor     $12, $12, $2               // Swap whether to continue or not based on call/branch
-    bgez    $12, run_next_DL_command   // If flag popped set (1) and is branch (1), continue DL
-     sw     $1, boundingFlags          // Store updated value
-skip_popbranchcall:
-    // Next flag is clear, so will branch if we are branching to another SPPopBranchNotVisible,
-    // so leave count at 0xA0 (one instr). Or, is G_DL and $1 = 0.
-    bgez    $1, branch_dl                   // Skip clearing the count
-     lbu    $1, displayListStackLength      // Get the DL stack length
-    li      cmd_w0, 0                       // Clear count of how many cmds to drop
+    lbu     $1, displayListStackLength      // Get the DL stack length
+    sll     $2, cmd_w0, 15                  // Shifts the push/nopush value to the sign bit
 branch_dl:
     jal     segmented_to_physical
      add    $3, taskDataPtr, inputBufferPos // Current DL pos to push on stack
     sub     $11, cmd_w1_dram, taskDataPtr   // Negative how far new target is behind current end
-    bgez    $2, call_dl                     // Push = call = flag is clear
+    bltz    $2, displaylist_dma_with_count  // Nopush = branch = flag is set
      move   taskDataPtr, cmd_w1_dram        // Set the new DL to the target display list
-    bgez    $11, displaylist_dma_with_count // If new target is ahead of current end, load it
-     sub    $12, cmd_w1_dram, $3            // How far new target is ahead of current pos
-    bltz    $12, displaylist_dma_with_count // If new target is behind current pos, load it
-     move   inputBufferPos, $11             // New negative pos in buffer
-    j       run_next_DL_command             // Don't load anything
-     sub    taskDataPtr, cmd_w1_dram, $11   // Restore original taskDataPtr value
-
-call_dl:
     sw      $3, (displayListStack)($1)
-    addi    $1, $1, 4                   // Increment the DL stack length
+    addi    $1, $1, 4                       // Increment the DL stack length
 call_ret_common:
     j       displaylist_dma_with_count
      sb     $1, displayListStackLength
 
 G_CULLDL_handler:
-    j       vtx_addrs_from_cmd           // Load start vtx addr in $12, end vtx in $3
+    j       vtx_addrs_from_cmd              // Load start vtx addr in $12, end vtx in $3
      li     $11, culldl_return_from_addrs
 culldl_return_from_addrs:
     li      $1, CLIP_MOD_MASK_SCRN_ALL
     lhu     $11, VTX_CLIP($12)
 culldl_loop:
     and     $1, $1, $11
-    beqz    $1, run_next_DL_command           // Some vertex is on the screen-side of all clipping planes; have to render
-     lhu    $11, (vtxSize + VTX_CLIP)($12) // next vertex clip flags
-    bne     $12, $3, culldl_loop    // loop until reaching the last vertex
-     addi   $12, $12, vtxSize           // advance to the next vertex
-    j       G_ENDDL_handler
-     li     cmd_w0, 0                    // Clear count of DL cmds to skip loading
+    beqz    $1, run_next_DL_command         // Some vertex is on the screen-side of all clipping planes; have to render
+     lhu    $11, (vtxSize + VTX_CLIP)($12)  // next vertex clip flags
+    bne     $12, $3, culldl_loop            // loop until reaching the last vertex
+     addi   $12, $12, vtxSize               // advance to the next vertex
+    li      cmd_w0, 0                       // Clear count of DL cmds to skip loading
+G_ENDDL_handler:
+    lbu     $1, displayListStackLength      // Load the DL stack index; if end stack,
+    beqz    $1, load_overlay_0_and_enter    // load overlay 0; $1 < 0 signals end
+     addi   $1, $1, -4                      // Decrement the DL stack index
+    j       call_ret_common                 // has a different version in ovl1
+     lw     taskDataPtr, (displayListStack)($1) // Load addr of DL to return to
 
 G_SETxIMG_handler:
     jal     segmented_to_physical
@@ -859,11 +828,11 @@ G_LOADBLOCK_handler:
      lw     $11, lastLoadBlockLow
     lw      $12, lastLoadBlockHigh
     sw      cmd_w1_dram, lastLoadBlockLow
-    bne     $11, cmd_w1_dram, G_RDP_handler // If command is different from last, run command
+    bne     $11, cmd_w1_dram, G_RDP_handler  // If command is different from last, run command
      sw     cmd_w0, lastLoadBlockHigh
     beq     $12, cmd_w0, run_next_DL_command // If command is the same, skip command
 G_RDP_handler:
-     sw     cmd_w1_dram, 4(rdpCmdBufPtr)        // Add the second word of the command to the RDP command buffer
+     sw     cmd_w1_dram, 4(rdpCmdBufPtr)     // Add the second word of the command to the RDP command buffer
 G_SYNC_handler:
     sw      cmd_w0, 0(rdpCmdBufPtr)         // Add the command word to the RDP command buffer
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8   // Increment the next RDP command pointer by 2 words
@@ -1213,76 +1182,22 @@ ovl3_padded_end:
 .orga max(max(ovl2_padded_end - ovl2_start, ovl4_padded_end - ovl4_start) + orga(ovl3_start), orga())
 ovl234_end:
 
-G_BOUNDINGVERTS_handler:
-    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // Bytes 1-2: size in bytes
-    li      $5, 0                              // Disable lighting (all geometry mode bits)
-    li      $6, 0                              // Track whether any vtx near enough
-    j       vtx_common_setup
-     li     $12, (clipTempVertsEnd & 0xFFF8)   // Address of end of load region
-
-boundingverts_setup_end:
-    jal     while_wait_dma_busy                // Wait for vertex load to finish
-     llv    vVpScl[0], rdpHalf1Val($zero)      // W compare int / frac; reg not used on this path
-    li      $9, CLIP_MOD_MASK_SCRN_ALL         // Track whether all vertices offscreen
-boundingverts_loop:
-    j       vtx_load_skip1st
-     ldv    vPairPosI[8], (8)(inputVtxPos)     // Load second vertex
-boundingverts_after_xfrm:
-    // Clip space coords in vPairTPosI/F.
-    vch     $v29, vPairTPosI, vPairTPosI[3h]   // Clip screen high
-    vcl     $v29, vPairTPosF, vPairTPosF[3h]   // Clip screen low
-    addi    $1, $1, 0x10                       // Has had - 2*inputVtxsize, need - 2*8 instead
-    cfc2    $20, $vcc                          // Get clip results
-    vsubc   $v29, vPairTPosF, vVpScl[1]        // Compare dist frac
-    and     $9, $9, $20                        // Combine screen clip mask for first vtx
-    vlt     $v29, vPairTPosI, vVpScl[0]        // Compare dist int, bits 3 and 7
-    cfc2    $11, $vcc                          // Get compare results
-    sll     $12, $11, 28                       // First vtx dist -> bit 31
-    bltz    $1, @@skip                         // Only one of two verts valid
-     or     $6, $6, $12                        // Combine first vtx near result
-    sll     $12, $11, 24                       // Second vtx near result -> bit 31
-    or      $6, $6, $12                        // Combine second vtx near result
-    srl     $20, $20, 4                        // Shift second vertex screen clipping to first slots
-    and     $9, $9, $20                        // Combine screen clip mask for second vtx
-@@skip:
-    addi    $24, $9, -1                        // Set sign bit if no verts left
-    and     $24, $24, $6                       // And at least one vertex near enough
-    bltz    $24, boundingverts_early_return    // If sign bit set, early return
-     addi   inputVtxPos, inputVtxPos, -0x10    // Has had + 2*inputVtxSize, need + 2*8 instead
-    bgtz    $1, boundingverts_loop             // > 0 verts remain, continue
-boundingverts_early_return:
-     lui    $11, 0x8000                        // Mask for only sign bit
-    and     $24, $24, $11                      // Keep only sign bit
-    lb      $2, (inputBufferEnd - 0x05)(inputBufferPos) // Byte 3 = -1 for keep value, 0 for clear
-    lw      $1, boundingFlags                  // Load current flags value
-    and     $1, $1, $2                         // Clear old value if don't need
-    srl     $1, $1, 1                          // Push stack of bits
-    or      $1, $1, $24                        // Insert new value
-    j       run_next_DL_command
-     sw     $1, boundingFlags                  // Store updated flags
-
 G_VTX_handler:
-    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // Bytes 1-2: size in bytes
+    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // $1 = size in bytes = vtx count * 0x10
     srl     $2, cmd_w0, 11                     // n << 1
     sub     $2, cmd_w0, $2                     // v0 << 1
     sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
     j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3 = $12
      li     $11, vtx_return_from_addrs
 vtx_return_from_addrs:
-    lhu     $5, geometryModeLabel + 1          // Middle 2 bytes
-    li      $6, -1                             // For boundingverts, negative means normal vtx load
+    lhu     $5, geometryModeLabel + 1          // Middle 2 bytes of geom mode
     andi    $12, $12, 0xFFF8                   // Round down end addr to DMA word; one input vtx still fits in one internal vtx
     mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
-vtx_common_setup:
-    // $1 = load size in bytes, $12 = load end addr, cmd_w1_dram, $5 = geom mode middle,
-    // $6 = mode flag, outputVtxPos if G_VTX_handler
     jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
      sub    dmemAddr, $12, $1                  // Start addr = end addr - size
     jal     dma_read_write
      addi   dmaLen, $1, -1                     // DMA length is always offset by -1
     move    inputVtxPos, dmemAddr
-vtx_setup_skip_load:
-    // $1 = vertex count * 0x10, $5 = geom mode middle, $6 = mode flag, inputVtxPos
     lqv     vM0I,     (mMatrix + 0x00)($zero)  // Load M matrix
     lqv     vM2I,     (mMatrix + 0x10)($zero)
     lqv     vM0F,     (mMatrix + 0x20)($zero)
@@ -1307,7 +1222,7 @@ vtx_setup_skip_load:
     bnez    $7, ovl234_ovl4_entrypoint         // run overlay 4 to compute M inverse transpose
      ldv    vM2F[8],  (mMatrix + 0x30)($zero)
 vtx_after_calc_mit:
-    lqv     vVP0I,     (vpMatrix  + 0x00)($zero)
+    lqv     vVP0I,    (vpMatrix  + 0x00)($zero)
     lqv     vVP2I,    (vpMatrix  + 0x10)($zero)
     lqv     vVP0F,    (vpMatrix  + 0x20)($zero)
     lqv     vVP2F,    (vpMatrix  + 0x30)($zero)
@@ -1315,17 +1230,16 @@ vtx_after_calc_mit:
     vcopy   vVP1I,  vVP0I
     li      $ra, 0                             // Flag to not return to clipping
     vcopy   vVP3I, vVP2I
-    ldv     vVP1I[0],  (vpMatrix  + 0x08)($zero)
+    ldv     vVP1I[0], (vpMatrix  + 0x08)($zero)
     vcopy   vVP1F, vVP0F
     ldv     vVP3I[0], (vpMatrix  + 0x18)($zero)
     vcopy   vVP3F, vVP2F
     ldv     vVP1F[0], (vpMatrix  + 0x28)($zero)
     ldv     vVP3F[0], (vpMatrix  + 0x38)($zero)
-    ldv     vVP0I[8],  (vpMatrix  + 0x00)($zero)
+    ldv     vVP0I[8], (vpMatrix  + 0x00)($zero)
     ldv     vVP2I[8], (vpMatrix  + 0x10)($zero)
     ldv     vVP0F[8], (vpMatrix  + 0x20)($zero)
-    bgez    $6, boundingverts_setup_end
-     ldv    vVP2F[8], (vpMatrix  + 0x30)($zero)
+    ldv     vVP2F[8], (vpMatrix  + 0x30)($zero)
 vtx_setup_constants:
 /*
 vVpScl = [vscale[0], -vscale[1], vscale[2], fogMult,   (repeat)]
@@ -1340,50 +1254,49 @@ vtrans[2] not incremented by Z attr offset if disabled
     vne     $v29, $v31, $v31[2h]                  // VCC = 11011101
     ldv     vSTOfs[0], (attrOffsetST - altBase)(altBaseReg) // elems 0, 1, 2 = S, T, Z offset
     vclr    $v21                                  // Zero
-    ldv     vVpOfs[0], (viewport + 8)($zero) // Load vtrans duplicated in 0-3 and 4-7
+    ldv     vVpOfs[0], (viewport + 8)($zero)      // Load vtrans duplicated in 0-3 and 4-7
     ldv     vVpOfs[8], (viewport + 8)($zero)
     lhu     $12, (geometryModeLabel+2)($zero)
-    vmrg    $v29, $v21, vSTOfs[2]               // all zeros except elems 2, 6 are Z offset
+    vmrg    $v29, $v21, vSTOfs[2]                 // all zeros except elems 2, 6 are Z offset
     ldv     vSTOfs[8], (attrOffsetST - altBase)(altBaseReg) // Duplicated in 4-6
     andi    $11, $12, G_ATTROFFSET_Z_ENABLE
     beqz    $11, @@skipz                          // Skip if Z offset disabled
      llv    $v20[4], (aoAmbientFactor - altBase)(altBaseReg) // Load aoAmb 2 and aoDir 3
-    vadd    vVpOfs, vVpOfs, $v29        // add Z offset if enabled
+    vadd    vVpOfs, vVpOfs, $v29                  // add Z offset if enabled
 @@skipz:
     andi    $11, $12, G_ATTROFFSET_ST_ENABLE
     bnez    $11, @@skipst                         // Skip if ST offset enabled
-     llv    vSTScl[0], (textureSettings2)($zero) // Texture ST scale in 0, 1
-    vclr    vSTOfs                              // If disabled, clear ST offset
+     llv    vSTScl[0], (textureSettings2)($zero)  // Texture ST scale in 0, 1
+    vclr    vSTOfs                                // If disabled, clear ST offset
 @@skipst:
     andi    $11, $12, G_AMBOCCLUSION
     vmov    $v20[6], $v20[3]                      // move aoDir to 6
     bnez    $11, @@skipao                         // Skip if ambient occlusion enabled
-     llv    vSTScl[8], (textureSettings2)($zero) // Texture ST scale in 4, 5
+     llv    vSTScl[8], (textureSettings2)($zero)  // Texture ST scale in 4, 5
     vcopy   $v20, $v21                            // Set aoAmb and aoDir to 0
 @@skipao:
-    ldv     vVpScl[0], (viewport)($zero)      // Load vscale duplicated in 0-3 and 4-7
+    ldv     vVpScl[0], (viewport)($zero)          // Load vscale duplicated in 0-3 and 4-7
     ldv     vVpScl[8], (viewport)($zero)
-    llv     vSTScl[4], (perspNorm)($zero)        // perspNorm in elem 2, garbage in 3
+    llv     vSTScl[4], (perspNorm)($zero)         // perspNorm in elem 2, garbage in 3
     llv     $v23[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
-    vmrg    vSTOfs, vSTOfs, $v20              // move aoAmb and aoDir into vSTOfs
+    vmrg    vSTOfs, vSTOfs, $v20                  // move aoAmb and aoDir into vSTOfs
     vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
-    vsub    $v20, $v21, vVpScl                // -vscale
-    vmrg    vSTScl, vSTScl, $v31[4]             // Put 4s in elements 3,7
-    vmrg    vVpScl, vVpScl, $v23[0]       // Put fog multiplier in elements 3,7 of vscale
+    vsub    $v20, $v21, vVpScl                    // -vscale
+    vmrg    vSTScl, vSTScl, $v31[4]               // Put 4s in elements 3,7
+    vmrg    vVpScl, vVpScl, $v23[0]               // Put fog multiplier in elements 3,7 of vscale
     vadd    $v23, $v23, $v31[6]                   // Add 0x7F00 to fog offset
-    vmrg    vSTOfs, vSTOfs, $v21              // Put 0s in elements 3,7
-    vmov    vVpScl[1], $v20[1]                // Negate vscale[1] because RDP top = y=0
-    vmov    vVpScl[5], $v20[1]                // Same for second half
-    bnez    $ra, clip_after_constants     // Return to clipping if from there
-     vmrg    vVpOfs, vVpOfs, $v23[1]    // Put fog offset in elements 3,7 of vtrans
+    vmrg    vSTOfs, vSTOfs, $v21                  // Put 0s in elements 3,7
+    vmov    vVpScl[1], $v20[1]                    // Negate vscale[1] because RDP top = y=0
+    vmov    vVpScl[5], $v20[1]                    // Same for second half
+    bnez    $ra, clip_after_constants             // Return to clipping if from there
+     vmrg    vVpOfs, vVpOfs, $v23[1]              // Put fog offset in elements 3,7 of vtrans
     jal     while_wait_dma_busy                   // Wait for vertex load to finish
      andi   $7, $5, G_FOG >> 8                    // Nonzero if fog enabled
 vtx_load_loop:
     ldv     vPairPosI[8],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
-vtx_load_skip1st:
-    vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
+    vlt     $v29, $v31, $v31[4]                   // Set VCC to 11110000
     ldv     vPairPosI[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
-    vmudn   $v29, vM3F, $v31[2]  // 1
+    vmudn   $v29, vM3F, $v31[2]                   // 1
     // Element access wraps in lpv/luv, but not intuitively. Basically the named
     // element and above do get the values at the specified address, but the earlier
     // elements get the values before that, except masked to 0xF. So for example here,
@@ -1434,8 +1347,7 @@ vtx_load_skip1st:
     vmadl   $v29, vVP2F, vPairPosF[2h]
     vmadm   $v29, vVP2I, vPairPosF[2h]
     vmadn   vPairTPosF, vVP2F, vPairPosI[2h]
-    bgez    $6, boundingverts_after_xfrm // >= 0 for boundingverts, < 0 for normal vtx
-     vmadh  vPairTPosI, vVP2I, vPairPosI[2h]
+    vmadh   vPairTPosI, vVP2I, vPairPosI[2h]
     vmudm   $v29, vPairST, vSTScl     // Scale ST; must be after texgen
     vmadh   vPairST, vSTOfs, $v31[2] // + 1 * ST offset
 vtx_store:
