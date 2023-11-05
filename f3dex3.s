@@ -519,8 +519,6 @@ OSTask:
 /////////////////////////////// Register Use Map ///////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
-// $v31: Only global constant vector register
-
 // Vertex / lighting all regs:
 vM0I   equ $v0  // mMatrix rows int/frac
 vM1I   equ $v1  // Valid in vertex, lighting, and M inverse transpose
@@ -554,6 +552,7 @@ vPairRGBA  equ $v27 // Vertex pair color
 vPairNrml  equ $v28 // Vertex pair normals (model then world space)
 // $v29: permanent temp register, also write results here to discard
 vPairLt    equ $v30 // Vertex pair total light color/intensity (RGB-RGB-)
+// $v31: Only global constant vector register
 
 // Some extra defines for lighting:
 vPackPXY   equ $v23 // Positive X and Y in packed normals
@@ -572,112 +571,79 @@ vLtMIT0F   equ $v29
 vLtMIT1F   equ $v30
 vLtMIT2F   equ $v10
 
+// Other vector regs defines:
+vZero equ $v0  // all elements = 0 (has other value in vtx / lighting)
+vOne  equ $v1  // all elements = 1 (has other value in vtx / lighting)
 
-// Registers marked as "global" are only used for one purpose in the vanilla
-// microcode. However, this does not necessarily mean they can't be used for
-// other things in mods--this depends on which group they're listed in below.
+// Global and semi-global (i.e. one main function + occasional local) scalar regs:
+//                 $zero // Hardwired zero scalar register
+altBaseReg     equ $13   // Alternate base address register for vector loads
+inputVtxPos    equ $14   // Pointer to loaded vertex to transform
+outputVtxPos   equ $15   // Pointer to vertex buffer to store transformed verts
+clipFlags      equ $16   // Current clipping flags being checked
+clipPolyRead   equ $17   // Read pointer within current polygon being clipped
+clipPolySelect equ $18   // Clip poly double buffer selection, or < 0 for normal tri write
+clipPolyWrite  equ $21   // Write pointer within current polygon being clipped
+rdpCmdBufEnd   equ $22   // RDP command buffer end DRAM pointer
+rdpCmdBufPtr   equ $23   // RDP command buffer current DRAM pointer
+cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
+cmd_w0         equ $25   // DL command word 0, also holds next tris info
+taskDataPtr    equ $26   // Task data (display list) DRAM pointer
+inputBufferPos equ $27   // DMEM position within display list input buffer, relative to end
+//                 $ra   // Return address
 
-// Note that these lists do not cover registers which are just used locally in
-// a particular region of code--you're still responsible for not breaking the
-// code you modify. This is designed to help you avoid breaking one part of the
-// code by modifying a different part.
-
-// Local register definitions are included with their code, not here.
-
-// These registers are used globally, and their values can't be rebuilt, so
-// they should never be used for anything besides their original purpose.
-//                 $zero // global
-rdpCmdBufEnd   equ $22   // global
-rdpCmdBufPtr   equ $23   // global
-taskDataPtr    equ $26   // global
-inputBufferPos equ $27   // global
-//                 $ra   // global
-
-// These registers are used throughout the codebase and expected to have
-// certain values, but you're free to overwrite them as long as you
-// reconstruct the normal values after you're done (in fact point lighting does
-// this for $v30 and $v31).
-vZero equ $v0  // global (not in MOD_VL_REWRITE)
-vOne  equ $v1  // global (not in MOD_VL_REWRITE)
-//        $v30 // global except in point lighting (not in MOD_VL_REWRITE)
-//        $v31 // global except in point lighting (actually global in MOD_VL_REWRITE)
-
-// Must keep values during the full clipping process: clipping overlay, vertex
-// write, tri drawing.
-clipPolySelect        equ $18 // global (mods: >= 0 indicates clipping, < 0 normal tri write)
-clipPolyWrite         equ $21 // also input_mtx_0
-savedActiveClipPlanes equ $29 // global (mods: got rid of, now available)
-savedRA               equ $30 // global (mods: got rid of, now available)
-
-// Must keep values during the first part of the clipping process only: polygon
-// subdivision and vertex write.
-// $2: vertex at end of edge
+// Misc scalar regs:
 clipMaskIdx  equ $5
 secondVtxPos equ $8
-outputVtxPos equ $15 // global
-clipFlags    equ $16 // global
-clipPolyRead equ $17 // global
-
-// Must keep values during tri drawing.
-// They are also used throughout the codebase, but can be overwritten once their
-// use has been fulfilled for the specific command.
-cmd_w1_dram equ $24 // Command word 1, which is also DMA DRAM addr; almost global, occasionally used locally
-cmd_w0      equ $25 // Command word 0; almost global, occasionally used locally
-vtxPtr    equ $25 // = cmd_w0
-endVtxPtr equ $24 // = cmd_w1_dram
-
-// Must keep values during the full vertex process: load, lighting, and vertex write
-// $1: count of remaining vertices
-curLight     equ $9   // Used locally elsewhere
-inputVtxPos  equ $14  // global
-
-
-// Values set up by load_spfx_global_values, which must be kept during the full
-// vertex process, and which are reloaded for each vert during clipping. See
-// that routine for the detailed contents of each of these registers.
-// secondVtxPos
-altBaseReg equ $13  // global
+curLight     equ $9
 
 // Arguments to dma_read_write
 dmaLen   equ $19 // also used by itself
 dmemAddr equ $20
-// cmd_w1_dram   // used for all dma_read_write DRAM addresses, not just second word of command
+// cmd_w1_dram   // used for all dma_read_write DRAM addresses
 
 // Argument to load_overlay*
 postOvlRA equ $12 // Commonly used locally
 
 // ==== Summary of uses of all registers
 // $zero: Hardwired zero scalar register
-// $1: vertex 1 addr, count of remaining vertices, pointer to store texture coefficients, local
-// $2: vertex 2 addr, vertex at end of edge in clipping, pointer to store shade coefficients, local
-// $3: vertex 3 addr, vertex at start of edge in clipping, local
-// $4: pre-shuffle vertex 1 addr for flat shading (mods: got rid of, available local), local
-// $5: clipMaskIdx, geometry mode high short during vertex load / lighting, local
-// $6: geometry mode low byte during tri write, local
-// $7: fog flag in vtx write, local
+// $1: vertex 1 addr, zero when command handler is called, count of
+//     remaining vertices * 0x10, pointer to store texture coefficients, local
+// $2: vertex 2 addr, vertex at end of edge during clipping, pointer to store
+//     shade coefficients, local
+// $3: vertex 3 addr, vertex at start of edge during clipping, local
+// $4: pre-shuffle vertex 1 addr for flat shading during tri write, otherwise unused
+// $5: clipMaskIdx, geometry mode middle 2 bytes during vertex load / lighting,
+//     local
+// $6: geometry mode low byte during tri write, any vtx near enough flag
+//     during bounding verts, local
+// $7: command byte when command handler is called, fog flag in vtx write,
+//     mIT recompute flag in Overlay 4, local
 // $8: secondVtxPos, local
-// $9: curLight, local
-// $10: briefly used local in vtx write (mods: got rid of, not used!)
+// $9: curLight, clip mask during clipping, all verts offscreen flag during
+//     bounding verts, local
+// $10: unused
 // $11: very common local
 // $12: postOvlRA, local
-// $13: altBaseReg
-// $14: inputVtxPos
-// $15: outputVtxPos
-// $16: clipFlags
-// $17: clipPolyRead
-// $18: clipPolySelect
-// $19: dmaLen, briefly used local
-// $20: dmemAddr
-// $21: clipPolyWrite
-// $22: rdpCmdBufEnd
-// $23: rdpCmdBufPtr
+// $13: altBaseReg (global)
+// $14: inputVtxPos, local
+// $15: outputVtxPos, local
+// $16: clipFlags (global)
+// $17: clipPolyRead (global)
+// $18: clipPolySelect (global)
+// $19: dmaLen, onscreen vertex during clipping, local
+// $20: dmemAddr, local
+// $21: clipPolyWrite (global)
+// $22: rdpCmdBufEnd (global)
+// $23: rdpCmdBufPtr (global)
 // $24: cmd_w1_dram, local
-// $25: cmd_w0
-// $26: taskDataPtr
-// $27: inputBufferPos
-// $28: not used!
-// $29: savedActiveClipPlanes (mods, got rid of, not used!)
-// $30: savedRA (unused in MOD_GENERAL)
+// $25: cmd_w0 (global); holds next tris info during tri write -> clipping ->
+//      vtx write
+// $26: taskDataPtr (global)
+// $27: inputBufferPos (global)
+// $28: unused
+// $29: unused
+// $30: unused
 // $ra: Return address for jal, b*al
 // $v0: vZero (every element 0)
 // $v1: vOne (every element 1)
@@ -739,9 +705,9 @@ task_init:
     sub     $11, $3, $2
     bgtz    $11, wait_dpc_start_valid
      mfc0   $1, DPC_CURRENT
-    lw      $4, OSTask + OSTask_output_buff_size
+    lw      $3, OSTask + OSTask_output_buff_size
     beqz    $1, wait_dpc_start_valid
-     sub    $11, $1, $4
+     sub    $11, $1, $3
     bgez    $11, wait_dpc_start_valid
      nop
     bne     $1, $2, f3dzex_0000111C
@@ -2302,9 +2268,7 @@ lt_after_xfrm_normals:
      luv    vPairLt, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
     // Set up ambient occlusion: light *= (factor * (alpha - 1) + 1)
     vmudm   $v25, vPairRGBA, vSTOfs[2] // (alpha - 1) * aoAmb factor; elems 3, 7
-    //sll     $12, $5, 17 // G_LIGHTING_POSITIONAL = 0x00400000; $5 is middle 16 bits so 0x00004000
     vcopy   vPairNrml, $v23
-    //sra     $12, $12, 31 // All 1s if point lighting enabled, else all 0s
     vadd    $v25, $v25, $v31[7] // 0x7FFF = 1 in s.15; elems 3, 7
     vmulf   vPairLt, vPairLt, $v25[3h] // light color *= ambient factor
 lt_loop:
@@ -2316,7 +2280,6 @@ lt_loop:
     lbu     $11,     (ltBufOfs + 3 - lightSize)(curLight) // Light type / constant attenuation
     beq     curLight, altBaseReg, lt_post
      vmrg   $v23, $v23, $v25                              // $v23 = light direction
-    //and     $11, $11, $12 // Mask away if point lighting disabled
     bnez    $11, lt_point
      luv    vLtColor,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
     vmulf   $v23, $v23, vPairNrml // Light dir * normalized normals
@@ -2526,42 +2489,39 @@ ovl4_select_instr:
      // Otherwise G_MTX_end, which starts with a harmless instruction
 
 G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
-output_mtx  equ $19
-input_mtx_1 equ $20
-input_mtx_0 equ $21
-    lhu     output_mtx, (movememTable + G_MV_MMTX)($1) // $1 holds 0 for M or 4 for VP.
-    move    input_mtx_0, output_mtx
+    lhu     $5, (movememTable + G_MV_MMTX)($1) // Output; $1 holds 0 for M or 4 for VP.
+    move    $2, $5 // Input 0 = output
     jal     while_wait_dma_busy // If ovl4 already in memory, was not done
-     li     input_mtx_1, tempMemRounded
-    addi    $12, input_mtx_1, 0x0018
+     li     $3, tempMemRounded // Input 1 = temp mem (loaded mtx)
+    addi    $12, $3, 0x0018
 @@loop:
     vmadn   $v9, vZero, vZero[0]
-    addi    $11, input_mtx_1, 0x0008
+    addi    $11, $3, 0x0008
     vmadh   $v8, vZero, vZero[0]
-    addi    input_mtx_0, input_mtx_0, -0x0020
+    addi    $2, $2, -0x0020
     vmudh   $v29, vZero, vZero[0]
 @@innerloop:
-    ldv     $v5[0], 0x0040(input_mtx_0)
-    ldv     $v5[8], 0x0040(input_mtx_0)
-    lqv     $v3[0], 0x0020(input_mtx_1)
-    ldv     $v4[0], 0x0020(input_mtx_0)
-    ldv     $v4[8], 0x0020(input_mtx_0)
-    lqv     $v2[0], 0x0000(input_mtx_1)
+    ldv     $v5[0], 0x0040($2)
+    ldv     $v5[8], 0x0040($2)
+    lqv     $v3[0], 0x0020($3) // Input 1
+    ldv     $v4[0], 0x0020($2)
+    ldv     $v4[8], 0x0020($2)
+    lqv     $v2[0], 0x0000($3) // Input 1
     vmadl   $v29, $v5, $v3[0h]
-    addi    input_mtx_1, input_mtx_1, 0x0002
+    addi    $3, $3, 0x0002
     vmadm   $v29, $v4, $v3[0h]
-    addi    input_mtx_0, input_mtx_0, 0x0008
+    addi    $2, $2, 0x0008 // Increment input 0 pointer
     vmadn   $v7, $v5, $v2[0h]
-    bne     input_mtx_1, $11, @@innerloop
+    bne     $3, $11, @@innerloop
      vmadh  $v6, $v4, $v2[0h]
-    bne     input_mtx_1, $12, @@loop
-     addi   input_mtx_1, input_mtx_1, 0x0008
-    // Store the results in the passed in matrix
-    sqv     $v9[0], 0x0020(output_mtx)
-    sqv     $v8[0], 0x0000(output_mtx)
-    sqv     $v7[0], 0x0030(output_mtx)
+    bne     $3, $12, @@loop
+     addi   $3, $3, 0x0008
+    // Store the results in M or VP
+    sqv     $v9[0], 0x0020($5)
+    sqv     $v8[0], 0x0000($5)
+    sqv     $v7[0], 0x0030($5)
     j       run_next_DL_command
-     sqv    $v6[0], 0x0010(output_mtx)
+     sqv    $v6[0], 0x0010($5)
 
 G_DMA_IO_handler:
     jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
