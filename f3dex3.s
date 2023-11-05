@@ -445,9 +445,12 @@ clipPoly2:                              //  \ / \ / \
 vertexBuffer:
     .skip (G_MAX_VERTS * vtxSize)
 
-.if . > OS_YIELD_DATA_SIZE - 8
-    // OS_YIELD_DATA_SIZE (0xC00) bytes of DMEM are saved; the last two words are
-    // the ucode and the DL pointer. Make sure anything past there is temporary.
+.if . > OS_YIELD_DATA_SIZE - 0xA
+    // OS_YIELD_DATA_SIZE (0xC00) bytes of DMEM are saved; the last data in that is:
+    // -0xA: numPrimsDrawn
+    // -0x8: taskDataPtr
+    // -0x4: ucode
+    // So anything after this must be temporary.
     // (Input buffer will be reloaded from next instruction in the source DL.)
     .error "Important things in DMEM will not be saved at yield!"
 .endif
@@ -583,6 +586,7 @@ cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
 cmd_w0         equ $25   // DL command word 0, also holds next tris info
 taskDataPtr    equ $26   // Task data (display list) DRAM pointer
 inputBufferPos equ $27   // DMEM position within display list input buffer, relative to end
+numPrimsDrawn  equ $28   // Number of tris + tex rects sent to RDP
 //                 $ra   // Return address
 
 // Misc scalar regs:
@@ -679,15 +683,18 @@ start: // This is at IMEM 0x1080, not the start of IMEM
     li      rdpCmdBufEnd, rdpCmdBuffer1End
     lw      $11, rdpFifoPos
     lw      $12, OSTask + OSTask_flags
-    li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // task done and yielded signals
-    beqz    $11, task_init
+    li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // Clear task done and yielded signals
+    beqz    $11, initialize_rdp             // If RDP FIFO not set up yet, do so
      mtc0   $1, SP_STATUS
-    andi    $12, $12, OS_TASK_YIELDED
-    beqz    $12, load_task_ptr    // skip init if resumed from yield?
-     sw     $zero, OSTask + OSTask_flags
-    j       load_overlay1_init              // Skip the initialization and go straight to loading overlay 1
-     lw     taskDataPtr, OS_YIELD_DATA_SIZE - 8  // Was previously saved here at yield time
-task_init:
+    andi    $12, $12, OS_TASK_YIELDED       // Resumed from yield or came from called ucode?
+    beqz    $12, continue_from_os_task      // If latter, load DL (task data) pointer from OSTask
+     sw     $zero, OSTask + OSTask_flags    // Clear all task flags, incl. yielded
+continue_from_yield:
+    lhu     numPrimsDrawn, OS_YIELD_DATA_SIZE - 0xA // Load value saved at yield
+    j       finish_setup
+     lw     taskDataPtr, OS_YIELD_DATA_SIZE - 8  // load DL pointer from yield data
+
+initialize_rdp:
     mfc0    $11, DPC_STATUS
     andi    $11, $11, DPC_STATUS_XBUS_DMA
     bnez    $11, wait_dpc_start_valid
@@ -713,13 +720,14 @@ wait_dpc_start_valid:
     mtc0    $2, DPC_END
 f3dzex_0000111C:
     sw      $2, rdpFifoPos
-    lw      $11, matrixStackPtr
-    bnez    $11, load_task_ptr
+    lw      $11, matrixStackPtr           // Initialize matrix stack pointer from OSTask
+    bnez    $11, continue_from_os_task    // if not yet initialized
      lw     $11, OSTask + OSTask_dram_stack
     sw      $11, matrixStackPtr
-load_task_ptr:
+continue_from_os_task:
+    lhu     numPrimsDrawn, OSTask + OSTask_type // Upper two bytes of type
     lw      taskDataPtr, OSTask + OSTask_data_ptr
-load_overlay1_init:
+finish_setup:
     li      inputBufferPos, 0
     li      cmd_w1_dram, orga(ovl1_start)
     j       load_overlays_0_1
@@ -1781,6 +1789,7 @@ tDaDyI equ $v7
     vmadh   tDaDxI, tDaDxI, $v24[1]
     add     rdpCmdBufPtr, rdpCmdBufPtr, $11  // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
     vmudl   $v29, tDaDyF, $v23[1]
+    addi    numPrimsDrawn, numPrimsDrawn, 1
     vmadm   $v29, tDaDyI, $v23[1]
     vmadn   tDaDyF, tDaDyF, $v24[1]
     sdv     tDaDxF[0], 0x0018($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
@@ -1892,24 +1901,25 @@ dma_write:
 
 .headersize 0x00001000 - orga()
 
-// Overlay 0 controls the RDP and also stops the RSP when work is done
+// Overlay 0 handles three cases of stopping the current microcode.
 // The action here is controlled by $1. If yielding, $1 > 0. If this was
 // G_LOAD_UCODE, $1 == 0. If we got to the end of the parent DL, $1 < 0.
 ovl0_start:
     sub     $11, rdpCmdBufPtr, rdpCmdBufEnd
     addi    $12, $11, RDP_CMD_BUFSIZE - 1
     bgezal  $12, flush_rdp_buffer
-     nop
+     sh     numPrimsDrawn, OS_YIELD_DATA_SIZE - 0xA // Stored here for yield and done
     jal     while_wait_dma_busy
      lw     $24, rdpFifoPos
-    bltz    $1, taskdone_and_break  // $1 < 0 = Got to the end of the parent DL
+    bltz    $1, task_done           // $1 < 0 = Got to the end of the parent DL
      mtc0   $24, DPC_END            // Set the end pointer of the RDP so that it starts the task
     bnez    $1, task_yield          // $1 > 0 = CPU requested yield
      add    taskDataPtr, taskDataPtr, inputBufferPos // inputBufferPos <= 0; taskDataPtr was where in the DL after the current chunk loaded
-// If here, G_LOAD_UCODE was executed.
+load_ucode:
     lw      cmd_w1_dram, (inputBufferEnd - 0x04)(inputBufferPos) // word 1 = ucode code DRAM addr
     sw      taskDataPtr, OSTask + OSTask_data_ptr // Store where we are in the DL
     sw      cmd_w1_dram, OSTask + OSTask_ucode // Store pointer to new ucode about to execute
+    sh      numPrimsDrawn, OSTask + OSTask_type // Stored here only when switch ucodes
     li      dmemAddr, start         // Beginning of overwritable part of IMEM
     jal     dma_read_write          // DMA DRAM read -> IMEM write
      li     dmaLen, (while_wait_dma_busy - start) - 1 // End of overwritable part of IMEM
@@ -1928,23 +1938,28 @@ ovl0_start:
     .error "ovl0_start does not fit within the space before the start of the ucode loaded with G_LOAD_UCODE"
 .endif
 
-ucode equ $11
-status equ $12
 task_yield:
-    lw      ucode, OSTask + OSTask_ucode
-    sw      taskDataPtr, OS_YIELD_DATA_SIZE - 8
-    sw      ucode, OS_YIELD_DATA_SIZE - 4
-    li      status, SP_SET_SIG1 | SP_SET_SIG2   // yielded and task done signals
+    lw      $11, OSTask + OSTask_ucode
+    sw      taskDataPtr, OS_YIELD_DATA_SIZE - 8 // numPrimsDrawn was saved above
+    sw      $11, OS_YIELD_DATA_SIZE - 4
+    li      $12, SP_SET_SIG1 | SP_SET_SIG2   // yielded and task done signals
     lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
     li      dmemAddr, 0x8000 // 0, but negative = write
     li      dmaLen, OS_YIELD_DATA_SIZE - 1
     j       dma_read_write
-     li     $ra, break
+     li     $ra, set_status_and_break
 
-taskdone_and_break:
-    li      status, SP_SET_SIG2   // task done signal
-break:
-    mtc0    status, SP_STATUS
+task_done:
+    // Copy just the part of the yield data that has the numPrimsDrawn counter.
+DONE_PART_OF_YIELD_DATA equ 0x10
+    lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
+    addi    cmd_w1_dram, cmd_w1_dram, OS_YIELD_DATA_SIZE - DONE_PART_OF_YIELD_DATA
+    li      dmemAddr, 0x8000 | (OS_YIELD_DATA_SIZE - DONE_PART_OF_YIELD_DATA) // negative = write
+    li      dmaLen, DONE_PART_OF_YIELD_DATA - 1
+    jal     dma_read_write
+     li     $12, SP_SET_SIG2   // task done signal
+set_status_and_break: // $12 is the status to set
+    mtc0    $12, SP_STATUS
     break   0
     nop
 
@@ -2048,6 +2063,7 @@ G_RDPHALF_2_handler:
     ldv     $v29[0], (texrectWord1)($zero)
     lw      cmd_w0, rdpHalf1Val                 // load the RDPHALF1 value into w0
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
+    addi    numPrimsDrawn, numPrimsDrawn, 1
     j       G_RDP_handler
      sdv    $v29[0], -8(rdpCmdBufPtr)
 

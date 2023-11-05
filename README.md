@@ -97,6 +97,12 @@ you should expect crashes and graphical issues.**
   slightly improves RDP draw time for large tris (max of about 500 us per frame,
   usually much less or zero).
 
+### Miscellaneous
+
+- Microcode counts the number of primitives (tris and tex rects) actually sent
+  to the RDP (after culling and clipping), which can be accessed after the task
+  is finished as a performance counter.
+
 
 ## Porting Your Romhack Codebase to F3DEX3
 
@@ -188,6 +194,18 @@ similar for other games):
   what percentage this is of the total RDP time depends on how many triangles
   are typically drawn between each material change. For more information, see
   the GBI documentation near this define.
+
+To get the number of primitives counter in OoT, in the `true` codepath of
+`Sched_TaskComplete`, add this code:
+```
+// Fetch number of primitives drawn from yield data
+if(task->list.t.type == M_GFXTASK){
+    u16* counterAddress = (u16*)((u8*)gGfxSPTaskYieldBuffer + OS_YIELD_DATA_SIZE - 0xA);
+    osInvalDCache(counterAddress, sizeof(u16));
+    gRSPGfxNumPrimsDrawn = *counterAddress;
+}
+```
+with `volatile u16 gRSPGfxNumPrimsDrawn` defined somewhere globally.
 
 ### Recommended Changes (Lighting)
 
