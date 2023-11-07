@@ -106,7 +106,7 @@ G_NORMALSMODE_FAST equ 0x00
 G_NORMALSMODE_AUTO equ 0x01
 G_NORMALSMODE_MANUAL equ 0x02
 
-G_MAX_LIGHTS equ 9 // 9 directional / point lights, plus ambient light (and lookat)
+G_MAX_LIGHTS equ 8 // 8 directional / point lights, plus ambient light (and lookat)
 lightSize equ 0x10
 
 G_MAX_VERTS equ 56
