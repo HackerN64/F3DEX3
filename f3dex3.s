@@ -1443,6 +1443,7 @@ vtx_store:
     ori     $12, $12, CLIP_MOD_VTX_USED // Write for all verts, only matters for generated verts
     vmadh   $v30, $v20, $v30[3h] // $v30:$v28 is 1/W
     vmadh   $v25, $v25, $v31[7] // 0x7FFF; $v25:$v28 is 1/W but large number if W negative
+    vlt     $v29, $v31, $v31[2h] // Set VCC to 11001100
     vmudl   $v29, vPairTPosF, $v28[3h]
     ssv     $v28[14],         (VTX_INV_W_FRAC)(secondVtxPos)
     vmadm   $v29, vPairTPosI, $v28[3h]
@@ -1452,53 +1453,42 @@ vtx_store:
     vmadh   vPairTPosI, vPairTPosI, $v25[3h] // pos * 1/W
     ssv     $v30[6],          (VTX_INV_W_INT )(outputVtxPos)
     vmudl   $v29, vPairTPosF, vSTScl[2] // Persp norm
-    sh      $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex results
+    ldv     $v30[0], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // Load coeffs 0-3
     vmadm   vPairTPosI, vPairTPosI, vSTScl[2] // Persp norm
-    sh      $12,              (VTX_CLIP      )(outputVtxPos) // Store first vertex results
+    ldv     $v30[8], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // and for vtx 2
     vmadn   vPairTPosF, vSTOfs, vSTOfs[3] // Zero
     vmudh   $v29, vVpOfs, $v31[2] // offset * 1
     vmadn   vPairTPosF, vPairTPosF, vVpScl // + XYZ * scale
     vmadh   vPairTPosI, vPairTPosI, vVpScl
-    // vPairTPos screen coords here
-    vge     $v21, vPairTPosI, $v31[6] // 0x7F00; clamp fog to >= 0 (low byte only)
+    vmrg    $v26, $v31, $v31[0] // Signs of $v26 are --++--++
+    // 2 cycles to wait for vPairTPosI
+    vmudh   $v28, vPairTPosI, $v31[4] // 4; scale up x and y
     slv     vPairTPosI[8],  (VTX_SCR_VEC   )(secondVtxPos)
-    vge     $v20, vPairTPosI, vSTOfs[3] // Zero; clamp Z to >= 0
+    vabs    $v26, $v26, $v31[5] // $v26 is 0xC000, 0xC000, 0x4000, 0x4000, repeat
     slv     vPairTPosI[0],  (VTX_SCR_VEC   )(outputVtxPos)
+    vge     $v21, vPairTPosI, $v31[6] // 0x7F00; clamp fog to >= 0 (low byte only)
     ssv     vPairTPosF[12], (VTX_SCR_Z_FRAC)(secondVtxPos)
+    vge     $v20, vPairTPosI, vSTOfs[3] // Zero; clamp Z to >= 0
+    ssv     vPairTPosF[4],  (VTX_SCR_Z_FRAC)(outputVtxPos)
+    vmulf   $v29, $v30, $v28[0h]       //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
     beqz    $7, vtx_skip_fog
-     ssv    vPairTPosF[4],  (VTX_SCR_Z_FRAC)(outputVtxPos)
+     vmacf  $v25, $v26, vPairTPosI[1h] // -0x4000*Y1, --, +0x4000*Y1, --, repeat vtx 2
     sbv     $v21[15],         (VTX_COLOR_A   )(secondVtxPos)
     sbv     $v21[7],          (VTX_COLOR_A   )(outputVtxPos)
 vtx_skip_fog:
-    ssv     $v20[12],         (VTX_SCR_Z     )(secondVtxPos)
-    jr      $ra
-     ssv    $v20[4],          (VTX_SCR_Z     )(outputVtxPos)
-
-/*
-// Draft of occlusion plane
-    vmudh   $v28, vPairTPosI, $v31[4] // 4; scale up x and y
-    ldv     $v30[0], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // Load coeffs 0-3
-    vlt     $v29, $v31, $v31[2h] // Set VCC to 11001100
-    ldv     $v30[8], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // and for vtx 2
-    vmrg    $v26, $v31, $v31[0] // Signs of $v26 are --++--++
-    // 3 cycles here
-    vabs    $v26, $v26, $v31[5] // $v26 is 0xC000, 0xC000, 0x4000, 0x4000, repeat
-    // 2 cycles here
-    vmulf   $v29, $v30, $v28[0h]       //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
-    vmacf   $v25, $v26, vPairTPosI[1h] // -0x4000*Y1, --, +0x4000*Y1, --, repeat vtx 2
     vmulf   $v29, $v30, $v28[1h]       // --,    4*Y1*c1, --,    4*Y1*c3, repeat vtx 2
+    ssv     $v20[12],         (VTX_SCR_Z     )(secondVtxPos)
     vmacf   $v26, $v26, vPairTPosI[0h] // --, -0x4000*X1, --, +0x4000*X1, repeat vtx 2
+    ssv     $v20[4],          (VTX_SCR_Z     )(outputVtxPos)
     ldv     $v30[0], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // Load coeffs 4-7
     veq     $v29, $v31, $v31[0q]       // Set VCC to 10101010
     ldv     $v30[8], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // and for vtx 2
-    // 2 cycles here
     vmrg    $v25, $v25, $v26           // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
-    // 3 cycles here
-    vge     $v29, $v25, $v22           // Each compare to coeffs 4-7
+    vge     $v29, $v25, $v30           // Each compare to coeffs 4-7
     cfc2    $20, $vcc // TODO process this
-    
-    
-*/
+    sh      $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex results
+    jr      $ra
+     sh     $12,              (VTX_CLIP      )(outputVtxPos) // Store first vertex results
 
 vtx_addrs_from_cmd:
     // Treat eight bytes of last command each as vertex indices << 1
