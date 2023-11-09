@@ -356,10 +356,10 @@ texgenLinearCoeffs:
 
 // Constants for clipping algorithm
 clipCondShifts:
-    .db CLIP_SHIFT_NY
-    .db CLIP_SHIFT_PY
-    .db CLIP_SHIFT_NX
-    .db CLIP_SHIFT_PX
+    .db CLIP_SCAL_NY_SHIFT
+    .db CLIP_SCAL_PY_SHIFT
+    .db CLIP_SCAL_NX_SHIFT
+    .db CLIP_SCAL_PX_SHIFT
 
 // "Forward declaration" of temporary matrix in clipTempVerts scratch space, aligned to 16 bytes
 tempMemRounded equ ((clipTempVerts + 15) & ~15)
@@ -416,18 +416,6 @@ jumpTableEntry G_QUAD_handler
 jumpTableEntry G_TRISTRIP_handler
 jumpTableEntry G_TRIFAN_handler
 jumpTableEntry G_LIGHTTORDP_handler
-
-gCullMagicNumbers:
-// Values added to cross product (16-bit sign extended).
-// Then if sign bit is clear, cull the triangle.
-    .dh 0xFFFF // }-G_CULL_NEITHER -- makes any value negative.
-    .dh 0x8000 // }/    }-G_CULL_FRONT -- inverts the sign.
-    .dh 0x0000 //       }/    }-G_CULL_BACK -- no change.
-    .dh 0x0000 //             }/    }-G_CULL_BOTH -- makes any value positive.
-    .dh 0x8000 //                   }/
-// G_CULL_BOTH is useless as the tri will always be culled, so might as well not
-// bother drawing it at all. Guess they just wanted completeness, and it only
-// costs two bytes of DMEM.
 
 // The maximum number of generated vertices in a clip polygon. In reality, this
 // is equal to MAX_CLIP_POLY_VERTS, but for testing we can change them separately.
@@ -819,7 +807,7 @@ G_CULLDL_handler:
     j       vtx_addrs_from_cmd              // Load start vtx addr in $12, end vtx in $3
      li     $11, culldl_return_from_addrs
 culldl_return_from_addrs:
-    li      $1, CLIP_MOD_MASK_SCRN_ALL
+    li      $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE | CLIP_OCCLUDED)
     lhu     $11, VTX_CLIP($12)
 culldl_loop:
     and     $1, $1, $11
@@ -949,7 +937,7 @@ clip_init_used_loop:
     sh      $2, (clipPoly - 6 + 2)(clipPolySelect)
     sh      $3, (clipPoly - 6 + 4)(clipPolySelect)
     sh      $zero, (clipPoly)(clipPolySelect) // Zero to mark end of polygon
-    li      $9, CLIP_NEAR >> 4                       // Initial clip mask for no nearclipping
+    li      $9, CLIP_CAMPLANE                        // Initial clip mask for no nearclipping
 // Available locals here: $11, $1, $7, $20, $24, $12
 clip_condlooptop: // Loop over six clipping conditions: near, far, +y, +x, -y, -x
     lhu     clipFlags, VTX_CLIP($3)                  // Load flags for V3, which will be the final vertex of the last polygon
@@ -972,7 +960,7 @@ clip_find_unused_loop:
     lhu     $11, (VTX_CLIP - vtxSize)(outputVtxPos)
     addi    $12, outputVtxPos, -clipTempVerts  // This is within the loop rather than before b/c delay after lhu
     blez    $12, clip_done                 // If can't find one (should never happen), give up
-     andi   $11, $11, CLIP_MOD_VTX_USED
+     andi   $11, $11, CLIP_VTX_USED
     bnez    $11, clip_find_unused_loop
      addi   outputVtxPos, outputVtxPos, -vtxSize
     beqz    clipFlags, clip_skipswap23     // V2 flag is clear / on screen, therefore V3 is set / off screen
@@ -1078,7 +1066,7 @@ clip_skipxy:
     vmudm   $v29, $v14, vClFade1[3]       //   Fade factor for off screen vert * off screen vert TC
     move    secondVtxPos, outputVtxPos    // Writes garbage second vertex and then output vertex to same place
     vmadm   vPairST, vPairST, vClFade2[3] // + Fade factor for on  screen vert * on  screen vert TC
-    andi    $11, $11, ~CLIP_MOD_VTX_USED  // Clear used flag from off screen vert
+    andi    $11, $11, ~CLIP_VTX_USED  // Clear used flag from off screen vert
     vmudl   $v29, $v6, vClFade1[3]        //   Fade factor for off screen vert * off screen vert pos frac
     sh      outputVtxPos, (clipPoly)(clipPolyWrite) // Write pointer to generated vertex to polygon
     vmadm   $v29, $v7, vClFade1[3]        // + Fade factor for off screen vert * off screen vert pos int
@@ -1389,15 +1377,15 @@ vtx_store:
     vmudl   $v29, vPairTPosF, vSTScl[2] // Persp norm
     vmadm   $v20, vPairTPosI, vSTScl[2] // Persp norm
     vmadn   $v21, vSTOfs, vSTOfs[3] // Zero
-    cfc2    $20, $vcc // Load screen clipping results
+    cfc2    $12, $vcc // Load screen clipping results
     vmudn   $v29, vPairTPosF, $v30 // X * X factor, Y * Y factor, Z * Z factor
     vmadh   $v28, vPairTPosI, $v30 // Clamp result, not vreadacc
     veq     $v29, $v31, $v31[3h] // Set VCC to 00010001
-    srl     $24, $20, 4            // Shift second vertex screen clipping to first slots
+    srl     $24, $12, 4            // Shift second vertex screen clipping to first slots
     vmudn   $v26, vPairTPosF, $v31[3] // W * clip ratio for scaled clipping
-    andi    $12, $20, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
+    andi    $12, $12, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
     vmadh   $v25, vPairTPosI, $v31[3] // W * clip ratio for scaled clipping
-    andi    $24, $24, CLIP_MOD_MASK_SCRN_ALL // Mask to only screen bits we care about
+    andi    $24, $24, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
     vmrg    $v28, $v28, $v30 // Put constant factor in elems 3, 7
     sdv     vPairTPosF[8],  (VTX_FRAC_VEC  )(secondVtxPos)
     vrcph   $v29[0], $v20[3]
@@ -1408,14 +1396,14 @@ vtx_store:
     sdv     vPairTPosI[0],  (VTX_INT_VEC   )(outputVtxPos)
     vrcpl   $v30[6], $v21[7]
     suv     vPairRGBA[4],     (VTX_COLOR_VEC )(secondVtxPos)
-    vadd    $v28, $v28, $v28[1q] // Add pairs
+    vadd    $v28, $v28, $v28[0q] // Add pairs upwards
     suv     vPairRGBA[0],     (VTX_COLOR_VEC )(outputVtxPos)
     vrcph   $v30[7], vSTOfs[3] // Zero
     slv     vPairST[8],       (VTX_TC_VEC    )(secondVtxPos)
     vch     $v29, vPairTPosI, $v25[3h] // Clip scaled high
     slv     vPairST[0],       (VTX_TC_VEC    )(outputVtxPos)
     vcl     $v29, vPairTPosF, $v26[3h] // Clip scaled low
-    vadd    $v28, $v28, $v28[2h] // Add elems 2, 6 to 0, 4
+    vadd    $v28, $v28, $v28[1h] // Add elems 1, 5 to 3, 7
     cfc2    $20, $vcc // Load scaled clipping results
     vmudl   $v29, $v21, $v30[2h]
     vmadm   $v29, $v20, $v30[2h]
@@ -1423,27 +1411,29 @@ vtx_store:
     lsv     vPairTPosF[14], (VTX_Z_FRAC    )(secondVtxPos) // load Z into W slot, will be for fog below
     vmadh   $v20, $v20, $v30[3h]
     lsv     vPairTPosF[6],  (VTX_Z_FRAC    )(outputVtxPos) // load Z into W slot, will be for fog below
-    vge     $v29, $v28, vSTOfs[3] // >= 0
-    sll     $11, $20, 4            // Shift first vertex scaled clipping to second slots
+    vge     $v29, $v28, vSTOfs[3] // >= 0 in elems 3, 7
     vmudh   $v29, vSTScl, $v31[2] // 4 * 1 in elems 3, 7
-    cfc2    $6, $vcc // Load occlusion plane mid results
+    cfc2    $11, $vcc // Load occlusion plane mid results to bits 3 and 7 (garbage in others)
     vmadn   $v21, $v21, $v31[0] // -4
-    andi    $20, $20, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
+    ori     $12, $12, CLIP_VTX_USED // Write for all first verts, only matters for generated verts
     vmadh   $v20, $v20, $v31[0] // -4
-    andi    $11, $11, CLIP_MOD_MASK_SCAL_ALL // Mask to only scaled bits we care about
+    andi    $20, $20, ~(CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4)) // Mask out bits we will or in    
     vge     $v29, vPairTPosI, vSTOfs[3] // Zero; vcc set if w >= 0
-    or      $24, $24, $20          // Combine final results for second vertex
+    andi    $11, $11, CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4) // Only meaningful bits from occlusion
     vmrg    $v25, vSTOfs, $v31[7] // 0 or 0x7FFF in elems 3, 7, latter if w < 0
     lsv     vPairTPosI[14], (VTX_Z_INT     )(secondVtxPos) // load Z into W slot, will be for fog below
     vmudl   $v29, $v21, $v30[2h]
     lsv     vPairTPosI[6],  (VTX_Z_INT     )(outputVtxPos) // load Z into W slot, will be for fog below
     vmadm   $v29, $v20, $v30[2h]
-    or      $12, $12, $11               // Combine final results for first vertex
+    or      $20, $20, $11          // Combine occlusion results with scaled results
     vmadn   $v28, $v21, $v30[3h]
-    ori     $12, $12, CLIP_MOD_VTX_USED // Write for all verts, only matters for generated verts
+    sll     $11, $20, 4            // Shift first vertex scaled clipping to second slots
     vmadh   $v30, $v20, $v30[3h] // $v30:$v28 is 1/W
+    andi    $20, $20, CLIP_SCAL_NPXY | CLIP_OCCLUDED // Mask to only bits we care about
     vmadh   $v25, $v25, $v31[7] // 0x7FFF; $v25:$v28 is 1/W but large number if W negative
+    andi    $11, $11, CLIP_SCAL_NPXY | CLIP_OCCLUDED // Mask to only bits we care about
     vlt     $v29, $v31, $v31[2h] // Set VCC to 11001100
+    or      $24, $24, $20          // Combine results for second vertex
     vmudl   $v29, vPairTPosF, $v28[3h]
     ssv     $v28[14],         (VTX_INV_W_FRAC)(secondVtxPos)
     vmadm   $v29, vPairTPosI, $v28[3h]
@@ -1457,6 +1447,7 @@ vtx_store:
     vmadm   vPairTPosI, vPairTPosI, vSTScl[2] // Persp norm
     ldv     $v30[8], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // and for vtx 2
     vmadn   vPairTPosF, vSTOfs, vSTOfs[3] // Zero
+    or      $12, $12, $11          // Combine results for first vertex
     vmudh   $v29, vVpOfs, $v31[2] // offset * 1
     vmadn   vPairTPosF, vPairTPosF, vVpScl // + XYZ * scale
     vmadh   vPairTPosI, vPairTPosI, vVpScl
@@ -1480,13 +1471,21 @@ vtx_skip_fog:
     ssv     $v20[12],         (VTX_SCR_Z     )(secondVtxPos)
     vmacf   $v26, $v26, vPairTPosI[0h] // --, -0x4000*X1, --, +0x4000*X1, repeat vtx 2
     ssv     $v20[4],          (VTX_SCR_Z     )(outputVtxPos)
-    ldv     $v30[0], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // Load coeffs 4-7
     veq     $v29, $v31, $v31[0q]       // Set VCC to 10101010
-    ldv     $v30[8], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // and for vtx 2
+    ldv     $v30[0], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // Load coeffs 4-7
     vmrg    $v25, $v25, $v26           // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
+    ldv     $v30[8], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // and for vtx 2
     vge     $v29, $v25, $v30           // Each compare to coeffs 4-7
-    cfc2    $20, $vcc // TODO process this
-    sh      $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex results
+    cfc2    $20, $vcc
+    andi    $11, $20, 0x00F0 // Bits 4-7 for vtx 2
+    beqz    $11, @@skipv2    // If 0, all equations true, don't clear occluded flag
+     andi   $20, $20, 0x000F // Bits 0-3 for vtx 1
+    andi    $24, $24, ~CLIP_OCCLUDED // At least one eqn false, clear vtx 2 occluded flag
+@@skipv2:
+    beqz    $20, @@skipv1    // If 0, all equations true, don't clear occluded flag
+     sh     $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex clip flags
+    andi    $12, $12, ~CLIP_OCCLUDED // At least one eqn false, clear vtx 1 occluded flag
+@@skipv1:    
     jr      $ra
      sh     $12,              (VTX_CLIP      )(outputVtxPos) // Store first vertex results
 
@@ -1566,51 +1565,51 @@ tV3AtI equ $v21
     vnxor   tV3AtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
     lhu     $5, VTX_CLIP($1)
     vmov    $v8[6], $v27[7]         // elem 6 of v8 = vertex 3 addr
-    lhu     $6, VTX_CLIP($2)
+    lhu     $7, VTX_CLIP($2)
     vadd    $v2, vZero, $v6[1] // v2 all elems = y-coord of vertex 1
-    lhu     $7, VTX_CLIP($3)
+    lhu     $8, VTX_CLIP($3)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
-    andi    $11, $5, CLIP_MOD_MASK_SCRN_ALL
+    lw      $6, geometryModeLabel // Load full geometry mode word
     vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
-    and     $11, $6, $11
+    and     $9, $5, $7
     vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
-    and     $11, $7, $11      // If there is any screen clipping plane where all three verts are past it...
+    and     $9, $9, $8 // $9 = all clip bits which are true for all three verts
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
-    bnez    $11, return_routine // ...whole tri is offscreen, cull.
-     vmrg   $v14, $v6, $v4    // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
-    vor     $v3, vZero, $v31[5]   // 0x4000; some rounding factor
-    lbu     $11, geometryModeLabel + 2  // Loads the geometry mode byte that contains face culling settings
+    andi    $11, $9, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
+    vmrg    $v14, $v6, $v4    // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
+    bnez    $11, return_routine // Then the whole tri is offscreen, cull
+     or     $5, $5, $7
     vmudh   $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
-    sra     $12, clipPolySelect, 31 // All 1s if negative, meaning clipping allowed
+    or      $5, $5, $8        // $5 = all clip bits which are true for any verts
     vmadh   $v29, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
-    or      $5, $5, $6
+    andi    $5, $5, CLIP_SCAL_NPXY | CLIP_CAMPLANE // Does tri cross scaled bounds or cam plane?
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
-    or      $5, $5, $7        // If any verts are past any clipping plane...
+    sra     $11, clipPolySelect, 31 // All 1s if negative, meaning clipping allowed
     vmrg    $v10, $v6, $v4    // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
-    andi    $11, $11, G_CULL_BOTH >> 8  // Only look at culling bits, so we can use others for other mods
+    and     $5, $5, $11       // Clear this if clipping not allowed
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
-    mfc2    $6, $v29[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
+    bnez    $5, ovl234_clipping_entrypoint // Facing info and occlusion may be garbage if need to clip
+     mfc2   $8, $v29[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    $v4, $v14, $v8    // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
-    and     $5, $5, $12       // ...which is in the set of currently enabled clipping planes (scaled for XY, screen for ZW)...
+    andi    $9, $9, CLIP_OCCLUDED
     vmrg    $v14, $v8, $v14   // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
-    // If tri crosses camera plane or scaled bounds, go directly to clipping
-    andi    $12, $5, CLIP_MOD_MASK_SCAL_ALL | (CLIP_NEAR >> 4)
+    bnez    $9, return_routine // Cull if all verts occluded
+     srl    $11, $8, 31       // = 0 if x prod positive (back facing), 1 if x prod negative (front facing)
     vlt     $v6, $v6, $v2     // v6 (thrown out), VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
-    bnez    $12, ovl234_clipping_entrypoint // Backface info is garbage, don't check it
-     lw     $11, (gCullMagicNumbers)($11)
+    beqz    $8, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
+     addi   $11, $11, 21      // = 21 if back facing, 22 if front facing
+    vor     $v3, vZero, $v31[5]   // 0x4000; some rounding factor
+    sllv    $11, $6, $11      // Sign bit = bit 10 of geom mode if back facing, bit 9 if front facing
     vmrg    $v2, $v4, $v10   // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
-    beqz    $6, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
-     add    $11, $6, $11        // Add magic number; see description at gCullMagicNumbers
-    vmrg    $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
-    bgez    $11, return_routine // If sign bit is clear, cull.
-     vmudn  $v4, $v14, $v31[5] // 0x4000
+    bltz    $11, return_routine // Cull if bit is set (culled based on facing)
+     vmrg   $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
+    vmudn   $v4, $v14, $v31[5] // 0x4000
     mfc2    $1, $v14[12]      // $v14 = lowest Y value = highest on screen (x, y, addr)
     vsub    $v6, $v2, $v14
     mfc2    $2, $v2[12]       // $v2 = mid vertex (x, y, addr)
     vsub    $v8, $v10, $v14
     mfc2    $3, $v10[12]      // $v10 = highest Y value = lowest on screen (x, y, addr)
     vsub    $v11, $v14, $v2
-    lw      $6, geometryModeLabel
     vsub    $v12, $v14, $v10  // VH - VL (negative)
     llv     $v13[0], VTX_INV_W_VEC($1)
     vsub    $v15, $v10, $v2

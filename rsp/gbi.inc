@@ -30,8 +30,6 @@ G_SHADING_SMOOTH        equ 0x00200000
 
 G_TRI_FILL        equ 0xc8 // not a GBI command
 
-G_RETURNNONEVISIBLE equ 0xd4 // formerly G_SPECIAL_2
-G_BOUNDINGVERTS     equ 0xd5 // formerly G_SPECIAL_1
 G_DMA_IO            equ 0xd6
 G_TEXTURE           equ 0xd7
 G_POPMTX            equ 0xd8
@@ -84,10 +82,9 @@ G_BRANCH_WZ         equ 0x04
 G_TRI1              equ 0x05
 G_TRI2              equ 0x06
 G_QUAD              equ 0x07
-G_POPBRANCHCALL     equ 0x08 // formerly G_LINE3D (no-op). Cmd byte needs to be >= 0
-G_TRISTRIP          equ 0x09
-G_TRIFAN            equ 0x0a
-G_LIGHTTORDP        equ 0x0b
+G_TRISTRIP          equ 0x08
+G_TRIFAN            equ 0x09
+G_LIGHTTORDP        equ 0x0a
 
 
 G_BRANCH_Z equ G_BRANCH_WZ
@@ -106,7 +103,7 @@ G_NORMALSMODE_FAST equ 0x00
 G_NORMALSMODE_AUTO equ 0x01
 G_NORMALSMODE_MANUAL equ 0x02
 
-G_MAX_LIGHTS equ 8 // 8 directional / point lights, plus ambient light (and lookat)
+G_MAX_LIGHTS equ 9 // 9 directional / point lights, plus ambient light (and lookat)
 lightSize equ 0x10
 
 G_MAX_VERTS equ 56
@@ -155,35 +152,42 @@ VTX_INV_W_INT   equ 0x20
 VTX_INV_W_FRAC  equ 0x22
   VTX_CLIP      equ 0x24
 
-// Clipping flags. Initially, only the bits below are valid, and bits 0-3 and
-// 8-11 are from the other vertex of the pair. Once the results are combined and
-// stored to the internal vertex, the bits below are for scaled clipping, and
-// 0-3 and 8-11 (the ones below shifted down 4) are for screen clipping.
-CLIP_SHIFT_NX equ 4
-CLIP_SHIFT_NY equ 5
-CLIP_SHIFT_NZ equ 6
-CLIP_SHIFT_NW equ 7
-CLIP_SHIFT_PX equ 12
-CLIP_SHIFT_PY equ 13
-CLIP_SHIFT_PZ equ 14
-CLIP_SHIFT_PW equ 15 // never used
-CLIP_NX equ (1 << CLIP_SHIFT_NX)
-CLIP_NY equ (1 << CLIP_SHIFT_NY)
-CLIP_NZ equ (1 << CLIP_SHIFT_NZ)
-CLIP_NW equ (1 << CLIP_SHIFT_NW)
-CLIP_PX equ (1 << CLIP_SHIFT_PX)
-CLIP_PY equ (1 << CLIP_SHIFT_PY)
-CLIP_PZ equ (1 << CLIP_SHIFT_PZ)
-CLIP_PW equ (1 << CLIP_SHIFT_PW) // never used
-// These values apply to either screen space clipping or clip ratio scaled
-// clipping, with appropriate shifts when used as one whole word.
-CLIP_SHIFT_SCAL equ 16
-CLIP_SHIFT_SCRN equ 0
-// Values used for far and near clipping.
-CLIP_FAR equ CLIP_PZ
-CLIP_NEAR equ CLIP_NW // No Nearclipping uses -w instead of -z
-
-// Could add CLIP_NZ and CLIP_PZ to SCRN if desired, even though not clipping there.
-CLIP_MOD_MASK_SCRN_ALL equ ((CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY | CLIP_NEAR) >> 4)
-CLIP_MOD_MASK_SCAL_ALL equ  (CLIP_NX | CLIP_NY | CLIP_PX | CLIP_PY)
-CLIP_MOD_VTX_USED equ CLIP_PZ // won't ever be used for other things
+// Clipping flags. 
+// Initially, the bits are (for either type of clipping):
+// 0-3: negative XYZW first vertex
+// 4-7: negative XYZW second vertex
+// 8-11: positive XYZW first vertex
+// 12-15: positive XYZW second vertex
+// Then, for screen clipping, the second vertex's results are shifted right 4,
+// and for scaled clipping, the first vertex's results are shifted left 4.
+// The results are then that the bits represent:
+CLIP_SCRN_NX_SHIFT   equ 0 
+CLIP_SCRN_NY_SHIFT   equ 1
+//CLIP_SCRN_NZ_SHIFT equ 2 // would be nearclipping; not supported in F3DEX3
+CLIP_CAMPLANE_SHIFT  equ 3 // equiv to CLIP_SCRN_NW_SHIFT; camera plane is -w in NoN
+CLIP_SCAL_NX_SHIFT   equ 4
+CLIP_SCAL_NY_SHIFT   equ 5
+CLIP_VTX_USED_SHIFT  equ 6 // replaces meaningless CLIP_SCAL_NZ_SHIFT
+CLIP_OCCLUDED_SHIFT  equ 7 // replaces meaningless CLIP_SCAL_NW_SHIFT
+CLIP_SCRN_PX_SHIFT   equ 8
+CLIP_SCRN_PY_SHIFT   equ 9
+//CLIP_SCRN_PZ_SHIFT equ 10 // would be farclipping; not supported in F3DEX3
+//CLIP_SCRN_PW_SHIFT equ 11 // meaningless
+CLIP_SCAL_PX_SHIFT   equ 12
+CLIP_SCAL_PY_SHIFT   equ 13
+//CLIP_SCAL_PZ_SHIFT equ 14 // meaningless
+//CLIP_SCAL_PW_SHIFT equ 15 // meaningless
+CLIP_SCRN_NX  equ (1 << CLIP_SCRN_NX_SHIFT )
+CLIP_SCRN_NY  equ (1 << CLIP_SCRN_NY_SHIFT )
+CLIP_CAMPLANE equ (1 << CLIP_CAMPLANE_SHIFT)
+CLIP_SCAL_NX  equ (1 << CLIP_SCAL_NX_SHIFT )
+CLIP_SCAL_NY  equ (1 << CLIP_SCAL_NY_SHIFT )
+CLIP_VTX_USED equ (1 << CLIP_VTX_USED_SHIFT)
+CLIP_OCCLUDED equ (1 << CLIP_OCCLUDED_SHIFT)
+CLIP_SCRN_PX  equ (1 << CLIP_SCRN_PX_SHIFT )
+CLIP_SCRN_PY  equ (1 << CLIP_SCRN_PY_SHIFT )
+CLIP_SCAL_PX  equ (1 << CLIP_SCAL_PX_SHIFT )
+CLIP_SCAL_PY  equ (1 << CLIP_SCAL_PY_SHIFT )
+// Combinations for simpler code
+CLIP_SCRN_NPXY equ (CLIP_SCRN_NX | CLIP_SCRN_NY | CLIP_SCRN_PX | CLIP_SCRN_PY)
+CLIP_SCAL_NPXY equ (CLIP_SCAL_NX | CLIP_SCAL_NY | CLIP_SCAL_PX | CLIP_SCAL_PY)
