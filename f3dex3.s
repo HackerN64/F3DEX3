@@ -267,23 +267,39 @@ lightBufferAmbient:
 ltBufOfs equ (lightBufferMain - altBase)
 
 occlusionPlaneEdgeCoeffs:
-    // Vertex is in occlusion region if all five equations below are true.
-    // For the edge coefficients, X and Y are in screen space (subpixels)
-    .dh 0x0000 // c0: 4*X*c0 - 0x4000*Y < c4
-    .dh 0x0000 // c1: 4*Y*c1 - 0x4000*X < c5
-    .dh 0x0000 // c2: 4*X*c2 + 0x4000*Y < c6
-    .dh 0x0000 // c3: 4*Y*c3 + 0x4000*X < c7
+/*
+Vertex is in occlusion region if all five equations below are true:
+4 * screenX[s13.2] * c0[s0.15] - 0.5 * screenY[s13.2] < c4[s14.1]
+4 * screenY[s13.2] * c1[s0.15] - 0.5 * screenX[s13.2] < c5[s14.1]
+4 * screenX[s13.2] * c2[s0.15] + 0.5 * screenY[s13.2] < c6[s14.1]
+4 * screenY[s13.2] * c3[s0.15] + 0.5 * screenX[s13.2] < c7[s14.1]
+      clamp_to_0.s15(clipX[s15.16] * kx[0.s15])
+    + clamp_to_0.s15(clipY[s15.16] * ky[0.s15])
+    + clamp_to_0.s15(clipZ[s15.16] * kz[0.s15])
+    + kc[0.s15]
+    >= 0
+The first four can be rewritten as (again, vertex is occluded if all are true):
+screenY > screenX *  8*c0 + -2*c4
+screenX > screenY *  8*c1 + -2*c5
+screenY < screenX * -8*c2 +  2*c6
+screenX < screenY * -8*c3 +  2*c7
+where screenX and screenY are in subpixels (e.g. screenX = 100 = 25.0 pixels),
+c0-c3 are shorts representing -1:0.99997,
+and c4-c7 are shorts representing "half pixels" (e.g. c4 = 50 = 25.0 pixels)
+*/
+    .dh 0x0000 // c0
+    .dh 0x0000 // c1
+    .dh 0x0000 // c2
+    .dh 0x0000 // c3
     .dh 0x8000 // c4
     .dh 0x8000 // c5
     .dh 0x8000 // c6
     .dh 0x8000 // c7
 occlusionPlaneMidCoeffs:
-    // For the plane middle, XYZ are in clip space (-1 to 1), which is the
-    // result of multiplying by MVP but no perspective or viewport.
     .dh 0x0000 // kx
     .dh 0x0000 // ky
     .dh 0x0000 // kz
-    .dh 0x8000 // kc: X*kx + Y*ky + Z*kz + kc >= 0
+    .dh 0x8000 // kc
 
 // Alternate base address because vector load offsets can't reach all of DMEM.
 // altBaseReg permanently points here.
@@ -807,7 +823,7 @@ G_CULLDL_handler:
     j       vtx_addrs_from_cmd              // Load start vtx addr in $12, end vtx in $3
      li     $11, culldl_return_from_addrs
 culldl_return_from_addrs:
-    li      $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE | CLIP_OCCLUDED)
+    li      $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE) // TODO | CLIP_OCCLUDED)
     lhu     $11, VTX_CLIP($12)
 culldl_loop:
     and     $1, $1, $11
@@ -839,6 +855,20 @@ rdp_handler_pre:
     beq     $3, $7, G_SETSCISSOR_handler
      li     $2, (0xFF00 | G_LOADBLOCK)
     bne     $2, $7, G_RDP_handler // If not load block, go to general handler
+/*
+    addi    $3, $7, -(0xFF00 | G_SETTILE)
+    bgez    $3, G_RDP_HANDLER
+     addi   $12, $7, -(0xFF00 | G_SETSCISSOR) // Relative to G_SETSCISSOR = 0
+    bltz    $12, G_RDP_HANDLER
+     addi   $2, $7, -(0xFF00 | G_SETPRIMDEPTH) // Relative to G_SETPRIMDEPTH = 0
+    andi    $2, $2, 0x0003 // 0 = G_SETPRIMDEPTH, 4 = G_SETTILESIZE, >=8 or <=-4 already covered
+    beqz    $2, G_RDP_HANDLER
+     addi   $3, $7, -(0xFF00 | G_LOADTLUT) // G_SETSCISSOR and G_RDPSETOTHERMODE are < this
+    bltz    $3, G_SETSCISSOR_handler
+     li     $2, (0xFF00 | G_RDPHALF_2)
+    beq     $2, $7, G_RDPHALF_2_handler
+    // + 1 instruction for merging G_SETSCISSOR and G_RDPSETOTHERMODE
+*/
 G_LOADBLOCK_handler:
      lw     $11, lastLoadBlockLow
     lw      $12, lastLoadBlockHigh
@@ -1380,12 +1410,12 @@ vtx_store:
     cfc2    $12, $vcc // Load screen clipping results
     vmudn   $v29, vPairTPosF, $v30 // X * X factor, Y * Y factor, Z * Z factor
     vmadh   $v28, vPairTPosI, $v30 // Clamp result, not vreadacc
-    veq     $v29, $v31, $v31[3h] // Set VCC to 00010001
+    vne     $v29, $v31, $v31[3h] // Set VCC to 11101110
     srl     $24, $12, 4            // Shift second vertex screen clipping to first slots
     vmudn   $v26, vPairTPosF, $v31[3] // W * clip ratio for scaled clipping
-    andi    $12, $12, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
-    vmadh   $v25, vPairTPosI, $v31[3] // W * clip ratio for scaled clipping
     andi    $24, $24, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
+    vmadh   $v25, vPairTPosI, $v31[3] // W * clip ratio for scaled clipping
+    andi    $12, $12, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
     vmrg    $v28, $v28, $v30 // Put constant factor in elems 3, 7
     sdv     vPairTPosF[8],  (VTX_FRAC_VEC  )(secondVtxPos)
     vrcph   $v29[0], $v20[3]
@@ -1432,7 +1462,7 @@ vtx_store:
     andi    $20, $20, CLIP_SCAL_NPXY | CLIP_OCCLUDED // Mask to only bits we care about
     vmadh   $v25, $v25, $v31[7] // 0x7FFF; $v25:$v28 is 1/W but large number if W negative
     andi    $11, $11, CLIP_SCAL_NPXY | CLIP_OCCLUDED // Mask to only bits we care about
-    vlt     $v29, $v31, $v31[2h] // Set VCC to 11001100
+    vge     $v29, $v31, $v31[2h] // Set VCC to 00110011
     or      $24, $24, $20          // Combine results for second vertex
     vmudl   $v29, vPairTPosF, $v28[3h]
     ssv     $v28[14],         (VTX_INV_W_FRAC)(secondVtxPos)
