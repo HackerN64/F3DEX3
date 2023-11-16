@@ -286,6 +286,18 @@ screenX < screenY * -8*c3 +  2*c7
 where screenX and screenY are in subpixels (e.g. screenX = 100 = 25.0 pixels),
 c0-c3 are shorts representing -1:0.99997,
 and c4-c7 are shorts representing "half pixels" (e.g. c4 = 50 = 25.0 pixels)
+
+For the last equation, one option is to think of kx through kc as in s10.5 mode
+instead, so a value of 0x0020 is 1.0 and they can range from -0x400.00 to
+0x3FF.F8. This choice is because clipZ ranges from 0x0000.0000 at the camera
+plane to 0x03FF.0000 at the maximum distance away. The normal distance Adult
+Link is from the camera is about 0x00B0.0000.
+
+A better option is to develop your plane equation in floating point, e.g.
+clipX[f] * -0.2f + clipY[f] * 0.4f + clipZ[f] * 1.0f + -200.0f >= 0
+then multiply everything by (32768.0f / max(abs(kx), abs(ky), abs(kz), abs(kc)))
+(here 32768.0f / 200.0f = 163.84f)
+clipX[f] * -32.77f + clipY[f] * 65.54f + clipZ[f] * 163.84f + -32768
 */
     .dh 0x0000 // c0
     .dh 0x0000 // c1
@@ -659,7 +671,7 @@ postOvlRA equ $12 // Commonly used locally
 //      vtx write
 // $26: taskDataPtr (global)
 // $27: inputBufferPos (global)
-// $28: unused
+// $28: numPrimsDrawn (global)
 // $29: unused
 // $30: unused
 // $ra: Return address for jal, b*al
@@ -1408,8 +1420,9 @@ vtx_store:
     vmadm   $v20, vPairTPosI, vSTScl[2] // Persp norm
     vmadn   $v21, vSTOfs, vSTOfs[3] // Zero
     cfc2    $12, $vcc // Load screen clipping results
-    vmudn   $v29, vPairTPosF, $v30 // X * X factor, Y * Y factor, Z * Z factor
-    vmadh   $v28, vPairTPosI, $v30 // Clamp result, not vreadacc
+    vmudn   $v29, vPairTPosF, $v30 // X * kx, Y * ky, Z * kz
+    vmadh   $v29, vPairTPosI, $v30 // Int * int
+    vreadacc $v28, ACC_UPPER // Load int * int portion
     vne     $v29, $v31, $v31[3h] // Set VCC to 11101110
     srl     $24, $12, 4            // Shift second vertex screen clipping to first slots
     vmudn   $v26, vPairTPosF, $v31[3] // W * clip ratio for scaled clipping

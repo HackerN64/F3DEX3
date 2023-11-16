@@ -1087,6 +1087,21 @@ typedef struct {
     int y2;
 } Hilite_t;
 
+typedef struct {
+    short c0;
+    short c1;
+    short c2;
+    short c3;
+    short c4;
+    short c5;
+    short c6;
+    short c7;
+    short kx;
+    short ky;
+    short kz;
+    short kc;
+} OcclusionPlane_t;
+
 typedef union {
     Light_t l;
     long long int force_structure_alignment[2];
@@ -1112,6 +1127,12 @@ typedef union {
     Hilite_t h;
     long int force_structure_alignment;
 } Hilite;
+
+typedef union {
+    OcclusionPlane_t o;
+    short c[12];
+    long long int force_structure_alignment[3];
+} OcclusionPlane;
 
 typedef struct {
     Light   l[9];
@@ -2971,7 +2992,7 @@ _DW({ \
 
 /*
  * Camera world position for Fresnel. Set this whenever you set the VP matrix,
- * viewport, etc. cam is the name/address of a PlainVtx struct.
+ * viewport, etc. cam is the address of a PlainVtx struct.
  */
 #define gSPCameraWorld(pkt, cam) \
     gDma2p((pkt), G_MOVEMEM, (cam), sizeof(PlainVtx), G_MV_LIGHT, 0)
@@ -2981,7 +3002,7 @@ _DW({ \
 
 /*
  * Reflection/Hiliting Macros.
- * la is the name/address of a LookAt struct.
+ * la is the address of a LookAt struct.
  */
 #define gSPLookAt(pkt, la) \
     gDma2p((pkt), G_MOVEMEM, (la), sizeof(LookAt), G_MV_LIGHT, 8)
@@ -3027,6 +3048,22 @@ _DW({ \
         (hilite)->h.y2 & 0xFFF,                             \
         ((((width)  - 1) * 4) + (hilite)->h.x2) & 0xFFF,    \
         ((((height) - 1) * 4) + (hilite)->h.y2) & 0xFFF)
+
+
+/*
+ * Occlusion plane
+ * 
+ * TODO explain how to calculate the coefficients
+ * 
+ * o is the address of an OcclusionPlane struct
+ */
+#define gSPOcclusionPlane(pkt, o) \
+    gDma2p((pkt), G_MOVEMEM, (o), sizeof(OcclusionPlane), G_MV_LIGHT, \
+        (G_MAX_LIGHTS * 0x10) + 0x18)
+#define gsSPOcclusionPlane(o) \
+    gsDma2p(      G_MOVEMEM, (o), sizeof(OcclusionPlane), G_MV_LIGHT, \
+        (G_MAX_LIGHTS * 0x10) + 0x18)
+
 
 /*
  * FOG macros
