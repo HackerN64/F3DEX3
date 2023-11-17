@@ -480,13 +480,20 @@ clipPoly2:                              //  \ / \ / \
 vertexBuffer:
     .skip (G_MAX_VERTS * vtxSize)
 
-.if . > OS_YIELD_DATA_SIZE - 0xA
-    // OS_YIELD_DATA_SIZE (0xC00) bytes of DMEM are saved; the last data in that is:
-    // -0xA: numPrimsDrawn
-    // -0x8: taskDataPtr
-    // -0x4: ucode
-    // So anything after this must be temporary.
-    // (Input buffer will be reloaded from next instruction in the source DL.)
+YIELD_DATA_FOOTER_SIZE equ 0x10
+yieldDataFooter equ OS_YIELD_DATA_SIZE - YIELD_DATA_FOOTER_SIZE
+
+.if . > yieldDataFooter
+    // OS_YIELD_DATA_SIZE (0xC00) bytes of DMEM are saved; the last data in that is
+    // the footer, organized as:
+    // +0: perfCounter1: Upper 16 bits: num verts; lower 16 bits: num tris sent to RDP
+    // +4: perfCounter2: Upper 18 bits: num tris requested; lower 14 bits: num tex/fill rects
+    // +8: taskDataPtr
+    // +C: ucode
+    // So, any data starting from the address of this footer will be clobbered,
+    // so the vertex buffer and other data which needs to be save across yield
+    // can't extend here. (The input buffer will be reloaded from the next
+    // command in the source DL.)
     .error "Important things in DMEM will not be saved at yield!"
 .endif
 
@@ -621,7 +628,8 @@ cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
 cmd_w0         equ $25   // DL command word 0, also holds next tris info
 taskDataPtr    equ $26   // Task data (display list) DRAM pointer
 inputBufferPos equ $27   // DMEM position within display list input buffer, relative to end
-numPrimsDrawn  equ $28   // Number of tris + tex rects sent to RDP
+perfCounter1   equ $28   // Upper 16 bits: num verts; lower 16 bits: num tris sent to RDP
+perfCounter2   equ $29   // Upper 18 bits: num tris requested; lower 14 bits: num tex/fill rects
 //                 $ra   // Return address
 
 // Misc scalar regs:
@@ -671,8 +679,8 @@ postOvlRA equ $12 // Commonly used locally
 //      vtx write
 // $26: taskDataPtr (global)
 // $27: inputBufferPos (global)
-// $28: numPrimsDrawn (global)
-// $29: unused
+// $28: perfCounter1 (global)
+// $29: perfCounter2 (global)
 // $30: unused
 // $ra: Return address for jal, b*al
 // $v0: vZero (every element 0)
@@ -719,15 +727,16 @@ start: // This is at IMEM 0x1080, not the start of IMEM
     lw      $11, rdpFifoPos
     lw      $12, OSTask + OSTask_flags
     li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // Clear task done and yielded signals
-    beqz    $11, initialize_rdp             // If RDP FIFO not set up yet, do so
+    beqz    $11, initialize_rdp             // If RDP FIFO not set up yet, starting ucode from scratch
      mtc0   $1, SP_STATUS
     andi    $12, $12, OS_TASK_YIELDED       // Resumed from yield or came from called ucode?
     beqz    $12, continue_from_os_task      // If latter, load DL (task data) pointer from OSTask
      sw     $zero, OSTask + OSTask_flags    // Clear all task flags, incl. yielded
 continue_from_yield:
-    lhu     numPrimsDrawn, OS_YIELD_DATA_SIZE - 0xA // Load value saved at yield
+    lw      perfCounter1, yieldDataFooter + 0x0 // Perf counters saved here at yield
+    lw      perfCounter2, yieldDataFooter + 0x4 
     j       finish_setup
-     lw     taskDataPtr, OS_YIELD_DATA_SIZE - 8  // load DL pointer from yield data
+     lw     taskDataPtr, yieldDataFooter + 0x8  // load DL pointer from yield data
 
 initialize_rdp:
     mfc0    $11, DPC_STATUS
@@ -760,7 +769,8 @@ f3dzex_0000111C:
      lw     $11, OSTask + OSTask_dram_stack
     sw      $11, matrixStackPtr
 continue_from_os_task:
-    lhu     numPrimsDrawn, OSTask + OSTask_type // Upper two bytes of type
+    lw      perfCounter1, textureSettings1  // Counters stored here if jumped to different ucode
+    lw      perfCounter2, textureSettings2  // If starting from scratch, these are zero
     lw      taskDataPtr, OSTask + OSTask_data_ptr
 finish_setup:
     li      inputBufferPos, 0
@@ -1244,6 +1254,8 @@ G_VTX_handler:
     srl     $2, cmd_w0, 11                     // n << 1
     sub     $2, cmd_w0, $2                     // v0 << 1
     sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
+    sll     $11, $1, 12                        // Vtx count * 0x10000
+    add     perfCounter1, perfCounter1, $11    // Add to vertex count
     j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3 = $12
      li     $11, vtx_return_from_addrs
 vtx_return_from_addrs:
@@ -1588,6 +1600,7 @@ tri_main:
 tri_return_from_addrs:
     mfc2    $1, $v27[10]
     vcopy   $v4, $v27                    // Need vtx 2 addr in $v4 elem 6
+    addi    perfCounter2, perfCounter2, 0x4000  // Increment number of tris requested
     mfc2    $2, $v27[12]
     move    $4, $1                // Save original vertex 1 addr (pre-shuffle) for flat shading
     li      clipPolySelect, -1    // Normal tri drawing mode (check clip masks)
@@ -1849,7 +1862,7 @@ tDaDyI equ $v7
     vmadh   tDaDxI, tDaDxI, $v24[1]
     add     rdpCmdBufPtr, rdpCmdBufPtr, $11  // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
     vmudl   $v29, tDaDyF, $v23[1]
-    addi    numPrimsDrawn, numPrimsDrawn, 1
+    addi    perfCounter1, perfCounter1, 1 // Increment number of tris sent to RDP
     vmadm   $v29, tDaDyI, $v23[1]
     vmadn   tDaDyF, tDaDyF, $v24[1]
     sdv     tDaDxF[0], 0x0018($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
@@ -1968,7 +1981,8 @@ ovl0_start:
     sub     $11, rdpCmdBufPtr, rdpCmdBufEnd
     addi    $12, $11, RDP_CMD_BUFSIZE - 1
     bgezal  $12, flush_rdp_buffer
-     sh     numPrimsDrawn, OS_YIELD_DATA_SIZE - 0xA // Stored here for yield and done
+     sw     perfCounter1, yieldDataFooter + 0x0 // Stored here for yield and done
+    sw      perfCounter2, yieldDataFooter + 0x4 // otherwise this is temp memory
     jal     while_wait_dma_busy
      lw     $24, rdpFifoPos
     bltz    $1, task_done           // $1 < 0 = Got to the end of the parent DL
@@ -1979,7 +1993,8 @@ load_ucode:
     lw      cmd_w1_dram, (inputBufferEnd - 0x04)(inputBufferPos) // word 1 = ucode code DRAM addr
     sw      taskDataPtr, OSTask + OSTask_data_ptr // Store where we are in the DL
     sw      cmd_w1_dram, OSTask + OSTask_ucode // Store pointer to new ucode about to execute
-    sh      numPrimsDrawn, OSTask + OSTask_type // Stored here only when switch ucodes
+    sw      perfCounter1, textureSettings1 // Store counters in texture settings; first 0x180 of DMEM
+    sw      perfCounter2, textureSettings2 // will be preserved in ucode swap AND if other ucode yields
     li      dmemAddr, start         // Beginning of overwritable part of IMEM
     jal     dma_read_write          // DMA DRAM read -> IMEM write
      li     dmaLen, (while_wait_dma_busy - start) - 1 // End of overwritable part of IMEM
@@ -1999,23 +2014,22 @@ load_ucode:
 .endif
 
 task_yield:
-    lw      $11, OSTask + OSTask_ucode
-    sw      taskDataPtr, OS_YIELD_DATA_SIZE - 8 // numPrimsDrawn was saved above
-    sw      $11, OS_YIELD_DATA_SIZE - 4
-    li      $12, SP_SET_SIG1 | SP_SET_SIG2   // yielded and task done signals
+    lw      $11, OSTask + OSTask_ucode         // Save pointer to current ucode
     lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
-    li      dmemAddr, 0x8000 // 0, but negative = write
+    li      dmemAddr, 0x8000                   // 0, but negative = write
     li      dmaLen, OS_YIELD_DATA_SIZE - 1
+    li      $12, SP_SET_SIG1 | SP_SET_SIG2     // yielded and task done signals
+    sw      taskDataPtr, yieldDataFooter + 0x8 // Save pointer to where in DL
+    sw      $11, yieldDataFooter + 0xC
     j       dma_read_write
      li     $ra, set_status_and_break
 
 task_done:
-    // Copy just the part of the yield data that has the numPrimsDrawn counter.
-DONE_PART_OF_YIELD_DATA equ 0x10
+    // Copy just the part of the yield data that has the perf counters.
     lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
-    addi    cmd_w1_dram, cmd_w1_dram, OS_YIELD_DATA_SIZE - DONE_PART_OF_YIELD_DATA
-    li      dmemAddr, 0x8000 | (OS_YIELD_DATA_SIZE - DONE_PART_OF_YIELD_DATA) // negative = write
-    li      dmaLen, DONE_PART_OF_YIELD_DATA - 1
+    addi    cmd_w1_dram, cmd_w1_dram, yieldDataFooter
+    li      dmemAddr, 0x8000 | yieldDataFooter // negative = write
+    li      dmaLen, YIELD_DATA_FOOTER_SIZE - 1
     jal     dma_read_write
      li     $12, SP_SET_SIG2   // task done signal
 set_status_and_break: // $12 is the status to set
@@ -2121,9 +2135,9 @@ G_RDPHALF_1_handler:
 
 G_RDPHALF_2_handler:
     ldv     $v29[0], (texrectWord1)($zero)
-    lw      cmd_w0, rdpHalf1Val                 // load the RDPHALF1 value into w0
+    lw      cmd_w0, rdpHalf1Val             // load the RDPHALF1 value into w0
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
-    addi    numPrimsDrawn, numPrimsDrawn, 1
+    addi    perfCounter2, perfCounter2, 1   // Increment number of tex/fill rects
     j       G_RDP_handler
      sdv    $v29[0], -8(rdpCmdBufPtr)
 

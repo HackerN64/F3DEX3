@@ -2722,9 +2722,9 @@ _DW({                                               \
  */
 
 /*
- * Vanilla F3D* display list culling based on screen clip flags of range of
- * loaded verts. Executes SPEndDisplayList if the convex hull formed by the
- * specified range of already-loaded vertices is offscreen.
+ * Cull the display list based on screen clip flags of range of loaded verts.
+ * Executes SPEndDisplayList if the convex hull formed by the specified range of
+ * already-loaded vertices is offscreen.
  */
 #define gSPCullDisplayList(pkt,vstart,vend)             \
 _DW({                                                   \
