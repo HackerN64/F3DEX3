@@ -825,9 +825,9 @@ do_cmd_jump_table:
      nop // TODO; delay slot must not affect $1, $7, $11
      
 G_DL_handler:
-    lbu     $1, displayListStackLength      // Get the DL stack length
     sll     $2, cmd_w0, 15                  // Shifts the push/nopush value to the sign bit
 branch_dl:
+    lbu     $1, displayListStackLength      // Get the DL stack length
     jal     segmented_to_physical
      add    $3, taskDataPtr, inputBufferPos // Current DL pos to push on stack
     sub     $11, cmd_w1_dram, taskDataPtr   // Negative how far new target is behind current end
