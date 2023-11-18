@@ -355,9 +355,10 @@ attrOffsetZ:
 tempHalfword1:
     .dh 0x0000 // Overwritten by movewords to above and below, can be used as temp
 
-    .db 0
+materialCullMode: // Overwritten to 0 by SPNormalsMode, but that should not
+    .db 0     // happen in the middle of tex setup
 normalsMode:
-    .db 0     // Overwrites above
+    .db 0     // Overwrites tempHalfword1 and materialCullMode
 
 alphaCompareCullMode:
     .db 0x00 // 0 = disabled, 1 = cull if all < thresh, -1 = cull if all >= thresh
@@ -370,12 +371,7 @@ tempHalfword3:
 numLightsxSize:
     .db 0   // Overwrites above
 
-lastImageSet:
-    .dw 0
-    
-lastLoadBlockLow:
-    .dw 0
-lastLoadBlockHigh:
+lastMatDLPhyAddr:
     .dw 0
     
 texgenLinearCoeffs:
@@ -818,13 +814,15 @@ run_next_DL_command:
     bgez    $2, do_cmd_jump_table                       // $2 is the index
      addi   $3, $2, G_VTX - (0xFF00 | G_SETTIMG)        // If >= G_SETTIMG, use handler; for G_NOOP, this puts
     bgez    $3, G_SETxIMG_handler                       // garbage in second word, but normal handler does anyway
-     addi   $2, $3, G_SETTIMG - G_RDPLOADSYNC           // If >= G_RDPLOADSYNC, use handler
-    bgez    $2, rdp_handler_pre                         // Otherwise $2 (negative) is the index
+     addi   $12, $3, G_SETTIMG - G_SETTILE              // If >= G_SETTILE, use RDP handler
+    bgez    $12, G_RDP_handler
+     addi   $2, $12, G_SETTILE - G_RDPLOADSYNC          // If >= G_RDPLOADSYNC, refine cmd further
+    bgez    $2, refine_cmd_further                      // Otherwise $2 (negative) is the index
 do_cmd_jump_table:
      sll    $11, $2, 1                                  // Multiply jump table index by 2 for addr offset
     lhu     $11, cmdJumpTable($11)                      // Load address of handler from jump table
     jr      $11                                         // Jump to handler
-     nop // Delay slot must not affect $1, $7, $11
+     nop // TODO; delay slot must not affect $1, $7, $11
      
 G_DL_handler:
     lbu     $1, displayListStackLength      // Get the DL stack length
@@ -833,11 +831,12 @@ branch_dl:
     jal     segmented_to_physical
      add    $3, taskDataPtr, inputBufferPos // Current DL pos to push on stack
     sub     $11, cmd_w1_dram, taskDataPtr   // Negative how far new target is behind current end
-    bltz    $2, displaylist_dma_with_count  // Nopush = branch = flag is set
+    bltz    $2, call_ret_common             // Nopush = branch = flag is set
      move   taskDataPtr, cmd_w1_dram        // Set the new DL to the target display list
     sw      $3, (displayListStack)($1)
     addi    $1, $1, 4                       // Increment the DL stack length
 call_ret_common:
+    sb      $zero, materialCullMode         // This covers call, branch, return, and cull and branchZ successes
     j       displaylist_dma_with_count
      sb     $1, displayListStackLength
 
@@ -862,44 +861,33 @@ G_ENDDL_handler:
      lw     taskDataPtr, (displayListStack)($1) // Load addr of DL to return to
 
 G_SETxIMG_handler:
-    jal     segmented_to_physical
-     lw     $2, lastImageSet              // Last image physical address set in RDP
-    beq     cmd_w1_dram, $2, G_RDP_handler // If same address, skip clearing last cmd
-     sw     cmd_w1_dram, lastImageSet     // Store new address
-    sw      $zero, lastLoadBlockHigh      // High contains cmd byte so 0 never == new cmd
-    // $7 is still the SETxIMG cmd ID so this will go to G_RDP_handler
-rdp_handler_pre:
-    li      $3, (0xFF00 | G_RDPHALF_2)
-    beq     $3, $7, G_RDPHALF_2_handler
-     li     $2, (0xFF00 | G_RDPSETOTHERMODE)
-    beq     $2, $7, G_RDPSETOTHERMODE_handler
-     li     $3, (0xFF00 | G_SETSCISSOR)
-    beq     $3, $7, G_SETSCISSOR_handler
-     li     $2, (0xFF00 | G_LOADBLOCK)
-    bne     $2, $7, G_RDP_handler // If not load block, go to general handler
-/*
-    addi    $3, $7, -(0xFF00 | G_SETTILE)
-    bgez    $3, G_RDP_HANDLER
-     addi   $12, $7, -(0xFF00 | G_SETSCISSOR) // Relative to G_SETSCISSOR = 0
-    bltz    $12, G_RDP_HANDLER
-     addi   $2, $7, -(0xFF00 | G_SETPRIMDEPTH) // Relative to G_SETPRIMDEPTH = 0
-    andi    $2, $2, 0x0003 // 0 = G_SETPRIMDEPTH, 4 = G_SETTILESIZE, >=8 or <=-4 already covered
-    beqz    $2, G_RDP_HANDLER
+    beqz    $7, G_RDP_handler               // Don't do any of this for G_NOOP
+     lb     $3, materialCullMode            // Get current mode
+    jal     segmented_to_physical           // Convert image to physical address
+     lw     $2, lastMatDLPhyAddr            // Get last material physical addr
+    bnez    $3, G_RDP_handler               // If not in normal mode (0), exit
+     add    $12, taskDataPtr, inputBufferPos // Current material physical addr
+    beq     $12, $2, @@skip                 // Branch if we are executing the same mat again
+     sw     $12, lastMatDLPhyAddr           // Store material physical addr
+    li      $7, 1                           // > 0: in material first time
+@@skip:                                     // Otherwise $7 was < 0: cull mode (in mat second time)
+    j       G_RDP_handler
+     sb     $7, materialCullMode
+    
+refine_cmd_further:
+    addi    $12, $7, -(0xFF00 | G_SETSCISSOR) // Relative to G_SETSCISSOR = 0
+    bltz    $12, G_RDP_handler // G_RDPLOADSYNC through G_SETCONVERT
+     andi   $2, $2, 0x0003 // $2 is relative to G_RDPLOADSYNC;
+    beqz    $2, G_RDP_handler // G_SETPRIMDEPTH and G_SETTILESIZE are multiples of 4 from here
      addi   $3, $7, -(0xFF00 | G_LOADTLUT) // G_SETSCISSOR and G_RDPSETOTHERMODE are < this
-    bltz    $3, G_SETSCISSOR_handler
+    bltz    $3, scissor_other_handler
      li     $2, (0xFF00 | G_RDPHALF_2)
-    beq     $2, $7, G_RDPHALF_2_handler
-    // + 1 instruction for merging G_SETSCISSOR and G_RDPSETOTHERMODE
-*/
-G_LOADBLOCK_handler:
-     lw     $11, lastLoadBlockLow
-    lw      $12, lastLoadBlockHigh
-    sw      cmd_w1_dram, lastLoadBlockLow
-    bne     $11, cmd_w1_dram, G_RDP_handler  // If command is different from last, run command
-     sw     cmd_w0, lastLoadBlockHigh
-    beq     $12, cmd_w0, run_next_DL_command // If command is the same, skip command
+    beq     $2, $7, G_RDPHALF_2_handler // Otherwise G_LOADTLUT, G_LOADBLOCK, or G_LOADTILE
+load_cmds_handler:
+     lb     $3, materialCullMode
+    bltz    $3, run_next_DL_command  // If cull mode is < 0, in mat second time, skip the load
 G_RDP_handler:
-     sw     cmd_w1_dram, 4(rdpCmdBufPtr)     // Add the second word of the command to the RDP command buffer
+     sw     cmd_w1_dram, 4(rdpCmdBufPtr)    // Add the second word of the command to the RDP command buffer
 G_SYNC_handler:
     sw      cmd_w0, 0(rdpCmdBufPtr)         // Add the command word to the RDP command buffer
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8   // Increment the next RDP command pointer by 2 words
@@ -1554,6 +1542,7 @@ vtx_indices_to_addr:
     lqv     $v30, v30Value($zero)
     vmudl   $v29, $v27, $v30[1]   // Multiply vtx indices times length
     vmadn   $v27, vOne, $v30[0]   // Add address of vertex buffer
+    sb      $zero, materialCullMode // This covers all tri cmds, vtx, modify vtx, branchZ, cull
     mfc2    $12, $v27[6]
     jr      $11
      mfc2   $3, $v27[14]
@@ -2108,12 +2097,11 @@ G_SETOTHERMODE_L_handler:
     j       G_RDP_handler
      lw     cmd_w1_dram, otherMode1
 
-G_SETSCISSOR_handler:
-    li      $7, scissorUpLeft - (otherMode0 + (0x100 - G_RDPSETOTHERMODE))
-G_RDPSETOTHERMODE_handler: // $7 contains command byte, -(0x100 - G_RDPSETOTHERMODE)
-    sw      cmd_w0, (otherMode0 + (0x100 - G_RDPSETOTHERMODE))($7)
-    j       G_RDP_handler            // Send the command to the RDP
-     sw     cmd_w1_dram, (otherMode1 + (0x100 - G_RDPSETOTHERMODE))($7)
+scissor_other_handler:     // $12 is 0 for G_SETSCISSOR or 2 for G_RDPSETOTHERMODE
+    sll     $12, $12, 2    // Now 0 or 8
+    sw      cmd_w0, (scissorUpLeft)($12) // otherMode0 = scissorUpLeft + 8
+    j       G_RDP_handler                // Send the command to the RDP
+     sw     cmd_w1_dram, (scissorBottomRight)($12) // otherMode1 = scissorBottomRight + 8
 
 G_GEOMETRYMODE_handler: // $7 = G_GEOMETRYMODE (as negative) if jumped here
     lw      $11, (geometryModeLabel + (0x100 - G_GEOMETRYMODE))($7) // load the geometry mode value
@@ -2138,6 +2126,7 @@ G_RDPHALF_2_handler:
     lw      cmd_w0, rdpHalf1Val             // load the RDPHALF1 value into w0
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
     addi    perfCounter2, perfCounter2, 1   // Increment number of tex/fill rects
+    sb      $zero, materialCullMode         // This covers tex and fill rects
     j       G_RDP_handler
      sdv    $v29[0], -8(rdpCmdBufPtr)
 
