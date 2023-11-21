@@ -1133,7 +1133,6 @@ clip_nextcond:
     bltz    $11, clip_done                 // If so, degenerate result, quit
      sh     $zero, (clipPoly)(clipPolyWrite)   // Terminate the output polygon with a 0
     lhu     $3, (clipPoly - 2)(clipPolyWrite)  // Initialize the edge start (V3) to the last vert
-clip_nextcond_skip:
     beqz    clipMaskIdx, clip_draw_tris
      lbu    $11, (clipCondShifts - 1)(clipMaskIdx) // Load next clip condition shift amount
     li      $9, 1
