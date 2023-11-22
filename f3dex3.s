@@ -222,7 +222,7 @@ v31Value:
     .dh -1     // used often
     .dh 1      // used to load accumulator when vOne or vLtOne not available
     .dh 2      // used as clip ratio (vtx write, clipping) and in clipping
-    .dh 4      // used to initialize 4s in vSTScl in vtx setup
+    .dh 4      // used in a few places
     .dh 0x4000 // used in tri write, texgen
     .dh 0x7F00 // used in fog, normals unpacking
     .dh 0x7FFF // used often
@@ -521,13 +521,23 @@ endVariableDmemUse:
 // First RDP Command Buffer
 rdpCmdBuffer1:
     .skip RDP_CMD_BUFSIZE
+.if (. & 8) != 8
+    .error "RDP command buffer alignment to 8 assumption broken"
+.endif
 rdpCmdBuffer1End:
-    .skip RDP_CMD_BUFSIZE_EXCESS
+    .skip 8
+rdpCmdBuffer1EndPlus1Word:
+    .skip RDP_CMD_BUFSIZE_EXCESS - 8
 // Second RDP Command Buffer
 rdpCmdBuffer2:
     .skip RDP_CMD_BUFSIZE
+.if (. & 8) != 8
+    .error "RDP command buffer alignment to 8 assumption broken"
+.endif
 rdpCmdBuffer2End:
-    .skip RDP_CMD_BUFSIZE_EXCESS
+    .skip 8
+rdpCmdBuffer2EndPlus1Word:
+    .skip RDP_CMD_BUFSIZE_EXCESS - 8
 
 // Input buffer. After RDP cmd buffers so it can be vector addressed from end.
 inputBuffer:
@@ -572,7 +582,6 @@ vVP2F  equ $v14
 vVP3F  equ $v15
 vVpScl equ $v16 // Vertex constants (viewport scale, offset, ST scale, offset)
 vVpOfs equ $v17 // Also contain other constants, see comment in vtx_setup_constants
-vSTScl equ $v18 // Valid in vertex, lighting, and first half of clipping
 vSTOfs equ $v19
 // Remaining regs sometimes valid in vertex and lighting, also used as temps
 vPairPosI  equ $v20 // Vertex pair model / world space position int/frac
@@ -618,8 +627,8 @@ clipFlags      equ $16   // Current clipping flags being checked
 clipPolyRead   equ $17   // Read pointer within current polygon being clipped
 clipPolySelect equ $18   // Clip poly double buffer selection, or < 0 for normal tri write
 clipPolyWrite  equ $21   // Write pointer within current polygon being clipped
-rdpCmdBufEnd   equ $22   // RDP command buffer end DRAM pointer
-rdpCmdBufPtr   equ $23   // RDP command buffer current DRAM pointer
+rdpCmdBufEndP1 equ $22   // Pointer to one command word past "end" (middle) of RDP command buf
+rdpCmdBufPtr   equ $23   // RDP command buffer current DMEM pointer
 cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
 cmd_w0         equ $25   // DL command word 0, also holds next tris info
 taskDataPtr    equ $26   // Task data (display list) DRAM pointer
@@ -668,7 +677,7 @@ postOvlRA equ $12 // Commonly used locally
 // $19: dmaLen, onscreen vertex during clipping, local
 // $20: dmemAddr, local
 // $21: clipPolyWrite (global)
-// $22: rdpCmdBufEnd (global)
+// $22: rdpCmdBufEndP1 (global)
 // $23: rdpCmdBufPtr (global)
 // $24: cmd_w1_dram, local
 // $25: cmd_w0 (global); holds next tris info during tri write -> clipping ->
@@ -697,7 +706,6 @@ postOvlRA equ $12 // Commonly used locally
 // $v15: local
 // $v16: vVpScl, local
 // $v17: vVpOfs, local
-// $v18: vSTScl, local
 // $v19: vSTOfs, local
 // $v20: local
 // $v21: local
@@ -719,7 +727,7 @@ start: // This is at IMEM 0x1080, not the start of IMEM
     lqv     $v31[0], (v31Value)($zero)
     li      altBaseReg, altBase
     li      rdpCmdBufPtr, rdpCmdBuffer1
-    li      rdpCmdBufEnd, rdpCmdBuffer1End
+    li      rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word
     lw      $11, rdpFifoPos
     lw      $12, OSTask + OSTask_flags
     li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // Clear task done and yielded signals
@@ -894,12 +902,12 @@ G_SYNC_handler:
 check_rdp_buffer_full_and_run_next_cmd:
     li      $ra, run_next_DL_command    // Set up running the next DL command as the return address
 check_rdp_buffer_full:
-     sub    $11, rdpCmdBufPtr, rdpCmdBufEnd
-    blez    $11, return_routine         // Return if rdpCmdBufEnd >= rdpCmdBufPtr
+     sub    $11, rdpCmdBufPtr, rdpCmdBufEndP1
+    bltz    $11, return_routine         // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
 flush_rdp_buffer:
      mfc0   $12, SP_DMA_BUSY
     lw      cmd_w1_dram, rdpFifoPos
-    addi    dmaLen, $11, RDP_CMD_BUFSIZE
+    addi    dmaLen, $11, RDP_CMD_BUFSIZE + 8
     bnez    $12, flush_rdp_buffer
      lw     $12, OSTask + OSTask_output_buff_size
     mtc0    cmd_w1_dram, DPC_END
@@ -927,10 +935,10 @@ f3dzex_000012BC:
     sw      $11, rdpFifoPos
     // Set up the DMA from DMEM to the RDP fifo in RDRAM
     addi    dmaLen, dmaLen, -1                                  // subtract 1 from the length
-    addi    dmemAddr, rdpCmdBufEnd, -(0x2000 | RDP_CMD_BUFSIZE) // The 0x2000 is meaningless, negative means write
-    xori    rdpCmdBufEnd, rdpCmdBufEnd, rdpCmdBuffer1End ^ rdpCmdBuffer2End // Swap between the two RDP command buffers
+    addi    dmemAddr, rdpCmdBufEndP1, -(0x2000 | (RDP_CMD_BUFSIZE + 8)) // The 0x2000 is meaningless, negative means write
+    xori    rdpCmdBufEndP1, rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word ^ rdpCmdBuffer2EndPlus1Word // Swap between the two RDP command buffers
     j       dma_read_write
-     addi   rdpCmdBufPtr, rdpCmdBufEnd, -RDP_CMD_BUFSIZE
+     addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
 
 .if (. & 4)
     .warning "One instruction of padding before ovl234"
@@ -1067,7 +1075,7 @@ clip_skipxy:
     vmadm   $v29, $v13, vClDiffF          // self * own reciprocal? int*frac discard
     vmadn   vClDiffF, $v12, vClDiffI      // self * own reciprocal? frac out
     vmadh   vClDiffI, $v13, vClDiffI      // self * own reciprocal? int out
-    vmudh   $v29, vOne, vSTScl[3]        // 4 (int part), Newton-Raphson algorithm
+    vmudh   $v29, vOne, $v31[4]           // 4 (int part), Newton-Raphson algorithm
     vmadn   vClDiffF, vClDiffF, $v31[0]   // - 4 * prev result frac part
     vmadh   vClDiffI, vClDiffI, $v31[0]   // - 4 * prev result frac part
     vmudl   $v29, $v12, vClDiffF          // * own reciprocal again? frac*frac discard
@@ -1095,6 +1103,7 @@ clip_skipxy:
     vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
     vge     vClDiffI, vClDiffI, vZero[0]  // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
     vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
+    llv     $v18[4], (perspNorm)($zero)   // TODO Dupl instr: perspNorm in elem 2, garbage in 3
     vmudn   vClFade2, vClFade1, $v31[1]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
     // Fade between attributes for on screen and off screen vert
     // Also, colors are now in $v12 and $v13.
@@ -1300,7 +1309,6 @@ vtx_setup_constants:
 /*
 vVpScl = [vscale[0], -vscale[1], vscale[2], fogMult,   (repeat)]
 vVpOfs = [vtrans[0],  vtrans[1], vtrans[2], fogOffset, (repeat)]
-vSTScl = [TexSScl,   TexTScl,    perspNorm, 4,         TexSScl,   TexTScl, ---,       4     ]
 vSTOfs = [TexSOfs,   TexTOfs,    aoAmb,     0,         TexSOfs,   TexTOfs, aoDir,     0     ]
 $v31   = [-4,        -1,         1,         2,         4,         0x4000,  0x7F00,    0x7FFF]
 aoAmb, aoDir set to 0 if ambient occlusion disabled
@@ -1308,37 +1316,29 @@ TexSOfs, TexTOfs set to 0 if ST attr offset disabled;
 vtrans[2] not incremented by Z attr offset if disabled
 */
     vne     $v29, $v31, $v31[2h]                  // VCC = 11011101
-    ldv     vSTOfs[0], (attrOffsetST - altBase)(altBaseReg) // elems 0, 1, 2 = S, T, Z offset
+    lsv     $v23[0], (attrOffsetZ - altBase)(altBaseReg) // Z offset
     vclr    $v21                                  // Zero
     ldv     vVpOfs[0], (viewport + 8)($zero)      // Load vtrans duplicated in 0-3 and 4-7
     ldv     vVpOfs[8], (viewport + 8)($zero)
     lhu     $12, (geometryModeLabel+2)($zero)
-    vmrg    $v29, $v21, vSTOfs[2]                 // all zeros except elems 2, 6 are Z offset
-    ldv     vSTOfs[8], (attrOffsetST - altBase)(altBaseReg) // Duplicated in 4-6
+    vmrg    $v29, $v21, $v23[0]                   // all zeros except elems 2, 6 are Z offset
     andi    $11, $12, G_ATTROFFSET_Z_ENABLE
     beqz    $11, @@skipz                          // Skip if Z offset disabled
      llv    $v20[4], (aoAmbientFactor - altBase)(altBaseReg) // Load aoAmb 2 and aoDir 3
     vadd    vVpOfs, vVpOfs, $v29                  // add Z offset if enabled
 @@skipz:
-    andi    $11, $12, G_ATTROFFSET_ST_ENABLE
-    bnez    $11, @@skipst                         // Skip if ST offset enabled
-     llv    vSTScl[0], (textureSettings2)($zero)  // Texture ST scale in 0, 1
-    vclr    vSTOfs                                // If disabled, clear ST offset
-@@skipst:
     andi    $11, $12, G_AMBOCCLUSION
     vmov    $v20[6], $v20[3]                      // move aoDir to 6
     bnez    $11, @@skipao                         // Skip if ambient occlusion enabled
-     llv    vSTScl[8], (textureSettings2)($zero)  // Texture ST scale in 4, 5
+     nop    // TODO
     vcopy   $v20, $v21                            // Set aoAmb and aoDir to 0
 @@skipao:
     ldv     vVpScl[0], (viewport)($zero)          // Load vscale duplicated in 0-3 and 4-7
     ldv     vVpScl[8], (viewport)($zero)
-    llv     vSTScl[4], (perspNorm)($zero)         // perspNorm in elem 2, garbage in 3
     llv     $v23[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
     vmrg    vSTOfs, vSTOfs, $v20                  // move aoAmb and aoDir into vSTOfs
     vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
     vsub    $v20, $v21, vVpScl                    // -vscale
-    vmrg    vSTScl, vSTScl, $v31[4]               // Put 4s in elements 3,7
     vmrg    vVpScl, vVpScl, $v23[0]               // Put fog multiplier in elements 3,7 of vscale
     vadd    $v23, $v23, $v31[6]                   // Add 0x7F00 to fog offset
     vmrg    vSTOfs, vSTOfs, $v21                  // Put 0s in elements 3,7
@@ -1379,33 +1379,42 @@ vtx_load_loop:
      // Elems 4-5 get bytes 6-7 of the following vertex (1)
      lpv    $v25[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
  vtx_return_from_lighting:
+    vclr    $v26
+    andi    $11, $5, G_ATTROFFSET_ST_ENABLE >> 8
     vmudn   $v29, vVP3F, $v31[2] // 1
-    addi    inputVtxPos, inputVtxPos, 2*inputVtxSize
-    vmadh   $v29, vVP3I, $v31[2] // 1
-    addi    outputVtxPos, outputVtxPos, 2*vtxSize
+    beqz    $11, @@skipoffset
+     vmadh  $v29, vVP3I, $v31[2] // 1
+    llv     $v26[0], (attrOffsetST - altBase)(altBaseReg) // elems 0, 1 = S, T offset
+    llv     $v26[8], (attrOffsetST - altBase)(altBaseReg) // elems 4, 5 = S, T offset
+@@skipoffset:
     vmadl   $v29, vVP0F, vPairPosF[0h]
-    addi    $1, $1, -2*inputVtxSize // Counter of remaining verts * inputVtxSize
-    vmadm   $v29, vVP0I,  vPairPosF[0h]
-    addi    secondVtxPos, outputVtxPos, vtxSize
+    llv     $v25[0], (textureSettings2)($zero)  // Texture ST scale in 0, 1
+    vmadm   $v29, vVP0I, vPairPosF[0h]
+    llv     $v25[8], (textureSettings2)($zero)  // Texture ST scale in 4, 5
     vmadn   $v29, vVP0F, vPairPosI[0h]
-    bgez    $1, @@skip1 // If < 0 verts remain, second and output vertices write to same mem
-     vmadh  $v29, vVP0I,  vPairPosI[0h]
-    move    secondVtxPos, outputVtxPos
-@@skip1:
+    llv     $v18[4], (perspNorm)($zero)  // TODO perspNorm in elem 2, garbage in 3
+    vmadh   $v29, vVP0I, vPairPosI[0h]
+    addi    inputVtxPos, inputVtxPos, 2*inputVtxSize
     vmadl   $v29, vVP1F, vPairPosF[1h]
-    li      $ra, vtx_load_loop
-    vmadm   $v29, vVP1I,  vPairPosF[1h]
-    bgtz    $1, @@skip2 // If <= 0 verts remain, run next DL command
-     vmadn  $v29, vVP1F, vPairPosI[1h]
-    li      $ra, run_next_DL_command
-@@skip2:
-    vmadh   $v29, vVP1I,  vPairPosI[1h]
-    vmadl   $v29, vVP2F, vPairPosF[2h]
+    addi    outputVtxPos, outputVtxPos, 2*vtxSize
+    vmadm   $v29, vVP1I, vPairPosF[1h]
+    addi    $1, $1, -2*inputVtxSize     // Counter of remaining verts * inputVtxSize
+    vmadn   $v29, vVP1F, vPairPosI[1h]
+    move    secondVtxPos, outputVtxPos  // Second and output vertices write to same mem...
+    vmadh   $v29, vVP1I, vPairPosI[1h]
+    bltz    $1, @@skipsecond            // ...if < 0 verts remain, ...
+     vmadl  $v29, vVP2F, vPairPosF[2h]
+    addi    secondVtxPos, outputVtxPos, vtxSize // ...otherwise, second vtx is next vtx
+@@skipsecond:
     vmadm   $v29, vVP2I, vPairPosF[2h]
     vmadn   vPairTPosF, vVP2F, vPairPosI[2h]
+    li      $ra, run_next_DL_command    // run next DL command...
     vmadh   vPairTPosI, vVP2I, vPairPosI[2h]
-    vmudm   $v29, vPairST, vSTScl     // Scale ST; must be after texgen
-    vmadh   vPairST, vSTOfs, $v31[2] // + 1 * ST offset
+    blez    $1, @@skiploop              // ...if <= 0 verts remain, ...
+     vmudm  $v29, vPairST, $v25         // Scale ST; must be after texgen
+    li      $ra, vtx_load_loop          // ...otherwise keep looping
+@@skiploop:
+    vmadh   vPairST, $v26, $v31[2]      // + 1 * (ST offset or zero)
 vtx_store:
     // Inputs: vPairTPosI, vPairTPosF, vPairST, vPairRGBA
     // Locals: $v20, $v21, $v25, $v26, $v28, $v30 ($v29 is temp)
@@ -1415,19 +1424,16 @@ vtx_store:
     vch     $v29, vPairTPosI, vPairTPosI[3h] // Clip screen high
     ldv     $v30[8], (occlusionPlaneMidCoeffs - altBase)(altBaseReg)
     vcl     $v29, vPairTPosF, vPairTPosF[3h] // Clip screen low
-    vmudl   $v29, vPairTPosF, vSTScl[2] // Persp norm
-    vmadm   $v20, vPairTPosI, vSTScl[2] // Persp norm
+    vmudl   $v29, vPairTPosF, $v18[2] // Persp norm
+    vmadm   $v20, vPairTPosI, $v18[2] // Persp norm
     vmadn   $v21, vSTOfs, vSTOfs[3] // Zero
     cfc2    $12, $vcc // Load screen clipping results
     vmudn   $v29, vPairTPosF, $v30 // X * kx, Y * ky, Z * kz
     vmadh   $v29, vPairTPosI, $v30 // Int * int
     vreadacc $v28, ACC_UPPER // Load int * int portion
     vne     $v29, $v31, $v31[3h] // Set VCC to 11101110
-    srl     $24, $12, 4            // Shift second vertex screen clipping to first slots
     vmudn   $v26, vPairTPosF, $v31[3] // W * clip ratio for scaled clipping
-    andi    $24, $24, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
     vmadh   $v25, vPairTPosI, $v31[3] // W * clip ratio for scaled clipping
-    andi    $12, $12, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
     vmrg    $v28, $v28, $v30 // Put constant factor in elems 3, 7
     sdv     vPairTPosF[8],  (VTX_FRAC_VEC  )(secondVtxPos)
     vrcph   $v29[0], $v20[3]
@@ -1448,34 +1454,33 @@ vtx_store:
     vadd    $v28, $v28, $v28[1h] // Add elems 1, 5 to 3, 7
     cfc2    $20, $vcc // Load scaled clipping results
     vmudl   $v29, $v21, $v30[2h]
+    srl     $24, $12, 4            // Shift second vertex screen clipping to first slots
     vmadm   $v29, $v20, $v30[2h]
+    andi    $24, $24, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
     vmadn   $v21, $v21, $v30[3h]
     lsv     vPairTPosF[14], (VTX_Z_FRAC    )(secondVtxPos) // load Z into W slot, will be for fog below
     vmadh   $v20, $v20, $v30[3h]
     lsv     vPairTPosF[6],  (VTX_Z_FRAC    )(outputVtxPos) // load Z into W slot, will be for fog below
     vge     $v29, $v28, vSTOfs[3] // >= 0 in elems 3, 7
-    vmudh   $v29, vSTScl, $v31[2] // 4 * 1 in elems 3, 7
+    vclr    $v29 // TODO
+    vsub    $v29, $v29, $v31[1]   // 1 = 0 - -1  // TODO
+    vmudh   $v29, $v29, $v31[4] // 4 * 1 in elems 3, 7  // TODO vOne
     cfc2    $11, $vcc // Load occlusion plane mid results to bits 3 and 7 (garbage in others)
     vmadn   $v21, $v21, $v31[0] // -4
-    ori     $12, $12, CLIP_VTX_USED // Write for all first verts, only matters for generated verts
+    andi    $12, $12, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
     vmadh   $v20, $v20, $v31[0] // -4
-    andi    $20, $20, ~(CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4)) // Mask out bits we will or in    
+    ori     $12, $12, CLIP_VTX_USED // Write for all first verts, only matters for generated verts
     vge     $v29, vPairTPosI, vSTOfs[3] // Zero; vcc set if w >= 0
-    andi    $11, $11, CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4) // Only meaningful bits from occlusion
     vmrg    $v25, vSTOfs, $v31[7] // 0 or 0x7FFF in elems 3, 7, latter if w < 0
     lsv     vPairTPosI[14], (VTX_Z_INT     )(secondVtxPos) // load Z into W slot, will be for fog below
     vmudl   $v29, $v21, $v30[2h]
     lsv     vPairTPosI[6],  (VTX_Z_INT     )(outputVtxPos) // load Z into W slot, will be for fog below
     vmadm   $v29, $v20, $v30[2h]
-    or      $20, $20, $11          // Combine occlusion results with scaled results
     vmadn   $v28, $v21, $v30[3h]
-    sll     $11, $20, 4            // Shift first vertex scaled clipping to second slots
     vmadh   $v30, $v20, $v30[3h] // $v30:$v28 is 1/W
-    andi    $20, $20, CLIP_SCAL_NPXY | CLIP_OCCLUDED // Mask to only bits we care about
     vmadh   $v25, $v25, $v31[7] // 0x7FFF; $v25:$v28 is 1/W but large number if W negative
-    andi    $11, $11, CLIP_SCAL_NPXY | CLIP_OCCLUDED // Mask to only bits we care about
     vge     $v29, $v31, $v31[2h] // Set VCC to 00110011
-    or      $24, $24, $20          // Combine results for second vertex
+    andi    $20, $20, ~(CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4)) // Mask out bits we will or in    
     vmudl   $v29, vPairTPosF, $v28[3h]
     ssv     $v28[14],         (VTX_INV_W_FRAC)(secondVtxPos)
     vmadm   $v29, vPairTPosI, $v28[3h]
@@ -1484,17 +1489,24 @@ vtx_store:
     ssv     $v30[14],         (VTX_INV_W_INT )(secondVtxPos)
     vmadh   vPairTPosI, vPairTPosI, $v25[3h] // pos * 1/W
     ssv     $v30[6],          (VTX_INV_W_INT )(outputVtxPos)
-    vmudl   $v29, vPairTPosF, vSTScl[2] // Persp norm
+    vmudl   $v29, vPairTPosF, $v18[2] // Persp norm
     ldv     $v30[0], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // Load coeffs 0-3
-    vmadm   vPairTPosI, vPairTPosI, vSTScl[2] // Persp norm
+    vmadm   vPairTPosI, vPairTPosI, $v18[2] // Persp norm
     ldv     $v30[8], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // and for vtx 2
     vmadn   vPairTPosF, vSTOfs, vSTOfs[3] // Zero
-    or      $12, $12, $11          // Combine results for first vertex
+    andi    $11, $11, CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4) // Only meaningful bits from occlusion
     vmudh   $v29, vVpOfs, $v31[2] // offset * 1
+    or      $20, $20, $11          // Combine occlusion results with scaled results
     vmadn   vPairTPosF, vPairTPosF, vVpScl // + XYZ * scale
+    sll     $11, $20, 4            // Shift first vertex scaled clipping to second slots
     vmadh   vPairTPosI, vPairTPosI, vVpScl
+    andi    $20, $20, CLIP_SCAL_NPXY | CLIP_OCCLUDED // Mask to only bits we care about
     vmrg    $v26, $v31, $v31[0] // Signs of $v26 are --++--++
-    // 2 cycles to wait for vPairTPosI
+    andi    $11, $11, CLIP_SCAL_NPXY | CLIP_OCCLUDED // Mask to only bits we care about
+    // VU cycle
+    or      $24, $24, $20          // Combine results for second vertex
+    // VU cycle
+    or      $12, $12, $11          // Combine results for first vertex
     vmudh   $v28, vPairTPosI, $v31[4] // 4; scale up x and y
     slv     vPairTPosI[8],  (VTX_SCR_VEC   )(secondVtxPos)
     vabs    $v26, $v26, $v31[5] // $v26 is 0xC000, 0xC000, 0x4000, 0x4000, repeat
@@ -1966,9 +1978,9 @@ dma_write:
 // The action here is controlled by $1. If yielding, $1 > 0. If this was
 // G_LOAD_UCODE, $1 == 0. If we got to the end of the parent DL, $1 < 0.
 ovl0_start:
-    sub     $11, rdpCmdBufPtr, rdpCmdBufEnd
-    addi    $12, $11, RDP_CMD_BUFSIZE - 1
-    bgezal  $12, flush_rdp_buffer
+    sub     $11, rdpCmdBufPtr, rdpCmdBufEndP1
+    addi    $12, $11, (RDP_CMD_BUFSIZE + 8) - 1 // Does the current buffer contain anything?
+    bgezal  $12, flush_rdp_buffer   // - 1 because there is no bgtzal instruction
      sw     perfCounter1, yieldDataFooter + 0x0 // Stored here for yield and done
     sw      perfCounter2, yieldDataFooter + 0x4 // otherwise this is temp memory
     jal     while_wait_dma_busy
