@@ -527,6 +527,7 @@ rdpCmdBuffer1:
 rdpCmdBuffer1End:
     .skip 8
 rdpCmdBuffer1EndPlus1Word:
+    // This is so that we can temporarily store vector regs here with lqv/sqv
     .skip RDP_CMD_BUFSIZE_EXCESS - 8
 // Second RDP Command Buffer
 rdpCmdBuffer2:
@@ -580,8 +581,6 @@ vVP0F  equ $v12
 vVP1F  equ $v13
 vVP2F  equ $v14
 vVP3F  equ $v15
-vVpScl equ $v16 // Vertex constants (viewport scale, offset, ST scale, offset)
-vVpOfs equ $v17 // Also contain other constants, see comment in vtx_setup_constants
 // Remaining regs sometimes valid in vertex and lighting, also used as temps
 vPairPosI  equ $v20 // Vertex pair model / world space position int/frac
 vPairPosF  equ $v21
@@ -703,8 +702,6 @@ postOvlRA equ $12 // Commonly used locally
 // $v13: local
 // $v14: local
 // $v15: local
-// $v16: vVpScl, local
-// $v17: vVpOfs, local
 // $v20: local
 // $v21: local
 // $v22: vPairST, local
@@ -1304,34 +1301,33 @@ vtx_after_calc_mit:
     ldv     vVP0F[8], (vpMatrix  + 0x20)($zero)
     ldv     vVP2F[8], (vpMatrix  + 0x30)($zero)
 vtx_setup_constants:
-/*
-vVpScl = [vscale[0], -vscale[1], vscale[2], fogMult,   (repeat)]
-vVpOfs = [vtrans[0],  vtrans[1], vtrans[2], fogOffset, (repeat)]
-$v31   = [-4,        -1,         1,         2,         4,         0x4000,  0x7F00,    0x7FFF]
-vtrans[2] not incremented by Z attr offset if disabled
-*/
+    // Computes modified viewport scale and offset including fog info, and stores
+    // these to temp memory in the RDP buffer. This is only used during vertex write
+    // and the first half of clipping, so that memory is not used then.
     lsv     $v21[0], (attrOffsetZ - altBase)(altBaseReg) // Z offset
-    ldv     vVpOfs[0], (viewport + 8)($zero)      // Load vtrans duplicated in 0-3 and 4-7
-    ldv     vVpOfs[8], (viewport + 8)($zero)
+    ldv     $v26[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
+    ldv     $v26[8], (viewport + 8)($zero)
     lhu     $12, (geometryModeLabel+2)($zero)
-    ldv     vVpScl[0], (viewport)($zero)          // Load vscale duplicated in 0-3 and 4-7
+    ldv     $v25[0], (viewport)($zero)            // Load vscale duplicated in 0-3 and 4-7
     vclr    $v19 // TODO
-    ldv     vVpScl[8], (viewport)($zero)
+    ldv     $v25[8], (viewport)($zero)
     vne     $v29, $v31, $v31[2h]                  // VCC = 11011101
     andi    $11, $12, G_ATTROFFSET_Z_ENABLE
-    vadd    $v21, vVpOfs, $v21[0]                 // Add Z offset to all terms (care about 2, 6)
+    vadd    $v21, $v26, $v21[0]                   // Add Z offset to all terms (care about 2, 6)
     beqz    $11, @@skipz                          // Skip if Z offset disabled
      llv    $v23[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
-    vmrg    vVpOfs, vVpOfs, $v21                  // Move Z + Z offset into elems 2, 6
+    vmrg    $v26, $v26, $v21                      // Move Z + Z offset into elems 2, 6
 @@skipz:
     vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
-    vmudh   $v20, vVpScl, $v31[1]                 // -1; -vscale
-    vmrg    vVpScl, vVpScl, $v23[0]               // Put fog multiplier in elements 3,7 of vscale
+    vmudh   $v20, $v25, $v31[1]                   // -1; -vscale
+    vmrg    $v25, $v25, $v23[0]                   // Put fog multiplier in elements 3,7 of vscale
     vadd    $v23, $v23, $v31[6]                   // Add 0x7F00 to fog offset
-    vmov    vVpScl[1], $v20[1]                    // Negate vscale[1] because RDP top = y=0
-    vmov    vVpScl[5], $v20[1]                    // Same for second half
+    vmov    $v25[1], $v20[1]                      // Negate vscale[1] because RDP top = y=0
+    vmov    $v25[5], $v20[1]                      // Same for second half
+    vmrg    $v26, $v26, $v23[1]                   // Put fog offset in elements 3,7 of vtrans
+    sqv     $v25, (0x00)(rdpCmdBufEndP1)          // Store viewport scale to temp mem
     bnez    $ra, clip_after_constants             // Return to clipping if from there
-     vmrg    vVpOfs, vVpOfs, $v23[1]              // Put fog offset in elements 3,7 of vtrans
+     sqv    $v26, (0x10)(rdpCmdBufEndP1)          // Store viewport offset to temp mem
     jal     while_wait_dma_busy                   // Wait for vertex load to finish
      andi   $7, $5, G_FOG >> 8                    // Nonzero if fog enabled
 vtx_load_loop:
@@ -1463,7 +1459,9 @@ vtx_store:
     lsv     vPairTPosI[6],  (VTX_Z_INT     )(outputVtxPos) // load Z into W slot, will be for fog below
     vmadm   $v29, $v20, $v30[2h]
     vmadn   $v28, $v21, $v30[3h]
+    lqv     $v26, (0x10)(rdpCmdBufEndP1) // Load viewport offset from temp mem
     vmadh   $v30, $v20, $v30[3h] // $v30:$v28 is 1/W
+    lqv     $v21, (0x00)(rdpCmdBufEndP1) // Load viewport scale from temp mem
     vmadh   $v25, $v25, $v31[7] // 0x7FFF; $v25:$v28 is 1/W but large number if W negative
     vge     $v29, $v31, $v31[2h] // Set VCC to 00110011
     andi    $20, $20, ~(CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4)) // Mask out bits we will or in    
@@ -1481,11 +1479,11 @@ vtx_store:
     ldv     $v30[8], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // and for vtx 2
     vmadn   vPairTPosF, $v19, $v19[3] // TODO Zero
     andi    $11, $11, CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4) // Only meaningful bits from occlusion
-    vmudh   $v29, vVpOfs, $v31[2] // offset * 1
+    vmudh   $v29, $v26, $v31[2] // offset * 1
     or      $20, $20, $11          // Combine occlusion results with scaled results
-    vmadn   vPairTPosF, vPairTPosF, vVpScl // + XYZ * scale
+    vmadn   vPairTPosF, vPairTPosF, $v21 // + XYZ * scale
     sll     $11, $20, 4            // Shift first vertex scaled clipping to second slots
-    vmadh   vPairTPosI, vPairTPosI, vVpScl
+    vmadh   vPairTPosI, vPairTPosI, $v21
     andi    $20, $20, CLIP_SCAL_NPXY | CLIP_OCCLUDED // Mask to only bits we care about
     vmrg    $v26, $v31, $v31[0] // Signs of $v26 are --++--++
     andi    $11, $11, CLIP_SCAL_NPXY | CLIP_OCCLUDED // Mask to only bits we care about
