@@ -405,6 +405,16 @@ the FIFO is occupied by full-size tris, so the buffers are effectively only two
 tris in size because a third tri can't fit. So, their size has been reduced to
 two tris, saving a substantial amount of DMEM.
 
+### Obscure semantic differences from F3DEX2 that should never matter in practice
+
+- `SPLoadUcode*` will corrupt RSP texture state previously set with `SPTexture`.
+  After returning from the other microcode but before drawing anything else, you
+  must execute `SPTexture` again.
+- Changing fog settings--i.e. enabling or disabling `G_FOG` in the geometry mode
+  or executing `SPFogFactor` or `SPFogPosition`--between loading verts and
+  drawing tris with those verts will lead to incorrect fog values for those
+  tris.
+
 ## Credits
 
 F3DEX3 modifications from F3DEX2 are by Sauraen and are dedicated to the public
