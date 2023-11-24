@@ -35,7 +35,7 @@
     .error "bge is a macro using slt, and silently clobbers $1!"
 .endmacro
 
-// This version doesn't depend on $v0 to be vZero, which it often is not in
+// This version doesn't depend on $v0 to be vZero, which it usually is not in
 // F3DEX3, and also doesn't get corrupted if $vco is set / consume $vco which
 // may be needed for a subsequent instruction.
 .macro vcopy, dst, src
@@ -613,7 +613,7 @@ vLtMIT1F   equ $v30
 vLtMIT2F   equ $v10
 
 // Other vector regs defines:
-vZero equ $v0  // all elements = 0 (has other value in vtx / lighting)
+vZero equ $v0  // all elements = 0, for tri write only
 
 // Global and semi-global (i.e. one main function + occasional local) scalar regs:
 //                 $zero // Hardwired zero scalar register
@@ -717,13 +717,13 @@ postOvlRA equ $12 // Commonly used locally
 start: // This is at IMEM 0x1080, not the start of IMEM
     vadd    $v29, $v29, $v29 // Consume VCO (carry) value possibly set by the previous ucode
     lqv     $v31[0], (v31Value)($zero)
-    vclr    vZero
+    vclr    vOne
     li      altBaseReg, altBase
     li      rdpCmdBufPtr, rdpCmdBuffer1
     li      rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word
     lw      $11, rdpFifoPos
     lw      $12, OSTask + OSTask_flags
-    vsub    vOne, vZero, $v31[1]            // 1 = 0 - -1
+    vsub    vOne, vOne, $v31[1]             // 1 = 0 - -1
     li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // Clear task done and yielded signals
     beqz    $11, initialize_rdp             // If RDP FIFO not set up yet, starting ucode from scratch
      mtc0   $1, SP_STATUS
@@ -800,7 +800,6 @@ G_MOVEMEM_end:
 G_SPNOOP_handler:
 run_next_DL_command:
      mfc0   $1, SP_STATUS                               // load the status word into register $1
-    vclr    vZero                                       // Zero vZero for each command
     beqz    inputBufferPos, displaylist_dma             // load more DL commands if none are left
      andi   $1, $1, SP_STATUS_SIG0                      // check if the task should yield
     lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // load the command word into cmd_w0
@@ -1062,18 +1061,18 @@ clip_skipxy:
     vor     $v29, vClDiffI, vOne[0]       // round up int sum to odd; this ensures the value is not 0, otherwise v29 will be 0 instead of +/- 2
     vrcph   $v3[3], vClDiffI[3]
     vrcpl   $v2[3], vClDiffF[3]           // frac: 1 / (x+y+z+w), vtx on screen - vtx off screen
-    vrcph   $v3[3], vZero[0]              // get int result of reciprocal
+    vrcph   $v3[3], $v31[2]               // 0; get int result of reciprocal
     vabs    $v29, $v29, $v31[3]           // 2; v29 = +/- 2 based on sum positive (incl. zero) or negative
     vmudn   $v2, $v2, $v29[3]             // multiply reciprocal by +/- 2
     vmadh   $v3, $v3, $v29[3]
-    veq     $v3, $v3, vZero[0]            // if reciprocal high is 0
+    veq     $v3, $v3, $v31[2]             // 0; if reciprocal high is 0
     vmrg    $v2, $v2, $v31[1]             // keep reciprocal low, otherwise set to -1
     vmudl   $v29, vClDiffF, $v2[3]        // sum frac * reciprocal, discard
     vmadm   vClDiffI, vClDiffI, $v2[3]    // sum int * reciprocal, frac out
-    vmadn   vClDiffF, vZero, vZero[0]     // get int out
+    vmadn   vClDiffF, $v31, $v31[2]       // 0; get int out
     vrcph   $v13[3], vClDiffI[3]          // reciprocal again (discard result)
     vrcpl   $v12[3], vClDiffF[3]          // frac part
-    vrcph   $v13[3], vZero[0]             // int part
+    vrcph   $v13[3], $v31[2]              // 0; int part
     vmudl   $v29, $v12, vClDiffF          // self * own reciprocal? frac*frac discard
     vmadm   $v29, $v13, vClDiffF          // self * own reciprocal? int*frac discard
     vmadn   vClDiffF, $v12, vClDiffI      // self * own reciprocal? frac out
@@ -1100,11 +1099,11 @@ clip_skipxy:
     luv     $v13[0], VTX_COLOR_VEC($19)   // Vtx on screen, RGBA
     vmadm   vClDiffI, vClDiffI, $v2[3]
     llv     vPairST[0], VTX_TC_VEC($19)   // Vtx on screen, ST
-    vmadn   vClDiffF, vClDiffF, vZero[0]  // * one of the reciprocals above
+    vmadn   vClDiffF, $v31, $v31[2]       // 0; * one of the reciprocals above
     vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
     vmrg    vClDiffF, vClDiffF, $v31[1]   // keep frac part of factor, else set to 0xFFFF (max val)
     vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
-    vge     vClDiffI, vClDiffI, vZero[0]  // If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
+    vge     vClDiffI, vClDiffI, $v31[2]   // 0; If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
     vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
     llv     $v18[4], (perspNorm)($zero)   // TODO Dupl instr: perspNorm in elem 2, garbage in 3
     vmudn   vClFade2, vClFade1, $v31[1]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
@@ -1125,30 +1124,30 @@ clip_skipxy:
     addi    clipPolyWrite, clipPolyWrite, 2  // Increment write ptr
     vmadl   $v29, $v4, vClFade2[3]        // + Fade factor for on screen vert * on screen vert pos frac
     sh      $11, VTX_CLIP($3)             // Store modified clip flags for off screen vert
-    vmadm   vPairTPosI, $v5, vClFade2[3] // + Fade factor for on screen vert * on screen vert pos int
-    jal     vtx_store              // Write new vertex
-     vmadn  vPairTPosF, vZero, vZero[0] // Load resulting frac pos
+    vmadm   vPairTPosI, $v5, vClFade2[3]  // + Fade factor for on screen vert * on screen vert pos int
+    jal     vtx_store                     // Write new vertex
+     vmadn  vPairTPosF, $v31, $v31[2]     // 0; load resulting frac pos
 clip_nextedge:
-    bnez    clipFlags, clip_edgelooptop  // Discard V2 if it was off screen (whether inserted vtx or not)
-     move   $3, $2                           // Move what was the end of the edge to be the new start of the edge
-    sh      $3, (clipPoly)(clipPolyWrite)    // Former V2 was on screen, so add it to the output polygon
+    bnez    clipFlags, clip_edgelooptop   // Discard V2 if it was off screen (whether inserted vtx or not)
+     move   $3, $2                        // Move what was the end of the edge to be the new start of the edge
+    sh      $3, (clipPoly)(clipPolyWrite) // Former V2 was on screen, so add it to the output polygon
     j       clip_edgelooptop
      addi   clipPolyWrite, clipPolyWrite, 2
 
 clip_w:
-    vcopy   vClBaseF, $v4                    // Result is just W
+    vcopy   vClBaseF, $v4                 // Result is just W
     j       clip_skipxy
      vcopy  vClBaseI, $v5
 
 clip_nextcond:
     sub     $11, clipPolyWrite, clipPolySelect // Are there less than 3 verts in the output polygon?
-    bltz    $11, clip_done                 // If so, degenerate result, quit
-     sh     $zero, (clipPoly)(clipPolyWrite)   // Terminate the output polygon with a 0
-    lhu     $3, (clipPoly - 2)(clipPolyWrite)  // Initialize the edge start (V3) to the last vert
+    bltz    $11, clip_done                    // If so, degenerate result, quit
+     sh     $zero, (clipPoly)(clipPolyWrite)  // Terminate the output polygon with a 0
+    lhu     $3, (clipPoly - 2)(clipPolyWrite) // Initialize the edge start (V3) to the last vert
     beqz    clipMaskIdx, clip_draw_tris
      lbu    $11, (clipCondShifts - 1)(clipMaskIdx) // Load next clip condition shift amount
     li      $9, 1
-    sllv    $9, $9, $11                        // $9 is clip mask
+    sllv    $9, $9, $11                       // $9 is clip mask
     j       clip_condlooptop
      addi   clipMaskIdx, clipMaskIdx, -1
     
@@ -1590,23 +1589,15 @@ tri_return_from_addrs:
     li      clipPolySelect, -1    // Normal tri drawing mode (check clip masks)
 tri_noinit:
     // ra is next cmd, second tri in TRI2, or middle of clipping
-tV1AtF equ $v5
-tV2AtF equ $v7
-tV3AtF equ $v9
-tV1AtI equ $v18
-tV2AtI equ $v19
-tV3AtI equ $v21
-    vnxor   tV1AtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
-    vnxor   tV2AtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
+    vclr    vZero
     llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
     vmov    $v6[6], $v27[5]         // elem 6 of v6 = vertex 1 addr
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
-    vnxor   tV3AtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
     lhu     $5, VTX_CLIP($1)
     vmov    $v8[6], $v27[7]         // elem 6 of v8 = vertex 3 addr
     lhu     $7, VTX_CLIP($2)
-    vadd    $v2, vZero, $v6[1] // v2 all elems = y-coord of vertex 1
+    vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
     lhu     $8, VTX_CLIP($3)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
     lw      $6, geometryModeLabel // Load full geometry mode word
@@ -1638,16 +1629,25 @@ tV3AtI equ $v21
     vlt     $v6, $v6, $v2     // v6 (thrown out), VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
     beqz    $8, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
      addi   $11, $11, 21      // = 21 if back facing, 22 if front facing
-    vor     $v3, vZero, $v31[5]   // 0x4000; some rounding factor
+    vmudh   $v3, vOne, $v31[5]   // 0x4000; some rounding factor
     sllv    $11, $6, $11      // Sign bit = bit 10 of geom mode if back facing, bit 9 if front facing
     vmrg    $v2, $v4, $v10   // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     bltz    $11, return_routine // Cull if bit is set (culled based on facing)
      vmrg   $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
     vmudn   $v4, $v14, $v31[5] // 0x4000
+tV1AtF equ $v5
+tV2AtF equ $v7
+tV3AtF equ $v9
+tV1AtI equ $v18
+tV2AtI equ $v19
+tV3AtI equ $v21
+    vnxor   tV1AtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
     mfc2    $1, $v14[12]      // $v14 = lowest Y value = highest on screen (x, y, addr)
     vsub    $v6, $v2, $v14
+    vnxor   tV2AtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
     mfc2    $2, $v2[12]       // $v2 = mid vertex (x, y, addr)
     vsub    $v8, $v10, $v14
+    vnxor   tV3AtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
     mfc2    $3, $v10[12]      // $v10 = highest Y value = lowest on screen (x, y, addr)
     vsub    $v11, $v14, $v2
     vsub    $v12, $v14, $v10  // VH - VL (negative)
@@ -1667,12 +1667,10 @@ tV3AtI equ $v21
     vrcp    $v20[0], $v15[1]
     sll     $11, $6, 10                 // Moves the value of G_SHADING_SMOOTH into the sign bit
     vrcph   $v22[0], $v17[1]
-    // TODO If everything else is done and we still have an instruction to spare,
-    // this will prevent a hang if G_TEXTURE_ENABLE is set in the geometry mode
-    //andi    $6, $6, (G_SHADE | G_ZBUFFER)
+    andi    $6, $6, (G_SHADE | G_ZBUFFER)
     vrcpl   $v23[1], $v16[1]
     bltz    $11, tri_skip_flat_shading  // Branch if G_SHADING_SMOOTH is set
-     vrcph  $v24[1], vZero[0]
+     vrcph  $v24[1], $v31[2]            // 0
     vlt     $v29, $v31, $v31[3]         // Set vcc to 11100000
     vmrg    tV1AtI, $v25, tV1AtI        // RGB from $4, alpha from $1
     vmrg    tV2AtI, $v25, tV2AtI        // RGB from $4, alpha from $2
@@ -1712,11 +1710,11 @@ tri_skip_flat_shading:
 tri_skip_alpha_compare_cull:
      vmadm  $v22, $v22, $v30[7] // 0x0020
     sub     $11, $5, $8
-    vmadn   $v20, vZero, vZero[0]
+    vmadn   $v20, $v31, $v31[2] // 0
     sra     $12, $11, 31
     vmudm   $v25, $v15, $v30[2] // 0x1000
     and     $11, $11, $12
-    vmadn   $v15, vZero, vZero[0]
+    vmadn   $v15, $v31, $v31[2] // 0
     sub     $5, $5, $11
     vsubc   $v4, vZero, $v4
     sw      $5, 0x0010(rdpCmdBufPtr)
@@ -1758,24 +1756,24 @@ tri_skip_alpha_compare_cull:
      vmadh  $v3, $v15, $v26[1]
     vrcph   $v29[0], $v27[0]
     vrcpl   $v10[0], $v27[1]
-    vadd    $v14, vZero, $v13[1q]
-    vrcph   $v27[0], vZero[0]
-    vor     $v22, vZero, $v31[7] // 0x7FFF
+    vmudh   $v14, vOne, $v13[1q]
+    vrcph   $v27[0], $v31[2]     // 0
+    vmudh   $v22, vOne, $v31[7]  // 0x7FFF
     vmudm   $v29, $v13, $v10[0]
     vmadl   $v29, $v14, $v10[0]
     llv     $v22[0], VTX_TC_VEC($1)
     vmadn   $v14, $v14, $v27[0]
     llv     $v22[8], VTX_TC_VEC($2)
     vmadh   $v13, $v13, $v27[0]
-    vor     $v10, vZero, $v31[7] // 0x7FFF
-    vge     $v29, $v30, $v30[7] // Set VCC to 11110001; select RGBA___Z or ____STW_
+    vmudh   $v10, vOne, $v31[7]  // 0x7FFF
+    vge     $v29, $v30, $v30[7]  // Set VCC to 11110001; select RGBA___Z or ____STW_
     llv     $v10[8], VTX_TC_VEC($3)
     vmudm   $v29, $v22, $v14[0h]
     vmadh   $v22, $v22, $v13[0h]
-    vmadn   $v25, vZero, vZero[0]
-    vmudm   $v29, $v10, $v14[6]     // acc = (v10 * v14[6]); v29 = mid(clamp(acc))
-    vmadh   $v10, $v10, $v13[6]     // acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
-    vmadn   $v13, vZero, vZero[0]   // v13 = lo(clamp(acc))
+    vmadn   $v25, $v31, $v31[2]  // 0
+    vmudm   $v29, $v10, $v14[6]  // acc = (v10 * v14[6]); v29 = mid(clamp(acc))
+    vmadh   $v10, $v10, $v13[6]  // acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
+    vmadn   $v13, $v31, $v31[2]  // 0; v13 = lo(clamp(acc))
     sdv     $v22[0], 0x0020(rdpCmdBufPtr)
     vmrg    tV2AtI, tV2AtI, $v22 // Merge S, T, W into elems 4-6
     sdv     $v25[0], 0x0028(rdpCmdBufPtr) // 8
@@ -2479,11 +2477,11 @@ G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
      li     $3, tempMemRounded // Input 1 = temp mem (loaded mtx)
     addi    $12, $3, 0x0018
 @@loop:
-    vmadn   $v9, vZero, vZero[0]
+    vmadn   $v9, $v31, $v31[2]  // 0
     addi    $11, $3, 0x0008
-    vmadh   $v8, vZero, vZero[0]
+    vmadh   $v8, $v31, $v31[2]  // 0
     addi    $2, $2, -0x0020
-    vmudh   $v29, vZero, vZero[0]
+    vmudh   $v29, $v31, $v31[2] // 0
 @@innerloop:
     ldv     $v5[0], 0x0040($2)
     ldv     $v5[8], 0x0040($2)
