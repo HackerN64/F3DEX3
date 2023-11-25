@@ -588,35 +588,16 @@ vVP1F  equ $v13
 vVP2F  equ $v14
 vVP3F  equ $v15
 // Remaining regs sometimes valid in vertex and lighting, also used as temps
-vPairNrml  equ $v16 // Vertex pair normals (model then world space)
-vPairLt    equ $v17 // Vertex pair total light color/intensity (RGB-RGB-)
 vPairPosI  equ $v20 // Vertex pair model / world space position int/frac
 vPairPosF  equ $v21
 vPairST    equ $v22 // Vertex pair ST texture coordinates
 vPairTPosF equ $v23 // Vertex pair transformed (clip / screen) space position frac/int
 vPairTPosI equ $v24
-// $v25: temp
-// $v26: temp
 vPairRGBA  equ $v27 // Vertex pair color
 vOne       equ $v28 // Global, all elements = 1
 // $v29: permanent temp register, also write results here to discard
 // $v31: Only global constant vector register
 
-// Some extra defines for lighting:
-vPackPXY   equ $v23 // Positive X and Y in packed normals
-vPackZ     equ $v24 // Z in packed normals
-vLtRGBOut  equ $v25 // Light / effects RGB output
-vLtAOut    equ $v26 // Light / effects alpha output
-vLtColor   equ $v26 // Light color
-vLookat1   equ $v16 // Lookat direction 1
-vLookat0   equ $v17 // Lookat direction 0
-// M inverse transpose matrix in regs briefly:
-vLtMIT0I   equ $v26
-vLtMIT1I   equ $v25
-vLtMIT2I   equ $v23
-vLtMIT0F   equ $v29
-vLtMIT1F   equ $v17
-vLtMIT2F   equ $v24
 
 // Other vector regs defines:
 vZero equ $v0  // all elements = 0, for tri write only
@@ -1344,6 +1325,32 @@ vtx_setup_constants:
      sqv    $v25, (0x00)(rdpCmdBufEndP1)          // Store viewport scale to temp mem
     jal     while_wait_dma_busy                   // Wait for vertex load to finish
 vtx_load_loop:
+// Some extra defines for lighting:
+vPairNrml  equ $v16 // Vertex pair normals (model then world space)
+vPairLt    equ $v17 // Vertex pair total light color/intensity (RGB-RGB-)
+vPackPXY   equ $v23 // Positive X and Y in packed normals
+vPackZ     equ $v24 // Z in packed normals
+vLtRGBOut  equ $v25 // Light / effects RGB output
+vLtAOut    equ $v26 // Light / effects alpha output
+vLtColor   equ $v26 // Light color
+vLookat1   equ $v16 // Lookat direction 1
+vLookat0   equ $v17 // Lookat direction 0
+// M inverse transpose matrix in regs briefly:
+vLtMIT0I   equ $v26
+vLtMIT1I   equ $v25
+vLtMIT2I   equ $v23
+vLtMIT0F   equ $v29
+vLtMIT1F   equ $v17
+vLtMIT2F   equ $v24
+//
+vNNN equ $v16
+vLLL equ $v17
+vSSS equ $v18
+vLtDir equ $v19
+vAAA equ $v23
+vBBB equ $v24
+vCCC equ $v25
+vDDD equ $v26
      vlt    $v29, $v31, $v31[4]                   // Set VCC to 11110000
     ldv     vPairPosI[8],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
     ldv     vPairPosI[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
@@ -1355,11 +1362,11 @@ vtx_load_loop:
     // 0-3 get bytes C-F of the vertex (which is what we want).
     luv     vPairRGBA[4], (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Colors as unsigned, lower 4
     vmadh   $v29, vM3I, vOne
-    luv     $v25[0],      (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
+    luv     vCCC[0],      (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
     vmadn   $v29, vM0F, vPairPosI[0h]
-    lpv     $v16[4],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Normals as signed, lower 4
+    lpv     vNNN[4],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Normals as signed, lower 4
     vmadh   $v29, vM0I, vPairPosI[0h]
-    lpv     $v26[0],      (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
+    lpv     vDDD[0],      (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
     vmadn   $v29, vM1F, vPairPosI[1h]
     llv     vPairST[0],   (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // ST in 0:1
     vmadh   $v29, vM1I, vPairPosI[1h]
@@ -1368,11 +1375,11 @@ vtx_load_loop:
     andi    $11, $5, G_LIGHTING >> 8
     vmadh   vPairPosI, vM2I, vPairPosI[2h] // vPairPosI/F = vertices world coords
     // Elems 0-1 get bytes 6-7 of the following vertex (0)
-    lpv     $v17[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
-    vmrg    vPairRGBA, vPairRGBA, $v25 // Merge colors
+    lpv     vLLL[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
+    vmrg    vPairRGBA, vPairRGBA, vCCC // Merge colors
     bnez    $11, ovl234_lighting_entrypoint
      // Elems 4-5 get bytes 6-7 of the following vertex (1)
-     lpv    $v25[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
+     lpv    vCCC[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
  vtx_return_from_lighting:
     vclr    $v26
     andi    $11, $5, G_ATTROFFSET_ST_ENABLE >> 8
@@ -2175,7 +2182,7 @@ ovl1_padded_end:
 
 ovl2_start:
 ovl234_lighting_entrypoint:
-    vmrg    vPairNrml, $v16, $v26          // Merge normals
+    vmrg    vPairNrml, vNNN, vDDD          // Merge normals
     j       lt_continue_setup
      andi   $11, $5, G_PACKED_NORMALS >> 8
 
@@ -2192,28 +2199,28 @@ ovl234_clipping_entrypoint_ovl2ver:  // same IMEM address as ovl234_clipping_ent
 
 lt_continue_setup:
     // Inputs: vPairPosI/F vertices pos world int:frac, vPairRGBA, vPairST,
-    // $v16 vPairNrml, $v17:$v25 (to be merged) packed normals
+    // vNNN vPairNrml, vLLL:vCCC (to be merged) packed normals
     // Outputs: vPairRGBA, vPairST, must leave alone vPairPosI/F
-    // Locals: $v29 temp, $v23 (will be vPairTPosF), $v24 (will be vPairTPosI),
-    // $v25 (after merge), $v26, whichever of $v16 or $v17 is unused
+    // Locals: $v29 temp, vAAA (will be vPairTPosF), vBBB (will be vPairTPosI),
+    // vCCC (after merge), vDDD, whichever of vNNN or vLLL is unused
     // New available locals: $6, $7 (existing: $11, $12, $20, $24)
     beqz    $11, lt_skip_packed_normals
-     vmrg   $v17, $v17, $v25          // Merge packed normals
+     vmrg   vLLL, vLLL, vCCC          // Merge packed normals
     // Packed normals algorithm. This produces a vector (one for each input vertex)
     // in vPairNrml such that |X| + |Y| + |Z| = 0x7F00 (called L1 norm), in the
     // same direction as the standard normal vector. The length is not "correct"
     // compared to the standard normal, but it's is normalized anyway after the M
     // matrix transform.
-    vand    vPackPXY, $v17, $v31[6]       // 0x7F00; positive X, Y
+    vand    vPackPXY, vLLL, $v31[6]       // 0x7F00; positive X, Y
     vclr    $v29                         // Zero
     vaddc   vPackZ, vPackPXY, vPackPXY[1q]    // elem 0, 4: pos X + pos Y, no clamping
-    vadd    $v26, $v29, $v29             // Save carry bit, indicates use 0x7F00 - x and y
+    vadd    vDDD, $v29, $v29             // Save carry bit, indicates use 0x7F00 - x and y
     vxor    vPairNrml, vPackPXY, $v31[6]   // 0x7F00 - x, 0x7F00 - y
     vxor    vPackZ, vPackZ, $v31[6]            // 0x7F00 - +X - +Y in elems 0, 4
-    vne     $v29, $v29, $v26[0h]         // set 0-3, 4-7 vcc if (+X + +Y) overflowed, discard result
+    vne     $v29, $v29, vDDD[0h]         // set 0-3, 4-7 vcc if (+X + +Y) overflowed, discard result
     vmrg    vPairNrml, vPairNrml, vPackPXY  // If so, use 0x7F00 - +X, else +X (same for Y)
     vne     $v29, $v31, $v31[2h]         // set VCC to 11011101
-    vabs    vPairNrml, $v17, vPairNrml     // Apply sign of original X and Y to new X and Y
+    vabs    vPairNrml, vLLL, vPairNrml     // Apply sign of original X and Y to new X and Y
     vmrg    vPairNrml, vPairNrml, vPackZ[0h]  // Move Z to elements 2, 6
 lt_skip_packed_normals:
     // Transform normals by M, in case normalsMode = G_NORMALSMODE_FAST.
@@ -2222,12 +2229,14 @@ lt_skip_packed_normals:
     vmudn   $v29, vM0F, vPairNrml[0h]
     lbu     $11, normalsMode($zero)
     vmadh   $v29, vM0I, vPairNrml[0h]
+    andi    $6, $5, G_SHADING_SPECULAR >> 8
     vmadn   $v29, vM1F, vPairNrml[1h]
     addi    curLight, curLight, altBase // Point to ambient light
     vmadh   $v29, vM1I, vPairNrml[1h]
-    vmadn   $v24, vM2F, vPairNrml[2h] // $v24 = normals frac
+    andi    $12, $5, (G_SHADING_SPECULAR | G_FRESNEL_COLOR | G_FRESNEL_ALPHA) >> 8
+    vmadn   vBBB, vM2F, vPairNrml[2h] // vBBB = normals frac
     beqz    $11, lt_after_xfrm_normals // Skip if G_NORMALSMODE_FAST
-     vmadh  $v23, vM2I, vPairNrml[2h] // $v23 = normals int
+     vmadh  vAAA, vM2I, vPairNrml[2h] // vAAA = normals int
     // Transform normals by M inverse transpose, for G_NORMALSMODE_AUTO or G_NORMALSMODE_MANUAL
     lqv     vLtMIT0I,    (mITMatrix + 0x00)($zero) // x int, y int
     lqv     vLtMIT2I,    (mITMatrix + 0x10)($zero) // z int, x frac
@@ -2247,41 +2256,71 @@ lt_skip_packed_normals:
     vmadh   $v29, vLtMIT0I, vPairNrml[0h]
     vmadn   $v29, vLtMIT1F, vPairNrml[1h]
     vmadh   $v29, vLtMIT1I, vPairNrml[1h]
-    vmadn   $v24, vLtMIT2F, vPairNrml[2h] // vLtMIT2F = $v24 = normals frac
-    vmadh   $v23, vLtMIT2I, vPairNrml[2h] // vLtMIT2I = $v23 = normals int
+    vmadn   vBBB, vLtMIT2F, vPairNrml[2h] // vLtMIT2F = vBBB = normals frac
+    vmadh   vAAA, vLtMIT2I, vPairNrml[2h] // vLtMIT2I = vAAA = normals int
 lt_after_xfrm_normals:
-    // Normalize normals; in $v23:$v24 i/f, out $v23
+    // Normalize normals; in vAAA:vBBB i/f, out vLtDir
     jal     lt_normalize
      luv    vPairLt, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
     // Set up ambient occlusion: light *= (factor * (alpha - 1) + 1)
     vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
-    vmadm   $v25, vPairRGBA, $v30[0] // + (alpha - 1) * aoAmb factor; elems 3, 7
-    vcopy   vPairNrml, $v23
-    vmulf   vPairLt, vPairLt, $v25[3h] // light color *= ambient factor
+    vmadm   vCCC, vPairRGBA, $v30[0] // + (alpha - 1) * aoAmb factor; elems 3, 7
+    vcopy   vPairNrml, vLtDir
+    beqz    $12, lt_loop
+     vmulf  vPairLt, vPairLt, vCCC[3h] // light color *= ambient factor
+    // Get (vPairNrml dot (camera - vertex))
+    ldv     vAAA[0], (cameraWorldPos - altBase)(altBaseReg) // Camera world pos
+    j       lt_normal_to_vertex
+     ldv    vAAA[8], (cameraWorldPos - altBase)(altBaseReg)
+lt_after_camera: // output in vAAA
+    // TODO
 lt_loop:
-    // vPairPosI/F, vPairST, $v23 light pos/dir (then local), $v24 $v25 locals,
+    // vPairPosI/F, vPairST, vAAA light pos/dir (then local), vBBB vCCC locals,
     // vLtColor, vPairRGBA, vPairNrml, $v29 temp, vPairLt
-    lpv     $v23[0], (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 0 dir in elems 0-2
+    lpv     vAAA[0], (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 0 dir in elems 0-2
     vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
-    lpv     $v25[4], (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 0 dir in elems 4-6
+    lpv     vCCC[4], (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 0 dir in elems 4-6
     lbu     $11,     (ltBufOfs + 3 - lightSize)(curLight) // Light type / constant attenuation
     beq     curLight, altBaseReg, lt_post
-     vmrg   $v23, $v23, $v25                              // $v23 = light direction
+     vmrg   vLtDir, vAAA, vCCC                            // vLtDir = light direction
     bnez    $11, lt_point
      luv    vLtColor,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
-    vmulf   $v23, $v23, vPairNrml // Light dir * normalized normals
+    vmulf   vAAA, vLtDir, vPairNrml // Light dir * normalized normals
     vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
-    vmadm   $v24, vPairRGBA, $v30[1] // + (alpha - 1) * aoDir factor; elems 3, 7
-    vmudh   $v29, vOne, $v23[0h] // Sum components of dot product as signed
-    vmadh   $v29, vOne, $v23[1h]
-    vmadh   $v23, vOne, $v23[2h]
-    vmulf   vLtColor, vLtColor, $v24[3h] // light color *= ambient or point light factor
-    vge     $v23, $v23, $v31[2] // 0; clamp dot product to >= 0
+    vmadm   vCCC, vPairRGBA, $v30[1] // + (alpha - 1) * aoDir factor; elems 3, 7
+    vcopy   vBBB, vOne // Directional light dot scaling = 0001.0001, approx == 1.0
+    vmudh   $v29, vOne, vAAA[0h] // Sum components of dot product as signed
+    vmadh   $v29, vOne, vAAA[1h]
+    vmadh   vAAA, vOne, vAAA[2h]
 lt_finish_light:
+    // vAAA is unclamped dot product, vBBB is point light scaling on dot product,
+    // vCCC is amb occ factor, vLtColor = vDDD is light color
+    vge     vAAA, vAAA, $v31[2] // 0; clamp dot product to >= 0
+    vmulf   vLtColor, vLtColor, vCCC[3h] // light color *= dir or point light factor
+    vmudm   $v29, vAAA, vBBB[2h] // Dot product int * rcp frac
+    vmadh   vAAA, vAAA, vBBB[3h] // Dot product int * rcp int, clamp to 0x7FFF
     addi    curLight, curLight, -lightSize
     vmudh   $v29, vOne, vPairLt // Load accum mid with current light level
+    beqz    $6, lt_loop
+     vmacf  vPairLt, vLtColor, vAAA[0h] // + light color * dot product
+    // Specular: similar to diffuse, but with specular direction
+    vmulf   vAAA, vLtDir, vSSS // Light dir * specular direction
+    lb      $20, (ltBufOfs + 0xF)(curLight) // Light size factor
+    vmudh   $v29, vOne, vAAA[0h] // Sum components of dot product as signed
+    vmadh   $v29, vOne, vAAA[1h]
+    addi    $20, $20, 2 // Default of 0 -> 2
+    vmadh   vAAA, vOne, vAAA[2h]
+    mtc2    $20, vCCC[0]        // Light size factor
+    vxor    vAAA, vAAA, $v31[7] // = 0x7FFF - dot product
+    vmudh   vAAA, vAAA, vCCC[0] // * size factor
+    vxor    vAAA, vAAA, $v31[7] // = 0x7FFF - dot product
+    vge     vAAA, vAAA, $v31[2] // 0; clamp dot product to >= 0
+    vmudm   $v29, vAAA, vBBB[2h] // Dot product int * rcp frac
+    vmadh   vAAA, vAAA, vBBB[3h] // Dot product int * rcp int, clamp to 0x7FFF
+    vmudh   $v29, vOne, vPairLt // Load accum mid with current light level
     j       lt_loop
-     vmacf  vPairLt, vLtColor, $v23[0h] // + light color * dot product
+     vmacf  vPairLt, vLtColor, vAAA[0h] // + light color * dot product
+    
 
 lt_post:
     vadd    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; undo change for ambient occlusion
@@ -2302,38 +2341,36 @@ lt_skip_cel:
      andi   $24, $5, G_FRESNEL_ALPHA >> 8
     vcopy   vLtRGBOut, vPairLt                // If no packed normals, base output is just light
 lt_skip_novtxcolor:
-    vmulf   vLookat0, vPairNrml, $v23        // Normal * lookat 0 dir; vLookat0 = $v17 = vPairLt
+    vmulf   vLookat0, vPairNrml, vAAA        // Normal * lookat 0 dir; vLookat0 = vLLL = vPairLt
     beqz    $24, lt_skip_fresnel
      vmrg   vPairRGBA, vLtRGBOut, vLtAOut       // Merge base output and alpha output
-    // Fresnel: call point lighting; camera pos in $v23
-    ldv     $v23[0], (cameraWorldPos - altBase)(altBaseReg) // Camera world pos
-    j       lt_normal_to_vertex
-     ldv    $v23[8], (cameraWorldPos - altBase)(altBaseReg)
-lt_finish_fresnel: // output in $v23
-    vabs    $v23, $v23, $v23            // Absolute value
-    vmudn   $v26, $v31, $v30[7]         // TODO this is wrong, 0x0100 is not available Elem 4 = low part of 0x0100 * scale
-    vmadh   $v25, $v31, $v31[2]         // + 0; elem 4 = high part of 0x0100 * scale
-    vsub    $v23, $v23, $v30[6]         // Subtract offset
-    vmudl   $v29, $v23, $v26[4]         // Unsigned Fresnel value * low part shifted scale
-    vmadn   $v23, $v23, $v25[4]         // Alpha = unsigned Fresnel value * high part
-    vmrg    vPairRGBA, vPairRGBA, $v23  // Merge base output and alpha output
+    // Fresnel: call point lighting; camera pos in vAAA
+    /*
+    vabs    vAAA, vAAA, vAAA            // Absolute value
+    vmudn   vDDD, $v31, $v30[7]         // TODO this is wrong, 0x0100 is not available Elem 4 = low part of 0x0100 * scale
+    vmadh   vCCC, $v31, $v31[2]         // + 0; elem 4 = high part of 0x0100 * scale
+    vsub    vAAA, vAAA, $v30[6]         // Subtract offset
+    vmudl   $v29, vAAA, vDDD[4]         // Unsigned Fresnel value * low part shifted scale
+    vmadn   vAAA, vAAA, vCCC[4]         // Alpha = unsigned Fresnel value * high part
+    vmrg    vPairRGBA, vPairRGBA, vAAA  // Merge base output and alpha output
+    */
 lt_skip_fresnel:
     beqz    $12, vtx_return_from_lighting // no texgen
-    // Texgen: vLookat0, vLookat1, locals $v25, $v26, $v23
+    // Texgen: vLookat0, vLookat1, locals vCCC, vDDD, vAAA
     // Output: vPairST; have to leave vPairPosI/F, vPairRGBA
      vmudh  $v29, vOne, vLookat0[0h]
     lpv     vLookat1[4], (ltBufOfs + 0 - lightSize)(curLight) // Lookat 1 dir in elems 0-2
     vmadh   $v29, vOne, vLookat0[1h]
-    lpv     $v26[0], (ltBufOfs + 8 - lightSize)(curLight) // Lookat 1 dir in elems 4-6
+    lpv     vDDD[0], (ltBufOfs + 8 - lightSize)(curLight) // Lookat 1 dir in elems 4-6
     vmadh   vLookat0, vOne, vLookat0[2h]      // vLookat0 = dot product 0
     vlt     $v29, $v31, $v31[4]         // Set VCC to 11110000
-    vmrg    vLookat1, vLookat1, $v26            // vLookat1 = lookat 1 dir
+    vmrg    vLookat1, vLookat1, vDDD            // vLookat1 = lookat 1 dir
     vmulf   vLookat1, vPairNrml, vLookat1        // Normal * lookat 1 dir
     vmudh   $v29, vOne, vLookat1[0h]
     vmadh   $v29, vOne, vLookat1[1h]
     vmadh   vLookat1, vOne, vLookat1[2h]      // vLookat1 = dot product 1
     vne     $v29, $v31, $v31[1h] // Set VCC to 10111011
-    llv     $v23[0], (texgenLinearCoeffs - altBase)(altBaseReg)
+    llv     vAAA[0], (texgenLinearCoeffs - altBase)(altBaseReg)
     vmrg    vLookat0, vLookat0, vLookat1[0h]  // Dot products in elements 0, 1, 4, 5
     andi    $11, $5, G_TEXTURE_GEN_LINEAR >> 8
     vmudh   $v29, vOne, $v31[5]  // 1 * 0x4000
@@ -2341,13 +2378,13 @@ lt_skip_fresnel:
      vmacf  vPairST, vLookat0, $v31[5] // + dot products * 0x4000 ( / 2)
     // Texgen_Linear:
     vmulf   vPairST, vLookat0, $v31[5] // dot products * 0x4000 ( / 2)
-    vmulf   $v26, vPairST, vPairST // ST squared
-    vmulf   $v25, vPairST, $v31[7] // Move ST to accumulator (0x7FFF = 1)
-    vmacf   $v25, vPairST, $v23[1] // + ST * 0x6CB3
+    vmulf   vDDD, vPairST, vPairST // ST squared
+    vmulf   vCCC, vPairST, $v31[7] // Move ST to accumulator (0x7FFF = 1)
+    vmacf   vCCC, vPairST, vAAA[1] // + ST * 0x6CB3
     vmudh   $v29, vOne, $v31[5] // 1 * 0x4000
-    vmacf   vPairST, vPairST, $v23[0] // + ST * 0x44D3
+    vmacf   vPairST, vPairST, vAAA[0] // + ST * 0x44D3
     j       vtx_return_from_lighting
-     vmacf  vPairST, $v26, $v25 // + ST squared * (ST + ST * coeff)
+     vmacf  vPairST, vDDD, vCCC // + ST squared * (ST + ST * coeff)
      
 lt_point:
     /*
@@ -2358,84 +2395,84 @@ lt_point:
     Input vector 1 elem size 0010.0000 -> len^2 00000100 -> 1/len 07FF.FC00 -> vec  7FFF.C000
     Input vector 1 elem size 0001.0000 -> len^2 00000001 -> 1/len 7FFF.C000 -> vec  7FFF.C000
     */
-    ldv     $v23[0], (ltBufOfs + 8 - lightSize)(curLight) // Light position int part 0-3
-    ldv     $v23[8], (ltBufOfs + 8 - lightSize)(curLight) // 4-7
+    ldv     vAAA[0], (ltBufOfs + 8 - lightSize)(curLight) // Light position int part 0-3
+    ldv     vAAA[8], (ltBufOfs + 8 - lightSize)(curLight) // 4-7
 lt_normal_to_vertex:
     // This reused for fresnel; scalar unit stuff all garbage in that case
-    // Input point (light / camera) in $v23; computes $v23 = (vPairNrml dot (input - vertex))
-    // Uses temps $v24, $v25, $v26, $v29
-    vclr    $v24                         // Zero light pos frac part
-    vsubc   $v24, $v24, vPairPosF             // Vector from vertex to light, frac
-    lbu     $20,     (ltBufOfs + 7 - lightSize)(curLight) // Linear factor
-    vsub    $v23, $v23, vPairPosI             // Int
-    jal     lt_normalize
-     lbu    $24,     (ltBufOfs + 0xE - lightSize)(curLight) // Quadratic factor
-    // $v23 = normalized vector from vertex to light, $v29[0h:1h] = 1/len, $v25 = len^2
-    vmudm   $v24, $v25, $v29[1h] // len^2 int * 1/len frac
-    vmadn   $v24, $v26, $v29[0h] // len^2 frac * 1/len int = len frac
-    mtc2    $20, vPairLt[14] // Quadratic int part in elem 7
-    vmadh   $v29, $v25, $v29[0h] // len^2 int * 1/len int = len int
-    vmulf   $v23, $v23, vPairNrml // Normalized light dir * normalized normals
-    vmudl   $v24, $v24, vPairNrml[7]   //   len frac * linear factor frac
-    vmadm   $v24, $v29, vPairNrml[7]   // + len int * linear factor frac
-    vmadm   $v24, vOne, vPairNrml[3] // + 1 * constant factor frac
-    vmadl   $v24, $v26, vPairLt[3]     // + len^2 frac * quadratic factor frac
-    vmadm   $v24, $v25, vPairLt[3]     // + len^2 int * quadratic factor frac
-    vmadn   $v29, $v26, vPairLt[7]     // + len^2 frac * quadratic factor int
-    vmadh   $v25, $v25, vPairLt[7]     // + len^2 int * quadratic factor int
-    luv     vLtColor,    (ltBufOfs + 0 - lightSize)(curLight) // vLtColor = $v26
-    vmudh   $v24, vOne, $v23[0h] // Sum components of dot product as signed
-    vmadh   $v24, vOne, $v23[1h]
-    beq     curLight, altBaseReg, lt_finish_fresnel // If finished light loop, is fresnel
-     vmadh  $v23, vOne, $v23[2h]
-    vrcph   $v24[1], $v25[0] // 1/(2*light factor), input of 0000.8000 -> no change normals
-    vrcpl   $v24[2], $v29[0] // Light factor 0001.0000 -> normals /= 2
-    vrcph   $v24[3], $v25[4] // Light factor 0000.1000 -> normals *= 8 (with clamping)
-    vrcpl   $v24[6], $v29[4] // Light factor 0010.0000 -> normals /= 32
-    vrcph   $v24[7], $v31[2] // 0
-    vge     $v23, $v23, $v31[2] // 0; clamp dot product to >= 0
-    vmudm   $v29, $v23, $v24[2h] // Dot product int * rcp frac
+    // Input point (light / camera) in vAAA; computes vAAA = (vPairNrml dot (input - vertex))
+    // Uses temps vBBB, vCCC, vDDD, $v29
+    vclr    vBBB                       // Both: Zero input frac part
+    vsubc   vBBB, vBBB, vPairPosF      // Both: Vector from vertex to input, frac
+    lbu     $20,     (ltBufOfs + 7 - lightSize)(curLight) // PL: Linear factor
+    vsub    vAAA, vAAA, vPairPosI      // Both: Int
+    jal     lt_normalize               // Both: Input vAAA:vBBB; output vLtDir
+     lbu    $24,     (ltBufOfs + 0xE - lightSize)(curLight) // PL: Quadratic factor
+    // vLtDir = normalized vector from vertex to light, $v29[0h:1h] = 1/len, vCCC = len^2
+    vmudm   vBBB, vCCC, $v29[1h]       // PL: len^2 int * 1/len frac
+    vmadn   vBBB, vDDD, $v29[0h]       // PL: len^2 frac * 1/len int = len frac
+    mtc2    $20, vPairLt[14]           // PL: Quadratic int part in elem 7
+    vmadh   $v29, vCCC, $v29[0h]       // PL: len^2 int * 1/len int = len int
+    vmulf   vAAA, vLtDir, vPairNrml    // Both: Normalized light dir * normalized normals
+    vmudl   vBBB, vBBB, vPairNrml[7]   // PL:   len frac * linear factor frac
+    vmadm   vBBB, $v29, vPairNrml[7]   // PL: + len int * linear factor frac
+    vmadm   vBBB, vOne, vPairNrml[3]   // PL: + 1 * constant factor frac
+    vmadl   vBBB, vDDD, vPairLt[3]     // PL: + len^2 frac * quadratic factor frac
+    vmadm   vBBB, vCCC, vPairLt[3]     // PL: + len^2 int * quadratic factor frac
+    vmadn   $v29, vDDD, vPairLt[7]     // PL: + len^2 frac * quadratic factor int = $v29 frac
+    vmadh   vCCC, vCCC, vPairLt[7]     // PL: + len^2 int * quadratic factor int  = vCCC int
+    luv     vLtColor,    (ltBufOfs + 0 - lightSize)(curLight) // PL: vLtColor = vDDD
+    vmudh   vBBB, vOne, vAAA[0h]       // Both: Sum components of dot product as signed
+    vmadh   vBBB, vOne, vAAA[1h]       // Both:
+    beq     $zero, $zero, lt_after_camera // TODO TODO
+     vmadh  vAAA, vOne, vAAA[2h]       // Both: vAAA dot product
+    vrcph   vBBB[1], vCCC[0]     // 1/(2*light factor), input of 0000.8000 -> no change normals
+    vrcpl   vBBB[2], $v29[0]     // Light factor 0001.0000 -> normals /= 2
+    vrcph   vBBB[3], vCCC[4]     // Light factor 0000.1000 -> normals *= 8 (with clamping)
+    vrcpl   vBBB[6], $v29[4]     // Light factor 0010.0000 -> normals /= 32
+    vrcph   vBBB[7], $v31[2]     // 0
+    vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
     j       lt_finish_light
-     vmadh  $v23, $v23, $v24[3h] // Dot product int * rcp int, clamp to 0x7FFF
+     vmadm  vCCC, vPairRGBA, $v30[2] // + (alpha - 1) * aoPoint factor; elems 3, 7
 
 lt_normalize:
-    // Normalize vector in $v23:$v24 i/f, output in $v23. Also continue point
-    // light scalar unit stuff. Uses temps $v25, $v26, $v29, also $11, $20, $24
+    // Normalize vector in vAAA:vBBB i/f, output in vLtDir. Secondary outputs for
+    // point lighting in $v29[0h:1h] and vCCC. Also uses temps vDDD, $11, $20, $24
+    // Doing point light scalar stuff too.
     // Also overwrites vPairNrml and vPairLt elems 3, 7
-    vmudm   $v29, $v23, $v24             // Squared. Don't care about frac*frac term
+    vmudm   $v29, vAAA, vBBB             // Squared. Don't care about frac*frac term
     sll     $11, $11, 8                  // Constant factor, 00000100 - 0000FF00
-    vmadn   $v29, $v24, $v23
+    vmadn   $v29, vBBB, vAAA
     sll     $20, $20, 6                  // Linear factor, 00000040 - 00003FC0
-    vmadh   $v29, $v23, $v23
-    vreadacc $v26, ACC_MIDDLE
-    vreadacc $v25, ACC_UPPER
+    vmadh   $v29, vAAA, vAAA
+    vreadacc vDDD, ACC_MIDDLE
+    vreadacc vCCC, ACC_UPPER
     mtc2    $11, vPairNrml[6] // Constant frac part in elem 3
-    vmudm   $v29, vOne, $v26[2h] // Sum of squared components
-    vmadh   $v29, vOne, $v25[2h]
+    vmudm   $v29, vOne, vDDD[2h] // Sum of squared components
+    vmadh   $v29, vOne, vCCC[2h]
     srl     $11, $24, 5 // Top 3 bits
-    vmadm   $v29, vOne, $v26[1h]
+    vmadm   $v29, vOne, vDDD[1h]
     mtc2    $20, vPairNrml[14] // Linear frac part in elem 7
-    vmadh   $v29, vOne, $v25[1h]
+    vmadh   $v29, vOne, vCCC[1h]
     andi    $20, $24, 0x1F // Bottom 5 bits
-    vmadn   $v26, $v26, vOne // elem 0; swapped so we can do vmadn and get result
+    vmadn   vDDD, vDDD, vOne // elem 0; swapped so we can do vmadn and get result
     ori     $20, $20, 0x20 // Append leading 1 to mantissa
-    vmadh   $v25, $v25, vOne
+    vmadh   vCCC, vCCC, vOne
     sllv    $20, $20, $11 // Left shift to create floating point
-    vrsqh   $v29[2], $v25[0] // High input, garbage output
+    vrsqh   $v29[2], vCCC[0] // High input, garbage output
     sll     $20, $20, 8 // Min range 00002000, 00002100... 00003F00, max 00100000...001F8000
-    vrsql   $v29[1], $v26[0] // Low input, low output
+    vrsql   $v29[1], vDDD[0] // Low input, low output
     bnez    $24, @@skip // If original value is zero, set to zero
-     vrsqh  $v29[0], $v25[4] // High input, high output
+     vrsqh  $v29[0], vCCC[4] // High input, high output
     li      $20, 0
 @@skip:
-    vrsql   $v29[5], $v26[4] // Low input, low output
+    vrsql   $v29[5], vDDD[4] // Low input, low output
     vrsqh   $v29[4], $v31[2] // 0 input, high output
     mtc2    $20, vPairLt[6] // Quadratic frac part in elem 3
-    vmudn   $v24, $v24, $v29[0h] // Vec frac * int scaling, discard result
+    vmudn   vBBB, vBBB, $v29[0h] // Vec frac * int scaling, discard result
     srl     $20, $20, 16
-    vmadm   $v24, $v23, $v29[1h] // Vec int * frac scaling, discard result
+    vmadm   vBBB, vAAA, $v29[1h] // Vec int * frac scaling, discard result
     jr      $ra
-     vmadh  $v23, $v23, $v29[0h] // Vec int * int scaling
+     vmadh  vLtDir, vAAA, $v29[0h] // Vec int * int scaling
 
 ovl2_end:
 .align 8

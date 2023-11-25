@@ -129,7 +129,7 @@
 #define G_CULL_BOTH             0x00000600  /* useless but supported */
 #define G_PACKED_NORMALS        0x00000800
 #define G_LIGHTTOALPHA          0x00001000
-#define G_SHADING_SPECULAR     0x00002000
+#define G_SHADING_SPECULAR      0x00002000
 #define G_FRESNEL_COLOR         0x00004000
 #define G_FRESNEL_ALPHA         0x00008000
 #define G_FOG                   0x00010000
