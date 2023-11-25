@@ -120,15 +120,18 @@
 #define G_ZBUFFER               0x00000001
 #define G_TEXTURE_ENABLE        0x00000000  /* actually 2, but do not set or may hang */
 #define G_SHADE                 0x00000004
+#define G_AMBOCCLUSION          0x00000040
+#define G_ATTROFFSET_Z_ENABLE   0x00000080
+#define G_ATTROFFSET_ST_ENABLE  0x00000100
+#define G_CULL_NEITHER          0x00000000
 #define G_CULL_FRONT            0x00000200
 #define G_CULL_BACK             0x00000400
-#define G_CULL_BOTH             0x00000600
-#define G_ATTROFFSET_ST_ENABLE  0x00000100
-#define G_ATTROFFSET_Z_ENABLE   0x00000800
-#define G_PACKED_NORMALS        0x00001000
-#define G_LIGHTTOALPHA          0x00002000
-#define G_AMBOCCLUSION          0x00004000
-#define G_FRESNEL               0x00008000
+#define G_CULL_BOTH             0x00000600  /* useless but supported */
+#define G_PACKED_NORMALS        0x00000800
+#define G_LIGHTTOALPHA          0x00001000
+#define G_SHADING_SPECULAR     0x00002000
+#define G_FRESNEL_COLOR         0x00004000
+#define G_FRESNEL_ALPHA         0x00008000
 #define G_FOG                   0x00010000
 #define G_LIGHTING              0x00020000
 #define G_TEXTURE_GEN           0x00040000
@@ -183,11 +186,13 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
  */
 #define G_MW_FX             0x00 /* replaces G_MW_MATRIX which is no longer supported */
 #define G_MW_NUMLIGHT       0x02
-#define G_MW_PERSPNORM      0x04 /* replaces G_MW_CLIP which is no longer supported */
+/* nothing for 0x04; G_MW_CLIP is no longer supported */
 #define G_MW_SEGMENT        0x06
 #define G_MW_FOG            0x08
 #define G_MW_LIGHTCOL       0x0A
 /* G_MW_FORCEMTX is no longer supported because there is no MVP matrix in F3DEX3. */
+
+#define G_MW_HALFWORD_FLAG 0x8000
 
 /*
  * These are offsets from the address in the dmem table
@@ -239,12 +244,19 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_MWO_POINT_XYSCREEN     0x18 /* not recommended to use, won't work if */
 #define G_MWO_POINT_ZSCREEN      0x1C /* the tri gets clipped */
 
-#define G_MWO_AMB_OCCLUSION      0x00
-#define G_MWO_FRESNEL            0x04
-#define G_MWO_ATTR_OFFSET_ST     0x08
-#define G_MWO_ATTR_OFFSET_Z      0x0C
-#define G_MWO_NORMALS_MODE       0x0E
-#define G_MWO_ALPHA_COMPARE_CULL 0x12
+#define G_MWO_AO_AMBIENT         0x00
+#define G_MWO_AO_DIRECTIONAL     0x02
+#define G_MWO_AO_POINT           0x04
+#define G_MWO_PERSPNORM          0x06
+#define G_MWO_DIFFUSE            0x08
+#define G_MWO_SPECULAR           0x0A
+#define G_MWO_FRESNEL_OFFSET     0x0C
+#define G_MWO_FRESNEL_SCALE      0x0E
+#define G_MWO_ATTR_OFFSET_S      0x10
+#define G_MWO_ATTR_OFFSET_T      0x12
+#define G_MWO_ATTR_OFFSET_Z      0x14
+#define G_MWO_ALPHA_COMPARE_CULL 0x16
+#define G_MWO_NORMALS_MODE       0x18
 
 /*
  * RDP command argument defines
@@ -2322,10 +2334,15 @@ _DW({                                       \
     (unsigned int) (dat)            \
 }
 
-#define gMoveWd(pkt, index, offset, data)           \
-    gDma1p((pkt), G_MOVEWORD, data, offset, index)
-#define gsMoveWd(    index, offset, data)           \
-    gsDma1p(      G_MOVEWORD, data, offset, index)
+#define gMoveWd(pkt, index, offset, data) \
+    gDma1p((pkt), G_MOVEWORD, data, (offset & 0xFFF), index)
+#define gsMoveWd(    index, offset, data) \
+    gsDma1p(      G_MOVEWORD, data, (offset & 0xFFF), index)
+    
+#define gMoveHalfwd(pkt, index, offset, data) \
+    gDma1p((pkt), G_MOVEWORD, data, (offset & 0xFFF) | G_MW_HALFWORD_FLAG, index)
+#define gsMoveHalfwd(    index, offset, data) \
+    gsDma1p(      G_MOVEWORD, data, (offset & 0xFFF) | G_MW_HALFWORD_FLAG, index)
 
 
 /*
@@ -2468,8 +2485,8 @@ _DW({                                                        \
 #define gsSPSegment(segment, base)                  \
     gsMoveWd(    G_MW_SEGMENT, (segment) * 4, (base))
 
-#define gSPPerspNormalize(pkt, s)   gMoveWd(pkt, G_MW_PERSPNORM, 0, (s))
-#define gsSPPerspNormalize(s)       gsMoveWd(    G_MW_PERSPNORM, 0, (s))
+#define gSPPerspNormalize(pkt, s)   gMoveHalfwd(pkt, G_MW_FX, G_MWO_PERSPNORM, (s))
+#define gsSPPerspNormalize(s)       gsMoveHalfwd(    G_MW_FX, G_MWO_PERSPNORM, (s))
 
 /*
  * Clipping Macros - Deprecated, encodes SP no-ops
@@ -2489,7 +2506,9 @@ _DW({                                                        \
  * Ambient occlusion
  * Enabled with the G_AMBOCCLUSION bit in geometry mode.
  * Each of these factors sets how much ambient occlusion affects lights of
- * the given type (ambient, directional). They are u16s.
+ * the given type (ambient, directional, point). They are u16s.
+ * You can set each independently or two adjacent values with one moveword.
+ * A two-command macro is also provided to set all three values.
  * 
  * When building the model, you must encode the amount of ambient occlusion at
  * each vertex--effectively the shadow map for the model--in vertex alpha, where
@@ -2500,26 +2519,74 @@ _DW({                                                        \
  * will be reduced by 50%, and in the lightest parts of the model, the ambient
  * light intensity won't be reduced at all.
  * 
- * The default is amb = 0xFFFF (ambient light fully affected by vertex alpha)
- * and dir = 0xA000 (directional lights 62% affected by vertex alpha).
+ * The default is:
+ * amb = 0xFFFF (ambient light fully affected by vertex alpha)
+ * dir = 0xA000 (directional lights 62% affected by vertex alpha)
+ * point = 0    (point lights not at all affected by vertex alpha)
  * 
- * The reason you'd want to use ambient occlusion rather than just darkening
- * the vertex colors is that with ambient occlusion, the geometry can still be
- * fully lit up by point lights (or directional lights if you set the dir factor
- * to zero here). In contrast, if you darken the vertex colors, the geometry
- * will always be that much darker. The reason you'd want to use these factors
- * to modify ambient occlusion rather than just manually scaling and offsetting
- * all the vertex alpha values is to allow the behavior to differ between
- * ambient and directional lights, and to allow the lighting to be adjusted on
- * the fly or after the model is made.
+ * Two reasons to use ambient occlusion rather than darkening the vertex colors:
+ * - With ambient occlusion, the geometry can be fully lit up with point and/or
+ *   directional lights, depending on your settings here.
+ * - Ambient occlusion can be used with cel shading to create areas which are
+ *   "darker" for the cel shading thresholds, but still have bright / white
+ *   vertex colors.
+ * 
+ * Two reasons to use these factors to modify ambient occlusion rather than
+ * just manually scaling and offsetting all the vertex alpha values:
+ * - To allow the behavior to differ between ambient, directional, and point
+ *   lights
+ * - To allow the lighting to be adjusted at the scene level on-the-fly
  */
-#define gSPAmbOcclusion(pkt, amb, dir) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_AMB_OCCLUSION, \
-        (_SHIFTL((amb), 16, 16) | _SHIFTL((dir), 0, 16)))
+ 
+#define gSPAmbOcclusionAmb(pkt, amb)     gMoveHalfwd(pkt, G_MW_FX, G_MWO_AO_AMBIENT, amb)
+#define gsSPAmbOcclusionAmb(amb)        gsMoveHalfwd(     G_MW_FX, G_MWO_AO_AMBIENT, amb)
+#define gSPAmbOcclusionDir(pkt, dir)     gMoveHalfwd(pkt, G_MW_FX, G_MWO_AO_DIRECTIONAL, dir)
+#define gsSPAmbOcclusionDir(dir)        gsMoveHalfwd(     G_MW_FX, G_MWO_AO_DIRECTIONAL, dir)
+#define gSPAmbOcclusionPoint(pkt, point) gMoveHalfwd(pkt, G_MW_FX, G_MWO_AO_POINT, point)
+#define gsSPAmbOcclusionPoint(point)    gsMoveHalfwd(     G_MW_FX, G_MWO_AO_POINT, point)
 
-#define gsSPAmbOcclusion(amb, dir) \
-    gsMoveWd(G_MW_FX, G_MWO_AMB_OCCLUSION, \
+#define gSPAmbOcclusionAmbDir(pkt, amb, dir) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_AO_AMBIENT,  \
         (_SHIFTL((amb), 16, 16) | _SHIFTL((dir), 0, 16)))
+#define gsSPAmbOcclusionAmbDir(amb, dir)     \
+    gsMoveWd(G_MW_FX, G_MWO_AO_AMBIENT,      \
+        (_SHIFTL((amb), 16, 16) | _SHIFTL((dir), 0, 16)))
+#define gSPAmbOcclusionDirPoint(pkt, dir, point) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_AO_DIRECTIONAL,  \
+        (_SHIFTL((dir), 16, 16) | _SHIFTL((point), 0, 16)))
+#define gsSPAmbOcclusionDirPoint(dir, point)     \
+    gsMoveWd(G_MW_FX, G_MWO_AO_DIRECTIONAL,      \
+        (_SHIFTL((dir), 16, 16) | _SHIFTL((point), 0, 16)))
+
+#define gSPAmbOcclusion(pkt, amb, dir, point) \
+_DW({                                         \
+    gSPAmbOcclusionAmbDir(pkt, amb, dir);     \
+    gSPAmbOcclusionPoint(pkt, point);         \
+})
+#define gsSPAmbOcclusion(amb, dir, point)     \
+    gsSPAmbOcclusionAmbDir(amb, dir),         \
+    gsSPAmbOcclusionPoint(point)
+
+/*
+ * Specular lighting - Based on suggestions from neoshaman
+ * Enabled with the G_SHADING_SPECULAR bit in geometry mode.
+ * 
+ * TODO
+ */
+#define gSPShadingDiffuse(pkt, diffuse) \
+    gMoveHalfwd(pkt, G_MW_FX, G_MWO_DIFFUSE, diffuse)
+#define gsSPShadingDiffuse(diffuse) \
+    gsMoveHalfwd(G_MW_FX, G_MWO_DIFFUSE, diffuse)
+#define gSPShadingSpecular(pkt, specular) \
+    gMoveHalfwd(pkt, G_MW_FX, G_MWO_SPECULAR, specular)
+#define gsSPShadingSpecular(specular) \
+    gsMoveHalfwd(G_MW_FX, G_MWO_SPECULAR, specular)
+#define gSPShadingDiffuseSpecular(pkt, diffuse, specular) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_DIFFUSE, \
+        (_SHIFTL((diffuse), 16, 16) | _SHIFTL((specular), 0, 16)))
+#define gsSPShadingDiffuseSpecular(diffuse, specular) \
+    gsMoveWd(G_MW_FX, G_MWO_DIFFUSE, \
+        (_SHIFTL((diffuse), 16, 16) | _SHIFTL((specular), 0, 16)))
 
 /*
  * Fresnel - Feature suggested by thecozies
@@ -2533,6 +2600,7 @@ _DW({                                                        \
  * If using Fresnel, you need to set the camera world position whenever you set
  * the VP matrix, viewport, etc. See SPCameraWorld.
  * 
+ * TODO this is outdated
  * offset = Dot product value, in 0000 - 7FFF, which gives shade alpha = 0
  * Let k = dot product value, in 0000 - 7FFF, which gives shade alpha = FF.
  * Then scale = 0.7FFF / (k - offset) as s7.8 fixed point.
@@ -2546,12 +2614,19 @@ _DW({                                                        \
  * 3. 30 degrees (0.5f or 4000) -> FF; 60 degrees (0.86f or 6ED9) -> 00
  *    Then set offset = 6ED9, scale = FD45 = FD.45 = -02.BB = 1 / (0.5f - 0.86f)
  */
+#define gSPFresnelOffset(pkt, offset) \
+    gMoveHalfwd(pkt, G_MW_FX, G_MWO_FRESNEL_OFFSET, offset)
+#define gsSPFresnelOffset(offset) \
+    gsMoveHalfwd(G_MW_FX, G_MWO_FRESNEL_OFFSET, offset)
+#define gSPFresnelScale(pkt, scale) \
+    gMoveHalfwd(pkt, G_MW_FX, G_MWO_FRESNEL_SCALE, scale)
+#define gsSPFresnelScale(scale) \
+    gsMoveHalfwd(G_MW_FX, G_MWO_FRESNEL_SCALE, scale)
 #define gSPFresnel(pkt, offset, scale) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_FRESNEL, \
+    gMoveWd(pkt, G_MW_FX, G_MWO_FRESNEL_OFFSET, \
         (_SHIFTL((offset), 16, 16) | _SHIFTL((scale), 0, 16)))
-
 #define gsSPFresnel(offset, scale) \
-    gsMoveWd(G_MW_FX, G_MWO_FRESNEL, \
+    gsMoveWd(G_MW_FX, G_MWO_FRESNEL_OFFSET, \
         (_SHIFTL((offset), 16, 16) | _SHIFTL((scale), 0, 16)))
 
 /*
@@ -2568,87 +2643,16 @@ _DW({                                                        \
  * latter, enable the Z offset and set the Z mode to opaque.
  */
 #define gSPAttrOffsetST(pkt, s, t) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_ST, \
+    gMoveWd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_S, \
         (_SHIFTL((s), 16, 16) | _SHIFTL((t), 0, 16)))
-
 #define gsSPAttrOffsetST(s, t) \
-    gsMoveWd(G_MW_FX, G_MWO_ATTR_OFFSET_ST, \
+    gsMoveWd(G_MW_FX, G_MWO_ATTR_OFFSET_S, \
         (_SHIFTL((s), 16, 16) | _SHIFTL((t), 0, 16)))
-       
 #define gSPAttrOffsetZ(pkt, z) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_Z, \
-        (_SHIFTL((z), 16, 16)))
-
+    gMoveHalfwd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_Z, z)
 #define gsSPAttrOffsetZ(z) \
-    gsMoveWd(G_MW_FX, G_MWO_ATTR_OFFSET_Z, \
-        (_SHIFTL((z), 16, 16)))
-
-/*
- * Normals mode: How to handle transformation of vertex normals from model to
- * world space for lighting.
- * 
- * If mode = G_NORMALS_MODE_FAST, transforms normals from model space to world
- * space with the M matrix. This is correct if the object's transformation
- * matrix stack only included translations, rotations, and uniform scale (i.e.
- * same scale in X, Y, and Z); otherwise, if the transformation matrix has
- * nonuniform scale or shear, the lighting on the object will be subtly wrong.
- * 
- * If mode = G_NORMALS_MODE_AUTO, transforms normals from model space to world
- * space with M inverse transpose, which renders lighting correctly for the
- * object regardless of its transformation matrix (nonuniform scale or shear is
- * okay). Whenever vertices are drawn with lighting enabled after M has been
- * changed, computes M inverse transpose from M. This requires swapping to
- * overlay 4 for M inverse transpose and then back to overlay 2 for lighting,
- * which produces roughly 3.5 us of extra DRAM traffic. This performance penalty
- * happens effectively once per matrix, which is once per normal object or
- * separated limb or about twice per flex skeleton limb. So in a scene with lots
- * of complex skeletons, this may have a noticeable performance impact.
- * 
- * If mode = G_NORMALS_MODE_MANUAL, uses M inverse transpose for correct results
- * like G_NORMALS_MODE_AUTO, but it never internally computes M inverse
- * transpose. You have to upload M inverse transpose to the RSP using
- * SPMITMatrix every time you change the M matrix. The DRAM traffic for the
- * extra matrix uploads is much smaller than the overlay swaps, so if you can
- * efficiently compute M inverse transpose on the CPU, this may be faster than
- * G_NORMALS_MODE_AUTO.
- * 
- * Recommended to leave this set to G_NORMALS_MODE_FAST generally, and only set
- * it to G_NORMALS_MODE_AUTO for specific objects at times when they actually
- * have a nonuniform scale. For example, G_NORMALS_MODE_FAST for Mario
- * generally, but G_NORMALS_MODE_AUTO temporarily while he is squashed.
- */
-#define gSPNormalsMode(pkt, mode) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_NORMALS_MODE, (mode))
-
-#define gsSPNormalsMode(mode) \
-    gsMoveWd(G_MW_FX, G_MWO_NORMALS_MODE, (mode))
-
-typedef union {
-    struct {
-        s16 intPart[3][4];  /* Fourth row containing translations is omitted. */
-        u16 fracPart[3][4]; /* Also the fourth column data is ignored, need not be 0. */
-    };
-    long long int force_structure_alignment;
-} MITMtx;
-
-/*
- * See SPNormalsMode. mtx is the address of a MITMtx (M inverse transpose).
- * 
- * The matrix values must be scaled down so that the matrix norm is <= 1,
- * i.e. multiplying this matrix by any vector length <= 1 must produce a vector
- * with length <= 1. Normally, M scales things down substantially, so M inverse
- * transpose natively would scale them up substantially; you need to apply a
- * constant scale to counteract this. One easy way to do this is compute M
- * inverse transpose normally, then scale it so until the maximum absolute
- * value of any element is 0.5. Because of this scaling, you can also skip the
- * part of the inverse computation where you compute the determinant and divide
- * by it, cause you're going to rescale it arbitrarily anyway.
- */
-#define gSPMITMatrix(pkt, mit) \
-        gDma2p((pkt), G_MOVEMEM, (mit), sizeof(MITMtx), G_MV_MMTX, 0x80)
-#define gsSPMITMatrix(mtx) \
-        gsDma2p(      G_MOVEMEM, (mit), sizeof(MITMtx), G_MV_MMTX, 0x80)
-
+    gsMoveHalfwd(G_MW_FX, G_MWO_ATTR_OFFSET_Z, z)
+    
 /*
  * Alpha compare culling. Optimization for cel shading, could also be used for
  * other scenarios where lots of tris are being drawn with alpha compare.
@@ -2686,11 +2690,76 @@ typedef union {
  * fragments drawn on the RDP, to save RDP time and memory bandwidth.
  */
 #define gSPAlphaCompareCull(pkt, mode, thresh) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, \
-        (_SHIFTL((mode), 24, 8) | _SHIFTL((thresh), 16, 8)))
+    gMoveHalfwd(pkt, G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, \
+        (_SHIFTL((mode), 8, 8) | _SHIFTL((thresh), 0, 8)))
 #define gsSPAlphaCompareCull(mode, thresh) \
-    gsMoveWd(G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, \
-        (_SHIFTL((mode), 24, 8) | _SHIFTL((thresh), 16, 8)))
+    gsMoveHalfwd(G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, \
+        (_SHIFTL((mode), 8, 8) | _SHIFTL((thresh), 0, 8)))
+
+/*
+ * Normals mode: How to handle transformation of vertex normals from model to
+ * world space for lighting.
+ * 
+ * If mode = G_NORMALS_MODE_FAST, transforms normals from model space to world
+ * space with the M matrix. This is correct if the object's transformation
+ * matrix stack only included translations, rotations, and uniform scale (i.e.
+ * same scale in X, Y, and Z); otherwise, if the transformation matrix has
+ * nonuniform scale or shear, the lighting on the object will be subtly wrong.
+ * 
+ * If mode = G_NORMALS_MODE_AUTO, transforms normals from model space to world
+ * space with M inverse transpose, which renders lighting correctly for the
+ * object regardless of its transformation matrix (nonuniform scale or shear is
+ * okay). Whenever vertices are drawn with lighting enabled after M has been
+ * changed, computes M inverse transpose from M. This requires swapping to
+ * overlay 4 for M inverse transpose and then back to overlay 2 for lighting,
+ * which produces roughly 3.5 us of extra DRAM traffic. This performance penalty
+ * happens effectively once per matrix, which is once per normal object or
+ * separated limb or about twice per flex skeleton limb. So in a scene with lots
+ * of complex skeletons, this may have a noticeable performance impact.
+ * 
+ * If mode = G_NORMALS_MODE_MANUAL, uses M inverse transpose for correct results
+ * like G_NORMALS_MODE_AUTO, but it never internally computes M inverse
+ * transpose. You have to upload M inverse transpose to the RSP using
+ * SPMITMatrix every time you change the M matrix. The DRAM traffic for the
+ * extra matrix uploads is much smaller than the overlay swaps, so if you can
+ * efficiently compute M inverse transpose on the CPU, this may be faster than
+ * G_NORMALS_MODE_AUTO.
+ * 
+ * Recommended to leave this set to G_NORMALS_MODE_FAST generally, and only set
+ * it to G_NORMALS_MODE_AUTO for specific objects at times when they actually
+ * have a nonuniform scale. For example, G_NORMALS_MODE_FAST for Mario
+ * generally, but G_NORMALS_MODE_AUTO temporarily while he is squashed.
+ */
+#define gSPNormalsMode(pkt, mode) \
+    gMoveHalfwd(pkt, G_MW_FX, G_MWO_NORMALS_MODE, (mode) & 0xFF)
+#define gsSPNormalsMode(mode) \
+    gsMoveHalfwd(G_MW_FX, G_MWO_NORMALS_MODE, (mode) & 0xFF)
+
+typedef union {
+    struct {
+        s16 intPart[3][4];  /* Fourth row containing translations is omitted. */
+        u16 fracPart[3][4]; /* Also the fourth column data is ignored, need not be 0. */
+    };
+    long long int force_structure_alignment;
+} MITMtx;
+
+/*
+ * See SPNormalsMode. mtx is the address of a MITMtx (M inverse transpose).
+ * 
+ * The matrix values must be scaled down so that the matrix norm is <= 1,
+ * i.e. multiplying this matrix by any vector length <= 1 must produce a vector
+ * with length <= 1. Normally, M scales things down substantially, so M inverse
+ * transpose natively would scale them up substantially; you need to apply a
+ * constant scale to counteract this. One easy way to do this is compute M
+ * inverse transpose normally, then scale it so until the maximum absolute
+ * value of any element is 0.5. Because of this scaling, you can also skip the
+ * part of the inverse computation where you compute the determinant and divide
+ * by it, cause you're going to rescale it arbitrarily anyway.
+ */
+#define gSPMITMatrix(pkt, mit) \
+        gDma2p((pkt), G_MOVEMEM, (mit), sizeof(MITMtx), G_MV_MMTX, 0x80)
+#define gsSPMITMatrix(mtx) \
+        gsDma2p(      G_MOVEMEM, (mit), sizeof(MITMtx), G_MV_MMTX, 0x80)
 
 
 /*
@@ -2909,7 +2978,7 @@ _DW({                                               \
     gsDma2p(      G_MOVEMEM, (l), sizeof(Ambient), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
 
 /*
- * gSPLightColor changes color of light without recalculating light direction
+ * gSPLightColor changes color of light without an additional DMA transfer.
  * col is a 32 bit word with r,g,b,a. For directional lights, a must be zero.
  * For point lights, a becomes both the constant and linear factors, which is
  * rarely desired. You can use the hidden _g*SPLightColor2 to specify a

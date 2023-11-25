@@ -7,17 +7,19 @@
 G_ZBUFFER               equ 0x00000001
 //G_TEXTURE_ENABLE      equ 0x00000002
 G_SHADE                 equ 0x00000004
-// Bits 1 and 2 (0x06) index into a table for front/backface culling. Other bits
-// are added.
+G_AMBOCCLUSION          equ 0x00000040
+G_ATTROFFSET_Z_ENABLE   equ 0x00000080
+G_ATTROFFSET_ST_ENABLE  equ 0x00000100
+// Bits 9 and 10 (0x0600) determine front/backface culling.
+G_CULL_NEITHER          equ 0x00000000
 G_CULL_FRONT            equ 0x00000200
 G_CULL_BACK             equ 0x00000400
 G_CULL_BOTH             equ 0x00000600
-G_ATTROFFSET_ST_ENABLE  equ 0x00000100
-G_ATTROFFSET_Z_ENABLE   equ 0x00000800
-G_PACKED_NORMALS        equ 0x00001000
-G_LIGHTTOALPHA          equ 0x00002000
-G_AMBOCCLUSION          equ 0x00004000
-G_FRESNEL               equ 0x00008000
+G_PACKED_NORMALS        equ 0x00000800
+G_LIGHTTOALPHA          equ 0x00001000
+G_LIGHTING_SPECULAR     equ 0x00002000
+G_FRESNEL_COLOR         equ 0x00004000
+G_FRESNEL_ALPHA         equ 0x00008000
 G_FOG                   equ 0x00010000
 G_LIGHTING              equ 0x00020000
 G_TEXTURE_GEN           equ 0x00040000

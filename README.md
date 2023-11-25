@@ -97,11 +97,20 @@ you should expect crashes and graphical issues.**
   slightly improves RDP draw time for large tris (max of about 500 us per frame,
   usually much less or zero).
 
-### Miscellaneous
+### Performance counters
 
-- Microcode counts the number of primitives (tris and tex rects) actually sent
-  to the RDP (after culling and clipping), which can be accessed after the task
-  is finished as a performance counter.
+F3DEX3 introduces four performance counters, which are accessible from the CPU
+after the graphics task finishes:
+- Number of vertices processed by the RSP
+- Number of triangles requested in display lists. This does not count triangles
+  skipped due to `SPCullDisplayList` or `SPBranchLessZ*`.
+- Number of triangles actually sent to the RDP, after:
+    - Subdivision in clipping
+    - Culling due to offscreen
+    - Culling due to front / back face settings
+    - Culling due to too small screen size (same algorithm as F3DEX2)
+    - Culling due to behind the occlusion plane
+- Number of texture or fill rectangles processed
 
 
 ## Porting Your Romhack Codebase to F3DEX3
@@ -148,7 +157,8 @@ similar for other games):
   needed are:
     - In `src/code/ucode_disas.c`, remove the switch statement cases for
       `G_LINE3D`, `G_MW_CLIP`, `G_MV_MATRIX`, `G_MVO_LOOKATX`, and
-      `G_MVO_LOOKATY`.
+      `G_MVO_LOOKATY`. Also remove the case for `G_MW_PERSPNORM` as perspective
+      normalization is now encoded differently.
     - In `src/libultra/gu/lookathil.c`, remove the lines which set the `col`,
       `colc`, and `pad` fields.
 - Change your game engine lighting code to set the `type` (formerly `pad1`)
@@ -254,6 +264,12 @@ and commands except:
 - `G_MV_MATRIX`, `G_MW_MATRIX`, and `G_MW_FORCEMTX` have been removed, and
   `SPForceMatrix` has been converted into a no-op. This is because there is no
   MVP matrix in F3DEX3.
+- `G_MV_POINT` has been removed. This was not used in any command; it would have
+  likely been used for debugging to copy vertices from DMEM to examine them.
+  This does not affect `SPModifyVertex`, which is still supported, though this
+  is moved to Overlay 4 (see below) so it will be slower than in F3DEX2.
+- `G_MW_PERSPNORM` has been removed. `SPPerspNormalize` is still supported but
+  is encoded differently, no longer using this define.
 - `G_MVO_LOOKATX` and `G_MVO_LOOKATY` have been removed, and `SPLookAtX` and
   `SPLookAtY` are deprecated. `SPLookAtX` has been changed to set both
   directions and `SPLookAtY` has been converted to a no-op. To set the lookat
@@ -269,10 +285,6 @@ and commands except:
   lights, you must use `SPAmbient` to write the ambient light, as discussed
   above. Note that you can now load all your lights with one command,
   `SPSetLights`.
-- `G_MV_POINT` has been removed. This was not used in any command; it would have
-  likely been used for debugging to copy vertices from DMEM to examine them.
-  This does not affect `g*SPModifyVertex`, which is still supported, though this
-  is moved to Overlay 4 (see below) so it will be slower than in F3DEX2.
 
 ### Binary Display List Compatibility
 
@@ -409,7 +421,8 @@ two tris, saving a substantial amount of DMEM.
 
 - `SPLoadUcode*` will corrupt RSP texture state previously set with `SPTexture`.
   After returning from the other microcode but before drawing anything else, you
-  must execute `SPTexture` again.
+  must execute `SPTexture` again. Normally, `SPTexture` is executed as part of
+  every material, so its state would not be relied on.
 - Changing fog settings--i.e. enabling or disabling `G_FOG` in the geometry mode
   or executing `SPFogFactor` or `SPFogPosition`--between loading verts and
   drawing tris with those verts will lead to incorrect fog values for those
@@ -428,3 +441,4 @@ Other credits:
 - Kaze Emanuar: several feature suggestions, testing
 - thecozies: Fresnel feature suggestion
 - Tharo: feature discussions
+- neoshaman: feature discussions

@@ -165,13 +165,13 @@ texrectWord1:
 texrectWord2:
     .fill 4 // second word, has tile, xl, yl
 
-// First half of RDP value for split commands (shared by perspNorm moveword to be able to write a 32-bit value)
+// First half of RDP value for split commands; overwritten by numLightsxSize
 rdpHalf1Val:
     .fill 4
-
-// perspective norm
-perspNorm:
-    .dh 0xFFFF
+    
+    .db 0   // unused
+numLightsxSize:
+    .db 0   // Overwrites above
 
 // displaylist stack length
 displayListStackLength:
@@ -322,13 +322,25 @@ fxParams:
 .if (. & 15) != 0
     .error "Wrong alignment for fxParams"
 .endif
+// First 8 values here loaded with lqv.
 
 aoAmbientFactor:
     .dh 0xFFFF
 aoDirectionalFactor:
     .dh 0xA000
+aoPointFactor:
+    .dh 0x0000
     
+perspNorm:
+    .dh 0xFFFF
+        
+diffuseFactor:
+    .dh 0xFFFF
+specularFactor:
+    .dh 0x0000
+
 /*
+TODO this is outdated
 fresnelOffset = Dot product value, in 0000 - 7FFF, which gives shade alpha = 0
 Let k = dot product value, in 0000 - 7FFF, which gives shade alpha = FF.
 Then fresnelScale = 0.7FFF / (k - fresnelOffset) as s7.8 fixed point.
@@ -350,30 +362,23 @@ fresnelScale:
 attrOffsetST:
     .dh 0x0100
     .dh 0xFF00
-
 attrOffsetZ:
     .dh 0xFFFE
-
-    .dh 0x0000 // Overwritten by movewords to above and below, can be used as temp
+    
+alphaCompareCullMode:
+    .db 0x00 // 0 = disabled, 1 = cull if all < thresh, -1 = cull if all >= thresh
+alphaCompareCullThresh:
+    .db 0x00 // Alpha threshold, 00 - FF
 
 materialCullMode: // Overwritten to 0 by SPNormalsMode, but that should not
     .db 0     // happen in the middle of tex setup
 normalsMode:
     .db 0     // Overwrites materialCullMode
 
-alphaCompareCullMode:
-    .db 0x00 // 0 = disabled, 1 = cull if all < thresh, -1 = cull if all >= thresh
-alphaCompareCullThresh:
-    .db 0x00 // Alpha threshold, 00 - FF
-
-    .dh 0x0000 // Overwritten by movewords to above and below, can be used as temp
-
-    .db 0
-numLightsxSize:
-    .db 0   // Overwrites above
-
 lastMatDLPhyAddr:
     .dw 0
+    
+    .dh 0x0000 // padding, unused
     
 texgenLinearCoeffs:
     .dh 0x44D3
@@ -402,7 +407,7 @@ movememTable:
 movewordTable:
     .dh fxParams           // G_MW_FX
     .dh numLightsxSize - 3 // G_MW_NUMLIGHT
-    .dh perspNorm - 2      // G_MW_PERSPNORM
+    .dh 0                  // unused
     .dh segmentTable       // G_MW_SEGMENT
     .dh fogFactor          // G_MW_FOG
     .dh lightBufferMain    // G_MW_LIGHTCOL
@@ -1105,7 +1110,6 @@ clip_skipxy:
     vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
     vge     vClDiffI, vClDiffI, $v31[2]   // 0; If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
     vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
-    llv     $v18[4], (perspNorm)($zero)   // TODO Dupl instr: perspNorm in elem 2, garbage in 3
     vmudn   vClFade2, vClFade1, $v31[1]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
     // Fade between attributes for on screen and off screen vert
     // Also, colors are now in $v12 and $v13.
@@ -1313,7 +1317,7 @@ vtx_setup_constants:
     lsv     $v21[0], (attrOffsetZ - altBase)(altBaseReg) // Z offset
     ldv     $v26[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
     ldv     $v26[8], (viewport + 8)($zero)
-    lhu     $12, (geometryModeLabel+2)($zero)
+    lw      $12, (geometryModeLabel)($zero)
     ldv     $v25[0], (viewport)($zero)            // Load vscale duplicated in 0-3 and 4-7
     ldv     $v25[8], (viewport)($zero)
     vne     $v29, $v31, $v31[2h]                  // VCC = 11011101
@@ -1324,12 +1328,18 @@ vtx_setup_constants:
     vmrg    $v26, $v26, $v21                      // Move Z + Z offset into elems 2, 6
 @@skipz:
     vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
+    lqv     $v30, (fxParams - altBase)(altBaseReg) // Parameters for vtx and lighting
     vmudh   $v20, $v25, $v31[1]                   // -1; -vscale
+    andi    $11, $12, G_AMBOCCLUSION
     vmrg    $v25, $v25, $v23[0]                   // Put fog multiplier in elements 3,7 of vscale
     vmrg    $v26, $v26, $v23[1]                   // Put fog offset in elements 3,7 of vtrans
+    vge     $v29, $v31, $v31[3]                   // VCC = 00011111
     vmov    $v25[1], $v20[1]                      // Negate vscale[1] because RDP top = y=0
     vmov    $v25[5], $v20[1]                      // Same for second half
-    sqv     $v26, (0x10)(rdpCmdBufEndP1)          // Store viewport offset to temp mem
+    bnez    $11, @@skipzeroao                     // Continue if AO disabled
+     sqv    $v26, (0x10)(rdpCmdBufEndP1)          // Store viewport offset to temp mem
+    vmrg    $v30, $v30, $v31[2]                   // 0; zero AO values
+@@skipzeroao:
     bnez    $ra, clip_after_constants             // Return to clipping if from there
      sqv    $v25, (0x00)(rdpCmdBufEndP1)          // Store viewport scale to temp mem
     jal     while_wait_dma_busy                   // Wait for vertex load to finish
@@ -1377,7 +1387,6 @@ vtx_load_loop:
     vmadm   $v29, vVP0I, vPairPosF[0h]
     llv     $v25[8], (textureSettings2)($zero)  // Texture ST scale in 4, 5
     vmadn   $v29, vVP0F, vPairPosI[0h]
-    llv     $v18[4], (perspNorm)($zero)  // TODO perspNorm in elem 2, garbage in 3
     vmadh   $v29, vVP0I, vPairPosI[0h]
     addi    inputVtxPos, inputVtxPos, 2*inputVtxSize
     vmadl   $v29, vVP1F, vPairPosF[1h]
@@ -1409,8 +1418,8 @@ vtx_store:
     vch     $v29, vPairTPosI, vPairTPosI[3h] // Clip screen high
     ldv     $v17[8], (occlusionPlaneMidCoeffs - altBase)(altBaseReg)
     vcl     $v29, vPairTPosF, vPairTPosF[3h] // Clip screen low
-    vmudl   $v29, vPairTPosF, $v18[2] // Persp norm
-    vmadm   $v20, vPairTPosI, $v18[2] // Persp norm
+    vmudl   $v29, vPairTPosF, $v30[3] // Persp norm
+    vmadm   $v20, vPairTPosI, $v30[3] // Persp norm
     vmadn   $v21, $v31, $v31[2] // 0
     cfc2    $12, $vcc // Load screen clipping results
     vmudn   $v29, vPairTPosF, $v17 // X * kx, Y * ky, Z * kz
@@ -1471,9 +1480,9 @@ vtx_store:
     vmadh   vPairTPosI, vPairTPosI, $v17[3h] // pos * 1/W
     ssv     $v17[6],          (VTX_INV_W_INT )(outputVtxPos)
     ldv     $v17[0], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // Load coeffs 0-3
-    vmudl   $v29, vPairTPosF, $v18[2] // Persp norm
+    vmudl   $v29, vPairTPosF, $v30[3] // Persp norm
     ldv     $v17[8], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // and for vtx 2
-    vmadm   vPairTPosI, vPairTPosI, $v18[2] // Persp norm
+    vmadm   vPairTPosI, vPairTPosI, $v30[3] // Persp norm
     andi    $11, $11, CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4) // Only meaningful bits from occlusion
     vmadn   vPairTPosF, $v31, $v31[2] // 0
     or      $20, $20, $11          // Combine occlusion results with scaled results
@@ -2213,18 +2222,12 @@ lt_skip_packed_normals:
     vmudn   $v29, vM0F, vPairNrml[0h]
     lbu     $11, normalsMode($zero)
     vmadh   $v29, vM0I, vPairNrml[0h]
-    llv     $v19[0], (aoAmbientFactor - altBase)(altBaseReg) // TODO reg; AO in elems 0, 1
     vmadn   $v29, vM1F, vPairNrml[1h]
     addi    curLight, curLight, altBase // Point to ambient light
     vmadh   $v29, vM1I, vPairNrml[1h]
-    andi    $12, $5, G_AMBOCCLUSION >> 8
     vmadn   $v24, vM2F, vPairNrml[2h] // $v24 = normals frac
-    bnez    $12, @@amb_occlusion_enabled
-     vmadh  $v23, vM2I, vPairNrml[2h] // $v23 = normals int
-    vclr    $v19 // TODO
-@@amb_occlusion_enabled:
     beqz    $11, lt_after_xfrm_normals // Skip if G_NORMALSMODE_FAST
-     nop    // TODO
+     vmadh  $v23, vM2I, vPairNrml[2h] // $v23 = normals int
     // Transform normals by M inverse transpose, for G_NORMALSMODE_AUTO or G_NORMALSMODE_MANUAL
     lqv     vLtMIT0I,    (mITMatrix + 0x00)($zero) // x int, y int
     lqv     vLtMIT2I,    (mITMatrix + 0x10)($zero) // z int, x frac
@@ -2251,9 +2254,9 @@ lt_after_xfrm_normals:
     jal     lt_normalize
      luv    vPairLt, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
     // Set up ambient occlusion: light *= (factor * (alpha - 1) + 1)
-    vmudm   $v25, vPairRGBA, $v19[0] // (alpha - 1) * aoAmb factor; elems 3, 7
+    vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
+    vmadm   $v25, vPairRGBA, $v30[0] // + (alpha - 1) * aoAmb factor; elems 3, 7
     vcopy   vPairNrml, $v23
-    vadd    $v25, $v25, $v31[7] // 0x7FFF = 1 in s.15; elems 3, 7
     vmulf   vPairLt, vPairLt, $v25[3h] // light color *= ambient factor
 lt_loop:
     // vPairPosI/F, vPairST, $v23 light pos/dir (then local), $v24 $v25 locals,
@@ -2268,7 +2271,7 @@ lt_loop:
      luv    vLtColor,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
     vmulf   $v23, $v23, vPairNrml // Light dir * normalized normals
     vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
-    vmadm   $v24, vPairRGBA, $v19[1] // + (alpha - 1) * aoDir factor
+    vmadm   $v24, vPairRGBA, $v30[1] // + (alpha - 1) * aoDir factor; elems 3, 7
     vmudh   $v29, vOne, $v23[0h] // Sum components of dot product as signed
     vmadh   $v29, vOne, $v23[1h]
     vmadh   $v23, vOne, $v23[2h]
@@ -2296,7 +2299,7 @@ lt_post:
 lt_skip_cel:
     vne     $v29, $v31, $v31[3h]        // Set VCC to 11101110
     bnez    $20, lt_skip_novtxcolor
-     andi   $24, $5, G_FRESNEL >> 8
+     andi   $24, $5, G_FRESNEL_ALPHA >> 8
     vcopy   vLtRGBOut, vPairLt                // If no packed normals, base output is just light
 lt_skip_novtxcolor:
     vmulf   vLookat0, vPairNrml, $v23        // Normal * lookat 0 dir; vLookat0 = $v17 = vPairLt
@@ -2307,11 +2310,10 @@ lt_skip_novtxcolor:
     j       lt_normal_to_vertex
      ldv    $v23[8], (cameraWorldPos - altBase)(altBaseReg)
 lt_finish_fresnel: // output in $v23
-    llv     $v24[0], (fresnelOffset - altBase)(altBaseReg) // Load fresnel offset and scale
     vabs    $v23, $v23, $v23            // Absolute value
-    vmudn   $v26, $v31, $v24[1]         // TODO this is wrong, 0x0100 is not available Elem 4 = low part of 0x0100 * scale
+    vmudn   $v26, $v31, $v30[7]         // TODO this is wrong, 0x0100 is not available Elem 4 = low part of 0x0100 * scale
     vmadh   $v25, $v31, $v31[2]         // + 0; elem 4 = high part of 0x0100 * scale
-    vsub    $v23, $v23, $v24[0]         // Subtract offset
+    vsub    $v23, $v23, $v30[6]         // Subtract offset
     vmudl   $v29, $v23, $v26[4]         // Unsigned Fresnel value * low part shifted scale
     vmadn   $v23, $v23, $v25[4]         // Alpha = unsigned Fresnel value * high part
     vmrg    vPairRGBA, vPairRGBA, $v23  // Merge base output and alpha output
