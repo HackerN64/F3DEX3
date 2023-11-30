@@ -17,7 +17,7 @@ G_CULL_BACK             equ 0x00000400
 G_CULL_BOTH             equ 0x00000600
 G_PACKED_NORMALS        equ 0x00000800
 G_LIGHTTOALPHA          equ 0x00001000
-G_SHADING_SPECULAR      equ 0x00002000
+G_LIGHTING_SPECULAR     equ 0x00002000
 G_FRESNEL_COLOR         equ 0x00004000
 G_FRESNEL_ALPHA         equ 0x00008000
 G_FOG                   equ 0x00010000
@@ -30,7 +30,7 @@ G_SHADING_SMOOTH        equ 0x00200000
 //G_CLIPPING            equ 0x00800000 // Ignored by all F3DEX* variants
 // The top byte holds the geometry mode opcode.
 
-G_TRI_FILL        equ 0xc8 // not a GBI command
+G_TRI_FILL          equ 0xc8 // not a GBI command
 
 G_DMA_IO            equ 0xd6
 G_TEXTURE           equ 0xd7

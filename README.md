@@ -25,22 +25,32 @@ you should expect crashes and graphical issues.**
 - New geometry mode bit `G_AMBOCCLUSION` enables ambient/directional occlusion
   for opaque materials. Paint the ambient light level into the vertex alpha
   channel; separate factors (set with `SPAmbOcclusion`) control how much this
-  affects the ambient light and how much it affects all directional lights.
-  Point lights are never affected by ambient occlusion.
+  affects the ambient light, all directional lights, and all point lights.
 - New geometry mode bit `G_LIGHTTOALPHA` moves light intensity (maximum of
   R, G, and B of what would normally be the shade color after lighting) to shade
   alpha. Then, if `G_PACKED_NORMALS` is also enabled, the shade RGB is set to
   the vertex RGB. Together with alpha compare and some special display lists
   from fast64 which draw triangles two or more times with different CC settings,
   this enables cel shading. Besides cel shading, `G_LIGHTTOALPHA` can also be
-  used for bump mapping or other unusual CC effects (e.g. vertex color
-  multiplies texture, lighting applied after).
-- New geometry mode bit `G_FRESNEL` enables Fresnel. The dot product between a
-  vertex normal and the vector from the vertex to the camera is computed. A
-  settable scale and offset from `SPFresnel` converts this to a shade alpha
-  value. This is useful for making surfaces fade between transparent when viewed
-  straight-on and opaque when viewed at a large angle, or for applying a fake
-  "outline" around the border of meshes.
+  used for [bump mapping](https://renderu.com/en/spookyiluhablog/post/23631) or
+  other unusual CC effects (e.g. vertex color multiplies texture, lighting
+  applied after).
+- New geometry mode bits `G_FRESNEL_COLOR` or `G_FRESNEL_ALPHA` enable Fresnel.
+  The dot product between a vertex normal and the vector from the vertex to the
+  camera is computed; this is then scaled and offset with settable factors. The
+  resulting value is then stored to shade color or shade alpha. This is useful
+  for:
+    - making surfaces like water and glass fade between transparent when viewed
+      straight-on and opaque when viewed at a large angle
+    - applying a fake "outline" around the border of meshes
+    - bump mapping
+- New geometry mode bit `G_LIGHTING_SPECULAR` changes lighting computation from
+  diffuse to specular. If enabled, the vertex normal for lighting is replaced
+  with the reflection of the vertex-to-camera vector over the vertex normal.
+  Also, a new size value for each light controls how large the light reflection
+  appears to be. This technique is lower fidelity than the vanilla `hilite`
+  system, as it is per-vertex rather than per-pixel, but it allows the material
+  to be textured normally.
 - New geometry mode bits `G_ATTROFFSET_ST_ENABLE` and `G_ATTROFFSET_Z_ENABLE`
   apply settable offsets to vertex ST (`SPAttrOffsetST`) and/or Z
   (`SPAttrOffsetZ`) values. These offsets are applied after their respective
@@ -48,28 +58,38 @@ you should expect crashes and graphical issues.**
   but without the Z fighting which can happen with the RDP's native decal mode.
   For ST, this enables UV scrolling without CPU intervention.
 
-### New commands for performance
+### Performance improvements
 
+- New occlusion plane system allows the placement of a 3D quadrilateral where
+  objects behind this plane in screen space are culled. This can substantially
+  reduce the performance penalty of overdraw in scenes with walls in the middle,
+  such as a city or an indoor scene.
+- If a material display list being drawn is the same as the last material, the
+  texture loads in the material are skipped (the second time). This effectively
+  results in auto-batched rendering of repeated objects, as long as each only
+  uses one material. This system supports multitexture and all types of loads.
 - New `SPTriangleStrip` and `SPTriangleFan` commands pack up to 5 tris into one
   64-bit GBI command (up from 2 tris in F3DEX2). In any given object, most tris
   can be drawn with these commands, with only a few at the end drawn with
-  `SP2Triangles` or `SP1Triangle`, so this cuts the triangle portion of display
-  lists roughly in half.
+  `SP2Triangles` or `SP1Triangle`. So, this cuts the triangle portion of display
+  lists roughly in half, saving DRAM traffic and ROM space.
 - New `SPAlphaCompareCull` command enables culling of triangles whose computed
   shade alpha values are all below or above a settable threshold. This
   substantially reduces the performance penalty of cel shading--only tris which
   "straddle" the cel threshold are drawn twice, the others are only drawn once.
-- New `SPLightToRDP` family of commands (e.g. `SPLightToPrimColor`) writes a
-  selectable RDP command (e.g. `DPSetPrimColor`) with the RGB color of a
-  selectable light (any including ambient). The alpha channel and any other
-  parameters are encoded in the command. With some limitations, this allows the
-  tint colors of cel shading to match scene lighting with no code intervention.
-  Possibly useful for other lighting-dependent effects.
+- A new "hints" system encodes the expected size of the target display list into
+  call, branch, and return DL commands. This allows only the needed number of DL
+  commands in the next DL to be fetched, rather than always fetching full
+  buffers, saving some DRAM traffic (maybe around 100 us per frame). The bits
+  used for this are ignored by HLE.
+- Clipped triangles are drawn by minimal overlapping scanlines algorithm; this
+  slightly improves RDP draw time for large tris (max of about 500 us per frame,
+  usually much less or zero).
 
-### Improved existing features
+### Miscellaneous
 
 - Point lighting has been redesigned. The appearance when a light is close to an
-  object has been improved. Fixed a bug in F3DEX2 point lighting where a Z
+  object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where a Z
   component was accidentally doubled in the point lighting calculations. The
   quadratic point light attenuation factor is now an E3M5 floating-point number.
   The performance penalty for point lighting has been reduced.
@@ -77,30 +97,15 @@ you should expect crashes and graphical issues.**
   number of directional / point lights lowered from 1 to 0 (F3DEX2 required at
   least one). Also supports loading all lights in one DMA transfer
   (`SPSetLights`), rather than one per light.
+- New `SPLightToRDP` family of commands (e.g. `SPLightToPrimColor`) writes a
+  selectable RDP command (e.g. `DPSetPrimColor`) with the RGB color of a
+  selectable light (any including ambient). The alpha channel and any other
+  parameters are encoded in the command. With some limitations, this allows the
+  tint colors of cel shading to match scene lighting with no code intervention.
+  Also useful for other lighting-dependent effects.
 
-### HLE-compatible cycle-shaving optimizations for Kaze Emanuar
-
-- The 56 vertex buffer is compatible with Kaze's supported HLE because that HLE
-  incorrectly supports 64 vertices for all microcodes.
-- "Hints" system encodes the expected size of the target display list into call,
-  branch, and return DL commands. This allows only the needed number of DL
-  commands in the next DL to be fetched, rather than always fetching full
-  buffers, saving some DRAM traffic (maybe around 100 us per frame). The bits
-  used for this are ignored by HLE.
-- F3DEX3 discards certain texture loads if they are identical to the last
-  texture load. This dramatically reduces the performance penalty of repeatedly
-  loading the same texture for instances of the same object--assuming the
-  objects have only one texture, that texture is not CI, and that texture is of
-  appropriate size so that it is loaded with `DPLoadBlock` rather than
-  `DPLoadTile`.
-- Clipped triangles are drawn by minimal overlapping scanlines algorithm; this
-  slightly improves RDP draw time for large tris (max of about 500 us per frame,
-  usually much less or zero).
-
-### Performance counters
-
-F3DEX3 introduces four performance counters, which are accessible from the CPU
-after the graphics task finishes:
+F3DEX3 also introduces four performance counters, which are accessible from the
+CPU after the graphics task finishes:
 - Number of vertices processed by the RSP
 - Number of triangles requested in display lists. This does not count triangles
   skipped due to `SPCullDisplayList` or `SPBranchLessZ*`.
@@ -149,16 +154,17 @@ similar for other games):
 - Clean and build your romhack (`make clean`, `make`).
 - Test your romhack and confirm that everything works as intended.
 - Make as many of the "Recommended changes" listed below as possible.
+- If you start using new features in F3DEX3, make the "Changes required for new
+  features" listed below.
 
 ### Required Changes
 
-- Remove uses of obscure GBI features which have been removed in F3DEX3 (see
-  "C GBI Compatibility" section below for full list). In OoT, the only changes
+- Remove uses of internal GBI features which have been removed in F3DEX3 (see "C
+  GBI Compatibility" section below for full list). In OoT, the only changes
   needed are:
     - In `src/code/ucode_disas.c`, remove the switch statement cases for
-      `G_LINE3D`, `G_MW_CLIP`, `G_MV_MATRIX`, `G_MVO_LOOKATX`, and
-      `G_MVO_LOOKATY`. Also remove the case for `G_MW_PERSPNORM` as perspective
-      normalization is now encoded differently.
+      `G_LINE3D`, `G_MW_CLIP`, `G_MV_MATRIX`, `G_MVO_LOOKATX`, `G_MVO_LOOKATY`,
+      and `G_MW_PERSPNORM`.
     - In `src/libultra/gu/lookathil.c`, remove the lines which set the `col`,
       `colc`, and `pad` fields.
 - Change your game engine lighting code to set the `type` (formerly `pad1`)
@@ -176,9 +182,6 @@ similar for other games):
 
 ### Recommended Changes (Non-Lighting)
 
-- If you are using Fresnel at all, whenever your code sends camera properties to
-  the RSP (VP matrix, viewport, etc.), also send the camera world position to
-  the RSP with `SPCameraWorld`.
 - Clean up any code using the deprecated, hacky `SPLookAtX` and `SPLookAtY` to
   use `SPLookAt` instead (this is only a few lines change). Also remove any
   code which writes `SPClipRatio` or `SPForceMatrix`--these are now no-ops, so
@@ -205,24 +208,12 @@ similar for other games):
   are typically drawn between each material change. For more information, see
   the GBI documentation near this define.
 
-To get the number of primitives counter in OoT, in the `true` codepath of
-`Sched_TaskComplete`, add this code:
-```
-// Fetch number of primitives drawn from yield data
-if(task->list.t.type == M_GFXTASK){
-    u16* counterAddress = (u16*)((u8*)gGfxSPTaskYieldBuffer + OS_YIELD_DATA_SIZE - 0xA);
-    osInvalDCache(counterAddress, sizeof(u16));
-    gRSPGfxNumPrimsDrawn = *counterAddress;
-}
-```
-with `volatile u16 gRSPGfxNumPrimsDrawn` defined somewhere globally.
-
 ### Recommended Changes (Lighting)
 
 - Change your game engine lighting code to load all lights in one DMA transfer
   with `SPSetLights`, instead of one-at-a-time with repeated `SPLight` commands.
   Note that if you are using a pointer (dynamically allocated) rather than a
-  direct variable (stack allocated), you need to dereference it; see the
+  direct variable (statically allocated), you need to dereference it; see the
   docstring for this macro in the GBI.
 - If you still need to use `SPLight` somewhere after this, use `SPLight` only
   for directional / point lights and use `SPAmbient` for ambient lights.
@@ -243,6 +234,20 @@ with `volatile u16 gRSPGfxNumPrimsDrawn` defined somewhere globally.
   Mask), note that the point light kc, kl, and kq factors have been changed, so
   you will need to redesign how game engine light parameters (e.g. "light
   radius") map to these parameters.
+
+### Changes Required for New Features
+
+Each of these changes is required if you want to use the respective new feature,
+but is not necessary if you are not using it.
+
+- For Fresnel and specular lighting: Whenever your code sends camera properties
+  to the RSP (VP matrix, viewport, etc.), also send the camera world position to
+  the RSP with `SPCameraWorld`.
+- For specular lighting: Set the `size` field of any `Light_t` and `PosLight_t`
+  to an appropriate value based on the game engine parameters for that light.
+- For the occlusion plane: Bring the code from `cpu/guOcclusionPlane.h` and `.c`
+  into your game and follow the included instructions.
+- For the performance counters: Make the changes described in `cpu/counters.c`.
 
 
 ## Backwards Compatibility with F3DEX2
@@ -268,7 +273,7 @@ and commands except:
   likely been used for debugging to copy vertices from DMEM to examine them.
   This does not affect `SPModifyVertex`, which is still supported, though this
   is moved to Overlay 4 (see below) so it will be slower than in F3DEX2.
-- `G_MW_PERSPNORM` has been removed. `SPPerspNormalize` is still supported but
+- `G_MW_PERSPNORM` has been removed; `SPPerspNormalize` is still supported but
   is encoded differently, no longer using this define.
 - `G_MVO_LOOKATX` and `G_MVO_LOOKATY` have been removed, and `SPLookAtX` and
   `SPLookAtY` are deprecated. `SPLookAtX` has been changed to set both
@@ -284,7 +289,8 @@ and commands except:
   commands are backwards compatible. However, if you do raise the number of
   lights, you must use `SPAmbient` to write the ambient light, as discussed
   above. Note that you can now load all your lights with one command,
-  `SPSetLights`.
+  `SPSetLights`, so it is not usually necessary to use `SPLight` and `SPAmbient`
+  at all.
 
 ### Binary Display List Compatibility
 
@@ -296,15 +302,11 @@ display lists with the new `gbi.h`, it can run them.
 
 The deprecated commands mentioned above in the C GBI section have had their
 encodings changed (the original encodings will do bad things / crash). In
-addition, the following other commands have had their encodings changed, making
-them binary incompatible:
-- All lighting-related commands, e.g. `gdSPDefLights*`, `SPNumLights`,
-  `SPLight`, `SPLightColor`, `SPLookAt`. The basic lighting data structures
-  `Light_t`, `PosLight_t`, and `Ambient_t` have not changed (except for the
-  requirement to set `type` to zero in directional lights), but `LookAt_t` and
-  all the larger data structures such as `Lightsn`, `Lights*`, and `PosLights*`
-  have changed.
-- `SPPerspNormalize` binary encoding has changed.
+addition, all lighting-related commands--e.g. `gdSPDefLights*`, `SPNumLights`,
+`SPLight`, `SPLightColor`, `SPLookAt`--have had their encodings changed, making
+them binary incompatible. The lighting data structures, e.g. `Light_t`,
+`PosLight_t`, `LookAt_t`, `Lightsn`, `Lights*`, `PosLights*`, etc., have also
+changed.
 
 
 ## What are the tradeoffs for all these new features?
@@ -420,20 +422,26 @@ two tris, saving a substantial amount of DMEM.
 ### Obscure semantic differences from F3DEX2 that should never matter in practice
 
 - `SPLoadUcode*` will corrupt RSP texture state previously set with `SPTexture`.
-  After returning from the other microcode but before drawing anything else, you
-  must execute `SPTexture` again. Normally, `SPTexture` is executed as part of
-  every material, so its state would not be relied on.
+  (In F3DEX2, it would be set to all zeros--texture disabled--after returning
+  from the other microcode, but in F3DEX3 it is set to garbage data.) After
+  returning from the other microcode but before drawing anything else, you must
+  execute `SPTexture` again. Normally, `SPTexture` is executed as part of every
+  material, so its state would not be relied on across microcode changes.
 - Changing fog settings--i.e. enabling or disabling `G_FOG` in the geometry mode
   or executing `SPFogFactor` or `SPFogPosition`--between loading verts and
   drawing tris with those verts will lead to incorrect fog values for those
-  tris.
+  tris. In F3DEX2, the fog settings at vertex load time would always be used,
+  even if they were changed before drawing tris.
 
 ## Credits
 
 F3DEX3 modifications from F3DEX2 are by Sauraen and are dedicated to the public
-domain. If you use F3DEX3 in a romhack, please credit "F3DEX3 Microcode -
-Sauraen" in your project's in-game Staff Roll or wherever other contributors to
-your project are credited.
+domain. `cpu/` C code is entirely by Sauraen and also dedicated to the public
+domain.
+
+If you use F3DEX3 in a romhack, please credit "F3DEX3 Microcode - Sauraen" in
+your project's in-game Staff Roll or wherever other contributors to your project
+are credited.
 
 Other credits:
 - Wiseguy: large chunk of F3DEX2 disassembly documentation and first version of

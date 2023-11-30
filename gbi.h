@@ -118,7 +118,7 @@
  * any other F3DEX3 effects which use shade alpha.
  */
 #define G_ZBUFFER               0x00000001
-#define G_TEXTURE_ENABLE        0x00000000  /* actually 2, but do not set or may hang */
+#define G_TEXTURE_ENABLE        0x00000000  /* actually 2, but controlled by SPTexture */
 #define G_SHADE                 0x00000004
 #define G_AMBOCCLUSION          0x00000040
 #define G_ATTROFFSET_Z_ENABLE   0x00000080
@@ -129,7 +129,7 @@
 #define G_CULL_BOTH             0x00000600  /* useless but supported */
 #define G_PACKED_NORMALS        0x00000800
 #define G_LIGHTTOALPHA          0x00001000
-#define G_SHADING_SPECULAR      0x00002000
+#define G_LIGHTING_SPECULAR     0x00002000
 #define G_FRESNEL_COLOR         0x00004000
 #define G_FRESNEL_ALPHA         0x00008000
 #define G_FOG                   0x00010000
@@ -191,8 +191,9 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_MW_FOG            0x08
 #define G_MW_LIGHTCOL       0x0A
 /* G_MW_FORCEMTX is no longer supported because there is no MVP matrix in F3DEX3. */
+/* G_MW_PERSPNORM is removed; perspective norm is now set via G_MW_FX. */
 
-#define G_MW_HALFWORD_FLAG 0x8000
+#define G_MW_HALFWORD_FLAG 0x8000 /* indicates store 2 bytes instead of 4 */
 
 /*
  * These are offsets from the address in the dmem table
@@ -248,10 +249,8 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_MWO_AO_DIRECTIONAL     0x02
 #define G_MWO_AO_POINT           0x04
 #define G_MWO_PERSPNORM          0x06
-#define G_MWO_DIFFUSE            0x08
-#define G_MWO_SPECULAR           0x0A
-#define G_MWO_FRESNEL_OFFSET     0x0C
-#define G_MWO_FRESNEL_SCALE      0x0E
+#define G_MWO_FRESNEL_SCALE      0x0C
+#define G_MWO_FRESNEL_OFFSET     0x0E
 #define G_MWO_ATTR_OFFSET_S      0x10
 #define G_MWO_ATTR_OFFSET_T      0x12
 #define G_MWO_ATTR_OFFSET_Z      0x14
@@ -1064,6 +1063,8 @@ typedef struct {
     char          pad2;
     signed char   dir[3];   /* direction of light (normalized) */
     char          pad3;
+    char          pad4[3];
+    unsigned char size;     /* For specular only; reasonable values are 1-4 */
 } Light_t;
 
 typedef struct {
@@ -1073,6 +1074,7 @@ typedef struct {
     unsigned char kl;       /* linear attenuation Kl */
     short pos[3];           /* light position x, y, z in world space */
     unsigned char kq;       /* quadratic attenuation Kq */
+    unsigned char size;     /* For specular only; reasonable values are 1-4 */
 } PosLight_t;
 
 typedef struct {
@@ -2568,27 +2570,6 @@ _DW({                                         \
     gsSPAmbOcclusionPoint(point)
 
 /*
- * Specular lighting - Based on suggestions from neoshaman
- * Enabled with the G_SHADING_SPECULAR bit in geometry mode.
- * 
- * TODO
- */
-#define gSPShadingDiffuse(pkt, diffuse) \
-    gMoveHalfwd(pkt, G_MW_FX, G_MWO_DIFFUSE, diffuse)
-#define gsSPShadingDiffuse(diffuse) \
-    gsMoveHalfwd(G_MW_FX, G_MWO_DIFFUSE, diffuse)
-#define gSPShadingSpecular(pkt, specular) \
-    gMoveHalfwd(pkt, G_MW_FX, G_MWO_SPECULAR, specular)
-#define gsSPShadingSpecular(specular) \
-    gsMoveHalfwd(G_MW_FX, G_MWO_SPECULAR, specular)
-#define gSPShadingDiffuseSpecular(pkt, diffuse, specular) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_DIFFUSE, \
-        (_SHIFTL((diffuse), 16, 16) | _SHIFTL((specular), 0, 16)))
-#define gsSPShadingDiffuseSpecular(diffuse, specular) \
-    gsMoveWd(G_MW_FX, G_MWO_DIFFUSE, \
-        (_SHIFTL((diffuse), 16, 16) | _SHIFTL((specular), 0, 16)))
-
-/*
  * Fresnel - Feature suggested by thecozies
  * Enabled with the G_FRESNEL bit in geometry mode.
  * The dot product between a vertex normal and the vector from the vertex to the
@@ -2600,34 +2581,22 @@ _DW({                                         \
  * If using Fresnel, you need to set the camera world position whenever you set
  * the VP matrix, viewport, etc. See SPCameraWorld.
  * 
- * TODO this is outdated
- * offset = Dot product value, in 0000 - 7FFF, which gives shade alpha = 0
- * Let k = dot product value, in 0000 - 7FFF, which gives shade alpha = FF.
- * Then scale = 0.7FFF / (k - offset) as s7.8 fixed point.
- * Alternatively, shade alpha [0000 - 7FFF] =
- * scale [-80.00 - 7F.FF] * (dot product [0000 - 7FFF] - offset)
- * Examples:
- * 1. Grazing -> 00; normal -> FF
- *    Then set offset = 0000, scale = 0100 = 01.00
- * 2. Grazing -> FF; normal -> 00
- *    Then set offset = 7FFF, scale = FF00 = FF.00 = -01.00
- * 3. 30 degrees (0.5f or 4000) -> FF; 60 degrees (0.86f or 6ED9) -> 00
- *    Then set offset = 6ED9, scale = FD45 = FD.45 = -02.BB = 1 / (0.5f - 0.86f)
+ * TODO explain math
  */
-#define gSPFresnelOffset(pkt, offset) \
-    gMoveHalfwd(pkt, G_MW_FX, G_MWO_FRESNEL_OFFSET, offset)
-#define gsSPFresnelOffset(offset) \
-    gsMoveHalfwd(G_MW_FX, G_MWO_FRESNEL_OFFSET, offset)
 #define gSPFresnelScale(pkt, scale) \
     gMoveHalfwd(pkt, G_MW_FX, G_MWO_FRESNEL_SCALE, scale)
 #define gsSPFresnelScale(scale) \
     gsMoveHalfwd(G_MW_FX, G_MWO_FRESNEL_SCALE, scale)
-#define gSPFresnel(pkt, offset, scale) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_FRESNEL_OFFSET, \
-        (_SHIFTL((offset), 16, 16) | _SHIFTL((scale), 0, 16)))
-#define gsSPFresnel(offset, scale) \
-    gsMoveWd(G_MW_FX, G_MWO_FRESNEL_OFFSET, \
-        (_SHIFTL((offset), 16, 16) | _SHIFTL((scale), 0, 16)))
+#define gSPFresnelOffset(pkt, offset) \
+    gMoveHalfwd(pkt, G_MW_FX, G_MWO_FRESNEL_OFFSET, offset)
+#define gsSPFresnelOffset(offset) \
+    gsMoveHalfwd(G_MW_FX, G_MWO_FRESNEL_OFFSET, offset)
+#define gSPFresnel(pkt, scale, offset) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_FRESNEL_SCALE, \
+        (_SHIFTL((scale), 16, 16) | _SHIFTL((offset), 0, 16)))
+#define gsSPFresnel(scale, offset) \
+    gsMoveWd(G_MW_FX, G_MWO_FRESNEL_SCALE, \
+        (_SHIFTL((scale), 16, 16) | _SHIFTL((offset), 0, 16)))
 
 /*
  * Attribute offsets
@@ -3060,8 +3029,8 @@ _DW({ \
 
 
 /*
- * Camera world position for Fresnel. Set this whenever you set the VP matrix,
- * viewport, etc. cam is the address of a PlainVtx struct.
+ * Camera world position for Fresnel and specular lighting. Set this whenever
+ * you set the VP matrix, viewport, etc. cam is the address of a PlainVtx struct.
  */
 #define gSPCameraWorld(pkt, cam) \
     gDma2p((pkt), G_MOVEMEM, (cam), sizeof(PlainVtx), G_MV_LIGHT, 0)
@@ -3120,9 +3089,14 @@ _DW({ \
 
 
 /*
- * Occlusion plane
+ * Set the occlusion plane. This is a quadrilateral in 3D space where all
+ * geometry behind it is culled. You should create occlusion plane candidates
+ * just behind walls and other large objects, and have your game engine pick
+ * the most optimal one every frame to send to the RSP.
  * 
- * TODO explain how to calculate the coefficients
+ * Computing the coefficients for the occlusion plane is far too complicated to
+ * explain here. The reference implementation `guOcclusionPlane` is provided
+ * separately.
  * 
  * o is the address of an OcclusionPlane struct
  */
@@ -3191,31 +3165,13 @@ _DW({                                                           \
 }
 
 /*
- * Different version of SPTexture macro, has an additional parameter
- * which is currently reserved in the microcode.
+ * The bowtie value is a workaround for a bug in HW V1, and is not supported
+ * by F3DEX2, let alone F3DEX3.
  */
-#define gSPTextureL(pkt, s, t, level, xparam, tile, on)    \
-_DW({                                                       \
-    Gfx *_g = (Gfx *)(pkt);                                 \
-                                                            \
-    _g->words.w0 = (_SHIFTL(G_TEXTURE, 24, 8) |             \
-                    _SHIFTL((xparam),  16, 8) |             \
-                    _SHIFTL((level),   11, 3) |             \
-                    _SHIFTL((tile),     8, 3) |             \
-                    _SHIFTL((on),       1, 7));             \
-    _g->words.w1 = (_SHIFTL((s), 16, 16) |                  \
-                    _SHIFTL((t),  0, 16));                  \
-})
-#define gsSPTextureL(s, t, level, xparam, tile, on)    \
-{                                                       \
-   (_SHIFTL(G_TEXTURE, 24, 8) |                         \
-    _SHIFTL((xparam),  16, 8) |                         \
-    _SHIFTL((level),   11, 3) |                         \
-    _SHIFTL((tile),     8, 3) |                         \
-    _SHIFTL((on),       1, 7)),                         \
-   (_SHIFTL((s), 16, 16) |                              \
-    _SHIFTL((t),  0, 16))                               \
-}
+#define gSPTextureL(pkt, s, t, level, bowtie, tile, on) \
+    gSPTexture(pkt, s, t, level, tile, on)
+#define gsSPTextureL(s, t, level, bowtie, tile, on) \
+    gsSPTexture(s, t, level, tile, on)
 
 /*
  *  One gSPGeometryMode(pkt,c,s) GBI is equal to these two GBIs.
@@ -3860,60 +3816,26 @@ _DW({                                                               \
     _SHIFTL(shifts,   0, 4))                                    \
 }
 
-/*
- * A new optimization in F3DEX3 discards a DPLoadBlock command if it is
- * identical to the last DPLoadBlock command sent to the RDP. It also tracks
- * the last DPSet*Img command sent and if a different image is set, the "last
- * DPLoadBlock" value is reset so the next DPLoadBlock will not be discarded.
- * This of course saves RDP time if the same material is run repeatedly for
- * many instances of the same object, assuming the object only has one texture
- * and it is not CI.
- * 
- * The only way this can fail is when loading the same image to two addresses
- * in TMEM but with the same tile (e.g. G_TX_LOADTILE) for multitexture (or for
- * strange custom texture setups). This is not an issue for fast64 exports as if
- * you create multitexture with the same texture twice, it only loads it once
- * and points both render tiles to the same TMEM. Vanilla OoT does the same
- * thing for the water. However, it is possible to write a DL which this
- * optimization breaks.
- * 
- * This command `DPLoadBlockTag` can solve that problem: put a different
- * arbitrary value in the tag field of each command, for example an incrementing
- * counter. Then the commands will compare as different in the RSP and the
- * second will not be discarded. The bits used for the tag are ignored by the
- * RDP.
- */
-#define gDPLoadBlockTag(pkt, tag, tile, uls, ult, lrs, dxt)         \
+#define gDPLoadBlock(pkt, tile, uls, ult, lrs, dxt)         \
 _DW({                                                               \
     Gfx *_g = (Gfx *)(pkt);                                         \
     _g->words.w0 = (_SHIFTL(G_LOADBLOCK, 24,  8) |                  \
                     _SHIFTL(uls,         12, 12) |                  \
                     _SHIFTL(ult,          0, 12));                  \
-    _g->words.w1 = (_SHIFTL(tag,                          27,  5) | \
-                    _SHIFTL(tile,                         24,  3) | \
+    _g->words.w1 = (_SHIFTL(tile,                         24,  3) | \
                     _SHIFTL(MIN(lrs, G_TX_LDBLK_MAX_TXL), 12, 12) | \
                     _SHIFTL(dxt,                           0, 12)); \
 })
-#define gsDPLoadBlockTag(tag, tile, uls, ult, lrs, dxt) \
+
+#define gsDPLoadBlock(tile, uls, ult, lrs, dxt) \
 {                                                       \
    (_SHIFTL(G_LOADBLOCK, 24,  8) |                      \
     _SHIFTL(uls,         12, 12) |                      \
     _SHIFTL(ult,          0, 12)),                      \
-   (_SHIFTL(tag,                            27,  5) |   \
-    _SHIFTL(tile,                           24,  3) |   \
+   (_SHIFTL(tile,                           24,  3) |   \
     _SHIFTL((MIN(lrs, G_TX_LDBLK_MAX_TXL)), 12, 12) |   \
     _SHIFTL(dxt,                             0, 12))    \
 }
-
-/*
- * Use __LINE__ as the tag to get different commands. Repeats every 32 lines.
- * See DPLoadBlockTag above.
- */
-#define gDPLoadBlock(pkt, tile, uls, ult, lrs, dxt) \
-    gDPLoadBlockTag(pkt, __LINE__, tile, uls, ult, lrs, dxt)
-#define gsDPLoadBlock(tile, uls, ult, lrs, dxt) \
-    gsDPLoadBlockTag(__LINE__, tile, uls, ult, lrs, dxt)
-
 
 #define gDPLoadTLUTCmd(pkt, tile, count)        \
 _DW({                                           \

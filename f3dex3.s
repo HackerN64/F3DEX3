@@ -135,10 +135,10 @@ fogFactor:
     .dw 0x00000000
 
 textureSettings1:
-    .dw 0x00000000 // first word, has command byte, bowtie val, level, tile, and on
+    .dw 0x00000000 // first word, has command byte, level, tile, and on
     
 textureSettings2:
-    .dw 0x00000000 // second word, has s and t scale
+    .dw 0xFFFFFFFF // second word, has s and t scale
     
 geometryModeLabel:
     .dw 0x00000000 // originally initialized to G_CLIPPING, but that does nothing
@@ -2163,11 +2163,11 @@ lt_skip_packed_normals:
     vmudn   $v29, vM0F, vPairNrml[0h]
     lbu     $11, normalsMode($zero)
     vmadh   $v29, vM0I, vPairNrml[0h]
-    andi    $6, $5, G_SHADING_SPECULAR >> 8
+    andi    $6, $5, G_LIGHTING_SPECULAR >> 8
     vmadn   $v29, vM1F, vPairNrml[1h]
     addi    curLight, curLight, altBase // Point to ambient light
     vmadh   $v29, vM1I, vPairNrml[1h]
-    andi    $12, $5, (G_SHADING_SPECULAR | G_FRESNEL_COLOR | G_FRESNEL_ALPHA) >> 8
+    andi    $12, $5, (G_LIGHTING_SPECULAR | G_FRESNEL_COLOR | G_FRESNEL_ALPHA) >> 8
     vmadn   vBBB, vM2F, vPairNrml[2h] // vBBB = normals frac
     beqz    $11, lt_after_xfrm_normals // Skip if G_NORMALSMODE_FAST
      vmadh  vAAA, vM2I, vPairNrml[2h] // vAAA = normals int
@@ -2246,7 +2246,6 @@ lt_finish_light:
     beqz    $6, lt_skip_specular
      vmulf  vDDD, vDDD, vCCC[3h] // light color *= dir or point light factor
     lb      $20, (ltBufOfs + 0xF)(curLight) // Light size factor
-    addi    $20, $20, 2 // Default of 0 -> 2
     mtc2    $20, vCCC[0]        // Light size factor
     vxor    vAAA, vAAA, $v31[7] // = 0x7FFF - dot product
     vmudh   vAAA, vAAA, vCCC[0] // * size factor
