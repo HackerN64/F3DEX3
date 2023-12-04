@@ -242,7 +242,7 @@ but is not necessary if you are not using it.
 
 - For Fresnel and specular lighting: Whenever your code sends camera properties
   to the RSP (VP matrix, viewport, etc.), also send the camera world position to
-  the RSP with `SPCameraWorld`.
+  the RSP with `SPCameraWorld`. See the code in `cpu/camera.c`.
 - For specular lighting: Set the `size` field of any `Light_t` and `PosLight_t`
   to an appropriate value based on the game engine parameters for that light.
 - For the occlusion plane: Bring the code from `cpu/guOcclusionPlane.h` and `.c`
