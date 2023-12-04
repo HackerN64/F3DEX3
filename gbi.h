@@ -1046,7 +1046,7 @@ typedef struct {
 
 typedef union {
     Vp_t vp;
-    long long int force_structure_alignment;
+    long long int force_structure_alignment[2];
 } Vp;
 
 /*
@@ -2581,7 +2581,26 @@ _DW({                                         \
  * If using Fresnel, you need to set the camera world position whenever you set
  * the VP matrix, viewport, etc. See SPCameraWorld.
  * 
- * TODO explain math
+ * The RSP does:
+ * s16 dotProduct = dot(vertex normal, camera pos - vertex pos);
+ * dotProduct = abs(dotProduct); // 0 = points to side, 7FFF = points at or away
+ * s32 factor = ((scale * dotProduct) >> 15) + offset;
+ * s16 result = clamp(factor << 8, 0, 7FFF);
+ * color_or_alpha = result >> 7;
+ * 
+ * At dotMax, color_or_alpha = FF, result = 7F80, factor = 7F
+ * At dotMin, color_or_alpha = 00, result = 0, factor = 0
+ * 7F = ((scale * dotMax) >> 15) + offset
+ * 00 = ((scale * dotMin) >> 15) + offset
+ * Subtract: 7F = (scale * (dotMax - dotMin)) >> 15
+ *           3F8000 = scale * (dotMax - dotMin)
+ *           scale = 3F8000 / (dotMax - dotMin)                <--
+ * offset = -(((3F8000 / (dotMax - dotMin)) * dotMin) >> 15)
+ * offset = -((7F * dotMin) / (dotMax - dotMin))               <--
+ * 
+ * To convert in the opposite direction:
+ * ((7F - offset) << 15) / scale = dotMax
+ * ((00 - offset) << 15) / scale = dotMin
  */
 #define gSPFresnelScale(pkt, scale) \
     gMoveHalfwd(pkt, G_MW_FX, G_MWO_FRESNEL_SCALE, scale)
@@ -2673,7 +2692,8 @@ _DW({                                         \
  * space with the M matrix. This is correct if the object's transformation
  * matrix stack only included translations, rotations, and uniform scale (i.e.
  * same scale in X, Y, and Z); otherwise, if the transformation matrix has
- * nonuniform scale or shear, the lighting on the object will be subtly wrong.
+ * nonuniform scale or shear, the lighting on the object will be somewhat
+ * distorted.
  * 
  * If mode = G_NORMALS_MODE_AUTO, transforms normals from model space to world
  * space with M inverse transpose, which renders lighting correctly for the

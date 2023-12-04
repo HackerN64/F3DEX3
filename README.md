@@ -357,7 +357,7 @@ by instead transforming light directions into model space with M transpose, and
 computing the lighting in model space. However, this requires extra DMEM to
 store the transformed lights, and adds an additional performance penalty for
 point lighting which is absent in F3DEX3. Plus, having world space normals in
-F3DEX3 enables the Fresnel feature.
+F3DEX3 enables Fresnel and specular lighting.
 
 If an object's transformation matrix stack only includes translations,
 rotations, and uniform scale (i.e. same scale in X, Y, and Z), then M inverse

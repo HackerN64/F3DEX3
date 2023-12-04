@@ -2148,10 +2148,10 @@ vPackZ     equ $v26 // = vDDD; Z in packed normals
     vand    vPackPXY, vAAA, $v31[6]          // 0x7F00; positive X, Y
     vclr    $v29                             // Zero
     vaddc   vPackZ, vPackPXY, vPackPXY[1q]   // elem 0, 4: pos X + pos Y, no clamping
-    vadd    vDDD, $v29, $v29                 // Save carry bit, indicates use 0x7F00 - x and y
+    vadd    vBBB, $v29, $v29                 // Save carry bit, indicates use 0x7F00 - x and y
     vxor    vPairNrml, vPackPXY, $v31[6]     // 0x7F00 - x, 0x7F00 - y
     vxor    vPackZ, vPackZ, $v31[6]          // 0x7F00 - +X - +Y in elems 0, 4
-    vne     $v29, $v29, vDDD[0h]             // set 0-3, 4-7 vcc if (+X + +Y) overflowed, discard result
+    vne     $v29, $v29, vBBB[0h]             // set 0-3, 4-7 vcc if (+X + +Y) overflowed, discard result
     vmrg    vPairNrml, vPairNrml, vPackPXY   // If so, use 0x7F00 - +X, else +X (same for Y)
     vne     $v29, $v31, $v31[2h]             // Set VCC to 11011101
     vabs    vPairNrml, vAAA, vPairNrml       // Apply sign of original X and Y to new X and Y
@@ -2296,10 +2296,11 @@ lt_skip_novtxcolor:
     vmudh   $v29, vOne, $v30[7]         // Fresnel offset
     vmacf   vAAA, vAAA, $v30[6]         // + factor * scale
     beqz    $11, @@skip
-     vmudh  vAAA, vAAA, vBBB[3]         // Result * 0x0100, clamped
+     vmudh  vAAA, vAAA, vBBB[3]         // Result * 0x0100, clamped to 0x7FFF
     veq     $v29, $v31, $v31[3h]        // Set VCC to 00010001 if G_FRESNEL_COLOR
 @@skip:
     vmrg    vPairRGBA, vPairRGBA, vAAA[3h] // Replace color or alpha with fresnel
+    vge     vPairRGBA, vPairRGBA, $v31[2]  // Clamp to >= 0 for fresnel; doesn't affect others
 lt_skip_fresnel:
     beqz    $12, vtx_return_from_lighting  // no texgen
     // Texgen: vLookat0, vLookat1, have to leave vPairPosI/F, vPairRGBA; output vPairST
