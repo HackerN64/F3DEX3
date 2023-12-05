@@ -2292,7 +2292,7 @@ lt_skip_novtxcolor:
     // vLookat0, vPairRGBA. Available: vAAA, vBBB, vNrmOut.
     lqv     vBBB, v30Value($zero)       // Need 0x0100 constant, in elem 3
     vabs    vAAA, vPairNrml, vPairNrml  // Absolute value of dot product for underwater
-    andi    $11, $5, G_FRESNEL_COLOR
+    andi    $11, $5, G_FRESNEL_COLOR >> 8
     vmudh   $v29, vOne, $v30[7]         // Fresnel offset
     vmacf   vAAA, vAAA, $v30[6]         // + factor * scale
     beqz    $11, @@skip
