@@ -2245,7 +2245,7 @@ lt_finish_light:
     // vCCC is amb occ factor, vDDD is light color
     beqz    $6, lt_skip_specular
      vmulf  vDDD, vDDD, vCCC[3h] // light color *= dir or point light factor
-    lb      $20, (ltBufOfs + 0xF)(curLight) // Light size factor
+    lb      $20, (ltBufOfs + 0xF - lightSize)(curLight) // Light size factor
     mtc2    $20, vCCC[0]        // Light size factor
     vxor    vAAA, vAAA, $v31[7] // = 0x7FFF - dot product
     vmudh   vAAA, vAAA, vCCC[0] // * size factor
