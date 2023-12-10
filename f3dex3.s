@@ -2255,7 +2255,7 @@ lt_skip_specular:
     vmadh   vAAA, vAAA, vBBB[3h] // Dot product int * scale int, clamp to 0x7FFF
     addi    curLight, curLight, -lightSize
     vmudh   $v29, vOne, vPairLt // Load accum mid with current light level
-    beqz    $6, lt_loop
+    j       lt_loop
      vmacf  vPairLt, vDDD, vAAA[0h] // + light color * dot product
     
 lt_post:
