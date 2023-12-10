@@ -2146,12 +2146,11 @@ lt_continue_setup:
 vPackPXY   equ $v25 // = vCCC; positive X and Y in packed normals
 vPackZ     equ $v26 // = vDDD; Z in packed normals
     vand    vPackPXY, vAAA, $v31[6]          // 0x7F00; positive X, Y
-    vclr    $v29                             // Zero
-    vaddc   vPackZ, vPackPXY, vPackPXY[1q]   // elem 0, 4: pos X + pos Y, no clamping
-    vadd    vBBB, $v29, $v29                 // Save carry bit, indicates use 0x7F00 - x and y
+    vmudh   $v29, vOne, $v31[1]              // -1; set all elems of $v29 to -1
+    vaddc   vBBB, vPackPXY, vPackPXY[1q]     // elems 0, 4: +X + +Y, no clamping; VCO always 0
     vxor    vPairNrml, vPackPXY, $v31[6]     // 0x7F00 - x, 0x7F00 - y
-    vxor    vPackZ, vPackZ, $v31[6]          // 0x7F00 - +X - +Y in elems 0, 4
-    vne     $v29, $v29, vBBB[0h]             // set 0-3, 4-7 vcc if (+X + +Y) overflowed, discard result
+    vxor    vPackZ, vBBB, $v31[6]            // 0x7F00 - +X - +Y in elems 0, 4
+    vge     $v29, $v29, vBBB[0h]             // set 0-3, 4-7 vcc if -1 >= (+X + +Y), = negative
     vmrg    vPairNrml, vPairNrml, vPackPXY   // If so, use 0x7F00 - +X, else +X (same for Y)
     vne     $v29, $v31, $v31[2h]             // Set VCC to 11011101
     vabs    vPairNrml, vAAA, vPairNrml       // Apply sign of original X and Y to new X and Y
@@ -2259,7 +2258,6 @@ lt_skip_specular:
     beqz    $6, lt_loop
      vmacf  vPairLt, vDDD, vAAA[0h] // + light color * dot product
     
-
 lt_post:
     // Valid: vPairPosI/F, vPairST, modified vPairRGBA ([3h] = alpha - 1),
     // vPairNrml normal [0h:2h] fresnel [3h], vPairLt [0h:2h], vAAA lookat 0 dir
@@ -2330,7 +2328,7 @@ lt_skip_fresnel:
     vmacf   vPairST, vPairST, $v30[4]      // + ST * 0x44D3
     j       vtx_return_from_lighting
      vmacf  vPairST, vDDD, vCCC            // + ST squared * (ST + ST * coeff)
-     
+    
 lt_point:
     /*
     Input vector 1 elem size 7FFF.0000 -> len^2 3FFF0001 -> 1/len 0001.0040 -> vec +801E.FFC0 -> clamped 7FFF
