@@ -8,92 +8,90 @@ you should expect crashes and graphical issues.**
 
 ## Features
 
-### Most important
+### New visual features
+
+- New geometry mode bit `G_PACKED_NORMALS` enables **simultaneous vertex colors
+  and normals/lighting on the same mesh**, by encoding the normals in the unused
+  2 bytes of each vertex using a variant of [octahedral encoding](https://knarkowicz.wordpress.com/2014/04/16/octahedron-normal-vector-encoding/).
+  The normals are effectively as precise as with the vanilla method of replacing
+  vertex RGB with normal XYZ.
+- New geometry mode bit `G_AMBOCCLUSION` enables **ambient occlusion** for
+  opaque materials. Paint the shadow map into the vertex alpha channel; separate
+  factors (set with `SPAmbOcclusion`) control how much this affects the ambient
+  light, all directional lights, and all point lights.
+- New geometry mode bit `G_LIGHTTOALPHA` moves light intensity (maximum of R, G,
+  and B of what would normally be the shade color after lighting) to shade
+  alpha. Then, if `G_PACKED_NORMALS` is also enabled, the shade RGB is set to
+  the vertex RGB. Together with alpha compare and some special display lists
+  from fast64 which draw triangles two or more times with different CC settings,
+  this enables **cel shading**. Besides cel shading, `G_LIGHTTOALPHA` can also
+  be used for [bump mapping](https://renderu.com/en/spookyiluhablog/post/23631)
+  or other unusual CC effects (e.g. texture minus vertex color times lighting).
+- New geometry mode bits `G_FRESNEL_COLOR` or `G_FRESNEL_ALPHA` enable
+  **Fresnel**. The dot product between a vertex normal and the vector from the
+  vertex to the camera is computed; this is then scaled and offset with settable
+  factors. The resulting value is then stored to shade color or shade alpha.
+  This is useful for:
+    - making surfaces like water and glass fade between transparent when viewed
+      straight-on and opaque when viewed at a large angle
+    - applying a fake "outline" around the border of meshes
+    - the N64 bump mapping implementation mentioned above
+- New geometry mode bit `G_LIGHTING_SPECULAR` changes lighting computation from
+  diffuse to **specular**. If enabled, the vertex normal for lighting is
+  replaced with the reflection of the vertex-to-camera vector over the vertex
+  normal. Also, a new size value for each light controls how large the light
+  reflection appears to be. This technique is lower fidelity than the vanilla
+  `hilite` system, as it is per-vertex rather than per-pixel, but it allows the
+  material to be textured normally.
+- New geometry mode bits `G_ATTROFFSET_ST_ENABLE` and `G_ATTROFFSET_Z_ENABLE`
+  apply settable offsets to vertex ST (`SPAttrOffsetST`) and/or Z
+  (`SPAttrOffsetZ`) values. These offsets are applied after their respective
+  scales. For Z, this enables a method of drawing coplanar surfaces like decals
+  but **without the Z fighting** which can happen with the RDP's native decal
+  mode. For ST, this enables **UV scrolling** without CPU intervention.
+
+### Performance improvements
 
 - **56 verts** can fit into DMEM at once, up from 32 verts in F3DEX2, and only
   13% below the 64 verts of reject microcodes. This reduces DRAM traffic and
   RSP time as fewer verts have to be reloaded and re-transformed, and also makes
   display lists shorter.
-
-### New visual features
-
-- New geometry mode bit `G_PACKED_NORMALS` enables simultaneous vertex colors
-  and normals/lighting on the same object. There is no loss of color precision,
-  and only a fraction of a bit of loss of normals precision in each model space
-  axis. (The competing implementation loses no normals precision, but loses 3
-  bits of each color channel.)
-- New geometry mode bit `G_AMBOCCLUSION` enables ambient/directional occlusion
-  for opaque materials. Paint the ambient light level into the vertex alpha
-  channel; separate factors (set with `SPAmbOcclusion`) control how much this
-  affects the ambient light, all directional lights, and all point lights.
-- New geometry mode bit `G_LIGHTTOALPHA` moves light intensity (maximum of
-  R, G, and B of what would normally be the shade color after lighting) to shade
-  alpha. Then, if `G_PACKED_NORMALS` is also enabled, the shade RGB is set to
-  the vertex RGB. Together with alpha compare and some special display lists
-  from fast64 which draw triangles two or more times with different CC settings,
-  this enables cel shading. Besides cel shading, `G_LIGHTTOALPHA` can also be
-  used for [bump mapping](https://renderu.com/en/spookyiluhablog/post/23631) or
-  other unusual CC effects (e.g. vertex color multiplies texture, lighting
-  applied after).
-- New geometry mode bits `G_FRESNEL_COLOR` or `G_FRESNEL_ALPHA` enable Fresnel.
-  The dot product between a vertex normal and the vector from the vertex to the
-  camera is computed; this is then scaled and offset with settable factors. The
-  resulting value is then stored to shade color or shade alpha. This is useful
-  for:
-    - making surfaces like water and glass fade between transparent when viewed
-      straight-on and opaque when viewed at a large angle
-    - applying a fake "outline" around the border of meshes
-    - bump mapping
-- New geometry mode bit `G_LIGHTING_SPECULAR` changes lighting computation from
-  diffuse to specular. If enabled, the vertex normal for lighting is replaced
-  with the reflection of the vertex-to-camera vector over the vertex normal.
-  Also, a new size value for each light controls how large the light reflection
-  appears to be. This technique is lower fidelity than the vanilla `hilite`
-  system, as it is per-vertex rather than per-pixel, but it allows the material
-  to be textured normally.
-- New geometry mode bits `G_ATTROFFSET_ST_ENABLE` and `G_ATTROFFSET_Z_ENABLE`
-  apply settable offsets to vertex ST (`SPAttrOffsetST`) and/or Z
-  (`SPAttrOffsetZ`) values. These offsets are applied after their respective
-  scales. For Z, this enables a method of drawing coplanar surfaces like decals
-  but without the Z fighting which can happen with the RDP's native decal mode.
-  For ST, this enables UV scrolling without CPU intervention.
-
-### Performance improvements
-
-- New occlusion plane system allows the placement of a 3D quadrilateral where
-  objects behind this plane in screen space are culled. This can substantially
-  reduce the performance penalty of overdraw in scenes with walls in the middle,
-  such as a city or an indoor scene.
+- New **occlusion plane** system allows the placement of a 3D quadrilateral
+  where objects behind this plane in screen space are culled. This can
+  substantially reduce the performance penalty of overdraw in scenes with walls
+  in the middle, such as a city or an indoor scene.
 - If a material display list being drawn is the same as the last material, the
   texture loads in the material are skipped (the second time). This effectively
-  results in auto-batched rendering of repeated objects, as long as each only
-  uses one material. This system supports multitexture and all types of loads.
-- New `SPTriangleStrip` and `SPTriangleFan` commands pack up to 5 tris into one
-  64-bit GBI command (up from 2 tris in F3DEX2). In any given object, most tris
-  can be drawn with these commands, with only a few at the end drawn with
+  results in **auto-batched rendering** of repeated objects, as long as each
+  only uses one material. This system supports multitexture and all types of
+  loads.
+- New `SPTriangleStrip` and `SPTriangleFan` commands **pack up to 5 tris** into
+  one 64-bit GBI command (up from 2 tris in F3DEX2). In any given object, most
+  tris can be drawn with these commands, with only a few at the end drawn with
   `SP2Triangles` or `SP1Triangle`. So, this cuts the triangle portion of display
   lists roughly in half, saving DRAM traffic and ROM space.
 - New `SPAlphaCompareCull` command enables culling of triangles whose computed
   shade alpha values are all below or above a settable threshold. This
-  substantially reduces the performance penalty of cel shading--only tris which
-  "straddle" the cel threshold are drawn twice, the others are only drawn once.
+  **substantially reduces the performance penalty of cel shading**--only tris
+  which "straddle" the cel threshold are drawn twice, the others are only drawn
+  once.
 - A new "hints" system encodes the expected size of the target display list into
   call, branch, and return DL commands. This allows only the needed number of DL
   commands in the next DL to be fetched, rather than always fetching full
-  buffers, saving some DRAM traffic (maybe around 100 us per frame). The bits
-  used for this are ignored by HLE.
+  buffers, **saving some DRAM traffic** (maybe around 100 us per frame). The
+  bits used for this are ignored by HLE.
 - Clipped triangles are drawn by minimal overlapping scanlines algorithm; this
-  slightly improves RDP draw time for large tris (max of about 500 us per frame,
-  usually much less or zero).
+  **slightly improves RDP draw time** for large tris (max of about 500 us per
+  frame, usually much less or zero).
 
 ### Miscellaneous
 
-- Point lighting has been redesigned. The appearance when a light is close to an
-  object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where a Z
-  component was accidentally doubled in the point lighting calculations. The
+- **Point lighting** has been redesigned. The appearance when a light is close
+  to an object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where
+  a Z component was accidentally doubled in the point lighting calculations. The
   quadratic point light attenuation factor is now an E3M5 floating-point number.
   The performance penalty for point lighting has been reduced.
-- Maximum number of directional / point lights raised from 7 to 9. Minimum
+- Maximum number of directional / point **lights raised from 7 to 9**. Minimum
   number of directional / point lights lowered from 1 to 0 (F3DEX2 required at
   least one). Also supports loading all lights in one DMA transfer
   (`SPSetLights`), rather than one per light.
@@ -101,11 +99,11 @@ you should expect crashes and graphical issues.**
   selectable RDP command (e.g. `DPSetPrimColor`) with the RGB color of a
   selectable light (any including ambient). The alpha channel and any other
   parameters are encoded in the command. With some limitations, this allows the
-  tint colors of cel shading to match scene lighting with no code intervention.
-  Also useful for other lighting-dependent effects.
+  tint colors of cel shading to **match scene lighting** with no code
+  intervention. Also useful for other lighting-dependent effects.
 
-F3DEX3 also introduces four performance counters, which are accessible from the
-CPU after the graphics task finishes:
+F3DEX3 also introduces four **performance counters**, which are accessible from
+the CPU after the graphics task finishes:
 - Number of vertices processed by the RSP
 - Number of triangles requested in display lists. This does not count triangles
   skipped due to `SPCullDisplayList` or `SPBranchLessZ*`.
@@ -306,7 +304,7 @@ addition, all lighting-related commands--e.g. `gdSPDefLights*`, `SPNumLights`,
 `SPLight`, `SPLightColor`, `SPLookAt`--have had their encodings changed, making
 them binary incompatible. The lighting data structures, e.g. `Light_t`,
 `PosLight_t`, `LookAt_t`, `Lightsn`, `Lights*`, `PosLights*`, etc., have also
-changed.
+changed--generally only slightly, so most code is compatible with no changes.
 
 
 ## What are the tradeoffs for all these new features?
@@ -368,7 +366,8 @@ or shear gets more extreme.
 
 F3DEX3 provides three options for handling this (see `SPNormalsMode`):
 - `G_NORMALS_MODE_FAST`: Use M to transform normals. No performance penalty.
-  Lighting will be slightly wrong for objects with nonuniform scale or shear.
+  Lighting will be somewhat distorted for objects with nonuniform scale or
+  shear.
 - `G_NORMALS_MODE_AUTO`: The RSP will automatically compute M inverse transpose
   whenever M changes. Costs about 3.5 microseconds of DRAM time per matrix, i.e.
   per object or skeleton limb which has lighting enabled. Lighting is correct
@@ -382,7 +381,7 @@ nonuniform scale (e.g. Mario only while he is squashed).
 
 ### Optimizing for RSP code size
 
-A number of over-zealous optimizations in F3DEX2 which saved a cycle or two but
+A number of over-zealous optimizations in F3DEX2 which saved a few cycles but
 took several more instructions have been removed. F3DEX3 will often be slightly
 slower than F3DEX2 in RSP cycles (not DRAM traffic or RDP time), especially for
 large quantities of very short commands. Note that for certain codepaths such as
