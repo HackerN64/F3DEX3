@@ -8,7 +8,6 @@
 #define F3DEX_GBI_2 1
 #define F3DEX_GBI_3 1
 
-
 /* Private macro to wrap other macros in do {...} while (0) */
 #define _DW(macro) do {macro} while (0)
 
@@ -374,49 +373,115 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_ACMUX_0               7
 
 /* typical CC cycle 1 modes */
-#define G_CC_PRIMITIVE              0, 0, 0, PRIMITIVE, 0, 0, 0, PRIMITIVE
-#define G_CC_SHADE                  0, 0, 0, SHADE, 0, 0, 0, SHADE
-#define G_CC_MODULATEI              TEXEL0, 0, SHADE, 0, 0, 0, 0, SHADE
-#define G_CC_MODULATEIA             TEXEL0, 0, SHADE, 0, TEXEL0, 0, SHADE, 0
-#define G_CC_MODULATEIDECALA        TEXEL0, 0, SHADE, 0, 0, 0, 0, TEXEL0
-#define G_CC_MODULATERGB            G_CC_MODULATEI
-#define G_CC_MODULATERGBA           G_CC_MODULATEIA
-#define G_CC_MODULATERGBDECALA      G_CC_MODULATEIDECALA
-#define G_CC_MODULATEI_PRIM         TEXEL0, 0, PRIMITIVE, 0, 0, 0, 0, PRIMITIVE
-#define G_CC_MODULATEIA_PRIM        TEXEL0, 0, PRIMITIVE, 0, TEXEL0, 0, PRIMITIVE, 0
-#define G_CC_MODULATEIDECALA_PRIM   TEXEL0, 0, PRIMITIVE, 0, 0, 0, 0, TEXEL0
-#define G_CC_MODULATERGB_PRIM       G_CC_MODULATEI_PRIM
-#define G_CC_MODULATERGBA_PRIM      G_CC_MODULATEIA_PRIM
-#define G_CC_MODULATERGBDECALA_PRIM G_CC_MODULATEIDECALA_PRIM
-#define G_CC_DECALRGB               0, 0, 0, TEXEL0, 0, 0, 0, SHADE
-#define G_CC_DECALRGBA              0, 0, 0, TEXEL0, 0, 0, 0, TEXEL0
-#define G_CC_BLENDI                 ENVIRONMENT, SHADE, TEXEL0, SHADE, 0, 0, 0, SHADE
-#define G_CC_BLENDIA                ENVIRONMENT, SHADE, TEXEL0, SHADE, TEXEL0, 0, SHADE, 0
-#define G_CC_BLENDIDECALA           ENVIRONMENT, SHADE, TEXEL0, SHADE, 0, 0, 0, TEXEL0
-#define G_CC_BLENDRGBA              TEXEL0, SHADE, TEXEL0_ALPHA, SHADE, 0, 0, 0, SHADE
-#define G_CC_BLENDRGBDECALA         TEXEL0, SHADE, TEXEL0_ALPHA, SHADE, 0, 0, 0, TEXEL0
-#define G_CC_ADDRGB                 1, 0, TEXEL0, SHADE, 0, 0, 0, SHADE
-#define G_CC_ADDRGBDECALA           1, 0, TEXEL0, SHADE, 0, 0, 0, TEXEL0
+
+/* typical CC cycle 1 modes */
+#define	G_CC_PRIMITIVE              0, 0, 0, PRIMITIVE, 0, 0, 0, PRIMITIVE
+#define	G_CC_SHADE                  0, 0, 0, SHADE, 0, 0, 0, SHADE
+
+#define	G_CC_MODULATEI              TEXEL0, 0, SHADE, 0, 0, 0, 0, SHADE
+#define	G_CC_MODULATEIDECALA        TEXEL0, 0, SHADE, 0, 0, 0, 0, TEXEL0
+#define	G_CC_MODULATEIFADE          TEXEL0, 0, SHADE, 0, 0, 0, 0, ENVIRONMENT
+
+#define	G_CC_MODULATERGB            G_CC_MODULATEI
+#define	G_CC_MODULATERGBDECALA      G_CC_MODULATEIDECALA
+#define	G_CC_MODULATERGBFADE        G_CC_MODULATEIFADE
+
+#define	G_CC_MODULATEIA             TEXEL0, 0, SHADE, 0, TEXEL0, 0, SHADE, 0
+#define	G_CC_MODULATEIFADEA         TEXEL0, 0, SHADE, 0, TEXEL0, 0, ENVIRONMENT, 0
+
+#define	G_CC_MODULATEFADE           TEXEL0, 0, SHADE, 0, ENVIRONMENT, 0, TEXEL0, 0
+
+#define	G_CC_MODULATERGBA           G_CC_MODULATEIA
+#define	G_CC_MODULATERGBFADEA       G_CC_MODULATEIFADEA
+
+#define	G_CC_MODULATEI_PRIM         TEXEL0, 0, PRIMITIVE, 0, 0, 0, 0, PRIMITIVE
+#define	G_CC_MODULATEIA_PRIM        TEXEL0, 0, PRIMITIVE, 0, TEXEL0, 0, PRIMITIVE, 0
+#define	G_CC_MODULATEIDECALA_PRIM   TEXEL0, 0, PRIMITIVE, 0, 0, 0, 0, TEXEL0
+
+#define	G_CC_MODULATERGB_PRIM       G_CC_MODULATEI_PRIM
+#define	G_CC_MODULATERGBA_PRIM      G_CC_MODULATEIA_PRIM
+#define	G_CC_MODULATERGBDECALA_PRIM G_CC_MODULATEIDECALA_PRIM
+
+#define	G_CC_FADE                   SHADE, 0, ENVIRONMENT, 0, SHADE, 0, ENVIRONMENT, 0
+#define	G_CC_FADEA                  TEXEL0, 0, ENVIRONMENT, 0, TEXEL0, 0, ENVIRONMENT, 0
+
+#define	G_CC_DECALRGB               0, 0, 0, TEXEL0, 0, 0, 0, SHADE
+#define	G_CC_DECALRGBA              0, 0, 0, TEXEL0, 0, 0, 0, TEXEL0
+#define	G_CC_DECALFADE              0, 0, 0, TEXEL0, 0, 0, 0, ENVIRONMENT
+
+#define	G_CC_DECALFADEA             0, 0, 0, TEXEL0, TEXEL0, 0, ENVIRONMENT, 0
+
+#define	G_CC_BLENDI                 ENVIRONMENT, SHADE, TEXEL0, SHADE, 0, 0, 0, SHADE
+#define	G_CC_BLENDIA                ENVIRONMENT, SHADE, TEXEL0, SHADE, TEXEL0, 0, SHADE, 0
+#define	G_CC_BLENDIDECALA           ENVIRONMENT, SHADE, TEXEL0, SHADE, 0, 0, 0, TEXEL0
+
+#define	G_CC_BLENDRGBA              TEXEL0, SHADE, TEXEL0_ALPHA, SHADE, 0, 0, 0, SHADE
+#define	G_CC_BLENDRGBDECALA         TEXEL0, SHADE, TEXEL0_ALPHA, SHADE, 0, 0, 0, TEXEL0
+#define	G_CC_BLENDRGBFADEA          TEXEL0, SHADE, TEXEL0_ALPHA, SHADE, 0, 0, 0, ENVIRONMENT
+
+#define G_CC_ADDRGB                 TEXEL0, 0, TEXEL0, SHADE, 0, 0, 0, SHADE
+#define G_CC_ADDRGBDECALA           TEXEL0, 0, TEXEL0, SHADE, 0, 0, 0, TEXEL0
+#define G_CC_ADDRGBFADE             TEXEL0, 0, TEXEL0, SHADE, 0, 0, 0, ENVIRONMENT
+
 #define G_CC_REFLECTRGB             ENVIRONMENT, 0, TEXEL0, SHADE, 0, 0, 0, SHADE
 #define G_CC_REFLECTRGBDECALA       ENVIRONMENT, 0, TEXEL0, SHADE, 0, 0, 0, TEXEL0
+
 #define G_CC_HILITERGB              PRIMITIVE, SHADE, TEXEL0, SHADE, 0, 0, 0, SHADE
 #define G_CC_HILITERGBA             PRIMITIVE, SHADE, TEXEL0, SHADE, PRIMITIVE, SHADE, TEXEL0, SHADE
 #define G_CC_HILITERGBDECALA        PRIMITIVE, SHADE, TEXEL0, SHADE, 0, 0, 0, TEXEL0
+
 #define G_CC_SHADEDECALA            0, 0, 0, SHADE, 0, 0, 0, TEXEL0
-#define G_CC_BLENDPE                PRIMITIVE, ENVIRONMENT, TEXEL0, ENVIRONMENT, TEXEL0, 0, SHADE, 0
-#define G_CC_BLENDPEDECALA          PRIMITIVE, ENVIRONMENT, TEXEL0, ENVIRONMENT, 0, 0, 0, TEXEL0
+#define G_CC_SHADEFADEA             0, 0, 0, SHADE, 0, 0, 0, ENVIRONMENT
+
+#define	G_CC_BLENDPE                PRIMITIVE, ENVIRONMENT, TEXEL0, ENVIRONMENT, TEXEL0, 0, SHADE, 0
+#define	G_CC_BLENDPEDECALA          PRIMITIVE, ENVIRONMENT, TEXEL0, ENVIRONMENT, 0, 0, 0, TEXEL0
 
 /* oddball modes */
-#define _G_CC_BLENDPE               ENVIRONMENT, PRIMITIVE, TEXEL0, PRIMITIVE, TEXEL0, 0, SHADE, 0
-#define _G_CC_BLENDPEDECALA         ENVIRONMENT, PRIMITIVE, TEXEL0, PRIMITIVE, 0, 0, 0, TEXEL0
-#define _G_CC_TWOCOLORTEX           PRIMITIVE, SHADE, TEXEL0, SHADE, 0, 0, 0, SHADE
+#define	_G_CC_BLENDPE       ENVIRONMENT, PRIMITIVE, TEXEL0, PRIMITIVE, TEXEL0, 0, SHADE, 0
+#define	_G_CC_BLENDPEDECALA ENVIRONMENT, PRIMITIVE, TEXEL0, PRIMITIVE, 0, 0, 0, TEXEL0
+#define	_G_CC_TWOCOLORTEX   PRIMITIVE, SHADE, TEXEL0, SHADE, 0, 0, 0, SHADE
 /* used for 1-cycle sparse mip-maps, primitive color has color of lowest LOD */
-#define _G_CC_SPARSEST              PRIMITIVE, TEXEL0, LOD_FRACTION, TEXEL0, PRIMITIVE, TEXEL0, LOD_FRACTION, TEXEL0
-#define G_CC_TEMPLERP               TEXEL1, TEXEL0, PRIM_LOD_FRAC, TEXEL0, TEXEL1, TEXEL0, PRIM_LOD_FRAC, TEXEL0
+#define	_G_CC_SPARSEST      PRIMITIVE, TEXEL0, LOD_FRACTION, TEXEL0, PRIMITIVE, TEXEL0, LOD_FRACTION, TEXEL0
+#define G_CC_TEMPLERP       TEXEL1, TEXEL0, PRIM_LOD_FRAC, TEXEL0, TEXEL1, TEXEL0, PRIM_LOD_FRAC, TEXEL0
 
 /* typical CC cycle 1 modes, usually followed by other cycle 2 modes */
-#define G_CC_TRILERP                TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0, TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0
-#define G_CC_INTERFERENCE           TEXEL0, 0, TEXEL1, 0, TEXEL0, 0, TEXEL1, 0
+#define	G_CC_TRILERP        TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0, TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0
+#define	G_CC_INTERFERENCE   TEXEL0, 0, TEXEL1, 0, TEXEL0, 0, TEXEL1, 0
+
+/*
+ *  One-cycle color convert operation
+ */
+#define	G_CC_1CYUV2RGB      TEXEL0, K4, K5, TEXEL0, 0, 0, 0, SHADE
+
+/*
+ *  NOTE: YUV2RGB expects TF step1 color conversion to occur in 2nd clock.
+ * Therefore, CC looks for step1 results in TEXEL1
+ */
+#define	G_CC_YUV2RGB        TEXEL1, K4, K5, TEXEL1, 0, 0, 0, 0
+
+/* typical CC cycle 2 modes */
+#define	G_CC_PASS2              0, 0, 0, COMBINED, 0, 0, 0, COMBINED
+#define	G_CC_MODULATEI2         COMBINED, 0, SHADE, 0, 0, 0, 0, SHADE
+#define	G_CC_MODULATEIA2        COMBINED, 0, SHADE, 0, COMBINED, 0, SHADE, 0
+#define	G_CC_MODULATERGB2       G_CC_MODULATEI2
+#define	G_CC_MODULATERGBA2      G_CC_MODULATEIA2
+#define	G_CC_MODULATEI_PRIM2    COMBINED, 0, PRIMITIVE, 0, 0, 0, 0, PRIMITIVE
+#define	G_CC_MODULATEIA_PRIM2   COMBINED, 0, PRIMITIVE, 0, COMBINED, 0, PRIMITIVE, 0
+#define	G_CC_MODULATERGB_PRIM2  G_CC_MODULATEI_PRIM2
+#define	G_CC_MODULATERGBA_PRIM2 G_CC_MODULATEIA_PRIM2
+#define	G_CC_DECALRGB2          0, 0, 0, COMBINED, 0, 0, 0, SHADE
+/*
+ * ?
+#define	G_CC_DECALRGBA2		COMBINED, SHADE, COMBINED_ALPHA, SHADE, 0, 0, 0, SHADE
+*/
+#define	G_CC_BLENDI2            ENVIRONMENT, SHADE, COMBINED, SHADE, 0, 0, 0, SHADE
+#define	G_CC_BLENDIA2           ENVIRONMENT, SHADE, COMBINED, SHADE, COMBINED, 0, SHADE, 0
+#define	G_CC_CHROMA_KEY2        TEXEL0, CENTER, SCALE, 0, 0, 0, 0, 0
+#define G_CC_HILITERGB2         ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, SHADE
+#define G_CC_HILITERGBA2        ENVIRONMENT, COMBINED, TEXEL0, COMBINED, ENVIRONMENT, COMBINED, TEXEL0, COMBINED
+#define G_CC_HILITERGBDECALA2   ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, TEXEL0
+#define G_CC_HILITERGBPASSA2    ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, COMBINED
+
 
 /*
  *  One-cycle color convert operation
@@ -791,7 +856,12 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
     CVG_DST_CLAMP | ZMODE_OPA |                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_0, G_BL_CLR_IN, G_BL_1)
 
+/* Custom version of RM_AA_ZB_XLU_SURF with Z_UPD */
+#define RM_CUSTOM_AA_ZB_XLU_SURF(clk)				\
+	RM_AA_ZB_XLU_SURF(clk) | Z_UPD
 
+#define G_RM_CUSTOM_AA_ZB_XLU_SURF	RM_CUSTOM_AA_ZB_XLU_SURF(1)
+#define G_RM_CUSTOM_AA_ZB_XLU_SURF2	RM_CUSTOM_AA_ZB_XLU_SURF(2)
 
 #define G_RM_AA_ZB_OPA_SURF     RM_AA_ZB_OPA_SURF(1)
 #define G_RM_AA_ZB_OPA_SURF2    RM_AA_ZB_OPA_SURF(2)
@@ -1276,6 +1346,7 @@ typedef struct {
                 { r1, g1, b1 }, 0,              \
                 { r1, g1, b1 }, 0,              \
                 { x1, y1, z1 }, 0,              \
+		        { 0, 0, 0 }, 0                  \
             }}                                  \
         },                                      \
         {{                                      \
@@ -1293,11 +1364,13 @@ typedef struct {
                 { r1, g1, b1 }, 0,              \
                 { r1, g1, b1 }, 0,              \
                 { x1, y1, z1 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r2, g2, b2 }, 0,              \
                 { r2, g2, b2 }, 0,              \
                 { x2, y2, z2 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }}                                  \
         },                                      \
         {{                                      \
@@ -1316,16 +1389,19 @@ typedef struct {
                 { r1, g1, b1 }, 0,              \
                 { r1, g1, b1 }, 0,              \
                 { x1, y1, z1 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r2, g2, b2 }, 0,              \
                 { r2, g2, b2 }, 0,              \
                 { x2, y2, z2 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r3, g3, b3 }, 0,              \
                 { r3, g3, b3 }, 0,              \
                 { x3, y3, z3 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }}                                  \
         },                                      \
         {{                                      \
@@ -1345,21 +1421,25 @@ typedef struct {
                 { r1, g1, b1 }, 0,              \
                 { r1, g1, b1 }, 0,              \
                 { x1, y1, z1 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r2, g2, b2 }, 0,              \
                 { r2, g2, b2 }, 0,              \
                 { x2, y2, z2 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r3, g3, b3 }, 0,              \
                 { r3, g3, b3 }, 0,              \
                 { x3, y3, z3 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r4, g4, b4 }, 0,              \
                 { r4, g4, b4 }, 0,              \
                 { x4, y4, z4 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }}                                  \
         },                                      \
         {{                                      \
@@ -1380,26 +1460,31 @@ typedef struct {
                 { r1, g1, b1 }, 0,              \
                 { r1, g1, b1 }, 0,              \
                 { x1, y1, z1 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r2, g2, b2 }, 0,              \
                 { r2, g2, b2 }, 0,              \
                 { x2, y2, z2 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r3, g3, b3 }, 0,              \
                 { r3, g3, b3 }, 0,              \
                 { x3, y3, z3 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r4, g4, b4 }, 0,              \
                 { r4, g4, b4 }, 0,              \
                 { x4, y4, z4 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r5, g5, b5 }, 0,              \
                 { r5, g5, b5 }, 0,              \
                 { x5, y5, z5 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }}                                  \
         },                                      \
         {{                                      \
@@ -1421,31 +1506,37 @@ typedef struct {
                 { r1, g1, b1 }, 0,              \
                 { x1, y1, z1 }, 0,              \
                 { r1, g1, b1 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r2, g2, b2 }, 0,              \
                 { r2, g2, b2 }, 0,              \
                 { x2, y2, z2 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r3, g3, b3 }, 0,              \
                 { r3, g3, b3 }, 0,              \
                 { x3, y3, z3 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r4, g4, b4 }, 0,              \
                 { r4, g4, b4 }, 0,              \
                 { x4, y4, z4 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r5, g5, b5 }, 0,              \
                 { r5, g5, b5 }, 0,              \
                 { x5, y5, z5 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r6, g6, b6 }, 0,              \
                 { r6, g6, b6 }, 0,              \
                 { x6, y6, z6 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }}                                  \
         },                                      \
         {{                                      \
@@ -1468,36 +1559,43 @@ typedef struct {
                 { r1, g1, b1 }, 0,              \
                 { r1, g1, b1 }, 0,              \
                 { x1, y1, z1 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r2, g2, b2 }, 0,              \
                 { r2, g2, b2 }, 0,              \
                 { x2, y2, z2 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r3, g3, b3 }, 0,              \
                 { r3, g3, b3 }, 0,              \
                 { x3, y3, z3 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r4, g4, b4 }, 0,              \
                 { r4, g4, b4 }, 0,              \
                 { x4, y4, z4 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r5, g5, b5 }, 0,              \
                 { r5, g5, b5 }, 0,              \
                 { x5, y5, z5 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r6, g6, b6 }, 0,              \
                 { r6, g6, b6 }, 0,              \
                 { x6, y6, z6 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r7, g7, b7 }, 0,              \
                 { r7, g7, b7 }, 0,              \
                 { x7, y7, z7 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }}                                  \
         },                                      \
         {{                                      \
@@ -1521,41 +1619,49 @@ typedef struct {
                 { r1, g1, b1 }, 0,              \
                 { r1, g1, b1 }, 0,              \
                 { x1, y1, z1 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r2, g2, b2 }, 0,              \
                 { r2, g2, b2 }, 0,              \
                 { x2, y2, z2 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r3, g3, b3 }, 0,              \
                 { r3, g3, b3 }, 0,              \
                 { x3, y3, z3 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r4, g4, b4 }, 0,              \
                 { r4, g4, b4 }, 0,              \
                 { x4, y4, z4 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r5, g5, b5 }, 0,              \
                 { r5, g5, b5 }, 0,              \
                 { x5, y5, z5 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r6, g6, b6 }, 0,              \
                 { r6, g6, b6 }, 0,              \
                 { x6, y6, z6 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r7, g7, b7 }, 0,              \
                 { r7, g7, b7 }, 0,              \
                 { x7, y7, z7 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r8, g8, b8 }, 0,              \
                 { r8, g8, b8 }, 0,              \
                 { x8, y8, z8 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }}                                  \
         },                                      \
         {{                                      \
@@ -1580,46 +1686,55 @@ typedef struct {
                 { r1, g1, b1 }, 0,              \
                 { r1, g1, b1 }, 0,              \
                 { x1, y1, z1 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r2, g2, b2 }, 0,              \
                 { r2, g2, b2 }, 0,              \
                 { x2, y2, z2 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r3, g3, b3 }, 0,              \
                 { r3, g3, b3 }, 0,              \
                 { x3, y3, z3 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r4, g4, b4 }, 0,              \
                 { r4, g4, b4 }, 0,              \
                 { x4, y4, z4 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r5, g5, b5 }, 0,              \
                 { r5, g5, b5 }, 0,              \
                 { x5, y5, z5 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r6, g6, b6 }, 0,              \
                 { r6, g6, b6 }, 0,              \
                 { x6, y6, z6 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r7, g7, b7 }, 0,              \
                 { r7, g7, b7 }, 0,              \
                 { x7, y7, z7 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r8, g8, b8 }, 0,              \
                 { r8, g8, b8 }, 0,              \
                 { x8, y8, z8 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }},                                 \
             {{                                  \
                 { r9, g9, b9 }, 0,              \
                 { r9, g9, b9 }, 0,              \
                 { x9, y9, z9 }, 0,              \
+                { 0, 0, 0 }, 0                  \
             }}                                  \
         },                                      \
         {{                                      \
@@ -3224,6 +3339,7 @@ _DW({                                                   \
 #define gSPLoadGeometryMode(pkt, word)  gSPGeometryMode((pkt), -1, (word))
 #define gsSPLoadGeometryMode(word)      gsSPGeometryMode(      -1, (word))
 
+#define gsSPGeometryModeSetFirst(c, s)	gsSPGeometryMode(c, s)
 
 #define gSPSetOtherMode(pkt, cmd, sft, len, data)           \
 _DW({                                                       \
