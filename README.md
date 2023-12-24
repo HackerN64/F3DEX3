@@ -122,7 +122,7 @@ For an OoT codebase, only a few minor changes are required to use F3DEX3.
 However, more changes are recommended to increase performance and enable new
 features.
 
-There is only one build-time option for F3DEX3: `make F3DEX3_BrW` if the
+Select the correct version of F3DEX3 for your game: `make F3DEX3_BrW` if the
 microcode is replacing F3DZEX (i.e. OoT or MM), otherwise `make F3DEX3_BrZ` if
 the microcode is replacing F3DEX2 or an earlier F3D version (i.e. SM64). This
 controls whether `SPBranchLessZ*` uses the vertex's W coordinate or screen Z
@@ -431,6 +431,36 @@ two tris, saving a substantial amount of DMEM.
   drawing tris with those verts will lead to incorrect fog values for those
   tris. In F3DEX2, the fog settings at vertex load time would always be used,
   even if they were changed before drawing tris.
+
+
+## Debugging
+
+To help debug lighting issues, add `CFG_DEBUG_NORMALS` to the `OPTIONS :=` line
+of your selected microcode version in the Makefile (near the bottom), then
+`make clean` and `make` again. This feature causes the vertex colors of any
+material with lighting enabled to be set to the transformed, normalized world
+space normals. The X, Y, and Z components map to R, G, and B, with each
+dimension's conceptual (-1.0 ... 1.0) range mapped to (0 ... 255). This also
+breaks vertex alpha and texgen / lookat.
+
+Some ways to use this for debugging are:
+- If the normals have obvious problems (e.g. flickering, or not changing
+  smoothly as the object rotates / animates), there is likely a problem with the
+  model space normals or the M matrix. Conversely, if there is a problem with
+  the standard lighting results (e.g. flickering) but the normals don't have
+  this problem, the problem is likely in the lighting data.
+- Check that the colors don't change based on the camera position, but DO change
+  as the object rotates, so that the same side of an object in world space is
+  always the same color.
+- Make a simple object like an octahedron or sphere, view it in game, and check
+  that the normals are correct. A normal pointing along +X would be
+  (1.0, 0.0, 0.0), meaning (255, 128, 128) or pink. A normal pointing along -X
+  would be (-1.0, 0.0, 0.0), meaning (0, 128, 128) or dark cyan. Bright, fully
+  saturated colors like green (0, 255, 0), yellow (255, 255, 0), or black should
+  never appear as these would correspond to impossibly long normals.
+- Make the same object (octahedron is easiest in this case) with vertex colors
+  which match what the normals should be, and compare them.
+
 
 ## Credits
 

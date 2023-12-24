@@ -2202,9 +2202,16 @@ lt_after_xfrm_normals:
     jal     lt_normalize
      luv    vPairLt, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
     // Set up ambient occlusion: light *= (factor * (alpha - 1) + 1)
+.if CFG_DEBUG_NORMALS
+.warning "Debug normals visualization is enabled"
+    vmudh   $v29, vOne, $v31[5] // 0x4000; middle gray
+    j       vtx_return_from_lighting
+     vmacf  vPairRGBA, vNrmOut, $v31[5] // 0x4000; + 0.5 * normal
+.else
     vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
     vmadm   vCCC, vPairRGBA, $v30[0] // + (alpha - 1) * aoAmb factor; elems 3, 7
     vcopy   vPairNrml, vNrmOut
+.endif
     beqz    $12, lt_loop // Not specular or fresnel
      vmulf  vPairLt, vPairLt, vCCC[3h] // light color *= ambient factor
     // Get vNrmOut = normalize(camera - vertex), vAAA = (vPairNrml dot vNrmOut)
