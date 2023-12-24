@@ -437,50 +437,50 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define	G_CC_BLENDPEDECALA          PRIMITIVE, ENVIRONMENT, TEXEL0, ENVIRONMENT, 0, 0, 0, TEXEL0
 
 /* oddball modes */
-#define	_G_CC_BLENDPE       ENVIRONMENT, PRIMITIVE, TEXEL0, PRIMITIVE, TEXEL0, 0, SHADE, 0
-#define	_G_CC_BLENDPEDECALA ENVIRONMENT, PRIMITIVE, TEXEL0, PRIMITIVE, 0, 0, 0, TEXEL0
-#define	_G_CC_TWOCOLORTEX   PRIMITIVE, SHADE, TEXEL0, SHADE, 0, 0, 0, SHADE
+#define	_G_CC_BLENDPE               ENVIRONMENT, PRIMITIVE, TEXEL0, PRIMITIVE, TEXEL0, 0, SHADE, 0
+#define	_G_CC_BLENDPEDECALA         ENVIRONMENT, PRIMITIVE, TEXEL0, PRIMITIVE, 0, 0, 0, TEXEL0
+#define	_G_CC_TWOCOLORTEX           PRIMITIVE, SHADE, TEXEL0, SHADE, 0, 0, 0, SHADE
 /* used for 1-cycle sparse mip-maps, primitive color has color of lowest LOD */
-#define	_G_CC_SPARSEST      PRIMITIVE, TEXEL0, LOD_FRACTION, TEXEL0, PRIMITIVE, TEXEL0, LOD_FRACTION, TEXEL0
-#define G_CC_TEMPLERP       TEXEL1, TEXEL0, PRIM_LOD_FRAC, TEXEL0, TEXEL1, TEXEL0, PRIM_LOD_FRAC, TEXEL0
+#define	_G_CC_SPARSEST              PRIMITIVE, TEXEL0, LOD_FRACTION, TEXEL0, PRIMITIVE, TEXEL0, LOD_FRACTION, TEXEL0
+#define G_CC_TEMPLERP               TEXEL1, TEXEL0, PRIM_LOD_FRAC, TEXEL0, TEXEL1, TEXEL0, PRIM_LOD_FRAC, TEXEL0
 
 /* typical CC cycle 1 modes, usually followed by other cycle 2 modes */
-#define	G_CC_TRILERP        TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0, TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0
-#define	G_CC_INTERFERENCE   TEXEL0, 0, TEXEL1, 0, TEXEL0, 0, TEXEL1, 0
+#define	G_CC_TRILERP                TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0, TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0
+#define	G_CC_INTERFERENCE           TEXEL0, 0, TEXEL1, 0, TEXEL0, 0, TEXEL1, 0
 
 /*
  *  One-cycle color convert operation
  */
-#define	G_CC_1CYUV2RGB      TEXEL0, K4, K5, TEXEL0, 0, 0, 0, SHADE
+#define	G_CC_1CYUV2RGB              TEXEL0, K4, K5, TEXEL0, 0, 0, 0, SHADE
 
 /*
  *  NOTE: YUV2RGB expects TF step1 color conversion to occur in 2nd clock.
  * Therefore, CC looks for step1 results in TEXEL1
  */
-#define	G_CC_YUV2RGB        TEXEL1, K4, K5, TEXEL1, 0, 0, 0, 0
+#define	G_CC_YUV2RGB                TEXEL1, K4, K5, TEXEL1, 0, 0, 0, 0
 
 /* typical CC cycle 2 modes */
-#define	G_CC_PASS2              0, 0, 0, COMBINED, 0, 0, 0, COMBINED
-#define	G_CC_MODULATEI2         COMBINED, 0, SHADE, 0, 0, 0, 0, SHADE
-#define	G_CC_MODULATEIA2        COMBINED, 0, SHADE, 0, COMBINED, 0, SHADE, 0
-#define	G_CC_MODULATERGB2       G_CC_MODULATEI2
-#define	G_CC_MODULATERGBA2      G_CC_MODULATEIA2
-#define	G_CC_MODULATEI_PRIM2    COMBINED, 0, PRIMITIVE, 0, 0, 0, 0, PRIMITIVE
-#define	G_CC_MODULATEIA_PRIM2   COMBINED, 0, PRIMITIVE, 0, COMBINED, 0, PRIMITIVE, 0
-#define	G_CC_MODULATERGB_PRIM2  G_CC_MODULATEI_PRIM2
-#define	G_CC_MODULATERGBA_PRIM2 G_CC_MODULATEIA_PRIM2
-#define	G_CC_DECALRGB2          0, 0, 0, COMBINED, 0, 0, 0, SHADE
+#define	G_CC_PASS2                  0, 0, 0, COMBINED, 0, 0, 0, COMBINED
+#define	G_CC_MODULATEI2             COMBINED, 0, SHADE, 0, 0, 0, 0, SHADE
+#define	G_CC_MODULATEIA2            COMBINED, 0, SHADE, 0, COMBINED, 0, SHADE, 0
+#define	G_CC_MODULATERGB2           G_CC_MODULATEI2
+#define	G_CC_MODULATERGBA2          G_CC_MODULATEIA2
+#define	G_CC_MODULATEI_PRIM2        COMBINED, 0, PRIMITIVE, 0, 0, 0, 0, PRIMITIVE
+#define	G_CC_MODULATEIA_PRIM2       COMBINED, 0, PRIMITIVE, 0, COMBINED, 0, PRIMITIVE, 0
+#define	G_CC_MODULATERGB_PRIM2      G_CC_MODULATEI_PRIM2
+#define	G_CC_MODULATERGBA_PRIM2     G_CC_MODULATEIA_PRIM2
+#define	G_CC_DECALRGB2              0, 0, 0, COMBINED, 0, 0, 0, SHADE
 /*
  * ?
-#define	G_CC_DECALRGBA2		COMBINED, SHADE, COMBINED_ALPHA, SHADE, 0, 0, 0, SHADE
+#define	G_CC_DECALRGBA2		        COMBINED, SHADE, COMBINED_ALPHA, SHADE, 0, 0, 0, SHADE
 */
-#define	G_CC_BLENDI2            ENVIRONMENT, SHADE, COMBINED, SHADE, 0, 0, 0, SHADE
-#define	G_CC_BLENDIA2           ENVIRONMENT, SHADE, COMBINED, SHADE, COMBINED, 0, SHADE, 0
-#define	G_CC_CHROMA_KEY2        TEXEL0, CENTER, SCALE, 0, 0, 0, 0, 0
-#define G_CC_HILITERGB2         ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, SHADE
-#define G_CC_HILITERGBA2        ENVIRONMENT, COMBINED, TEXEL0, COMBINED, ENVIRONMENT, COMBINED, TEXEL0, COMBINED
-#define G_CC_HILITERGBDECALA2   ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, TEXEL0
-#define G_CC_HILITERGBPASSA2    ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, COMBINED
+#define	G_CC_BLENDI2                ENVIRONMENT, SHADE, COMBINED, SHADE, 0, 0, 0, SHADE
+#define	G_CC_BLENDIA2               ENVIRONMENT, SHADE, COMBINED, SHADE, COMBINED, 0, SHADE, 0
+#define	G_CC_CHROMA_KEY2            TEXEL0, CENTER, SCALE, 0, 0, 0, 0, 0
+#define G_CC_HILITERGB2             ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, SHADE
+#define G_CC_HILITERGBA2            ENVIRONMENT, COMBINED, TEXEL0, COMBINED, ENVIRONMENT, COMBINED, TEXEL0, COMBINED
+#define G_CC_HILITERGBDECALA2       ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, TEXEL0
+#define G_CC_HILITERGBPASSA2        ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, COMBINED
 
 
 /*
@@ -3082,22 +3082,27 @@ _DW({                                               \
     gsDma2p(      G_MOVEMEM, (l), sizeof(Ambient), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
 
 /*
- * gSPLightColor changes color of light without an additional DMA transfer.
- * col is a 32 bit word with r,g,b,a. For directional lights, a must be zero.
- * For point lights, a becomes both the constant and linear factors, which is
- * rarely desired. You can use the hidden _g*SPLightColor2 to specify a
- * different factor for each.
+ * gSPLightColor changes the color of a directional light without an additional
+ * DMA transfer.
+ * col is a 32 bit word where (col >> 24) & 0xFF is red, (col >> 16) & 0xFF is
+ * green, and (col >> 8) & 0xFF is blue. (col & 0xFF) is ignored and masked to
+ * zero.
  * n should be an integer 1-10 to apply to light 0-9.
  */
 #define gSPLightColor(pkt, n, col)                  \
 _DW({                                               \
-    gMoveWd(pkt, G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 0, col);   \
-    gMoveWd(pkt, G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 4, col);   \
+    gMoveWd(pkt, G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 0, ((col) & 0xFFFFFF00));   \
+    gMoveWd(pkt, G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 4, ((col) & 0xFFFFFF00));   \
 })
 #define gsSPLightColor(n, col)                      \
-    gsMoveWd(G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 0, col),       \
-    gsMoveWd(G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 4, col)
-
+    gsMoveWd(G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 0, ((col) & 0xFFFFFF00)),       \
+    gsMoveWd(G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 4, ((col) & 0xFFFFFF00))
+/*
+ * Version for point lights. (col1 & 0xFF) must be set to the point light constant
+ * factor (must be nonzero), and (col2 & 0xFF) must be set to the point light
+ * linear factor.
+ * n should be an integer 1-10 to apply to light 0-9.
+ */
 #define _gSPLightColor2(pkt, n, col1, col2) \
 _DW({\
   gMoveWd(pkt, G_MW_LIGHTCOL, (((n) - 1) * 0x10) + 0, col1); \

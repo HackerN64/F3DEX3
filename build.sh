@@ -1,4 +1,8 @@
 #!/bin/bash
+# Note: This is a convenience script for Sauraen to build the microcode, build
+# HackerOoT, and upload the ROM to the SummerCart64. You do NOT need to run this
+# script to build the microcode. To build the microcode, just run make F3DEX3_BrZ
+# or make F3DEX3_BrW.
 set -e
 make F3DEX3_BrW
 cp build/F3DEX3_BrW/F3DEX3_BrW.code ../../Mods/HackerOoT/data/F3DEX3_BrW.code
