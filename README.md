@@ -122,7 +122,7 @@ For an OoT codebase, only a few minor changes are required to use F3DEX3.
 However, more changes are recommended to increase performance and enable new
 features.
 
-Select the correct version of F3DEX3 for your game: `make F3DEX3_BrW` if the
+Select the correct version of F3DEX3 for your game: use `make F3DEX3_BrW` if the
 microcode is replacing F3DZEX (i.e. OoT or MM), otherwise `make F3DEX3_BrZ` if
 the microcode is replacing F3DEX2 or an earlier F3D version (i.e. SM64). This
 controls whether `SPBranchLessZ*` uses the vertex's W coordinate or screen Z
@@ -133,7 +133,7 @@ similar for other games):
 - Replace `include/ultra64/gbi.h` in your romhack with `gbi.h` from this repo.
 - Make the "Required Changes" listed below.
 - Build this repo: install the latest version of `armips`, then `make
-  F3DEX3_BrZ` or `make F3DEX3_BrW` (see above).
+  F3DEX3_BrZ` or `make F3DEX3_BrW`.
 - Copy the microcode binaries (`build/F3DEX3_X/F3DEX3_X.code` and
   `build/F3DEX3_X/F3DEX3_X.data`) to somewhere in your romhack repo, e.g. `data`.
 - In `data/rsp.rodata.s`, change the line between `fifoTextStart` and
@@ -157,6 +157,8 @@ similar for other games):
 
 ### Required Changes
 
+Both OoT and SM64:
+
 - Remove uses of internal GBI features which have been removed in F3DEX3 (see "C
   GBI Compatibility" section below for full list). In OoT, the only changes
   needed are:
@@ -178,6 +180,23 @@ similar for other games):
       `Lights_BindPoint`, `Lights_BindDirectional`, and `Lights_NewAndDraw`, set
       `l.type` to 0 right before setting `l.col`.
 
+SM64 only:
+
+- If you are using the vanilla lighting system where light directions are always
+  fixed, the vanilla permanent light direction of `{0x28, 0x28, 0x28}` must be
+  changed to `{0x49, 0x49, 0x49}`, or everything will be too dark. The former
+  vector is not properly normalized, but F3D through F3DEX2 normalize light
+  directions in the microcode, so it doesn't matter with those microcodes. In
+  contrast, F3DEX3 normalizes vertex normals (after transforming them), but
+  assumes light directions have already been normalized.
+- Matrix stack fix (world space lighting / view matrix in VP instead of in M) is
+  basically required. If you *really* want camera space lighting, use matrix
+  stack fix, transform the fixed camera space light direction by V inverse each
+  frame, and send that to the RSP. This will be faster than the alternative (not
+  using matrix stack fix and enabling `G_NORMALS_MODE_AUTO` to correct the
+  matrix).
+
+
 ### Recommended Changes (Non-Lighting)
 
 - Clean up any code using the deprecated, hacky `SPLookAtX` and `SPLookAtY` to
@@ -196,6 +215,11 @@ similar for other games):
 - Re-export as many display lists (scenes, objects, skeletons, etc.) as possible
   with fast64 set to F3DEX3 mode, to take advantage of the substantially larger
   vertex buffer, triangle packing commands, "hints" system, etc.
+- `#define REQUIRE_SEMICOLONS_AFTER_GBI_COMMANDS` (at the top of, or before
+  including, the GBI) for a more modern, OoT-style codebase where uses of GBI
+  commands require semicolons after them. SM64 omits the semicolons sometimes,
+  e.g. `gSPDisplayList(gfx++, foo) gSPEndDisplayList(gfx++);`. If you are using
+  `-Wpedantic`, using this define is required.
 - Once everything in your romhack is ported to F3DEX3 and everything is stable,
   `#define NO_SYNCS_IN_TEXTURE_LOADS` (at the top of, or before including, the
   GBI) and fix any crashes or graphical issues that arise. Display lists
@@ -402,6 +426,31 @@ changes to the clipping implementation which saved even more DMEM space.
 
 NoN (No Nearclipping) is also mandatory in F3DEX3, though this was already the
 microcode option used in OoT.
+
+### Removal of scaled vertex normals
+
+A few clever romhackers figured out that you could shrink the normals on verts
+in your mesh (so their length is less than "1") to make the lighting on those
+verts dimmer and create a version of ambient occlusion. F3DEX3 normalizes vertex
+normals after transforming them, which is required for most features of the
+lighting system including packed normals, so this no longer works. However,
+F3DEX3 has support for ambient occlusion via vertex alpha, which accomplishes
+the same goal with some extra benefits:
+- Much easier to create: just paint the vertex alpha in Blender / fast64. The
+  scaled normals approach was not supported in fast64 and had to be done with
+  scripts or by hand.
+- The amount of ambient occlusion in F3DEX3 can be set at runtime based on scene
+  lighting, whereas the scaled normals approach is baked into the mesh.
+- F3DEX3 can have the vertex alpha affect ambient, directional, and point lights
+  by different amounts, which is not possible with scaled normals.
+
+Furthermore, for partial HLE compatibility, the same mesh can have the ambient
+occlusion information encoded in both scaled normals and vertex alpha at the
+same time. HLE will ignore the vertex alpha AO but use the scaled normals;
+F3DEX3 will fix the normals' scale but then apply the AO.
+
+The only case where scaled normals work but F3DEX3 AO doesn't work is for meshes
+with vertex alpha actually used for transparency (therefore also no fog).
 
 ### RDP temporary buffers shrinking
 

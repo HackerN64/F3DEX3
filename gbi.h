@@ -8,8 +8,15 @@
 #define F3DEX_GBI_2 1
 #define F3DEX_GBI_3 1
 
-/* Private macro to wrap other macros in do {...} while (0) */
+#ifdef REQUIRE_SEMICOLONS_AFTER_GBI_COMMANDS
+/* OoT style, semicolons required after using macros, cleaner code. If modding
+SM64, will have to fix a few places the codebase omits the semicolons. */
 #define _DW(macro) do {macro} while (0)
+#else
+/* SM64 style, semicolons optional, uglier code, will produce tens of thousands
+of warnings if you use -Wpedantic. */
+#define _DW(macro) macro
+#endif
 
 /*
  * The following commands are the "generated" RDP commands; the user
@@ -990,10 +997,7 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
  */
 typedef struct {
     short          ob[3];   /* x, y, z */
-    union {
-        unsigned short packedNormals;
-        unsigned short flag;    /* for GBI backwards compatibility */
-    };
+    unsigned short flag;    /* Holds packed normals, or unused */
     short          tc[2];   /* texture coord */
     unsigned char  cn[4];   /* color & alpha */
 } Vtx_t;
@@ -1003,7 +1007,7 @@ typedef struct {
  */
 typedef struct {
     short          ob[3];   /* x, y, z */
-    unsigned short flag;    /* not used when normals are in colors */
+    unsigned short flag;    /* Packed normals are not used when normals are in colors */
     short          tc[2];   /* texture coord */
     signed char    n[3];    /* normal */
     unsigned char  a;       /* alpha  */
