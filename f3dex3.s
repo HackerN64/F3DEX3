@@ -1959,8 +1959,9 @@ task_done:
     lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
     addi    cmd_w1_dram, cmd_w1_dram, yieldDataFooter
     li      dmemAddr, 0x8000 | yieldDataFooter // negative = write
-    li      dmaLen, YIELD_DATA_FOOTER_SIZE - 1
     jal     dma_read_write
+     li     dmaLen, YIELD_DATA_FOOTER_SIZE - 1
+    jal     while_wait_dma_busy
      li     $12, SP_SET_SIG2   // task done signal
 set_status_and_break: // $12 is the status to set
     mtc0    $12, SP_STATUS
