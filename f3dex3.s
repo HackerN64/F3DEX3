@@ -2270,7 +2270,7 @@ lt_post:
     // vPairNrml normal [0h:2h] fresnel [3h], vPairLt [0h:2h], vAAA lookat 0 dir
 vLtRGBOut  equ $v25 // = vCCC: light / effects RGB output
 vLtAOut    equ $v26 // = vDDD: light / effects alpha output
-vLookat1   equ $v16 // = vPairNrml: lookat direction 1
+vLookat1   equ $v23 // = vAAA: lookat direction 1
 vLookat0   equ $v17 // = vPairLt:   lookat direction 0 (not initially)
     vadd    vPairRGBA, vPairRGBA, $v31[7]  // 0x7FFF; undo change for ambient occlusion
     andi    $11, $5, G_LIGHTTOALPHA >> 8
@@ -2308,7 +2308,7 @@ lt_skip_novtxcolor:
     vge     vPairRGBA, vPairRGBA, $v31[2]  // Clamp to >= 0 for fresnel; doesn't affect others
 lt_skip_fresnel:
     beqz    $12, vtx_return_from_lighting  // no texgen
-    // Texgen: vLookat0, vLookat1, have to leave vPairPosI/F, vPairRGBA; output vPairST
+    // Texgen: vLookat0, vPairNrml, have to leave vPairPosI/F, vPairRGBA; output vPairST
      vmudh  $v29, vOne, vLookat0[0h]
     lpv     vLookat1[4], (ltBufOfs + 0 - lightSize)(curLight) // Lookat 1 dir in elems 0-2
     vmadh   $v29, vOne, vLookat0[1h]
