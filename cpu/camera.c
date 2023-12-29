@@ -1,34 +1,35 @@
-/* This example code is for HackerOoT. For other games, similarly send the
-camera world position to the RSP whenever you send / apply the view matrix. */
+/* For any game, the idea is to send the camera world position to the RSP
+whenever you send / apply the view matrix. For OoT, this is not trivial because
+the game allocates the view matrix at the beginning of the frame and runs
+gSPMatrix, but at the end of the frame it updates the camera and then rewrites
+the allocated view matrix, changing it retroactively for the frame. So, we have
+to similarly save a pointer to the camera position, set at the beginning of the
+frame, and update it at the end of the frame. */
+
+/* In z64view.h, in the definition of the View struct, after Mtx* viewingPtr */
+PlainVtx* cameraWorldPosPtr;
 
 /* In z_view.c somewhere towards the top */
-PlainVtx* View_GetCameraWorld(View* view){
-    PlainVtx* cameraWorldPos = Graph_Alloc(view->gfxCtx, sizeof(PlainVtx));
+void View_SetCameraWorld(PlainVtx* cameraWorldPos, View* view){
     cameraWorldPos->c.pos[0] = (s16)view->eye.x;
     cameraWorldPos->c.pos[1] = (s16)view->eye.y;
     cameraWorldPos->c.pos[2] = (s16)view->eye.z;
+}
+PlainVtx* View_CreateCameraWorld(View* view){
+    PlainVtx* cameraWorldPos = Graph_Alloc(view->gfxCtx, sizeof(PlainVtx));
+    View_SetCameraWorld(cameraWorldPos, view);
     return cameraWorldPos;
 }
 
-/* Before CLOSE_DISPS in View_ApplyPerspective */
-PlainVtx* cameraWorldPos = View_GetCameraWorld(view);
-gSPCameraWorld(POLY_OPA_DISP++, cameraWorldPos);
-gSPCameraWorld(POLY_XLU_DISP++, cameraWorldPos);
+/* After each place in the functions in z_view.c where view->viewingPtr gets
+set */
+PlainVtx* cameraWorldPos = View_CreateCameraWorld(view);
+view->cameraWorldPosPtr = cameraWorldPos;
 
-/* Before CLOSE_DISPS in View_ApplyPerspectiveToOverlay */
-gSPCameraWorld(OVERLAY_DISP++, View_GetCameraWorld(view));
+/* In those same functions, right after the calls to
+gSPMatrix(GFX, viewing, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION)
+where GFX is POLY_OPA_DISP++, POLY_XLU_DISP++, OVERLAY_DISP++, or gfx++ */
+gSPCameraWorld(GFX, cameraWorldPos);
 
-/* After sending the viewing matrix to the RSP in View_ApplyTo */
-gSPCameraWorld(gfx++, View_GetCameraWorld(view));
-
-/* Bonus: To convert Fresnel lo and hi (values for where the Fresnel fade begins
-/* and ends, normally between 0.0 and 1.0) to scale and offset for SPFresnel */
-void FresnelParams(s16* scale, s16* offset, float lo, float hi){
-    s32 dotMin = (s32)(lo * 0x7FFF);
-    s32 dotMax = (s32)(hi * 0x7FFF);
-    if(dotMax == dotMin) ++dotMax;
-    s32 scale32 = 0x3F8000 / (dotMax - dotMin);
-    s32 offset32 = -(0x7F * dotMin) / (dotMax - dotMin);
-    *scale = (s16)MAX(MIN(scale32, 0x7FFF), -0x8000);
-    *offset = (s16)MAX(MIN(offset32, 0x7FFF), -0x8000);
-}
+/* The important part: in View_UpdateViewingMatrix */
+View_SetCameraWorld(view->cameraWorldPosPtr, view);
