@@ -793,7 +793,7 @@ run_next_DL_command:
     bgez    $2, refine_cmd_further                      // Otherwise $2 (negative) is the index
 do_cmd_jump_table:
      sll    $11, $2, 1                                  // Multiply jump table index by 2 for addr offset
-    lhu     $11, cmdJumpTable($11)                      // Load address of handler from jump table
+    lhu     $11, (cmdJumpTable)($11)                    // Load address of handler from jump table
     jr      $11                                         // Jump to handler
      // Delay slot must not affect $1, $7, $11
 G_DL_handler:
@@ -1113,7 +1113,7 @@ clip_nextcond:
      addi   clipMaskIdx, clipMaskIdx, -1
     
 clip_draw_tris:
-    lqv     $v30, v30Value($zero)
+    lqv     $v30, (v30Value)($zero)
 // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
     addi    clipPolySelect, clipPolySelect, -6 // = Pointer to first vertex
     // Available locals: most registers ($5, $6, $7, $8, $9, $11, $12, etc.)
@@ -1502,7 +1502,7 @@ vtx_addrs_from_cmd:
 vtx_indices_to_addr:
     // Input and output in $v27
     // Also out elem 3 -> $12, elem 7 -> $3 because these are used more than once
-    lqv     $v30, v30Value($zero)
+    lqv     $v30, (v30Value)($zero)
     vmudl   $v29, $v27, $v30[1]   // Multiply vtx indices times length
     vmadn   $v27, vOne, $v30[0]   // Add address of vertex buffer
     sb      $zero, materialCullMode // This covers all tri cmds, vtx, modify vtx, branchZ, cull
@@ -1646,7 +1646,7 @@ tV3AtI equ $v21
     vmrg    tV3AtI, $v25, tV3AtI        // RGB from $4, alpha from $3
 tri_skip_flat_shading:
     vrcp    $v20[2], $v6[1]
-    lb      $20, alphaCompareCullMode($zero)
+    lb      $20, (alphaCompareCullMode)($zero)
     vrcph   $v22[2], $v6[1]
     lw      $5, VTX_INV_W_VEC($1)
     vrcp    $v20[3], $v8[1]
@@ -2211,7 +2211,7 @@ lt_skip_packed_normals:
     vsub    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; offset alpha, will be fixed later
     lbu     curLight, numLightsxSize
     vmudn   $v29, vM0F, vPairNrml[0h]
-    lbu     $11, normalsMode($zero)
+    lbu     $11, (normalsMode)($zero)
     vmadh   $v29, vM0I, vPairNrml[0h]
     andi    $6, $5, G_LIGHTING_SPECULAR >> 8
     vmadn   $v29, vM1F, vPairNrml[1h]
@@ -2346,7 +2346,7 @@ lt_skip_novtxcolor:
      vmrg   vPairRGBA, vLtRGBOut, vLtAOut  // Merge base output and alpha output
     // Fresnel: dot product in vPairNrml[3h]. Also valid rest of vPairNrml for texgen,
     // vLookat0, vPairRGBA. Available: vAAA, vBBB, vNrmOut.
-    lqv     vBBB, v30Value($zero)       // Need 0x0100 constant, in elem 3
+    lqv     vBBB, (v30Value)($zero)     // Need 0x0100 constant, in elem 3
     vabs    vAAA, vPairNrml, vPairNrml  // Absolute value of dot product for underwater
     andi    $11, $5, G_FRESNEL_COLOR >> 8
     vmudh   $v29, vOne, $v30[7]         // Fresnel offset
