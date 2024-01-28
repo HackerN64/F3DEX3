@@ -460,16 +460,15 @@ clipPoly2:                              //  \ / \ / \
 vertexBuffer:
     .skip (G_MAX_VERTS * vtxSize)
 
-YIELD_DATA_FOOTER_SIZE equ 0x10
-yieldDataFooter equ OS_YIELD_DATA_SIZE - YIELD_DATA_FOOTER_SIZE
-
 .if . > yieldDataFooter
     // OS_YIELD_DATA_SIZE (0xC00) bytes of DMEM are saved; the last data in that is
     // the footer, organized as:
-    // +0: perfCounter1: Upper 16 bits: num verts; lower 16 bits: num tris sent to RDP
-    // +4: perfCounter2: Upper 18 bits: num tris requested; lower 14 bits: num tex/fill rects
-    // +8: taskDataPtr
-    // +C: ucode
+    // YDF_OFFSET_RDPWAITCYC  : How many loops we had to wait because the RDP FIFO was full
+    // YDF_OFFSET_GCLKSAMPLE  : Upper 16 bits: num times "GCLK is alive" was 1, out of:; lower 16 bits: num DL cmds
+    // YDF_OFFSET_PERFCOUNTER1: Upper 16 bits: num verts; lower 16 bits: num tris sent to RDP
+    // YDF_OFFSET_PERFCOUNTER2: Upper 18 bits: num tris requested; lower 14 bits: num tex/fill rects
+    // YDF_OFFSET_TASKDATAPTR : taskDataPtr
+    // YDF_OFFSET_UCODE       : ucode
     // So, any data starting from the address of this footer will be clobbered,
     // so the vertex buffer and other data which needs to be save across yield
     // can't extend here. (The input buffer will be reloaded from the next
@@ -592,6 +591,7 @@ vZero equ $v0  // all elements = 0
 
 // Global and semi-global (i.e. one main function + occasional local) scalar regs:
 //                 $zero // Hardwired zero scalar register
+gclkSample     equ $10   // RDP GCLK sampling counter
 altBaseReg     equ $13   // Alternate base address register for vector loads
 inputVtxPos    equ $14   // Pointer to loaded vertex to transform
 outputVtxPos   equ $15   // Pointer to vertex buffer to store transformed verts
@@ -607,6 +607,7 @@ taskDataPtr    equ $26   // Task data (display list) DRAM pointer
 inputBufferPos equ $27   // DMEM position within display list input buffer, relative to end
 perfCounter1   equ $28   // Upper 16 bits: num verts; lower 16 bits: num tris sent to RDP
 perfCounter2   equ $29   // Upper 18 bits: num tris requested; lower 14 bits: num tex/fill rects
+rdpWaitCyc     equ $30   // How many loops we had to wait because the RDP FIFO was full
 //                 $ra   // Return address
 
 // Misc scalar regs:
@@ -636,7 +637,7 @@ postOvlRA equ $12 // Commonly used locally
 //     Overlay 4, local
 // $8: secondVtxPos, local
 // $9: curLight, clip mask during clipping, local
-// $10: unused
+// $10: gclkSample (global)
 // $11: very common local
 // $12: postOvlRA, local
 // $13: altBaseReg (global)
@@ -657,7 +658,7 @@ postOvlRA equ $12 // Commonly used locally
 // $27: inputBufferPos (global)
 // $28: perfCounter1 (global)
 // $29: perfCounter2 (global)
-// $30: unused
+// $30: rdpWaitCyc (global)
 // $ra: Return address for jal, b*al
 
 // Initialization routines
@@ -679,44 +680,57 @@ start: // This is at IMEM 0x1080, not the start of IMEM
     beqz    $12, continue_from_os_task      // If latter, load DL (task data) pointer from OSTask
      sw     $zero, OSTask + OSTask_flags    // Clear all task flags, incl. yielded
 continue_from_yield:
-    lw      perfCounter1, yieldDataFooter + 0x0 // Perf counters saved here at yield
-    lw      perfCounter2, yieldDataFooter + 0x4 
+    // Perf counters saved here at yield
+    lw      rdpWaitCyc, yieldDataFooter + YDF_OFFSET_RDPWAITCYC
+    lw      gclkSample, yieldDataFooter + YDF_OFFSET_GCLKSAMPLE
+    lw      perfCounter1, yieldDataFooter + YDF_OFFSET_PERFCOUNTER1
+    lw      perfCounter2, yieldDataFooter + YDF_OFFSET_PERFCOUNTER2 
     j       finish_setup
-     lw     taskDataPtr, yieldDataFooter + 0x8  // load DL pointer from yield data
+     lw     taskDataPtr, yieldDataFooter + YDF_OFFSET_TASKDATAPTR
 
 initialize_rdp:
-    mfc0    $11, DPC_STATUS
-    andi    $11, $11, DPC_STATUS_XBUS_DMA
-    bnez    $11, wait_dpc_start_valid
-     mfc0   $2, DPC_END
-    lw      $3, OSTask + OSTask_output_buff
-    sub     $11, $3, $2
-    bgtz    $11, wait_dpc_start_valid
-     mfc0   $1, DPC_CURRENT
-    lw      $3, OSTask + OSTask_output_buff_size
-    beqz    $1, wait_dpc_start_valid
-     sub    $11, $1, $3
-    bgez    $11, wait_dpc_start_valid
+    mfc0    $11, DPC_STATUS               // Read RDP status
+    andi    $11, $11, DPC_STATUS_XBUS_DMA // Look at XBUS enabled bit
+    bnez    $11, @@start_new_buf          // If XBUS is enabled, start new buffer
+     mfc0   $2, DPC_END                   // Load RDP end pointer
+    lw      $3, OSTask + OSTask_output_buff // Load start of FIFO
+    sub     $11, $3, $2                   // If start of FIFO > RDP end,
+    bgtz    $11, @@start_new_buf          // start new buffer
+     mfc0   $1, DPC_CURRENT               // Load RDP current pointer
+    lw      $3, OSTask + OSTask_output_buff_size // Load end of FIFO
+    beqz    $1, @@start_new_buf           // If RDP current pointer is 0, start new buffer
+     sub    $11, $1, $3                   // If RDP current > end of fifo,
+    bgez    $11, @@start_new_buf          // start new buffer
      nop
-    bne     $1, $2, f3dzex_0000111C
-wait_dpc_start_valid:
-     mfc0   $11, DPC_STATUS
-    andi    $11, $11, DPC_STATUS_START_VALID
-    bnez    $11, wait_dpc_start_valid
-     li     $11, DPC_STATUS_CLR_XBUS
-    mtc0    $11, DPC_STATUS
-    lw      $2, OSTask + OSTask_output_buff_size
-    mtc0    $2, DPC_START
-    mtc0    $2, DPC_END
-f3dzex_0000111C:
-    sw      $2, rdpFifoPos
+    bne     $1, $2, @@continue_buffer     // If RDP current != RDP end, keep current buffer
+@@start_new_buf:
+    // There may be one buffer executing in the RDP, and another queued in the
+    // double-buffered start/end regs. Wait for the latter to be available
+    // (i.e. possibly one buffer executing, none waiting).
+     mfc0   $11, DPC_STATUS               // Read RDP status
+    andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
+    bnez    $11, @@start_new_buf          // Wait until double buffered start/end available
+     li     $11, DPC_STATUS_CLR_XBUS      // Bit to disable XBUS mode
+    mtc0    $11, DPC_STATUS               // Set bit, disable XBUS
+    lw      $2, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
+    // Set up the next buffer for the RDP to be zero size and at the end of the FIFO.
+    mtc0    $2, DPC_START                 // Set RDP start addr to end of FIFO
+    mtc0    $2, DPC_END                   // Set RDP end addr to end of FIFO
+@@continue_buffer:
+    // If we jumped here, the RDP is currently executing from the middle of the FIFO.
+    // So we can just append commands to there and move the end pointer.
+    sw      $2, rdpFifoPos                // Set FIFO position to end of FIFO or RDP end
     lw      $11, matrixStackPtr           // Initialize matrix stack pointer from OSTask
     bnez    $11, continue_from_os_task    // if not yet initialized
      lw     $11, OSTask + OSTask_dram_stack
     sw      $11, matrixStackPtr
 continue_from_os_task:
-    lw      perfCounter1, textureSettings1  // Counters stored here if jumped to different ucode
-    lw      perfCounter2, textureSettings2  // If starting from scratch, these are zero
+    // Counters stored here if jumped to different ucode
+    // If starting from scratch, these are zero
+    lw      rdpWaitCyc, mITMatrix + YDF_OFFSET_RDPWAITCYC
+    lw      gclkSample, mITMatrix + YDF_OFFSET_GCLKSAMPLE
+    lw      perfCounter1, mITMatrix + YDF_OFFSET_PERFCOUNTER1
+    lw      perfCounter2, mITMatrix + YDF_OFFSET_PERFCOUNTER2
     lw      taskDataPtr, OSTask + OSTask_data_ptr
 finish_setup:
     li      inputBufferPos, 0
@@ -745,6 +759,9 @@ wait_for_dma_and_run_next_command:
 G_POPMTX_end:
 G_MOVEMEM_end:
     jal     while_wait_dma_busy                         // wait for the DMA read to finish
+.if CFG_GCLK_SAMPLE
+G_LIGHTTORDP_handler:
+.endif
 G_SPNOOP_handler:
 run_next_DL_command:
      mfc0   $1, SP_STATUS                               // load the status word into register $1
@@ -755,6 +772,13 @@ run_next_DL_command:
      sra    $7, cmd_w0, 24                              // extract DL command byte from command word
     lw      cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
     addi    inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
+.if CFG_GCLK_SAMPLE
+    mfc0    $11, DPC_STATUS
+    andi    $11, $11, DPC_STATUS_GCLK_ALIVE             // Sample whether GCLK is active now
+    sll     $11, $11, 16 - 3                            // move from bit 3 to bit 16
+    addi    $11, $11, 1                                 // 1 counts that we sampled
+    add     gclkSample, gclkSample, $11                 // Add both to the perf counter
+.endif
     // $1 must remain zero
     // $7 must retain the command byte for load_mtx and overlay 4 stuff
     // $11 must contain the handler called for several handlers
@@ -816,20 +840,6 @@ G_ENDDL_handler:
     j       call_ret_common                 // has a different version in ovl1
      lw     taskDataPtr, (displayListStack)($1) // Load addr of DL to return to
 
-G_SETxIMG_handler:
-    beqz    $7, G_RDP_handler               // Don't do any of this for G_NOOP
-     lb     $3, materialCullMode            // Get current mode
-    jal     segmented_to_physical           // Convert image to physical address
-     lw     $2, lastMatDLPhyAddr            // Get last material physical addr
-    bnez    $3, G_RDP_handler               // If not in normal mode (0), exit
-     add    $12, taskDataPtr, inputBufferPos // Current material physical addr
-    beq     $12, $2, @@skip                 // Branch if we are executing the same mat again
-     sw     $12, lastMatDLPhyAddr           // Store material physical addr
-    li      $7, 1                           // > 0: in material first time
-@@skip:                                     // Otherwise $7 was < 0: cull mode (in mat second time)
-    j       G_RDP_handler
-     sb     $7, materialCullMode
-    
 refine_cmd_further:
     addi    $12, $7, -(0xFF00 | G_SETSCISSOR) // Relative to G_SETSCISSOR = 0
     bltz    $12, G_RDP_handler // G_RDPLOADSYNC through G_SETCONVERT
@@ -853,33 +863,41 @@ check_rdp_buffer_full:
      sub    $11, rdpCmdBufPtr, rdpCmdBufEndP1
     bltz    $11, return_routine         // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
 flush_rdp_buffer:
-     mfc0   $12, SP_DMA_BUSY
-    lw      cmd_w1_dram, rdpFifoPos
-    addi    dmaLen, $11, RDP_CMD_BUFSIZE + 8
-    bnez    $12, flush_rdp_buffer
-     lw     $12, OSTask + OSTask_output_buff_size
-    mtc0    cmd_w1_dram, DPC_END
-    add     $11, cmd_w1_dram, dmaLen
-    sub     $12, $12, $11
-    bgez    $12, f3dzex_000012A8
-@@await_start_valid:
-     mfc0   $11, DPC_STATUS
-    andi    $11, $11, DPC_STATUS_START_VALID
-    bnez    $11, @@await_start_valid
-     lw     cmd_w1_dram, OSTask + OSTask_output_buff
-f3dzex_00001298:
-    mfc0    $11, DPC_CURRENT
-    beq     $11, cmd_w1_dram, f3dzex_00001298
-     nop
-    mtc0    cmd_w1_dram, DPC_START
-f3dzex_000012A8:
-    mfc0    $11, DPC_CURRENT
-    sub     $11, $11, cmd_w1_dram
-    blez    $11, f3dzex_000012BC
-     sub    $11, $11, dmaLen
-    blez    $11, f3dzex_000012A8
-f3dzex_000012BC:
-     add    $11, cmd_w1_dram, dmaLen
+     mfc0   $12, SP_DMA_BUSY            // Check if any DMA is in flight
+    lw      cmd_w1_dram, rdpFifoPos     // FIFO pointer = end of RDP read, start of RSP write
+    addi    dmaLen, $11, RDP_CMD_BUFSIZE + 8 // dmaLen = size of DMEM buffer to copy
+    bnez    $12, flush_rdp_buffer       // Wait until no DMAs are active
+     lw     $12, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
+    mtc0    cmd_w1_dram, DPC_END        // Set RDP to execute until FIFO end (buf pushed last time)
+    add     $11, cmd_w1_dram, dmaLen    // $11 = future FIFO pointer if we append this new buffer
+    sub     $12, $12, $11               // $12 = FIFO end addr - future pointer
+    bgez    $12, @@has_room             // Branch if we can fit this
+@@await_rdp_dblbuf_avail:
+     mfc0   $11, DPC_STATUS             // Read RDP status
+    andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
+    bnez    $11, @@await_rdp_dblbuf_avail  // Wait until double buffered start/end available
+     addi   rdpWaitCyc, rdpWaitCyc, 7   // 4 instr + 2 after mfc + 1 taken branch
+    lw      cmd_w1_dram, OSTask + OSTask_output_buff // Start of FIFO
+@@await_past_first_instr:
+    mfc0    $11, DPC_CURRENT            // Load RDP current pointer
+    beq     $11, cmd_w1_dram, @@await_past_first_instr // Wait until RDP moved past start
+     addi   rdpWaitCyc, rdpWaitCyc, 6   // 3 instr + 2 after mfc + 1 taken branch
+    // Start was previously the start of the FIFO, unless this is the first buffer,
+    // in which case it was the end of the FIFO. Normally, when the RDP gets to end, if we
+    // have a new end value waiting (END_VALID), it'll load end but leave current. By
+    // setting start here, it will also load current with start.
+    mtc0    cmd_w1_dram, DPC_START      // Set RDP start to start of FIFO
+@@keep_waiting:
+    // This is here so we only count it when stalling below or on FIFO end codepath
+    addi    rdpWaitCyc, rdpWaitCyc, 10  // 7 instr + 2 after mfc + 1 taken branch
+@@has_room:
+    mfc0    $11, DPC_CURRENT            // Load RDP current pointer
+    sub     $11, $11, cmd_w1_dram       // Current - current end (rdpFifoPos or start)
+    blez    $11, @@copy_buffer          // Current is behind or at current end, can do copy
+     sub    $11, $11, dmaLen            // If amount current is ahead of current end
+    blez    $11, @@keep_waiting         // is <= size of buffer to copy, keep waiting
+@@copy_buffer:
+     add    $11, cmd_w1_dram, dmaLen    // New end is current end + buffer size
     sw      $11, rdpFifoPos
     // Set up the DMA from DMEM to the RDP fifo in RDRAM
     addi    dmaLen, dmaLen, -1                                  // subtract 1 from the length
@@ -1911,8 +1929,11 @@ ovl0_start:
     sub     $11, rdpCmdBufPtr, rdpCmdBufEndP1
     addi    $12, $11, (RDP_CMD_BUFSIZE + 8) - 1 // Does the current buffer contain anything?
     bgezal  $12, flush_rdp_buffer   // - 1 because there is no bgtzal instruction
-     sw     perfCounter1, yieldDataFooter + 0x0 // Stored here for yield and done
-    sw      perfCounter2, yieldDataFooter + 0x4 // otherwise this is temp memory
+     // Stored here for yield and done, otherwise this is temp memory
+     sw     perfCounter1, yieldDataFooter + YDF_OFFSET_PERFCOUNTER1
+    sw      perfCounter2, yieldDataFooter + YDF_OFFSET_PERFCOUNTER2
+    sw      rdpWaitCyc, yieldDataFooter + YDF_OFFSET_RDPWAITCYC
+    sw      gclkSample, yieldDataFooter + YDF_OFFSET_GCLKSAMPLE
     jal     while_wait_dma_busy
      lw     $24, rdpFifoPos
     bltz    $1, task_done           // $1 < 0 = Got to the end of the parent DL
@@ -1923,8 +1944,12 @@ load_ucode:
     lw      cmd_w1_dram, (inputBufferEnd - 0x04)(inputBufferPos) // word 1 = ucode code DRAM addr
     sw      taskDataPtr, OSTask + OSTask_data_ptr // Store where we are in the DL
     sw      cmd_w1_dram, OSTask + OSTask_ucode // Store pointer to new ucode about to execute
-    sw      perfCounter1, textureSettings1 // Store counters in texture settings; first 0x180 of DMEM
-    sw      perfCounter2, textureSettings2 // will be preserved in ucode swap AND if other ucode yields
+    // Store counters in mITMatrix; first 0x180 of DMEM will be preserved in ucode swap AND
+    // if other ucode yields
+    sw      rdpWaitCyc, mITMatrix + YDF_OFFSET_RDPWAITCYC
+    sw      gclkSample, mITMatrix + YDF_OFFSET_GCLKSAMPLE
+    sw      perfCounter1, mITMatrix + YDF_OFFSET_PERFCOUNTER1
+    sw      perfCounter2, mITMatrix + YDF_OFFSET_PERFCOUNTER2
     li      dmemAddr, start         // Beginning of overwritable part of IMEM
     jal     dma_read_write          // DMA DRAM read -> IMEM write
      li     dmaLen, (while_wait_dma_busy - start) - 1 // End of overwritable part of IMEM
@@ -1949,13 +1974,13 @@ task_yield:
     li      dmemAddr, 0x8000                   // 0, but negative = write
     li      dmaLen, OS_YIELD_DATA_SIZE - 1
     li      $12, SP_SET_SIG1 | SP_SET_SIG2     // yielded and task done signals
-    sw      taskDataPtr, yieldDataFooter + 0x8 // Save pointer to where in DL
-    sw      $11, yieldDataFooter + 0xC
+    sw      taskDataPtr, yieldDataFooter + YDF_OFFSET_TASKDATAPTR // Save pointer to where in DL
+    sw      $11, yieldDataFooter + YDF_OFFSET_UCODE
     j       dma_read_write
      li     $ra, set_status_and_break
 
 task_done:
-    // Copy just the part of the yield data that has the perf counters.
+    // Copy just the yield data footer, which has the perf counters.
     lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
     addi    cmd_w1_dram, cmd_w1_dram, yieldDataFooter
     li      dmemAddr, 0x8000 | yieldDataFooter // negative = write
@@ -2093,6 +2118,21 @@ segmented_to_physical:
     jr      $ra
      add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
+G_SETxIMG_handler:
+    beqz    $7, G_RDP_handler               // Don't do any of this for G_NOOP
+     lb     $3, materialCullMode            // Get current mode
+    jal     segmented_to_physical           // Convert image to physical address
+     lw     $2, lastMatDLPhyAddr            // Get last material physical addr
+    bnez    $3, G_RDP_handler               // If not in normal mode (0), exit
+     add    $12, taskDataPtr, inputBufferPos // Current material physical addr
+    beq     $12, $2, @@skip                 // Branch if we are executing the same mat again
+     sw     $12, lastMatDLPhyAddr           // Store material physical addr
+    li      $7, 1                           // > 0: in material first time
+@@skip:                                     // Otherwise $7 was < 0: cull mode (in mat second time)
+    j       G_RDP_handler
+     sb     $7, materialCullMode
+
+.if !CFG_GCLK_SAMPLE
 G_LIGHTTORDP_handler:
     lbu     $11, numLightsxSize          // Ambient light
     lbu     $1, (inputBufferEnd - 0x6)(inputBufferPos) // Byte 2 = light count from end * size
@@ -2103,6 +2143,7 @@ G_LIGHTTORDP_handler:
     sll     $3, $3, 8                    // Shift light RGB to upper 3 bytes and clear alpha byte
     j       G_RDP_handler                // Send to RDP
      or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
+.endif
 
 ovl1_end:
 .align 8

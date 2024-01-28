@@ -7,7 +7,8 @@ default: F3DEX3_BrZ F3DEX3_BrW
 # List of all compile-time options supported by the microcode source.
 ALL_OPTIONS := \
   CFG_G_BRANCH_W \
-  CFG_DEBUG_NORMALS
+  CFG_DEBUG_NORMALS \
+  CFG_GCLK_SAMPLE
 
 ARMIPS ?= armips
 PARENT_OUTPUT_DIR ?= ./build

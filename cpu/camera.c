@@ -33,3 +33,14 @@ gSPCameraWorld(GFX, cameraWorldPos);
 
 /* The important part: in View_UpdateViewingMatrix */
 View_SetCameraWorld(view->cameraWorldPosPtr, view);
+
+/* The same issue happens (in the vanilla game) for lookat vectors--they are
+computed during the frame based on the camera position and direction, but
+these are updated at the end of the frame so the lookat vectors are one frame
+behind. You can see this when going into C-up next to an object with hilite
+or env map-- it's wrong for one frame and then is fixed. You could solve
+this by either tracking all lookat vectors created during the frame and
+updating them at the end as we did here. Another option is to only send
+lookat once at the start of each frame (and update it at the end of the
+frame), rather than once per object using it. This is not exactly the same
+for objects not in the middle of the screen, but the difference is minor. */

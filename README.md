@@ -40,9 +40,12 @@ you should expect crashes and graphical issues.**
   diffuse to **specular**. If enabled, the vertex normal for lighting is
   replaced with the reflection of the vertex-to-camera vector over the vertex
   normal. Also, a new size value for each light controls how large the light
-  reflection appears to be. This technique is lower fidelity than the vanilla
-  `hilite` system, as it is per-vertex rather than per-pixel, but it allows the
-  material to be textured normally.
+  reflection appears to be. This technique is lower fidelity in some ways than
+  the vanilla `hilite` system, as it is per-vertex rather than per-pixel, but it
+  allows the material to be textured normally. Plus, it supports all scene
+  lights (including point) with different dynamic colors, whereas the vanilla
+  system supports up to two directional lights and more than one dynamic color
+  is difficult.
 - New geometry mode bits `G_ATTROFFSET_ST_ENABLE` and `G_ATTROFFSET_Z_ENABLE`
   apply settable offsets to vertex ST (`SPAttrOffsetST`) and/or Z
   (`SPAttrOffsetZ`) values. These offsets are applied after their respective
@@ -207,11 +210,11 @@ SM64 only:
   computes a matrix stack on the CPU and sends the final matrix for each object
   / limb to the RSP, rather than multiplying matrices on the RSP. OoT already
   usually does the former for precision / accuracy reasons and only uses
-  `G_MTX_MUL` in a couple places; it is okay to leave those. This change is
-  recommended because the `G_MTX_MUL` mode of `SPMatrix` has been moved to
-  Overlay 4 in F3DEX3 (see below), making it substantially slower than it was in
-  F3DEX2. It still functions the same though so you can use it if it's really
-  needed.
+  `G_MTX_MUL` in a couple places (e.g. view * perspective matrix); it is okay to
+  leave those. This change is recommended because the `G_MTX_MUL` mode of
+  `SPMatrix` has been moved to Overlay 4 in F3DEX3 (see below), making it
+  substantially slower than it was in F3DEX2. It still functions the same though
+  so you can use it if it's really needed.
 - Re-export as many display lists (scenes, objects, skeletons, etc.) as possible
   with fast64 set to F3DEX3 mode, to take advantage of the substantially larger
   vertex buffer, triangle packing commands, "hints" system, etc.
@@ -445,7 +448,9 @@ the same goal with some extra benefits:
 - The amount of ambient occlusion in F3DEX3 can be set at runtime based on scene
   lighting, whereas the scaled normals approach is baked into the mesh.
 - F3DEX3 can have the vertex alpha affect ambient, directional, and point lights
-  by different amounts, which is not possible with scaled normals.
+  by different amounts, which is not possible with scaled normals. In fact,
+  scaled normals never affect the ambient light, contrary to the concept of
+  ambient occlusion.
 
 Furthermore, for partial HLE compatibility, the same mesh can have the ambient
 occlusion information encoded in both scaled normals and vertex alpha at the
@@ -472,12 +477,14 @@ two tris, saving a substantial amount of DMEM.
 
 ### Obscure semantic differences from F3DEX2 that should never matter in practice
 
-- `SPLoadUcode*` will corrupt RSP texture state previously set with `SPTexture`.
-  (In F3DEX2, it would be set to all zeros--texture disabled--after returning
-  from the other microcode, but in F3DEX3 it is set to garbage data.) After
-  returning from the other microcode but before drawing anything else, you must
-  execute `SPTexture` again. Normally, `SPTexture` is executed as part of every
-  material, so its state would not be relied on across microcode changes.
+- `SPLoadUcode*` corrupts the current M inverse transpose matrix state. If using
+  `G_NORMALS_MODE_FAST`, this doesn't matter. If using `G_NORMALS_MODE_AUTO`,
+  you must send the M matrix to the RSP again after returning to F3DEX3 from the
+  other microcode (which would normally be done anyway when starting to draw the
+  next object). If using `G_NORMALS_MODE_MANUAL`, you must send the updated
+  M inverse transpose matrix to the RSP after returning to F3DEX3 from the other
+  microcode (which would normally be done anyway when starting to draw the next
+  object).
 - Changing fog settings--i.e. enabling or disabling `G_FOG` in the geometry mode
   or executing `SPFogFactor` or `SPFogPosition`--between loading verts and
   drawing tris with those verts will lead to incorrect fog values for those
