@@ -415,7 +415,7 @@ jumpTableEntry G_TEXRECT_handler
 jumpTableEntry G_TEXRECTFLIP_handler
 cmdJumpTable:
 jumpTableEntry G_VTX_handler
-jumpTableEntry ovl234_ovl4_entrypoint // G_MODIFYVTX
+jumpTableEntry G_MODIFYVTX_handler
 jumpTableEntry G_CULLDL_handler
 jumpTableEntry ovl234_ovl4_entrypoint // G_BRANCH_WZ
 jumpTableEntry G_TRI1_handler
@@ -424,6 +424,7 @@ jumpTableEntry G_QUAD_handler
 jumpTableEntry G_TRISTRIP_handler
 jumpTableEntry G_TRIFAN_handler
 jumpTableEntry G_LIGHTTORDP_handler
+jumpTableEntry G_RELSEGMENT_handler
 
 // The maximum number of generated vertices in a clip polygon. In reality, this
 // is equal to MAX_CLIP_POLY_VERTS, but for testing we can change them separately.
@@ -811,34 +812,32 @@ call_ret_common:
     j       displaylist_dma_with_count
      sb     $1, displayListStackLength
 
-G_CULLDL_handler:
-    j       vtx_addrs_from_cmd              // Load start vtx addr in $12, end vtx in $3
-     li     $11, culldl_return_from_addrs
-culldl_return_from_addrs:
-    /*
-    CLIP_OCCLUDED can't be included here because: Suppose the list consists of N-1
-    verts which are behind the occlusion plane, and 1 vert which is behind the camera
-    plane and therefore randomly erroneously also set as behind the occlusion plane.
-    However, the convex hull of all the verts goes through visible area. This will be
-    incorrectly culled here. We can't afford the extra few instructions to disable
-    the occlusion plane if the vert is behind the camera, because this only matters for
-    G_CULLDL and not for tris.
-    */
-    li      $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE)
-    lhu     $11, VTX_CLIP($12)
-culldl_loop:
-    and     $1, $1, $11
-    beqz    $1, run_next_DL_command         // Some vertex is on the screen-side of all clipping planes; have to render
-     lhu    $11, (vtxSize + VTX_CLIP)($12)  // next vertex clip flags
-    bne     $12, $3, culldl_loop            // loop until reaching the last vertex
-     addi   $12, $12, vtxSize               // advance to the next vertex
-    li      cmd_w0, 0                       // Clear count of DL cmds to skip loading
-G_ENDDL_handler:
-    lbu     $1, displayListStackLength      // Load the DL stack index; if end stack,
-    beqz    $1, load_overlay_0_and_enter    // load overlay 0; $1 < 0 signals end
-     addi   $1, $1, -4                      // Decrement the DL stack index
-    j       call_ret_common                 // has a different version in ovl1
-     lw     taskDataPtr, (displayListStack)($1) // Load addr of DL to return to
+.if !CFG_GCLK_SAMPLE
+G_LIGHTTORDP_handler:
+    lbu     $11, numLightsxSize          // Ambient light
+    lbu     $1, (inputBufferEnd - 0x6)(inputBufferPos) // Byte 2 = light count from end * size
+    andi    $2, cmd_w0, 0x00FF           // Byte 3 = alpha
+    sub     $1, $11, $1                  // Light address; byte 2 counts from end
+    lw      $3, (lightBufferMain-1)($1)  // Load light RGB into lower 3 bytes
+    move    cmd_w0, cmd_w1_dram          // Move second word to first (cmd byte, prim level)
+    sll     $3, $3, 8                    // Shift light RGB to upper 3 bytes and clear alpha byte
+    j       G_RDP_handler                // Send to RDP
+     or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
+.endif
+
+G_SETxIMG_handler:
+    beqz    $7, G_RDP_handler               // Don't do any of this for G_NOOP
+     lb     $3, materialCullMode            // Get current mode
+    jal     segmented_to_physical           // Convert image to physical address
+     lw     $2, lastMatDLPhyAddr            // Get last material physical addr
+    bnez    $3, G_RDP_handler               // If not in normal mode (0), exit
+     add    $12, taskDataPtr, inputBufferPos // Current material physical addr
+    beq     $12, $2, @@skip                 // Branch if we are executing the same mat again
+     sw     $12, lastMatDLPhyAddr           // Store material physical addr
+    li      $7, 1                           // > 0: in material first time
+@@skip:                                     // Otherwise $7 was < 0: cull mode (in mat second time)
+    j       G_RDP_handler
+     sb     $7, materialCullMode
 
 refine_cmd_further:
     addi    $12, $7, -(0xFF00 | G_SETSCISSOR) // Relative to G_SETSCISSOR = 0
@@ -1492,6 +1491,10 @@ vtx_skip_fog:
     jr      $ra
      sh     $12,              (VTX_CLIP      )(outputVtxPos) // Store first vertex results
 
+G_MODIFYVTX_handler:
+    // Command byte 3 = vtx being modified; its addr -> $12
+    li      $11, do_moveword  // Moveword adds cmd_w0 to $12 for final addr
+    lbu     cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx
 vtx_addrs_from_cmd:
     // Treat eight bytes of last command each as vertex indices << 1
     // inputBufferEnd is close enough to the end of DMEM to fit in signed offset
@@ -1841,30 +1844,31 @@ tDaDeI equ $v9
     vmadh   tV1AtI, tDaDeI, $v26[1]
     sdv     tDaDeI[8], 0x0020($1)   // Store DsDe, DtDe, DwDe texture coefficients (integer)
 tV1AtFF equ $v10
-    vmudn   tV1AtFF, tDaDeF, $v4[1] // Super-frac (frac * frac) part; assumes v4 factor >= 0
-    vmudn   tDaDeF, tDaDeF, $v30[7] // 0x0020
-    vmadh   tDaDeI, tDaDeI, $v30[7] // 0x0020
+    // All values start in element 7. "a", attribute, is Z. Need
+    // tV1AtI, tV1AtF, tDaDxI, tDaDxF, tDaDeI, tDaDeF, tDaDyI, tDaDyF
+    vmov    tDaDyF[5], tDaDeF[7]    // DaDy already in elem 7; DaDe to elem 5
     sdv     tV1AtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
-    vmudn   tDaDxF, tDaDxF, $v30[7] // 0x0020
+    vmov    tDaDyI[5], tDaDeI[7]
     sdv     tV1AtI[0], 0x0000($2)   // Store RGBA shade color (integer)
-    vmadh   tDaDxI, tDaDxI, $v30[7] // 0x0020
+    vmov    tDaDyF[3], tDaDxF[7]    // DaDx to elem 3
     sdv     tV1AtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
-    vmudn   tDaDyF, tDaDyF, $v30[7] // 0x0020
+    vmov    tDaDyI[3], tDaDxI[7]
+    sdv     tV1AtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
+    vmudn   tV1AtFF, tDaDeF, $v4[1] // Super-frac (frac * frac) part; assumes v4 factor >= 0
     beqz    $6, check_rdp_buffer_full // see below
-     sdv    tV1AtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
+     veq    $v29, $v31, $v31[1q] // Set VCC to 01010101
+    vmudn   tDaDyF, tDaDyF, $v30[7] // 0x0020
     vmadh   tDaDyI, tDaDyI, $v30[7] // 0x0020
-    ssv     tDaDeF[14], -0x0006(rdpCmdBufPtr)
     vmudl   $v29,  tV1AtFF, $v30[7] // 0x0020
-    ssv     tDaDeI[14], -0x0008(rdpCmdBufPtr)
     vmadn   tV1AtF, tV1AtF, $v30[7] // 0x0020
-    ssv     tDaDxF[14], -0x000A(rdpCmdBufPtr)
     vmadh   tV1AtI, tV1AtI, $v30[7] // 0x0020
-    ssv     tDaDxI[14], -0x000C(rdpCmdBufPtr)
-    ssv     tDaDyF[14], -0x0002(rdpCmdBufPtr)
-    ssv     tDaDyI[14], -0x0004(rdpCmdBufPtr)
-    ssv     tV1AtF[14], -0x000E(rdpCmdBufPtr)
+    vmrg    tDaDyF, tDaDyF, tDaDyI[1q] // Move int elems 3, 5, 7 to result 2, 4, 6
+    ssv     tV1AtF[14], -0x0E(rdpCmdBufPtr)
+    ssv     tV1AtI[14], -0x10(rdpCmdBufPtr)
+    slv     tDaDyF[4],  -0x0C(rdpCmdBufPtr) // DaDx i/f
     j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
-     ssv    tV1AtI[14], -0x10(rdpCmdBufPtr)
+     sdv    tDaDyF[8],  -0x08(rdpCmdBufPtr) // DaDe i/f, DaDy i/f
+    
 
 load_overlay_0_and_enter:
 G_LOAD_UCODE_handler:
@@ -2097,8 +2101,10 @@ G_RDPHALF_2_handler:
     j       G_RDP_handler
      sdv    $v29[0], -8(rdpCmdBufPtr)
 
+G_RELSEGMENT_handler:
+    jal     segmented_to_physical    // Resolve new segment address relative to existing segment
 G_MOVEWORD_handler:
-    srl     $2, cmd_w0, 16                              // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
+     srl    $2, cmd_w0, 16           // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
     lhu     $12, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
 do_moveword:
     sll     $11, cmd_w0, 16          // Sign bit = upper bit of offset
@@ -2118,32 +2124,35 @@ segmented_to_physical:
     jr      $ra
      add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
-G_SETxIMG_handler:
-    beqz    $7, G_RDP_handler               // Don't do any of this for G_NOOP
-     lb     $3, materialCullMode            // Get current mode
-    jal     segmented_to_physical           // Convert image to physical address
-     lw     $2, lastMatDLPhyAddr            // Get last material physical addr
-    bnez    $3, G_RDP_handler               // If not in normal mode (0), exit
-     add    $12, taskDataPtr, inputBufferPos // Current material physical addr
-    beq     $12, $2, @@skip                 // Branch if we are executing the same mat again
-     sw     $12, lastMatDLPhyAddr           // Store material physical addr
-    li      $7, 1                           // > 0: in material first time
-@@skip:                                     // Otherwise $7 was < 0: cull mode (in mat second time)
-    j       G_RDP_handler
-     sb     $7, materialCullMode
+G_CULLDL_handler:
+    j       vtx_addrs_from_cmd              // Load start vtx addr in $12, end vtx in $3
+     li     $11, culldl_return_from_addrs
+culldl_return_from_addrs:
+    /*
+    CLIP_OCCLUDED can't be included here because: Suppose the list consists of N-1
+    verts which are behind the occlusion plane, and 1 vert which is behind the camera
+    plane and therefore randomly erroneously also set as behind the occlusion plane.
+    However, the convex hull of all the verts goes through visible area. This will be
+    incorrectly culled here. We can't afford the extra few instructions to disable
+    the occlusion plane if the vert is behind the camera, because this only matters for
+    G_CULLDL and not for tris.
+    */
+    li      $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE)
+    lhu     $11, VTX_CLIP($12)
+culldl_loop:
+    and     $1, $1, $11
+    beqz    $1, run_next_DL_command         // Some vertex is on the screen-side of all clipping planes; have to render
+     lhu    $11, (vtxSize + VTX_CLIP)($12)  // next vertex clip flags
+    bne     $12, $3, culldl_loop            // loop until reaching the last vertex
+     addi   $12, $12, vtxSize               // advance to the next vertex
+    li      cmd_w0, 0                       // Clear count of DL cmds to skip loading
+G_ENDDL_handler:
+    lbu     $1, displayListStackLength      // Load the DL stack index; if end stack,
+    beqz    $1, load_overlay_0_and_enter    // load overlay 0; $1 < 0 signals end
+     addi   $1, $1, -4                      // Decrement the DL stack index
+    j       call_ret_common                 // has a different version in ovl1
+     lw     taskDataPtr, (displayListStack)($1) // Load addr of DL to return to
 
-.if !CFG_GCLK_SAMPLE
-G_LIGHTTORDP_handler:
-    lbu     $11, numLightsxSize          // Ambient light
-    lbu     $1, (inputBufferEnd - 0x6)(inputBufferPos) // Byte 2 = light count from end * size
-    andi    $2, cmd_w0, 0x00FF           // Byte 3 = alpha
-    sub     $1, $11, $1                  // Light address; byte 2 counts from end
-    lw      $3, (lightBufferMain-1)($1)  // Load light RGB into lower 3 bytes
-    move    cmd_w0, cmd_w1_dram          // Move second word to first (cmd byte, prim level)
-    sll     $3, $3, 8                    // Shift light RGB to upper 3 bytes and clear alpha byte
-    j       G_RDP_handler                // Send to RDP
-     or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
-.endif
 
 ovl1_end:
 .align 8
@@ -2496,10 +2505,8 @@ ovl4_select_instr:
     beq     $2, $7, calc_mit // otherwise $7 = command byte
      li     $3, G_BRANCH_WZ
     beq     $3, $7, G_BRANCH_WZ_handler
-     li     $2, G_MODIFYVTX
-    beq     $2, $7, G_MODIFYVTX_handler
-     li     $3, (0xFF00 | G_DMA_IO)
-    beq     $3, $7, G_DMA_IO_handler
+     li     $2, (0xFF00 | G_DMA_IO)
+    beq     $2, $7, G_DMA_IO_handler
      // Otherwise G_MTX_end, which starts with a harmless instruction
 
 G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
@@ -2546,13 +2553,6 @@ G_DMA_IO_handler:
     sra     dmemAddr, dmemAddr, 2
     j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
      li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
-
-G_MODIFYVTX_handler:
-    j       vtx_addrs_from_cmd          // byte 3 = vtx being modified; addr -> $12
-     li     $11, modifyvtx_return_from_addrs
-modifyvtx_return_from_addrs:
-    j       do_moveword                 // Moveword adds cmd_w0 to $12 for final addr
-     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)
 
 G_BRANCH_WZ_handler:
     j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $12

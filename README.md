@@ -83,6 +83,11 @@ you should expect crashes and graphical issues.**
   commands in the next DL to be fetched, rather than always fetching full
   buffers, **saving some DRAM traffic** (maybe around 100 us per frame). The
   bits used for this are ignored by HLE.
+- Segment addresses are now resolved relative to other segments (feature by
+  Tharo). This enables a strategy for skipping repeated material DLs: call
+  a segment to run the material, remap the segment in the material to a
+  display list that immediately returns, and so if the material is called again
+  it won't run.
 - Clipped triangles are drawn by minimal overlapping scanlines algorithm; this
   **slightly improves RDP draw time** for large tris (max of about 500 us per
   frame, usually much less or zero).
@@ -299,8 +304,7 @@ and commands except:
   MVP matrix in F3DEX3.
 - `G_MV_POINT` has been removed. This was not used in any command; it would have
   likely been used for debugging to copy vertices from DMEM to examine them.
-  This does not affect `SPModifyVertex`, which is still supported, though this
-  is moved to Overlay 4 (see below) so it will be slower than in F3DEX2.
+  This does not affect `SPModifyVertex`, which is still supported.
 - `G_MW_PERSPNORM` has been removed; `SPPerspNormalize` is still supported but
   is encoded differently, no longer using this define.
 - `G_MVO_LOOKATX` and `G_MVO_LOOKATY` have been removed, and `SPLookAtX` and
@@ -336,6 +340,12 @@ them binary incompatible. The lighting data structures, e.g. `Light_t`,
 `PosLight_t`, `LookAt_t`, `Lightsn`, `Lights*`, `PosLights*`, etc., have also
 changed--generally only slightly, so most code is compatible with no changes.
 
+`SPSegment` has been given a different command id (`G_RELSEGMENT` vs.
+`G_MOVEWORD`) to facilitate relative segmented address translation. The
+original binary encoding is still valid, but does not support relative
+translation like the new encoding. However, recompiling with the C GBI will
+always use the new encoding.
+
 
 ## What are the tradeoffs for all these new features?
 
@@ -368,7 +378,6 @@ This overlay contains handlers for:
   discussed below
 - The codepath for `SPMatrix` with `G_MTX_MUL` set
 - `SPBranchLessZ*`
-- `SPModifyVertex`
 - `SPDma_io`
 
 Whenever any of these features is needed, the RSP has to swap to Overlay 4. The
@@ -475,6 +484,17 @@ the FIFO is occupied by full-size tris, so the buffers are effectively only two
 tris in size because a third tri can't fit. So, their size has been reduced to
 two tris, saving a substantial amount of DMEM.
 
+### Segment 0
+
+Segment 0 is now reserved: ensure segment 0 is never set to anything but
+0x00000000. In F3DEX2 and prior this was only a good idea (and SM64 and OoT
+always follow this); in F3DEX3 segmented addresses are now resolved relative to
+other segments. That is, `gsSPSegment(0x08, 0x07001000)` sets segment 8 to the
+base address of segment 7 with an additional offset of 0x1000. So for correct
+behavior when supplying a direct-mapped or physical address such as 0x80101000,
+segment 0 must always be 0x00000000 so that this address resolves to e.g.
+0x101000 as expected in this example.
+
 ### Obscure semantic differences from F3DEX2 that should never matter in practice
 
 - `SPLoadUcode*` corrupts the current M inverse transpose matrix state. If using
@@ -534,7 +554,7 @@ are credited.
 Other credits:
 - Wiseguy: large chunk of F3DEX2 disassembly documentation and first version of
   build system
+- Tharo: relative segment resolution feature, other feature discussions
 - Kaze Emanuar: several feature suggestions, testing
 - thecozies: Fresnel feature suggestion
-- Tharo: feature discussions
 - neoshaman: feature discussions

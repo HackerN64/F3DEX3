@@ -97,6 +97,7 @@ of warnings if you use -Wpedantic. */
 #define G_TRISTRIP          0x08 /* = G_LINE3D was a no-op in F3DEX2, has been removed */
 #define G_TRIFAN            0x09
 #define G_LIGHTTORDP        0x0A
+#define G_RELSEGMENT        0x0B
 
 /* names differ between F3DEX2 and F3DZEX */
 #define G_BRANCH_Z G_BRANCH_WZ
@@ -2600,11 +2601,11 @@ _DW({                                                        \
 /*
  * Moveword commands
  */
-
+/* not strictly a moveword command anymore */
 #define gSPSegment(pkt, segment, base)              \
-    gMoveWd(pkt, G_MW_SEGMENT, (segment) * 4, (base))
+    gDma1p((pkt), G_RELSEGMENT, (base), ((segment) * 4) & 0xFFF, G_MW_SEGMENT)
 #define gsSPSegment(segment, base)                  \
-    gsMoveWd(    G_MW_SEGMENT, (segment) * 4, (base))
+    gsDma1p(      G_RELSEGMENT, (base), ((segment) * 4) & 0xFFF, G_MW_SEGMENT)
 
 #define gSPPerspNormalize(pkt, s)   gMoveHalfwd(pkt, G_MW_FX, G_MWO_PERSPNORM, (s))
 #define gsSPPerspNormalize(s)       gsMoveHalfwd(    G_MW_FX, G_MWO_PERSPNORM, (s))

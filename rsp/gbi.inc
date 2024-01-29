@@ -88,6 +88,7 @@ G_QUAD              equ 0x07
 G_TRISTRIP          equ 0x08
 G_TRIFAN            equ 0x09
 G_LIGHTTORDP        equ 0x0a
+G_RELSEGMENT        equ 0x0b
 
 
 G_BRANCH_Z equ G_BRANCH_WZ
