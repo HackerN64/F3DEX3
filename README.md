@@ -110,8 +110,8 @@ you should expect crashes and graphical issues.**
   tint colors of cel shading to **match scene lighting** with no code
   intervention. Also useful for other lighting-dependent effects.
 
-F3DEX3 also introduces four **performance counters**, which are accessible from
-the CPU after the graphics task finishes:
+F3DEX3 also introduces several **performance counters**, which are accessible
+from the CPU after the graphics task finishes:
 - Number of vertices processed by the RSP
 - Number of triangles requested in display lists. This does not count triangles
   skipped due to `SPCullDisplayList` or `SPBranchLessZ*`.
@@ -122,6 +122,18 @@ the CPU after the graphics task finishes:
     - Culling due to too small screen size (same algorithm as F3DEX2)
     - Culling due to behind the occlusion plane
 - Number of texture or fill rectangles processed
+- Number of cycles the microcode was stalled because the output FIFO in DMEM
+  was full
+- Number of display list commands processed (*)
+- Number of times the "GCLK is alive" bit in the RDP status word is set (*),
+  which is sampled once per display list command. This enables a rough
+  measurement of how often the RDP is stalled waiting for RDRAM for I/O to the
+  framebuffer / Z buffer.
+
+(*) These two counters are only enabled if the `CFG_GCLK_SAMPLE` build option is
+enabled in the Makefile, otherwise they are both zero. Due to extremely limited
+IMEM space, enabling this option removes the `SPLightToRDP` commands (they
+become no-ops). This is intended for profiling during development only.
 
 
 ## Porting Your Romhack Codebase to F3DEX3
@@ -203,7 +215,6 @@ SM64 only:
   frame, and send that to the RSP. This will be faster than the alternative (not
   using matrix stack fix and enabling `G_NORMALS_MODE_AUTO` to correct the
   matrix).
-
 
 ### Recommended Changes (Non-Lighting)
 
@@ -421,12 +432,12 @@ nonuniform scale (e.g. Mario only while he is squashed).
 ### Optimizing for RSP code size
 
 A number of over-zealous optimizations in F3DEX2 which saved a few cycles but
-took several more instructions have been removed. F3DEX3 will often be slightly
+took several more instructions have been removed. F3DEX3 will often be 5-10%
 slower than F3DEX2 in RSP cycles (not DRAM traffic or RDP time), especially for
 large quantities of very short commands. Note that for certain codepaths such as
-point lighting, the RSP will now be faster than in F3DEX2, and the improved
-performance from all the new microcode features should more than make up for
-these slight reductions in efficiency.
+point lighting, the RSP will now be faster than in F3DEX2, and the improved RDP
+performance from all the new features matters more as the RDP is usually the
+bottleneck.
 
 ### Far clipping removal
 

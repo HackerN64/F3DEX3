@@ -129,12 +129,14 @@ $(eval $(call reset_vars))
 NAME := F3DEX3_BrZ
 DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z version)
 ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_Z version______________________
+# Add options you want here, e.g. CFG_GCLK_SAMPLE
 OPTIONS := 
 $(eval $(call ucode_rule))
 
 NAME := F3DEX3_BrW
 DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W version)
 ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_W version______________________
+# Add options you want here, e.g. CFG_GCLK_SAMPLE
 OPTIONS := \
   CFG_G_BRANCH_W
 $(eval $(call ucode_rule))
