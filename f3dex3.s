@@ -1019,7 +1019,11 @@ clip_skipy:
 clip_skipxy:
     vsubc   vClDiffF, vClBaseF, vClBaseF[7]  // Vtx on screen - vtx off screen
     vsub    vClDiffI, vClBaseI, vClBaseI[7]
-    // Not sure what the first reciprocal is for.
+    // This is computing vClDiffI:F = vClBaseI:F / vClDiffI:F to high precision.
+    // The first step is a sort of range reduction, where $v2 becomes a scale factor
+    // (roughly min(1.0f, abs(1.0f / vClDiffI:F))) which scales down vClDiffI:F and
+    // the final result. Then the reciprocal of vClDiffI:F is computed with a Newton-
+    // Raphson iteration and multiplied by vClBaseI:F. Finally scale down by $v2.
     vor     $v29, vClDiffI, vOne[0]       // round up int sum to odd; this ensures the value is not 0, otherwise v29 will be 0 instead of +/- 2
     vrcph   $v3[3], vClDiffI[3]
     vrcpl   $v2[3], vClDiffF[3]           // frac: 1 / (x+y+z+w), vtx on screen - vtx off screen
@@ -1061,7 +1065,7 @@ clip_skipxy:
     luv     $v13[0], VTX_COLOR_VEC($19)   // Vtx on screen, RGBA
     vmadm   vClDiffI, vClDiffI, $v2[3]
     llv     vPairST[0], VTX_TC_VEC($19)   // Vtx on screen, ST
-    vmadn   vClDiffF, $v31, $v31[2]       // 0; * one of the reciprocals above
+    vmadn   vClDiffF, $v31, $v31[2]       // End of computing vClDiff = vClBase / vClDiff
     vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
     vmrg    vClDiffF, vClDiffF, $v31[1]   // keep frac part of factor, else set to 0xFFFF (max val)
     vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
