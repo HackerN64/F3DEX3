@@ -289,8 +289,8 @@ but is not necessary if you are not using it.
   view matrix at the beginning of the main DL. See the code in `cpu/camera.c`.
 - For specular lighting: Set the `size` field of any `Light_t` and `PosLight_t`
   to an appropriate value based on the game engine parameters for that light.
-- For the occlusion plane: Bring the code from `cpu/guOcclusionPlane.h` and `.c`
-  into your game and follow the included instructions.
+- For the occlusion plane: Bring the code from `cpu/occlusionplane.c` into your
+  game and follow the included instructions.
 - For the performance counters: Make the changes described in `cpu/counters.c`.
 
 
