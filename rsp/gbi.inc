@@ -107,10 +107,10 @@ G_NORMALSMODE_FAST equ 0x00
 G_NORMALSMODE_AUTO equ 0x01
 G_NORMALSMODE_MANUAL equ 0x02
 
-G_MAX_LIGHTS equ 9 // 9 directional / point lights, plus ambient light (and lookat)
-lightSize equ 0x10
+G_MAX_LIGHTS equ 7 // 9 directional / point lights, plus ambient light (and lookat)
+lightSize equ 0x18
 
-G_MAX_VERTS equ 56
+G_MAX_VERTS equ 53
 
 // Input Vertex structure offsets, should match Vtx structure in gbi.h
 inputVtxSize equ 0x10

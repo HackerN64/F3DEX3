@@ -127,21 +127,9 @@ mMatrix:
 vpMatrix:
     .fill 64
 
-// model inverse transpose matrix; first three rows only
+// MVP matrix
 mITMatrix:
-    .fill 0x30
-    
-fogFactor:
-    .dw 0x00000000
-
-textureSettings1:
-    .dw 0x00000000 // first word, has command byte, level, tile, and on
-    
-textureSettings2:
-    .dw 0xFFFFFFFF // second word, has s and t scale
-    
-geometryModeLabel:
-    .dw 0x00000000 // originally initialized to G_CLIPPING, but that does nothing
+    .fill 0x40
     
 .if . != 0x00C0
 .error "Scissor and othermode must be at 0x00C0 for S2DEX"
@@ -169,17 +157,14 @@ texrectWord2:
 rdpHalf1Val:
     .fill 4
     
-    .db 0   // unused
-numLightsxSize:
-    .db 0   // Overwrites above
-
+perspNorm:
+    .dh 0xFFFF
+            
 // displaylist stack length
 displayListStackLength:
     .db 0x00 // starts at 0, increments by 4 for each "return address" pushed onto the stack
     
-// Is M inverse transpose valid or does it need to be recomputed. Zeroed when modifying M.
-mITValid:
-    .db 0
+    .db 0 // dummy
 
 // viewport
 viewport:
@@ -254,12 +239,8 @@ the 4 and -4 come from. For tri write, the result needs to be multiplied by 4
 for subpixels, so it's 16 and -16.
 */
 
-cameraWorldPos:
-    .skip 6
-tempHalfword:
-    .skip 2 // Overwritten as part of camera world position, used as temp
 lightBufferLookat:
-    .skip 8 // s8 X0, Y0, Z0, dummy, X1, Y1, Z1, dummy
+    .skip 2 * lightSize
 lightBufferMain:
     .skip (G_MAX_LIGHTS * lightSize)
 lightBufferAmbient:
@@ -317,51 +298,36 @@ occlusionPlaneMidCoeffs:
 // altBaseReg permanently points here.
 altBase:
 
-fxParams:
+fogFactor:
+    .dw 0x00000000
 
-.if (. & 15) != 0
-    .error "Wrong alignment for fxParams"
-.endif
-// First 8 values here loaded with lqv.
+textureSettings1:
+    .dw 0x00000000 // first word, has command byte, level, tile, and on
 
-aoAmbientFactor:
-    .dh 0xFFFF
-aoDirectionalFactor:
-    .dh 0xA000
-aoPointFactor:
-    .dh 0x0000
-    
-perspNorm:
-    .dh 0xFFFF
+textureSettings2:
+    .dw 0xFFFFFFFF // second word, has s and t scale
+
+geometryModeLabel:
+    .dw 0x00000000 // originally initialized to G_CLIPPING, but that does nothing
     
 texgenLinearCoeffs:
     .dh 0x44D3
     .dh 0x6CB3
     
-fresnelScale:
-    .dh 0x0000
-fresnelOffset:
-    .dh 0x0000
-
-attrOffsetST:
-    .dh 0x0100
-    .dh 0xFF00
-attrOffsetZ:
-    .dh 0xFFFE
-    
-alphaCompareCullMode:
-    .db 0x00 // 0 = disabled, 1 = cull if all < thresh, -1 = cull if all >= thresh
-alphaCompareCullThresh:
-    .db 0x00 // Alpha threshold, 00 - FF
-
-materialCullMode: // Overwritten to 0 by SPNormalsMode, but that should not
-    .db 0     // happen in the middle of tex setup
-normalsMode:
-    .db 0     // Overwrites materialCullMode
-
 lastMatDLPhyAddr:
     .dw 0
     
+materialCullMode:
+    .db 0
+mvpValid:
+    .db 0
+tempHalfword:
+    .dw 0x0000
+lightsMTValid:
+    .db 0
+numLightsxSize:
+    .db 0   // Overwrites above
+
 // Constants for clipping algorithm
 clipCondShifts:
     .db CLIP_SCAL_NY_SHIFT
@@ -379,16 +345,18 @@ movememTable:
     .dh tempMemRounded    // G_MTX multiply temp matrix (projection)
     .dh vpMatrix          // G_MV_PMTX
     .dh viewport          // G_MV_VIEWPORT
-    .dh cameraWorldPos    // G_MV_LIGHT
+    .dh lightBufferLookat // G_MV_LIGHT
 
 // moveword table
 movewordTable:
-    .dh fxParams           // G_MW_FX
+    .dh 0                  // G_MW_MATRIX
     .dh numLightsxSize - 3 // G_MW_NUMLIGHT
-    .dh 0                  // unused
+    .dh 0                  // G_MW_CLIP
     .dh segmentTable       // G_MW_SEGMENT
     .dh fogFactor          // G_MW_FOG
     .dh lightBufferMain    // G_MW_LIGHTCOL
+    .dh 0                  // G_MW_FORCEMTX
+    .dh perspNorm - 2      // G_MW_PERSPNORM
 
 // G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
 movememHandlerTable:
@@ -413,7 +381,34 @@ jumpTableEntry G_SETOTHERMODE_L_handler
 jumpTableEntry G_SETOTHERMODE_H_handler
 jumpTableEntry G_TEXRECT_handler
 jumpTableEntry G_TEXRECTFLIP_handler
+jumpTableEntry G_SYNC_handler    // G_RDPLOADSYNC
+jumpTableEntry G_SYNC_handler    // G_RDPPIPESYNC
+jumpTableEntry G_SYNC_handler    // G_RDPTILESYNC
+jumpTableEntry G_SYNC_handler    // G_RDPFULLSYNC
+jumpTableEntry G_RDP_handler     // G_SETKEYGB
+jumpTableEntry G_RDP_handler     // G_SETKEYR
+jumpTableEntry G_RDP_handler     // G_SETCONVERT
+jumpTableEntry scissor_other_handler
+jumpTableEntry G_RDP_handler     // G_SETPRIMDEPTH
+jumpTableEntry scissor_other_handler
+jumpTableEntry G_RDP_handler     // G_LOADTLUT
+jumpTableEntry G_RDPHALF_2_handler
+jumpTableEntry G_RDP_handler     // G_SETTILESIZE
+jumpTableEntry G_RDP_handler     // G_LOADBLOCK
+jumpTableEntry G_RDP_handler     // G_LOADTILE
+jumpTableEntry G_RDP_handler     // G_SETTILE
+jumpTableEntry G_RDP_handler     // G_FILLRECT
+jumpTableEntry G_RDP_handler     // G_SETFILLCOLOR
+jumpTableEntry G_RDP_handler     // G_SETFOGCOLOR
+jumpTableEntry G_RDP_handler     // G_SETBLENDCOLOR
+jumpTableEntry G_RDP_handler     // G_SETPRIMCOLOR
+jumpTableEntry G_RDP_handler     // G_SETENVCOLOR
+jumpTableEntry G_RDP_handler     // G_SETCOMBINE
+jumpTableEntry G_SETxIMG_handler // G_SETTIMG
+jumpTableEntry G_SETxIMG_handler // G_SETZIMG
+jumpTableEntry G_SETxIMG_handler // G_SETCIMG
 cmdJumpTable:
+jumpTableEntry G_SYNC_handler
 jumpTableEntry G_VTX_handler
 jumpTableEntry G_MODIFYVTX_handler
 jumpTableEntry G_CULLDL_handler
@@ -1233,9 +1228,9 @@ vtx_return_from_addrs:
     lqv     vM2I,     (mMatrix + 0x10)($zero)
     lqv     vM0F,     (mMatrix + 0x20)($zero)
     lqv     vM2F,     (mMatrix + 0x30)($zero)
-    lbu     $11, mITValid                      // 0 if matrix invalid, 1 if valid
+    lbu     $11, mvpValid                      // 0 if matrix invalid, 1 if valid
     vcopy   vM1I,  vM0I
-    lbu     $12, normalsMode                   // bit 0 clear if don't compute mIT, set if do
+    la      $12, 0                             // TODO old normalsMode
     vcopy   vM3I,  vM2I
     ldv     vM1I[0],  (mMatrix + 0x08)($zero)
     vcopy   vM1F,  vM0F
@@ -1275,7 +1270,7 @@ vtx_setup_constants:
     // Computes modified viewport scale and offset including fog info, and stores
     // these to temp memory in the RDP buffer. This is only used during vertex write
     // and the first half of clipping, so that memory is not used then.
-    lsv     $v21[0], (attrOffsetZ - altBase)(altBaseReg) // Z offset
+    vclr    $v21  // TODO old Z offset
     ldv     $v26[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
     ldv     $v26[8], (viewport + 8)($zero)
     lw      $12, (geometryModeLabel)($zero)
@@ -1285,11 +1280,11 @@ vtx_setup_constants:
     andi    $11, $12, G_ATTROFFSET_Z_ENABLE
     vadd    $v21, $v26, $v21[0]                   // Add Z offset to all terms (care about 2, 6)
     beqz    $11, @@skipz                          // Skip if Z offset disabled
-     llv    $v23[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
+     llv    $v23[0], (fogFactor - altBase)(altBaseReg)  // Load fog multiplier 0 and offset 1
     vmrg    $v26, $v26, $v21                      // Move Z + Z offset into elems 2, 6
 @@skipz:
     vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
-    lqv     $v30, (fxParams - altBase)(altBaseReg) // Parameters for vtx and lighting
+    lqv     $v30, (0)(altBaseReg)                 // TODO Parameters for vtx and lighting
     vmudh   $v20, $v25, $v31[1]                   // -1; -vscale
     andi    $11, $12, G_AMBOCCLUSION
     vmrg    $v25, $v25, $v23[0]                   // Put fog multiplier in elements 3,7 of vscale
@@ -1340,13 +1335,12 @@ vtx_load_loop:
     vmudn   $v29, vVP3F, vOne
     beqz    $11, @@skipoffset
      vmadh  $v29, vVP3I, vOne
-    llv     $v26[0], (attrOffsetST - altBase)(altBaseReg) // elems 0, 1 = S, T offset
-    llv     $v26[8], (attrOffsetST - altBase)(altBaseReg) // elems 4, 5 = S, T offset
+    vclr    $v26 // TODO old attrOffsetST
 @@skipoffset:
     vmadl   $v29, vVP0F, vPairPosF[0h]
-    llv     $v25[0], (textureSettings2)($zero)  // Texture ST scale in 0, 1
+    llv     $v25[0], (textureSettings2 - altBase)(altBaseReg)  // Texture ST scale in 0, 1
     vmadm   $v29, vVP0I, vPairPosF[0h]
-    llv     $v25[8], (textureSettings2)($zero)  // Texture ST scale in 4, 5
+    llv     $v25[8], (textureSettings2 - altBase)(altBaseReg)  // Texture ST scale in 4, 5
     vmadn   $v29, vVP0F, vPairPosI[0h]
     vmadh   $v29, vVP0I, vPairPosI[0h]
     addi    inputVtxPos, inputVtxPos, 2*inputVtxSize
@@ -1650,7 +1644,7 @@ tV3AtI equ $v21
     vmrg    tV3AtI, $v25, tV3AtI        // RGB from $4, alpha from $3
 tri_skip_flat_shading:
     vrcp    $v20[2], $v6[1]
-    lb      $20, (alphaCompareCullMode)($zero)
+    li      $20, 0  // TODO old alphaCompareCullMode
     vrcph   $v22[2], $v6[1]
     lw      $5, VTX_INV_W_VEC($1)
     vrcp    $v20[3], $v8[1]
@@ -1670,7 +1664,7 @@ tri_skip_flat_shading:
      sub    $5, $5, $11
     // Alpha compare culling
     vge     $v26, tV1AtI, tV2AtI
-    lbu     $19, alphaCompareCullThresh
+    li      $19, 0 // TODO old alphaCompareCullThresh
     vlt     $v27, tV1AtI, tV2AtI
     bgtz    $20, @@skip1
      vge    $v26, $v26, tV3AtI // If alphaCompareCullMode > 0, $v26 = max of 3 verts
@@ -2026,7 +2020,7 @@ do_popmtx:
     beq     cmd_w1_dram, $11, run_next_DL_command   // If no bytes were popped, then we don't need to make the mvp matrix as being out of date and can run the next command
      sw     cmd_w1_dram, matrixStackPtr             // Update the matrix stack pointer with the new value
     j       do_movemem
-     sb     $zero, mITValid
+     sb     $zero, mvpValid
 
 G_MTX_handler:
     // The lower 3 bits of G_MTX are, from LSb to MSb (0 value/1 value),
@@ -2046,7 +2040,7 @@ G_MTX_handler:
     lw      cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Load command word 1 again
 load_mtx:
     add     $7, $7, $2        // Add the load type to the command byte in $7, selects the return address based on whether the matrix needs multiplying or just loading
-    sb      $zero, mITValid
+    sb      $zero, mvpValid
 G_MOVEMEM_handler:
     jal     segmented_to_physical   // convert the memory address cmd_w1_dram to a virtual one
 do_movemem:
@@ -2215,7 +2209,7 @@ lt_skip_packed_normals:
     vsub    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; offset alpha, will be fixed later
     lbu     curLight, numLightsxSize
     vmudn   $v29, vM0F, vPairNrml[0h]
-    lbu     $11, (normalsMode)($zero)
+    li      $11, 0 // TODO old normalsMode
     vmadh   $v29, vM0I, vPairNrml[0h]
     andi    $6, $5, G_LIGHTING_SPECULAR >> 8
     vmadn   $v29, vM1F, vPairNrml[1h]
@@ -2270,9 +2264,9 @@ lt_after_xfrm_normals:
     beqz    $12, lt_loop // Not specular or fresnel
      vmulf  vPairLt, vPairLt, vCCC[3h] // light color *= ambient factor
     // Get vNrmOut = normalize(camera - vertex), vAAA = (vPairNrml dot vNrmOut)
-    ldv     vAAA[0], (cameraWorldPos - altBase)(altBaseReg) // Camera world pos
+    vclr    vAAA // TODO old camera world pos
     j       lt_normal_to_vertex
-     ldv    vAAA[8], (cameraWorldPos - altBase)(altBaseReg)
+     vclr   vAAA // TODO old camera world pos
 lt_after_camera:
     // If specular, replace vPairNrml with reflected vector
     vne     $v29, $v31, $v31[3h]      // Set VCC to 11101110
@@ -2589,7 +2583,7 @@ calc_mit:
     */
     // Get absolute value of all terms of M matrix. $12 already set in dispatch.
     vxor    $v20, vM0I, $v31[1] // One's complement of X int part
-    sb      $7, mITValid                                     // $7 is 1 if we got here, mark valid
+    sb      $7, mvpValid                                     // $7 is 1 if we got here, mark valid
     vlt     $v29, vM0I, $v31[2] // X int part < 0
     li      $11, mMatrix + 2                                 // For left rotates with lqv/ldv
     vabs    $v21, vM0I, vM0F     // Apply sign of X int part to X frac part
