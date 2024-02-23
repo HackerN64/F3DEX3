@@ -8,7 +8,7 @@ default: F3DEX3_BrZ F3DEX3_BrW
 ALL_OPTIONS := \
   CFG_G_BRANCH_W \
   CFG_DEBUG_NORMALS \
-  CFG_GCLK_SAMPLE
+  CFG_PROFILING
 
 ARMIPS ?= armips
 PARENT_OUTPUT_DIR ?= ./build
@@ -129,15 +129,16 @@ $(eval $(call reset_vars))
 NAME := F3DEX3_BrZ
 DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z version)
 ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_Z version______________________
-# Add options you want here, e.g. CFG_GCLK_SAMPLE
+# Add options you want here, e.g. CFG_PROFILING
 OPTIONS := 
 $(eval $(call ucode_rule))
 
 NAME := F3DEX3_BrW
 DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W version)
 ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_W version______________________
-# Add options you want here, e.g. CFG_GCLK_SAMPLE
+# Add options you want here, e.g. CFG_PROFILING
 OPTIONS := \
+  CFG_PROFILING \
   CFG_G_BRANCH_W
 $(eval $(call ucode_rule))
 

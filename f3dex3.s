@@ -425,6 +425,7 @@ jumpTableEntry G_TRISTRIP_handler
 jumpTableEntry G_TRIFAN_handler
 jumpTableEntry G_LIGHTTORDP_handler
 jumpTableEntry G_RELSEGMENT_handler
+jumpTableEntry G_STORECLK_handler
 
 // The maximum number of generated vertices in a clip polygon. In reality, this
 // is equal to MAX_CLIP_POLY_VERTS, but for testing we can change them separately.
@@ -608,7 +609,7 @@ taskDataPtr    equ $26   // Task data (display list) DRAM pointer
 inputBufferPos equ $27   // DMEM position within display list input buffer, relative to end
 perfCounter1   equ $28   // Upper 16 bits: num verts; lower 16 bits: num tris sent to RDP
 perfCounter2   equ $29   // Upper 18 bits: num tris requested; lower 14 bits: num tex/fill rects
-rdpWaitCyc     equ $30   // How many loops we had to wait because the RDP FIFO was full
+rdpWaitCyc     equ $30   // How many cycles we had to wait because the RDP FIFO was full
 //                 $ra   // Return address
 
 // Misc scalar regs:
@@ -760,8 +761,10 @@ wait_for_dma_and_run_next_command:
 G_POPMTX_end:
 G_MOVEMEM_end:
     jal     while_wait_dma_busy                         // wait for the DMA read to finish
-.if CFG_GCLK_SAMPLE
+.if CFG_PROFILING
 G_LIGHTTORDP_handler:
+.else
+G_STORECLK_handler:
 .endif
 G_SPNOOP_handler:
 run_next_DL_command:
@@ -773,7 +776,7 @@ run_next_DL_command:
      sra    $7, cmd_w0, 24                              // extract DL command byte from command word
     lw      cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
     addi    inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
-.if CFG_GCLK_SAMPLE
+.if CFG_PROFILING
     mfc0    $11, DPC_STATUS
     andi    $11, $11, DPC_STATUS_GCLK_ALIVE             // Sample whether GCLK is active now
     sll     $11, $11, 16 - 3                            // move from bit 3 to bit 16
@@ -812,7 +815,10 @@ call_ret_common:
     j       displaylist_dma_with_count
      sb     $1, displayListStackLength
 
-.if !CFG_GCLK_SAMPLE
+.if CFG_PROFILING
+G_STORECLK_handler:
+    
+.else
 G_LIGHTTORDP_handler:
     lbu     $11, numLightsxSize          // Ambient light
     lbu     $1, (inputBufferEnd - 0x6)(inputBufferPos) // Byte 2 = light count from end * size
@@ -936,6 +942,10 @@ ovl3_clipping_nosavera:
     jal     vtx_setup_constants
      li     clipMaskIdx, 4
 clip_after_constants:
+.if CFG_PROFILING
+    lui     $11, 1
+    addi    perfCounter1, perfCounter1, $11  // Increment clipped tris
+.endif
     // Clear all temp vertex slots used.
     li      $11, (MAX_CLIP_GEN_VERTS - 1) * vtxSize
 clip_init_used_loop:
@@ -1217,8 +1227,10 @@ G_VTX_handler:
     srl     $2, cmd_w0, 11                     // n << 1
     sub     $2, cmd_w0, $2                     // v0 << 1
     sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
+.if !CFG_PROFILING
     sll     $11, $1, 12                        // Vtx count * 0x10000
     add     perfCounter1, perfCounter1, $11    // Add to vertex count
+.endif
     j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3 = $12
      li     $11, vtx_return_from_addrs
 vtx_return_from_addrs:
@@ -1650,7 +1662,9 @@ tV3AtI equ $v21
     vmrg    tV3AtI, $v25, tV3AtI        // RGB from $4, alpha from $3
 tri_skip_flat_shading:
     vrcp    $v20[2], $v6[1]
+.if !CFG_PROFILING
     lb      $20, (alphaCompareCullMode)($zero)
+.endif
     vrcph   $v22[2], $v6[1]
     lw      $5, VTX_INV_W_VEC($1)
     vrcp    $v20[3], $v8[1]
@@ -1666,8 +1680,11 @@ tri_skip_flat_shading:
     vmov    $v15[3], $v8[0]
     and     $11, $11, $12
     vmudl   $v29, $v20, $v30[7] // 0x0020
+.if !CFG_PROFILING
     beqz    $20, tri_skip_alpha_compare_cull
+.endif
      sub    $5, $5, $11
+.if !CFG_PROFILING
     // Alpha compare culling
     vge     $v26, tV1AtI, tV2AtI
     lbu     $19, alphaCompareCullThresh
@@ -1680,6 +1697,7 @@ tri_skip_flat_shading:
     sub     $24, $24, $19 // sign bit set if (max/min) < thresh
     xor     $24, $24, $20 // invert sign bit if other cond. Sign bit set -> cull
     bltz    $24, return_routine // if max < thresh or if min >= thresh.
+.endif
 tri_skip_alpha_compare_cull:
      vmadm  $v22, $v22, $v30[7] // 0x0020
     sub     $11, $5, $8
@@ -1889,6 +1907,9 @@ load_overlays_2_3_4:
     li      dmemAddr, ovl234_start
 load_overlay_inner:
     lw      $11, OSTask + OSTask_ucode
+.if CFG_PROFILING
+    addi    perfCounter2, perfCounter2, 1  // Increment number of overlay loads
+.endif
     jal     dma_read_write
      add    cmd_w1_dram, cmd_w1_dram, $11
     move    $ra, postOvlRA
@@ -2100,7 +2121,9 @@ G_RDPHALF_2_handler:
     ldv     $v29[0], (texrectWord1)($zero)
     lw      cmd_w0, rdpHalf1Val             // load the RDPHALF1 value into w0
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
+.if !CFG_PROFILING
     addi    perfCounter2, perfCounter2, 1   // Increment number of tex/fill rects
+.endif
     sb      $zero, materialCullMode         // This covers tex and fill rects
     j       G_RDP_handler
      sdv    $v29[0], -8(rdpCmdBufPtr)
