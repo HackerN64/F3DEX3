@@ -11,7 +11,7 @@ ALL_OPTIONS := \
   CFG_GCLK_SAMPLE
 
 ARMIPS ?= armips
-PARENT_OUTPUT_DIR ?= ./build
+PARENT_OUTPUT_DIR ?= ../test
 ifeq ($(PARENT_OUTPUT_DIR),.)
   $(error Cannot build directly in repo directory; see Makefile for details.)
   # The problem is that we want to be able to have targets like F3DEX2_2.08,
@@ -138,6 +138,7 @@ DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W version)
 ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_W version______________________
 # Add options you want here, e.g. CFG_GCLK_SAMPLE
 OPTIONS := \
+  CFG_GCLK_SAMPLE \
   CFG_G_BRANCH_W
 $(eval $(call ucode_rule))
 
