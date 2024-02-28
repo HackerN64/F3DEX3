@@ -139,7 +139,7 @@ NAME := F3DEX3_BrW
 DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W version)
 ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_W version______________________
 # Add options you want here, e.g. CFG_PROFILING_A
-OPTIONS := CFG_PROFILING_A CFG_G_BRANCH_W
+OPTIONS := CFG_G_BRANCH_W
 $(eval $(call ucode_rule))
 
 .PHONY: default ok all clean
