@@ -63,11 +63,6 @@ ACC_LOWER equ 2
 // are removed, i.e. G_LIGHTTORDP behaves as a no-op and all tris are smooth
 // shaded.
 //
-ENABLE_PROFILING equ 0
-COUNTER_A_UPPER_VERTEX_COUNT equ 0
-COUNTER_B_LOWER_CMD_COUNT equ 0
-COUNTER_C_FIFO_FULL equ 1
-NEED_START_COUNTER_DMEM equ 0
 
 // Config A TODO
 // perfCounterA:
@@ -80,10 +75,14 @@ NEED_START_COUNTER_DMEM equ 0
 // perfCounterD:
 //     cycles RSP spent processing triangle commands (incl. buffer flushes)
 .if CFG_PROFILING_A
-ENABLE_PROFILING equ 1
-COUNTER_B_LOWER_CMD_COUNT equ 1
-NEED_START_COUNTER_DMEM equ 1
+.if CFG_PROFILING_B || CFG_PROFILING_C
+.error "At most one CFG_PROFILING_ option can be enabled at a time"
 .endif
+ENABLE_PROFILING equ 1
+COUNTER_A_UPPER_VERTEX_COUNT equ 0
+COUNTER_B_LOWER_CMD_COUNT equ 1
+COUNTER_C_FIFO_FULL equ 1
+NEED_START_COUNTER_DMEM equ 1
 
 // Config B TODO
 // perfCounterA:
@@ -98,18 +97,19 @@ NEED_START_COUNTER_DMEM equ 1
 // perfCounterD:
 //     upper 18 bits: overlay 3 (clipping) load count TODO
 //     lower 14 bits: overlay 4 (misc) load count TODO
-.if CFG_PROFILING_B
-.if ENABLE_PROFILING
+.elseif CFG_PROFILING_B
+.if CFG_PROFILING_C
 .error "At most one CFG_PROFILING_ option can be enabled at a time"
 .endif
 ENABLE_PROFILING equ 1
-COUNTER_C_FIFO_FULL equ 0
 COUNTER_A_UPPER_VERTEX_COUNT equ 1
-.endif
+COUNTER_B_LOWER_CMD_COUNT equ 0
+COUNTER_C_FIFO_FULL equ 0
+NEED_START_COUNTER_DMEM equ 0
 
 // Config C TODO
 // perfCounterA:
-//     cycles RSP believes it was running
+//     cycles RSP believes it was running (this ucode only)
 // perfCounterB:
 //     upper 16 bits: samples GCLK was alive (sampled once per DL command count)
 //     lower 16 bits: DL command count
@@ -117,14 +117,12 @@ COUNTER_A_UPPER_VERTEX_COUNT equ 1
 //     cycles RSP was stalled because RDP FIFO was full
 // perfCounterD:
 //     cycles RSP was stalled waiting for miscellaneous DMAs to finish
-.if CFG_PROFILING_C
-.if ENABLE_PROFILING
-.error "At most one CFG_PROFILING_ option can be enabled at a time"
-.endif
+.elseif CFG_PROFILING_C
 ENABLE_PROFILING equ 1
+COUNTER_A_UPPER_VERTEX_COUNT equ 0
 COUNTER_B_LOWER_CMD_COUNT equ 1
+COUNTER_C_FIFO_FULL equ 1
 NEED_START_COUNTER_DMEM equ 1
-.endif
 
 // Default (extra profiling disabled)
 // perfCounterA:
@@ -137,9 +135,15 @@ NEED_START_COUNTER_DMEM equ 1
 //     cycles RSP was stalled because RDP FIFO was full
 // perfCounterD:
 //     unused/zero
-.if !ENABLE_PROFILING
+.else
+ENABLE_PROFILING equ 0
 COUNTER_A_UPPER_VERTEX_COUNT equ 1
+COUNTER_B_LOWER_CMD_COUNT equ 0
+COUNTER_C_FIFO_FULL equ 1
+NEED_START_COUNTER_DMEM equ 0
+
 .endif
+.warning "TODO matrix count"
 
 /*
 There are two different memory spaces for the overlays: (a) IMEM and (b) the
@@ -915,7 +919,7 @@ call_ret_common:
     j       displaylist_dma_with_count
      sb     $1, displayListStackLength
 
-.if !CFG_GCLK_SAMPLE
+.if !ENABLE_PROFILING
 G_LIGHTTORDP_handler:
     lbu     $11, numLightsxSize          // Ambient light
     lbu     $1, (inputBufferEnd - 0x6)(inputBufferPos) // Byte 2 = light count from end * size

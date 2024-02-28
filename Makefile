@@ -8,10 +8,12 @@ default: F3DEX3_BrZ F3DEX3_BrW
 ALL_OPTIONS := \
   CFG_G_BRANCH_W \
   CFG_DEBUG_NORMALS \
-  CFG_GCLK_SAMPLE
+  CFG_PROFILING_A \
+  CFG_PROFILING_B \
+  CFG_PROFILING_C
 
 ARMIPS ?= armips
-PARENT_OUTPUT_DIR ?= ../test
+PARENT_OUTPUT_DIR ?= ./build
 ifeq ($(PARENT_OUTPUT_DIR),.)
   $(error Cannot build directly in repo directory; see Makefile for details.)
   # The problem is that we want to be able to have targets like F3DEX2_2.08,
@@ -129,17 +131,15 @@ $(eval $(call reset_vars))
 NAME := F3DEX3_BrZ
 DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z version)
 ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_Z version______________________
-# Add options you want here, e.g. CFG_GCLK_SAMPLE
+# Add options you want here, e.g. CFG_PROFILING_A
 OPTIONS := 
 $(eval $(call ucode_rule))
 
 NAME := F3DEX3_BrW
 DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W version)
 ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_W version______________________
-# Add options you want here, e.g. CFG_GCLK_SAMPLE
-OPTIONS := \
-  CFG_GCLK_SAMPLE \
-  CFG_G_BRANCH_W
+# Add options you want here, e.g. CFG_PROFILING_A
+OPTIONS := CFG_PROFILING_A CFG_G_BRANCH_W
 $(eval $(call ucode_rule))
 
 .PHONY: default ok all clean
