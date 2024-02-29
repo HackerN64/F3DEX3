@@ -1728,6 +1728,7 @@ tri_return_from_addrs:
     move    $4, $1                // Save original vertex 1 addr (pre-shuffle) for flat shading
 .endif
     li      clipPolySelect, -1    // Normal tri drawing mode (check clip masks)
+    sh      $ra, tempTriRA        // If end up clipping, where to go after
 tri_noinit:
     // ra is next cmd, second tri in TRI2, or middle of clipping
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
@@ -1738,17 +1739,16 @@ tri_noinit:
     lhu     $5, VTX_CLIP($1)
     vmov    $v8[6], $v27[7]         // elem 6 of v8 = vertex 3 addr
     lhu     $7, VTX_CLIP($2)
-    lhu     $8, VTX_CLIP($3)
     vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
-    lw      $6, geometryModeLabel // Load full geometry mode word
+    lhu     $8, VTX_CLIP($3)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
-    and     $9, $5, $7
+    lw      $6, geometryModeLabel // Load full geometry mode word
     vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
-    and     $9, $9, $8 // $9 = all clip bits which are true for all three verts
+    and     $9, $5, $7
     vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
-    andi    $11, $9, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
+    and     $9, $9, $8 // $9 = all clip bits which are true for all three verts
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
-    sh      $ra, tempTriRA
+    andi    $11, $9, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
     vmrg    $v14, $v6, $v4    // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     bnez    $11, return_routine // Then the whole tri is offscreen, cull
      or     $5, $5, $7
