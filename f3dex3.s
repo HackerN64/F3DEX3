@@ -340,7 +340,7 @@ for subpixels, so it's 16 and -16.
 
 cameraWorldPos:
     .skip 6
-tempHalfword:
+tempTriRA:
     .skip 2 // Overwritten as part of camera world position, used as temp
 lightBufferLookat:
     .skip 8 // s8 X0, Y0, Z0, dummy, X1, Y1, Z1, dummy
@@ -1400,32 +1400,29 @@ vtx_skip_fog:
 ovl234_start:
 
 ovl3_start:
+// Clipping overlay.
 
-// Jump here to do lighting. If overlay 3 is loaded (this code), loads and jumps
-// to overlay 2 (same address as right here).
-ovl234_lighting_entrypoint_ovl3ver:  // same IMEM address as ovl234_lighting_entrypoint
-    li      cmd_w1_dram, orga(ovl2_start)        // set up a load for overlay 2
-    j       load_overlays_2_3_4                  // load overlay 2
-     li     postOvlRA, ovl234_lighting_entrypoint // set the return address
+// Jump here to do lighting. If overlay 3 is loaded (this code), loads overlay 2
+// and jumps to right here, which is now in the new code.
+ovl234_lighting_entrypoint_ovl3ver:        // same IMEM address as ovl234_lighting_entrypoint
+    jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
+     li     cmd_w1_dram, orga(ovl2_start)  // set up a load for overlay 2
 
-// Jump here for all overlay 4 features. If overlay 3 is loaded (this code),
-// loads and jumps to overlay 4 (ovl234_start).
-ovl234_ovl4_entrypoint_ovl3ver: // same IMEM address as ovl234_ovl4_entrypoint
-    li      cmd_w1_dram, orga(ovl4_start)        // set up a load for overlay 4
-    j       load_overlays_2_3_4                  // load overlay 4
-     li     postOvlRA, ovl234_ovl4_entrypoint    // set the return address
+// Jump here for all overlay 4 features. If overlay 3 is loaded (this code), loads
+// overlay 4 and jumps to right here, which is now in the new code.
+ovl234_ovl4_entrypoint_ovl3ver:            // same IMEM address as ovl234_ovl4_entrypoint
+    jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
+     li     cmd_w1_dram, orga(ovl4_start)  // set up a load for overlay 4
 
 // Jump here to do clipping. If overlay 3 is loaded (this code), directly starts
 // the clipping code.
 ovl234_clipping_entrypoint:
-    sh      $ra, tempHalfword
-ovl3_clipping_nosavera:
-.if CFG_PROFILING_B
-    addi    perfCounterB, perfCounterB, 1        // Increment clipped (input) tris count
-.endif
     jal     vtx_setup_constants
      li     clipMaskIdx, 4
 clip_after_constants:
+.if CFG_PROFILING_B
+    addi    perfCounterB, perfCounterB, 1        // Increment clipped (input) tris count
+.endif
     // Clear all temp vertex slots used.
     li      $11, (MAX_CLIP_GEN_VERTS - 1) * vtxSize
 clip_init_used_loop:
@@ -1690,7 +1687,7 @@ clip_final_draw:
      li     $ra, clip_draw_loop // When done, return to top of loop
 
 clip_done:
-    lh      $ra, tempHalfword
+    lh      $ra, tempTriRA
     jr      $ra
      li     clipPolySelect, -1  // Back to normal tri drawing mode (check clip masks)
 
@@ -1741,16 +1738,17 @@ tri_noinit:
     lhu     $5, VTX_CLIP($1)
     vmov    $v8[6], $v27[7]         // elem 6 of v8 = vertex 3 addr
     lhu     $7, VTX_CLIP($2)
-    vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
     lhu     $8, VTX_CLIP($3)
-    vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
+    vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
     lw      $6, geometryModeLabel // Load full geometry mode word
-    vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
+    vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
     and     $9, $5, $7
-    vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
+    vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
     and     $9, $9, $8 // $9 = all clip bits which are true for all three verts
-    vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
+    vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
     andi    $11, $9, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
+    vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
+    sh      $ra, tempTriRA
     vmrg    $v14, $v6, $v4    // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     bnez    $11, return_routine // Then the whole tri is offscreen, cull
      or     $5, $5, $7
@@ -2064,7 +2062,9 @@ load_overlays_0_1:
     li      dmaLen, ovl01_end - 0x1000 - 1
     j       load_overlay_inner
      li     dmemAddr, 0x1000
+
 load_overlays_2_3_4:
+    addi    postOvlRA, $ra, -8  // Got here with jal, but want to return to addr of jal itself
     li      dmaLen, ovl234_end - ovl234_start - 1
     li      dmemAddr, ovl234_start
 load_overlay_inner:
@@ -2369,21 +2369,25 @@ ovl1_padded_end:
 .headersize ovl234_start - orga()
 
 ovl2_start:
+// Lighting overlay.
+
+// Jump here to do lighting. If overlay 2 is loaded (this code), jumps into the
+// rest of the lighting code below.
 ovl234_lighting_entrypoint:
-    vmrg    vPairNrml, vPairNrml, vDDD          // Merge normals
     j       lt_continue_setup
      andi   $11, $5, G_PACKED_NORMALS >> 8
 
-ovl234_ovl4_entrypoint_ovl2ver: // same IMEM address as ovl234_ovl4_entrypoint
-    li      cmd_w1_dram, orga(ovl4_start)        // set up a load for overlay 4
-    j       load_overlays_2_3_4                  // load overlay 4
-     li     postOvlRA, ovl234_ovl4_entrypoint    // set the return address
+// Jump here for all overlay 4 features. If overlay 2 is loaded (this code), loads
+// overlay 4 and jumps to right here, which is now in the new code.
+ovl234_ovl4_entrypoint_ovl2ver:            // same IMEM address as ovl234_ovl4_entrypoint
+    jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
+     li     cmd_w1_dram, orga(ovl4_start)  // set up a load for overlay 4
 
-ovl234_clipping_entrypoint_ovl2ver:  // same IMEM address as ovl234_clipping_entrypoint
-    sh      $ra, tempHalfword
-    li      cmd_w1_dram, orga(ovl3_start)     // set up a load of overlay 3
-    j       load_overlays_2_3_4               // load overlay 3
-     li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
+// Jump here to do clipping. If overlay 2 is loaded (this code), loads overlay 3
+// and jumps to right here, which is now in the new code.
+ovl234_clipping_entrypoint_ovl2ver:        // same IMEM address as ovl234_clipping_entrypoint
+    jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
+     li     cmd_w1_dram, orga(ovl3_start)  // set up a load for overlay 3
 
 lt_continue_setup:
     // Inputs: vPairPosI/F vertices pos world int:frac, vPairRGBA, vPairST,
@@ -2394,6 +2398,7 @@ lt_continue_setup:
 .if CFG_PROFILING_B
     addi    perfCounterB, perfCounterB, 2    // Increment lit vertex count by 2
 .endif
+    vmrg    vPairNrml, vPairNrml, vDDD       // Merge normals
     beqz    $11, lt_skip_packed_normals
      vmrg   vAAA, vAAA, vBBB          // Merge packed normals
     // Packed normals algorithm. This produces a vector (one for each input vertex)
@@ -2692,21 +2697,23 @@ ovl2_padded_end:
 ovl4_start:
 // Contains M inverse transpose (mIT) computation, and some rarely-used command handlers.
 
-ovl234_lighting_entrypoint_ovl4ver:  // same IMEM address as ovl234_lighting_entrypoint
-    li      cmd_w1_dram, orga(ovl2_start)        // set up a load for overlay 2
-    j       load_overlays_2_3_4                  // load overlay 2
-     li     postOvlRA, ovl234_lighting_entrypoint // set the return address
-
+// Jump here to do lighting. If overlay 4 is loaded (this code), loads overlay 2
+// and jumps to right here, which is now in the new code.
+ovl234_lighting_entrypoint_ovl4ver:        // same IMEM address as ovl234_lighting_entrypoint
+    jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
+     li     cmd_w1_dram, orga(ovl2_start)  // set up a load for overlay 2
+     
+// Jump here for all overlay 4 features. If overlay 4 is loaded (this code), jumps
+// to the instruction selection below.
 ovl234_ovl4_entrypoint:
-    li      $10, mMatrix + 0xE   // For right rotates with lrv/ldv for calc_mit
     j       ovl4_select_instr
      li     $2, 1                // $7 = 1 (lighting && mIT invalid) if doing calc_mit
 
-ovl234_clipping_entrypoint_ovl4ver:  // same IMEM address as ovl234_clipping_entrypoint
-    sh      $ra, tempHalfword
-    li      cmd_w1_dram, orga(ovl3_start)     // set up a load of overlay 3
-    j       load_overlays_2_3_4               // load overlay 3
-     li     postOvlRA, ovl3_clipping_nosavera // set up the return address in ovl3
+// Jump here to do clipping. If overlay 4 is loaded (this code), loads overlay 3
+// and jumps to right here, which is now in the new code.
+ovl234_clipping_entrypoint_ovl4ver:        // same IMEM address as ovl234_clipping_entrypoint
+    jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
+     li     cmd_w1_dram, orga(ovl3_start)  // set up a load for overlay 3
 
 ovl4_select_instr:
     beq     $2, $7, calc_mit // otherwise $7 = command byte
@@ -2790,12 +2797,13 @@ calc_mit:
     However, if input matrix has components on the order of 0000.0100, multiplying
     two terms will reduce that to the order of 0000.0001, which kills all the precision.
     */
-    // Get absolute value of all terms of M matrix. $10 already set in dispatch.
+    // Get absolute value of all terms of M matrix.
+    li      $10, mMatrix + 0xE                               // For right rotates with lrv/ldv
     vxor    $v20, vM0I, $v31[1] // One's complement of X int part
     sb      $7, mITValid                                     // $7 is 1 if we got here, mark valid
     vlt     $v29, vM0I, $v31[2] // X int part < 0
     li      $11, mMatrix + 2                                 // For left rotates with lqv/ldv
-    vabs    $v21, vM0I, vM0F     // Apply sign of X int part to X frac part
+    vabs    $v21, vM0I, vM0F    // Apply sign of X int part to X frac part
     lrv     $v10[0], (0x00)($10)                              // X int right shifted
     vxor    $v22, vM1I, $v31[1] // One's complement of Y int part
     lrv     $v11[0], (0x20)($10)                              // X frac right shifted
@@ -2803,7 +2811,7 @@ calc_mit:
     lqv     $v16[0], (0x10)($11)                              // Z int left shifted
     vlt     $v29, vM1I, $v31[2] // Y int part < 0
     lqv     $v17[0], (0x30)($11)                              // Z frac left shifted
-    vabs    $v23, vM1I, vM1F     // Apply sign of Y int part to Y frac part
+    vabs    $v23, vM1I, vM1F    // Apply sign of Y int part to Y frac part
     lsv     $v10[0], (0x02)($11)                              // X int right rot elem 2->0
     vxor    $v24, vM2I, $v31[1] // One's complement of Z int part
     lsv     $v11[0], (0x22)($11)                              // X frac right rot elem 2->0
@@ -2811,7 +2819,7 @@ calc_mit:
     lsv     $v16[4],  (0x0E)($11)                             // Z int left rot elem 0->2
     vlt     $v29, vM2I, $v31[2] // Z int part < 0
     lsv     $v17[4],  (0x2E)($11)                             // Z frac left rot elem 0->2
-    vabs    $v25, vM2I, vM2F     // Apply sign of Z int part to Z frac part
+    vabs    $v25, vM2I, vM2F    // Apply sign of Z int part to Z frac part
     lrv     $v18[0], (0x10)($10)                              // Z int right shifted
     vmrg    $v24, $v24, vM2I    // $v24:$v25 = abs(Z int:frac)
     lrv     $v19[0], (0x30)($10)                              // Z frac right shifted
