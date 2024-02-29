@@ -541,8 +541,8 @@ miniTableEntry G_RDP_handler // G_SETCOMBINE
 miniTableEntry G_SETxIMG_handler // G_SETTIMG
 miniTableEntry G_SETxIMG_handler // G_SETZIMG
 miniTableEntry G_SETxIMG_handler // G_SETCIMG
-miniTableEntry G_SYNC_handler // G_NOOP
 cmdMiniTable:
+miniTableEntry G_SYNC_handler // G_NOOP
 miniTableEntry G_VTX_handler
 miniTableEntry G_MODIFYVTX_handler
 miniTableEntry G_CULLDL_handler
