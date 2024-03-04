@@ -129,10 +129,27 @@ endef
 $(eval $(call reset_vars))
 
 NAME := F3DEX3_BrZ
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z version)
-ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_Z version______________________
-# Add options you want here, e.g. CFG_PROFILING_A
-OPTIONS := 
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z, default profiling)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_Z, default profiling___________
+OPTIONS :=
+$(eval $(call ucode_rule))
+
+NAME := F3DEX3_BrZ_PA
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z, PROFILING_A)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_Z, PROFILING_A_________________
+OPTIONS := CFG_PROFILING_A
+$(eval $(call ucode_rule))
+
+NAME := F3DEX3_BrZ_PB
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z, PROFILING_B)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_Z, PROFILING_B_________________
+OPTIONS := CFG_PROFILING_B
+$(eval $(call ucode_rule))
+
+NAME := F3DEX3_BrZ_PC
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z, PROFILING_C)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_Z, PROFILING_C_________________
+OPTIONS := CFG_PROFILING_C
 $(eval $(call ucode_rule))
 
 NAME := F3DEX3_BrW
@@ -163,7 +180,9 @@ $(eval $(call ucode_rule))
 
 all: $(ALL_UCODES)
 
-ok: $(ALL_UCODES_WITH_MD5S)
+all_brz: F3DEX3_BrZ F3DEX3_BrZ_PA F3DEX3_BrZ_PB F3DEX3_BrZ_PC
+
+all_brw: F3DEX3_BrW F3DEX3_BrW_PA F3DEX3_BrW_PB F3DEX3_BrW_PC
 
 clean:
 	@printf "$(WARNING)Deleting all built microcode files$(NO_COL)\n"

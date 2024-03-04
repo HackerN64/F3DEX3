@@ -4,7 +4,7 @@
 # script to build the microcode. To build the microcode, just run make F3DEX3_BrZ
 # or make F3DEX3_BrW.
 set -e
-make all
+make all_brw
 cp build/F3DEX3_BrW/F3DEX3_BrW.code ../../Mods/HackerOoT/data/F3DEX3/F3DEX3_BrW.code
 cp build/F3DEX3_BrW/F3DEX3_BrW.data ../../Mods/HackerOoT/data/F3DEX3/F3DEX3_BrW.data
 cp build/F3DEX3_BrW_PA/F3DEX3_BrW_PA.code ../../Mods/HackerOoT/data/F3DEX3/F3DEX3_BrW_PA.code

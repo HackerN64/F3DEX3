@@ -352,6 +352,7 @@ ltBufOfs equ (lightBufferMain - altBase)
 
 occlusionPlaneEdgeCoeffs:
 /*
+NOTE: This explanation is outdated; see cpu/occlusionplane.c
 Vertex is in occlusion region if all five equations below are true:
 4 * screenX[s13.2] * c0[s0.15] - 0.5 * screenY[s13.2] < c4[s14.1]
 4 * screenY[s13.2] * c1[s0.15] - 0.5 * screenX[s13.2] < c5[s14.1]

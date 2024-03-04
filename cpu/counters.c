@@ -17,6 +17,12 @@ to clear/modify the CLK counter while the RSP is running, or the profiling
 results may be garbage.
 
 Note that all "cycles" counters reported by F3DEX3 are RCP cycles, at 62.5 MHz.
+
+Finally, note that the implementation of the stallDMACycles counter in 
+CFG_PROFILING_C is compatible with loading S2DEX via SPLoadUcode, but it may not
+be compatible with other microcodes. If you run into crashes when using
+CFG_PROFILING_C but not A or B or the default, contact Sauraen, as you will need
+a customized implementation based on the other microcode you are using.
 */
 
 /* In some header, needs to be accessible to variables.h */

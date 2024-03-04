@@ -3,8 +3,8 @@
 Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
 Heavily modified version of F3DEX2, partially rewritten from scratch.
 
-**F3DEX3 is in alpha. It is not stable yet for use in romhacks. If you try it,
-you should expect crashes and graphical issues.**
+**F3DEX3 is in alpha. It is not guaranteed to be bug-free, and updates may bring
+breaking changes.**
 
 ## Features
 
@@ -110,30 +110,30 @@ you should expect crashes and graphical issues.**
   tint colors of cel shading to **match scene lighting** with no code
   intervention. Also useful for other lighting-dependent effects.
 
-F3DEX3 also introduces several **performance counters**, which are accessible
-from the CPU after the graphics task finishes:
-- Number of vertices processed by the RSP
-- Number of triangles requested in display lists. This does not count triangles
-  skipped due to `SPCullDisplayList` or `SPBranchLessZ*`.
-- Number of triangles actually sent to the RDP, after:
-    - Subdivision in clipping
-    - Culling due to offscreen
-    - Culling due to front / back face settings
-    - Culling due to too small screen size (same algorithm as F3DEX2)
-    - Culling due to behind the occlusion plane
-- Number of texture or fill rectangles processed
-- Number of cycles the microcode was stalled because the output FIFO in DMEM
-  was full
-- Number of display list commands processed (*)
-- Number of times the "GCLK is alive" bit in the RDP status word is set (*),
-  which is sampled once per display list command. This enables a rough
-  measurement of how often the RDP is stalled waiting for RDRAM for I/O to the
-  framebuffer / Z buffer.
+### Profiling
 
-(*) These two counters are only enabled if the `CFG_GCLK_SAMPLE` build option is
-enabled in the Makefile, otherwise they are both zero. Due to extremely limited
-IMEM space, enabling this option removes the `SPLightToRDP` commands (they
-become no-ops). This is intended for profiling during development only.
+F3DEX3 introduces a suite of performance profiling capabilities. These take the
+form of performance counters, which report cycle counts for various operations
+or the number of items processed of a given type. There are far too many
+counters for a single microcode to maintain, so multiple configurations of the
+microcode can be built, each containing a different set of performance counters.
+These can be swapped while the game is running so the full set of counters can
+be effectively accessed over multiple frames.
+
+There are a total of 21 performance counters, including:
+- Counts of vertices, triangles, rectangles, matrices, DL commands, etc.
+- Times the microcode was processing vertices, processing triangles, stalled
+  because the RDP FIFO in DMEM was full, and stalled waiting for DMAs to finish
+- A counter enabling a rough measurement of how long the RDP was stalled
+  waiting for RDRAM for I/O to the framebuffer / Z buffer
+
+The default configuration of F3DEX3 provides a few of the most basic counters.
+The additional profiling configurations, called A, B, and C (for example
+`F3DEX3_BrZ_PA`), provide additional counters, but have two default features
+removed to make space for the profiling. These two features were selected
+because their removal do not affect the RDP render time.
+- The `SPLightToRDP` commands are removed (they become no-ops)
+- Flat shading mode, i.e. `!G_SHADING_SMOOTH`, is removed (all tris are smooth)
 
 
 ## Porting Your Romhack Codebase to F3DEX3
@@ -291,7 +291,7 @@ but is not necessary if you are not using it.
   to an appropriate value based on the game engine parameters for that light.
 - For the occlusion plane: Bring the code from `cpu/occlusionplane.c` into your
   game and follow the included instructions.
-- For the performance counters: Make the changes described in `cpu/counters.c`.
+- For the performance counters: See `cpu/counters.c`.
 
 
 ## Backwards Compatibility with F3DEX2
@@ -338,8 +338,8 @@ and commands except:
 ### Binary Display List Compatibility
 
 F3DEX3 is generally binary backwards compatible with OoT-style display lists for
-objects, scenes, etc. It is not compatible at the binary level with SM64-style
-display lists which encode object colors as light colors, as all the command
+objects, scenes, etc. **It is not compatible at the binary level with SM64-style
+display lists which encode object colors as light colors**, as all the command
 encodings related to lighting have changed. Of course, if you recompile these
 display lists with the new `gbi.h`, it can run them.
 
@@ -359,6 +359,15 @@ always use the new encoding.
 
 
 ## What are the tradeoffs for all these new features?
+
+### Vertex Processing RSP Time
+
+The vertex processing algorithm in F3DEX3 is redesigned compared to F3DEX2,
+which enables several of the new graphical features in F3DEX3 as well as the
+56 vertex buffer. With the new algorithm, the RSP takes significantly longer to
+process vertices in F3DEX3, especially vertices without lighting or with a very
+small number of directional lights. Note that this is RSP cycles only, not RDP
+cycles or DRAM traffic.
 
 ### Overlay 4
 
@@ -432,12 +441,8 @@ nonuniform scale (e.g. Mario only while he is squashed).
 ### Optimizing for RSP code size
 
 A number of over-zealous optimizations in F3DEX2 which saved a few cycles but
-took several more instructions have been removed. F3DEX3 will often be 5-10%
-slower than F3DEX2 in RSP cycles (not DRAM traffic or RDP time), especially for
-large quantities of very short commands. Note that for certain codepaths such as
-point lighting, the RSP will now be faster than in F3DEX2, and the improved RDP
-performance from all the new features matters more as the RDP is usually the
-bottleneck.
+took several more instructions have been removed. This has a very small impact
+on overall RSP time and no impact on RDP time.
 
 ### Far clipping removal
 
