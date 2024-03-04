@@ -5,9 +5,9 @@ Build the microcode with one of the CFG_PROFILING_* options below to select one
 of these sets of performance counters, or without any CFG_PROFILING_* option for
 the default set. You can even include all the microcode versions in your game,
 and let the player/developer swap which one is used for a given frame in order
-to switch which set of performance counters they're seeing. You only need to
-keep the currently used one in RDRAM, you can load a different one from the cart
-over it when the user swaps.
+to switch which set of performance counters they're seeing. If you want, you
+only need to keep the currently used one in RDRAM--you can load a different one
+from the cart over it when the user swaps.
 
 For the options other than the default, the microcode uses the RDP's CLK counter
 for its own timing. You should clear this counter just before launching F3DEX3
@@ -15,6 +15,8 @@ on the RSP (in the graphics task setup); usually you'd also read the counter
 value, to optionally print on screen, after the RDP is finished. Make sure not
 to clear/modify the CLK counter while the RSP is running, or the profiling
 results may be garbage.
+
+Note that all "cycles" counters reported by F3DEX3 are RCP cycles, at 62.5 MHz.
 */
 
 /* In some header, needs to be accessible to variables.h */
@@ -27,26 +29,41 @@ typedef struct {  /* Default performance counters, if no CFG_PROFILING_* is enab
     u32 rspInTriCount:18;
     /* Number of fill rects and tex rects drawn */
     u32 rectCount:14;
+    /* Number of cycles the RSP was stalled because the RDP FIFO was full */
     u32 stallRDPFifoFullCycles;
+    /* Unused, zero */
     u32 dummy;
 } F3DEX3ProfilingDefault;
 
 typedef struct {  /* Counters for CFG_PROFILING_A */
+    /* Number of cycles the RSP spent processing vertex commands, including vertex DMAs */
     u32 vertexProcCycles;
+    /* Number of display list commands fetched from DRAM, >= dlCommandCount */
     u16 fetchedDLCommandCount;
+    /* Number of display list commands executed */
     u16 dlCommandCount;
+    /* Number of cycles the RSP was stalled because the RDP FIFO was full */
     u32 stallRDPFifoFullCycles;
+    /* Number of cycles the RSP spent processing triangle commands, NOT including buffer flushes (i.e. FIFO full) */
     u32 triProcCycles;
 } F3DEX3ProfilingA;
 
 typedef struct {  /* Counters for CFG_PROFILING_B */
+    /* Number of vertices processed by the RSP */
     u16 vertexCount;
+    /* Number of vertices processed which had lighting enabled */
     u16 litVertexCount;
-    u32 smallRDPCommandCount:18; /* All RDP commands except tris */
-    u32 clippedTriCount:14; /* Number of RSP/input triangles which got clipped */
+    /* Number of tris culled by the occlusion plane */
+    u32 occlusionPlaneCullCount:18;
+    /* Number of RSP/input triangles which got clipped */
+    u32 clippedTriCount:14;
+    /* Number of times any microcode overlay was loaded */
     u32 allOverlayLoadCount:18;
+    /* Number of times overlay 2 (lighting) was loaded */
     u32 lightingOverlayLoadCount:14;
+    /* Number of times overlay 3 (clipping) was loaded */
     u32 clippingOverlayLoadCount:18;
+    /* Number of times overlay 4 (mIT matrix, matrix multiply, etc.) was loaded */
     u32 miscOverlayLoadCount:14;
 } F3DEX3ProfilingB;
 
@@ -59,8 +76,14 @@ typedef struct {  /* Counters for CFG_PROFILING_C */
     percentage of time the RDP was doing useful work, as opposed to waiting
     for framebuffer / Z buffer memory transactions to complete. */
     u16 commandsSampledGclkActive;
+    /* Number of display list commands executed */
     u16 dlCommandCount;
-    u32 stallRDPFifoFullCycles;
+    /* Number of commands sent to the RDP except for triangle commands */
+    u32 smallRDPCommandCount:18;
+    /* Number of matrix loads, of any type */
+    u32 matrixCount:14;
+    /* Number of cycles the RSP was stalled waiting for any DMAs: vertex loads,
+    matrix loads, copying command buffers to the RDP FIFO, overlay loads, etc. */
     u32 stallDMACycles;
 } F3DEX3ProfilingC;
 
@@ -108,7 +131,7 @@ GfxPrint_Open(&printer, gfx);
 
 GfxPrint_SetColor(&printer, 255, 100, 0, 255);
 if(f3dex3_version_CFG_PROFILING_A){
-    
+    ...
 }else if(f3dex3_version_CFG_PROFILING_B){
     ...
 }else if(f3dex3_version_CFG_PROFILING_C){

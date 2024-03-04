@@ -121,7 +121,7 @@ define ucode_rule
 	@(printf "$(MD5_CODE) *$$(CODE_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) code matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) code differs$(NO_COL)\n"
 	@(printf "$(MD5_DATA) *$$(DATA_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) data matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) data differs$(NO_COL)\n"
   else ifneq ($(1),1)
-	@printf "  $(WARNING)MD5 sums not in database for $(NAME)$(NO_COL)\n"
+	@printf "(MD5 sums not in database for $(NAME), this is normal in development)\n"
   endif
   $$(eval $$(call reset_vars))
 endef
@@ -136,10 +136,27 @@ OPTIONS :=
 $(eval $(call ucode_rule))
 
 NAME := F3DEX3_BrW
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W version)
-ID_STR := F3DEX3 by Sauraen & Nintendo, G_BRANCH_W version______________________
-# Add options you want here, e.g. CFG_PROFILING_A
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, default profiling)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, default profiling___________
 OPTIONS := CFG_G_BRANCH_W
+$(eval $(call ucode_rule))
+
+NAME := F3DEX3_BrW_PA
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, PROFILING_A)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, PROFILING_A_________________
+OPTIONS := CFG_G_BRANCH_W CFG_PROFILING_A
+$(eval $(call ucode_rule))
+
+NAME := F3DEX3_BrW_PB
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, PROFILING_B)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, PROFILING_B_________________
+OPTIONS := CFG_G_BRANCH_W CFG_PROFILING_B
+$(eval $(call ucode_rule))
+
+NAME := F3DEX3_BrW_PC
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, PROFILING_C)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, PROFILING_C_________________
+OPTIONS := CFG_G_BRANCH_W CFG_PROFILING_C
 $(eval $(call ucode_rule))
 
 .PHONY: default ok all clean

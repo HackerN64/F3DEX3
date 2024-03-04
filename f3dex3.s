@@ -69,7 +69,7 @@ ACC_LOWER equ 2
 // perfCounterC:
 //     cycles RSP was stalled because RDP FIFO was full
 // perfCounterD:
-//     cycles RSP spent processing triangle commands (incl. buffer flushes)
+//     cycles RSP spent processing triangle commands, NOT including buffer flushes
 .if CFG_PROFILING_A
 .if CFG_PROFILING_B || CFG_PROFILING_C
 .error "At most one CFG_PROFILING_ option can be enabled at a time"
@@ -85,7 +85,7 @@ NEED_START_COUNTER_DMEM equ 1
 //     upper 16 bits: vertex count
 //     lower 16 bits: lit vertex count
 // perfCounterB:
-//     upper 18 bits: small RDP command count (all RDP cmds except tris)
+//     upper 18 bits: tris culled by occlusion plane count
 //     lower 14 bits: clipped (input) tris count
 // perfCounterC:
 //     upper 18 bits: overlay (all 0-4) load count
@@ -110,14 +110,15 @@ NEED_START_COUNTER_DMEM equ 0
 //     upper 16 bits: samples GCLK was alive (sampled once per DL command count)
 //     lower 16 bits: DL command count
 // perfCounterC:
-//     cycles RSP was stalled because RDP FIFO was full
+//     upper 18 bits: small RDP command count (all RDP cmds except tris)
+//     lower 14 bits: matrix loads count
 // perfCounterD:
 //     cycles RSP was stalled waiting for miscellaneous DMAs to finish
 .elseif CFG_PROFILING_C
 ENABLE_PROFILING equ 1
 COUNTER_A_UPPER_VERTEX_COUNT equ 0
 COUNTER_B_LOWER_CMD_COUNT equ 1
-COUNTER_C_FIFO_FULL equ 1
+COUNTER_C_FIFO_FULL equ 0
 NEED_START_COUNTER_DMEM equ 1
 
 // Default (extra profiling disabled)
@@ -139,7 +140,6 @@ COUNTER_C_FIFO_FULL equ 1
 NEED_START_COUNTER_DMEM equ 0
 
 .endif
-.warning "TODO matrix count"
 
 /*
 There are two different memory spaces for the overlays: (a) IMEM and (b) the
@@ -924,6 +924,7 @@ run_next_DL_command:
     addi    perfCounterB, perfCounterB, 1               // Count commands
 .endif
 .if CFG_PROFILING_A
+    move    $4, perfCounterC                            // Save initial FIFO stall time
     sw      $11, startCounterTime
 .endif
     // $1 must remain zero
@@ -983,8 +984,8 @@ load_cmds_handler:
 G_RDP_handler:
      sw     cmd_w1_dram, 4(rdpCmdBufPtr)     // Add the second word of the command to the RDP command buffer
 G_SYNC_handler:
-.if CFG_PROFILING_B
-    addi    perfCounterB, perfCounterB, 0x4000 // Increment small RDP command count
+.if CFG_PROFILING_C
+    addi    perfCounterC, perfCounterC, 0x4000 // Increment small RDP command count
 .endif
     sw      cmd_w0, 0(rdpCmdBufPtr)          // Add the command word to the RDP command buffer
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8    // Increment the next RDP command pointer by 2 words
@@ -1405,24 +1406,30 @@ ovl3_start:
 // Jump here to do lighting. If overlay 3 is loaded (this code), loads overlay 2
 // and jumps to right here, which is now in the new code.
 ovl234_lighting_entrypoint_ovl3ver:        // same IMEM address as ovl234_lighting_entrypoint
+.if CFG_PROFILING_B
+    addi    perfCounterC, perfCounterC, 1  // Count lighting overlay load
+.endif
     jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
      li     cmd_w1_dram, orga(ovl2_start)  // set up a load for overlay 2
 
 // Jump here for all overlay 4 features. If overlay 3 is loaded (this code), loads
 // overlay 4 and jumps to right here, which is now in the new code.
 ovl234_ovl4_entrypoint_ovl3ver:            // same IMEM address as ovl234_ovl4_entrypoint
+.if CFG_PROFILING_B
+    addi    perfCounterD, perfCounterD, 1  // Count overlay 4 load
+.endif
     jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
      li     cmd_w1_dram, orga(ovl4_start)  // set up a load for overlay 4
 
 // Jump here to do clipping. If overlay 3 is loaded (this code), directly starts
 // the clipping code.
 ovl234_clipping_entrypoint:
+.if CFG_PROFILING_B
+    addi    perfCounterB, perfCounterB, 1  // Increment clipped (input) tris count
+.endif
     jal     vtx_setup_constants
      li     clipMaskIdx, 4
 clip_after_constants:
-.if CFG_PROFILING_B
-    addi    perfCounterB, perfCounterB, 1        // Increment clipped (input) tris count
-.endif
     // Clear all temp vertex slots used.
     li      $11, (MAX_CLIP_GEN_VERTS - 1) * vtxSize
 clip_init_used_loop:
@@ -1705,11 +1712,13 @@ tri_end:
     mfc0    $11, DPC_CLOCK
     lw      $10, startCounterTime
     sub     $11, $11, $10
-    bnez    $ra, run_next_DL_command         // $ra != 0 if from tri cmds
-     add    perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
-    sub     perfCounterD, perfCounterD, $11  // From verts, undo add to tri perf counter
-    j       run_next_DL_command
+    beqz    $ra, run_next_DL_command         // $ra != 0 if from tri cmds
      add    perfCounterA, perfCounterA, $11  // Add to vert cycles perf counter
+    sub     perfCounterA, perfCounterA, $11  // From tris, undo add to vert perf counter
+    sub     $10, perfCounterC, $4            // How long we stalled for RDP FIFO during this cmd
+    sub     $11, $11, $10                    // Subtract that from the tri cycles
+    j       run_next_DL_command
+     add    perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
 .endif
 
 tri_fan_store:
@@ -1766,7 +1775,7 @@ tri_noinit:
     vmrg    $v4, $v14, $v8    // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     andi    $9, $9, CLIP_OCCLUDED
     vmrg    $v14, $v8, $v14   // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
-    bnez    $9, return_routine // Cull if all verts occluded
+    bnez    $9, tri_culled_by_occlusion_plane // Cull if all verts occluded
      srl    $11, $8, 31       // = 0 if x prod positive (back facing), 1 if x prod negative (front facing)
     vlt     $v6, $v6, $v2     // v6 (thrown out), VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
     beqz    $8, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
@@ -2052,6 +2061,12 @@ tV1AtFF equ $v10
     j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
      sdv    tDaDyF[8],  -0x08(rdpCmdBufPtr) // DaDe i/f, DaDy i/f
 
+.if CFG_PROFILING_B
+tri_culled_by_occlusion_plane:
+    jr      $ra
+     addi   perfCounterB, perfCounterB, 0x4000
+.endif
+
 
 load_overlay_0_and_enter:
     li      postOvlRA, 0x1000                        // Sets up return address
@@ -2072,11 +2087,27 @@ load_overlay_inner:
 .if CFG_PROFILING_B
     addi    perfCounterC, perfCounterC, 0x4000  // Increment overlay (all 0-4) load count
 .endif
+.if CFG_PROFILING_C
+    mfc0    $9, DPC_CLOCK  // see below
+.endif
     jal     dma_read_write
      add    cmd_w1_dram, cmd_w1_dram, $11
     move    $ra, postOvlRA
     // Fall through to while_wait_dma_busy
-    
+.if CFG_PROFILING_C
+// ...except if profiling DMA time. According to Tharo's testing, and in contradiction
+// to the manual, almost no instructions are issued while an IMEM DMA is happening.
+// So we have to time it using counters.
+    mfc0    $11, SP_DMA_BUSY
+overlay_load_while_dma_busy:
+    bnez    $11, overlay_load_while_dma_busy
+     mfc0   $11, SP_DMA_BUSY
+    mfc0    $11, DPC_CLOCK
+    sub     $11, $11, $9
+    jr      $ra
+     add    perfCounterD, perfCounterD, $11
+.endif
+
 totalImemUseUpTo1FC8:
 
 .if . > 0x1FC8
@@ -2091,13 +2122,16 @@ while_wait_dma_busy:
     bnez    $11, while_wait_dma_busy
      // perfCounterD is $12, which is a temp register in S2DEX, which happens to
      // never have state carried over while_wait_dma_busy.
-     addi   perfCounterD, perfCounterD, 6 // 3 instr + 2 after mfc + 1 taken branch
+     addi   perfCounterD, perfCounterD, 6  // 3 instr + 2 after mfc + 1 taken branch
 .else
 @@while_dma_busy:
     bnez    $11, @@while_dma_busy // Loop until DMA_BUSY is cleared
      mfc0   $11, SP_DMA_BUSY      // Update DMA_BUSY value
 .endif
 // This routine is used to return via conditional branch
+.if !CFG_PROFILING_B
+tri_culled_by_occlusion_plane:
+.endif
 return_routine:
     jr      $ra
 
@@ -2231,6 +2265,9 @@ G_MTX_handler:
     //  load type (multiply/load)
     //  push type (nopush/push)
     // In F3DEX2 (and by extension F3DZEX), G_MTX_PUSH is inverted, so 1 is nopush and 0 is push
+.if CFG_PROFILING_C
+    addi    perfCounterC, perfCounterC, 1  // Increment matrix count
+.endif
     andi    $11, cmd_w0, G_MTX_P_MV | G_MTX_NOPUSH_PUSH // Read the matrix type and push type flags into $11
     bnez    $11, load_mtx                               // If the matrix type is projection or this is not a push, skip pushing the matrix
      andi   $2, cmd_w0, G_MTX_MUL_LOAD                  // Read the matrix load type into $2 (0 is multiply, 2 is load)
@@ -2374,18 +2411,27 @@ ovl2_start:
 // Jump here to do lighting. If overlay 2 is loaded (this code), jumps into the
 // rest of the lighting code below.
 ovl234_lighting_entrypoint:
+.if CFG_PROFILING_B
+    addi    perfCounterA, perfCounterA, 2    // Increment lit vertex count by 2
+.endif
     j       lt_continue_setup
      andi   $11, $5, G_PACKED_NORMALS >> 8
 
 // Jump here for all overlay 4 features. If overlay 2 is loaded (this code), loads
 // overlay 4 and jumps to right here, which is now in the new code.
 ovl234_ovl4_entrypoint_ovl2ver:            // same IMEM address as ovl234_ovl4_entrypoint
+.if CFG_PROFILING_B
+    addi    perfCounterD, perfCounterD, 1  // Count overlay 4 load
+.endif
     jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
      li     cmd_w1_dram, orga(ovl4_start)  // set up a load for overlay 4
 
 // Jump here to do clipping. If overlay 2 is loaded (this code), loads overlay 3
 // and jumps to right here, which is now in the new code.
 ovl234_clipping_entrypoint_ovl2ver:        // same IMEM address as ovl234_clipping_entrypoint
+.if CFG_PROFILING_B
+    addi    perfCounterD, perfCounterD, 0x4000  // Count clipping overlay load
+.endif
     jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
      li     cmd_w1_dram, orga(ovl3_start)  // set up a load for overlay 3
 
@@ -2395,9 +2441,6 @@ lt_continue_setup:
     // Outputs: leave alone vPairPosI/F; update vPairRGBA, vPairST 
     // Locals: vAAA and vBBB after merge and normals selection, vCCC, vDDD, vPairLt, vNrmOut
     // New available locals: $6, $7 (existing: $11, $10, $20, $24)
-.if CFG_PROFILING_B
-    addi    perfCounterB, perfCounterB, 2    // Increment lit vertex count by 2
-.endif
     vmrg    vPairNrml, vPairNrml, vDDD       // Merge normals
     beqz    $11, lt_skip_packed_normals
      vmrg   vAAA, vAAA, vBBB          // Merge packed normals
@@ -2700,18 +2743,27 @@ ovl4_start:
 // Jump here to do lighting. If overlay 4 is loaded (this code), loads overlay 2
 // and jumps to right here, which is now in the new code.
 ovl234_lighting_entrypoint_ovl4ver:        // same IMEM address as ovl234_lighting_entrypoint
+.if CFG_PROFILING_B
+    addi    perfCounterC, perfCounterC, 1  // Count lighting overlay load
+.endif
     jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
      li     cmd_w1_dram, orga(ovl2_start)  // set up a load for overlay 2
      
 // Jump here for all overlay 4 features. If overlay 4 is loaded (this code), jumps
 // to the instruction selection below.
 ovl234_ovl4_entrypoint:
+.if CFG_PROFILING_B
+    nop                                    // Needs to take up the space for the other perf counter
+.endif
     j       ovl4_select_instr
      li     $2, 1                // $7 = 1 (lighting && mIT invalid) if doing calc_mit
 
 // Jump here to do clipping. If overlay 4 is loaded (this code), loads overlay 3
 // and jumps to right here, which is now in the new code.
 ovl234_clipping_entrypoint_ovl4ver:        // same IMEM address as ovl234_clipping_entrypoint
+.if CFG_PROFILING_B
+    addi    perfCounterD, perfCounterD, 0x4000  // Count clipping overlay load
+.endif
     jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
      li     cmd_w1_dram, orga(ovl3_start)  // set up a load for overlay 3
 

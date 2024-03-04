@@ -393,7 +393,7 @@ This overlay contains handlers for:
 
 Whenever any of these features is needed, the RSP has to swap to Overlay 4. The
 next time lighting or clipping is needed, the RSP has to then swap back to
-Overlay 2 or 3. The round-trip of these two overlay loads takes about 3.5
+Overlay 2 or 3. The round-trip of these two overlay loads takes about 5
 microseconds of DRAM time including overheads. Fortunately, all the above
 features other than the mIT matrix are rarely or never used.
 
