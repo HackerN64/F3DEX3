@@ -941,7 +941,6 @@ branch_dl:
     lbu     $1, displayListStackLength      // Get the DL stack length
     jal     segmented_to_physical
      add    $3, taskDataPtr, inputBufferPos // Current DL pos to push on stack
-    sub     $11, cmd_w1_dram, taskDataPtr   // Negative how far new target is behind current end
     bltz    $2, call_ret_common             // Nopush = branch = flag is set
      move   taskDataPtr, cmd_w1_dram        // Set the new DL to the target display list
     sw      $3, (displayListStack)($1)
@@ -2139,6 +2138,8 @@ return_routine:
 dma_read_write:
      mfc0   $11, SP_DMA_FULL          // load the DMA_FULL value
 while_dma_full:
+    // TODO this wait needs to be added to perfCounterD / CFG_PROFILING_C!
+    // But we have to check this routine in S2DEX too.
     bnez    $11, while_dma_full       // Loop until DMA_FULL is cleared
      mfc0   $11, SP_DMA_FULL          // Update DMA_FULL value
     mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from/to
@@ -2834,7 +2835,7 @@ branchwz_return_from_addrs:
     bgez    $2, run_next_DL_command     // if vtx.w/z >= cmd w/z, continue running this DL
      lw     cmd_w1_dram, rdpHalf1Val    // load the RDPHALF1 value as the location to branch to
     j       branch_dl                   // need $2 < 0 for nopush and cmd_w1_dram
-     move   cmd_w0, $zero               // No count of DL cmds to skip
+     li     cmd_w0, 0                   // No count of DL cmds to skip
 
 calc_mit:
     /*
