@@ -1278,7 +1278,7 @@ vtx_store:
     // Locals: $v20, $v21, $v25, $v26, $v16, $v17 ($v29 is temp). Also vPairST and
     // vPairRGBA can be used as temps once stored ($v22, $v27).
     // Scalar regs: secondVtxPos, outputVtxPos; set to the same thing if only write 1 vtx
-    // temps $7, $11, $10, $20, $24
+    // temps $3, $7, $11, $10, $19, $20, $24
     // Temp reg names with s = store (for vtx_store)
 s1WH equ $v16 // vtx_store 1/W High
 s1WL equ $v17 // vtx_store 1/W Low
@@ -1351,7 +1351,7 @@ sOC1 equ $v21 // vtx_store OCclusion temp 1
     vmadh   vPairTPosI, vPairTPosI, s1WH[3h] // pos * 1/W
     ssv     s1WH[6],          (VTX_INV_W_INT )(outputVtxPos)
     vadd    sOC1, sOC1, sOC1[0q] // Add pairs upwards
-    vnop
+    // vnop
 sVPO equ $v17 // vtx_store ViewPort Offset
 sVPS equ $v16 // vtx_store ViewPort Scale
     lqv     sVPO, (0x10)(rdpCmdBufEndP1) // Load viewport offset from temp mem
@@ -1363,7 +1363,7 @@ sVPS equ $v16 // vtx_store ViewPort Scale
     vmadn   vPairTPosF, $v31, $v31[2] // 0
     ldv     vPairPosI[8],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
     vadd    sOC1, sOC1, sOC1[1h] // Add elems 1, 5 to 3, 7
-    vnop
+    // vnop
 sO03 equ $v25 // vtx_store Occlusion coeffs 0-3
     ldv     sO03[0], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // Load coeffs 0-3
     vmudh   $v29, sVPO, vOne // offset * 1
@@ -1376,83 +1376,60 @@ sFOG equ $v16
     vmadh   sFOG, vOne, $v31[6] // + 0x7F00 in all elements, clamp to 0x7FFF for fog
     or      $10, $10, $11          // Combine results for first vertex
     vlt     $v29, sOC1, $v31[2] // Occlusion plane equation < 0 in elems 3, 7
-    vnop
+    // vnop
     cfc2    $11, $vcc // Load occlusion plane mid results to bits 3 and 7
-    
-    
-    
-    
-    
-    
-    andi    $11, $11, CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4) // Only bits 3, 7 from occlusion
-    
-    
-    
-    
-    
-    
-    
-    
-    slv     vPairTPosI[8],  (VTX_SCR_VEC   )(secondVtxPos)
-    slv     vPairTPosI[0],  (VTX_SCR_VEC   )(outputVtxPos)
-    ssv     vPairTPosF[12], (VTX_SCR_Z_FRAC)(secondVtxPos)
-    ssv     vPairTPosF[4],  (VTX_SCR_Z_FRAC)(outputVtxPos)
-    
+sOSC equ $v21 // vtx_store Occlusion SCaled up
+    vmudh   sOSC, vPairTPosI, $v31[4] // 4; scale up x and y
+    ssv     vPairTPosF[12],   (VTX_SCR_Z_FRAC)(secondVtxPos)
     vge     sFOG, sFOG, $v31[6] // 0x7F00; clamp fog to >= 0 (want low byte only)
     andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
-    beqz    $7, vtx_skip_fog
-     nop
+sCLZ equ $v26 // vtx_store CLipped Z
+    vge     sCLZ, vPairTPosI, $v31[2] // 0; clamp Z to >= 0
+    ssv     vPairTPosF[4],    (VTX_SCR_Z_FRAC)(outputVtxPos)
+    vmulf   $v29, sOPM, vPairTPosI[1h] // -0x4000*Y1, --, +0x4000*Y1, --, repeat vtx 2
+    slv     vPairTPosI[8],    (VTX_SCR_VEC   )(secondVtxPos)
+sOC2 equ $v22 // vtx_store OCclusion temp 2, $v22 = vPairST
+    vmacf   sOC2, sO03, sOSC[0h]       //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
+sO47 equ $v23 // vtx_store Occlusion coeffs 0-3; $v23 = vPairTPosF
+    ldv     sO47[0], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // Load coeffs 4-7
+    vmulf   $v29, sOPM, vPairTPosI[0h] // --, -0x4000*X1, --, +0x4000*X1, repeat vtx 2
+    beqz    $7, @@skipfog
+sOC3 equ $v17 // vtx_store OCclusion temp 3
+     vmacf  sOC3, sO03, sOSC[1h]       // --,    4*Y1*c1, --,    4*Y1*c3, repeat vtx 2
     sbv     sFOG[15],         (VTX_COLOR_A   )(secondVtxPos)
     sbv     sFOG[7],          (VTX_COLOR_A   )(outputVtxPos)
-vtx_skip_fog:
-
-sCLZ equ TODO // vtx_store CLipped Z
-    vge     sCLZ, vPairTPosI, $v31[2] // 0; clamp Z to >= 0
-    ssv     sCLZ[12],         (VTX_SCR_Z     )(secondVtxPos)
-    ssv     sCLZ[4],          (VTX_SCR_Z     )(outputVtxPos)
-    
-    
-
-sOSC equ TODO // vtx_store Occlusion SCaled up
-    vmudh   sOSC, vPairTPosI, $v31[4] // 4; scale up x and y
-sOC2 equ TODO // vtx_store OCclusion temp 2
-sOC3 equ TODO // vtx_store OCclusion temp 3
-    vmulf   $v29, sO03, sOSC[0h]       //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
-    vmacf   sOC2, sOPM, vPairTPosI[1h] // -0x4000*Y1, --, +0x4000*Y1, --, repeat vtx 2
-    vmulf   $v29, sO03, sOSC[1h]       // --,    4*Y1*c1, --,    4*Y1*c3, repeat vtx 2
-    vmacf   sOC3, sOPM, vPairTPosI[0h] // --, -0x4000*X1, --, +0x4000*X1, repeat vtx 2
-    veq     $v29, $v31, $v31[0q]       // Set VCC to 10101010
-    vmrg    sOC2, $sOC2, sOC3           // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
-sO47 equ TODO // vtx_store Occlusion coeffs 0-3
-    ldv     sO47[0], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // Load coeffs 4-7
+@@skipfog:
     ldv     sO47[8], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // and for vtx 2
+    veq     $v29, $v31, $v31[0q]       // Set VCC to 10101010
+    vmrg    sOC2, $sOC2, sOC3          // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
+    // vnop; vnop; vnop
+    slv     vPairTPosI[0],    (VTX_SCR_VEC   )(outputVtxPos)
     vge     $v29, sOC2, sO47           // Each compare to coeffs 4-7
+    ssv     sCLZ[12],         (VTX_SCR_Z     )(secondVtxPos)
+    vmudn   $v29, vM3F, vOne
     cfc2    $20, $vcc
-    or      $20, $20, $11
+    vmadh   $v29, vM3I, vOne
+    ssv     sCLZ[4],          (VTX_SCR_Z     )(outputVtxPos)
+    vmadn   $v29, vM0F, vPairPosI[0h]
+    andi    $11, $11, CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4) // Only bits 3, 7 from occlusion
+    vmadh   $v29, vM0I, vPairPosI[0h]
+    or      $20, $20, $11    // Combine occlusion results. Any set in 0-3, 4-7 = not occluded
+    vmadn   $v29, vM1F, vPairPosI[1h]
     andi    $11, $20, 0x00F0 // Bits 4-7 for vtx 2
-    beqz    $11, @@skipv2    // If 0, all equations true, don't clear occluded flag
+    vmadh   $v29, vM1I, vPairPosI[1h]
+    beqz    $11, @@skipv2    // If nonzero, at least one equation false, don't set occluded flag
      andi   $20, $20, 0x000F // Bits 0-3 for vtx 1
-    andi    $24, $24, ~CLIP_OCCLUDED // At least one eqn false, clear vtx 2 occluded flag
+    ori     $24, $24, CLIP_OCCLUDED // All equations true, set vtx 2 occluded flag
 @@skipv2:
-    beqz    $20, @@skipv1    // If 0, all equations true, don't clear occluded flag
+    // vPairPosF is $v21
+    vmadn   vPairPosF, vM2F, vPairPosI[2h]
+    beqz    $20, @@skipv1    // If nonzero, at least one equation false, don't set occluded flag
      sh     $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex clip flags
-    andi    $10, $10, ~CLIP_OCCLUDED // At least one eqn false, clear vtx 1 occluded flag
+    ori     $10, $10, CLIP_OCCLUDED // All equations true, set vtx 1 occluded flag
 @@skipv1:    
+    vmadh   vPairPosI, vM2I, vPairPosI[2h] // vPairPosI/F = vertices world coords
     jr      $ra
      sh     $10,              (VTX_CLIP      )(outputVtxPos) // Store first vertex results
-
-
-    vmudn   $v29, vM3F, vOne
-    vmadh   $v29, vM3I, vOne
-    vmadn   $v29, vM0F, vPairPosI[0h]
-    vmadh   $v29, vM0I, vPairPosI[0h]
-    vmadn   $v29, vM1F, vPairPosI[1h]
-    vmadh   $v29, vM1I, vPairPosI[1h]
-// vPairPosF is $v21
-    vmadn   vPairPosF, vM2F, vPairPosI[2h]
-    vmadh   vPairPosI, vM2I, vPairPosI[2h] // vPairPosI/F = vertices world coords
-
-
     
     
     
@@ -1595,10 +1572,10 @@ sVPS equ TODO // vtx_store ViewPort Scale
 sFOG equ TODO
     vmadh   sFOG, vOne, $v31[6] // + 0x7F00 in all elements, clamp to 0x7FFF for fog
     
-    slv     vPairTPosI[8],  (VTX_SCR_VEC   )(secondVtxPos)
-    slv     vPairTPosI[0],  (VTX_SCR_VEC   )(outputVtxPos)
-    ssv     vPairTPosF[12], (VTX_SCR_Z_FRAC)(secondVtxPos)
-    ssv     vPairTPosF[4],  (VTX_SCR_Z_FRAC)(outputVtxPos)
+    ssv     vPairTPosF[12],   (VTX_SCR_Z_FRAC)(secondVtxPos)
+    ssv     vPairTPosF[4],    (VTX_SCR_Z_FRAC)(outputVtxPos)
+    slv     vPairTPosI[8],    (VTX_SCR_VEC   )(secondVtxPos)
+    slv     vPairTPosI[0],    (VTX_SCR_VEC   )(outputVtxPos)
     
     vge     sFOG, sFOG, $v31[6] // 0x7F00; clamp fog to >= 0 (want low byte only)
     andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
@@ -1636,15 +1613,15 @@ sO47 equ TODO // vtx_store Occlusion coeffs 0-3
     ldv     sO47[8], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // and for vtx 2
     vge     $v29, sOC2, sO47           // Each compare to coeffs 4-7
     cfc2    $20, $vcc
-    or      $20, $20, $11
+    or      $20, $20, $11    // Combine occlusion results. Any set in 0-3, 4-7 = not occluded
     andi    $11, $20, 0x00F0 // Bits 4-7 for vtx 2
-    beqz    $11, @@skipv2    // If 0, all equations true, don't clear occluded flag
+    beqz    $11, @@skipv2    // If nonzero, at least one equation false, don't set occluded flag
      andi   $20, $20, 0x000F // Bits 0-3 for vtx 1
-    andi    $24, $24, ~CLIP_OCCLUDED // At least one eqn false, clear vtx 2 occluded flag
+    ori     $24, $24, CLIP_OCCLUDED // All equations true, set vtx 2 occluded flag
 @@skipv2:
-    beqz    $20, @@skipv1    // If 0, all equations true, don't clear occluded flag
+    beqz    $20, @@skipv1    // If nonzero, at least one equation false, don't set occluded flag
      sh     $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex clip flags
-    andi    $10, $10, ~CLIP_OCCLUDED // At least one eqn false, clear vtx 1 occluded flag
+    ori     $10, $10, CLIP_OCCLUDED // All equations true, set vtx 1 occluded flag
 @@skipv1:    
     jr      $ra
      sh     $10,              (VTX_CLIP      )(outputVtxPos) // Store first vertex results
