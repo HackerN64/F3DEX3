@@ -1206,37 +1206,18 @@ vtx_after_calc_mit:
     ldv     vVP2I[8], (vpMatrix  + 0x10)($zero)
     ldv     vVP0F[8], (vpMatrix  + 0x20)($zero)
     ldv     vVP2F[8], (vpMatrix  + 0x30)($zero)
-    jal     while_wait_dma_busy                   // Wait for vertex load to finish
+    li      $19, clipTempVerts     // Temp mem we can freely overwrite replaces outputVtxPos
+    move    secondVtxPos, $19      // for first pre-loop, same for secondVtxPos
+    j       while_wait_dma_busy                   // Wait for vertex load to finish
+     li     $ra, middle_of_vtx_store
+    
 vtx_load_loop:
-     vlt    $v29, $v31, $v31[4]                   // Set VCC to 11110000
-    ldv     vPairPosI[8],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
-    ldv     vPairPosI[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
-    vmudn   $v29, vM3F, vOne
-    // Element access wraps in lpv/luv, but not intuitively. Basically the named
-    // element and above do get the values at the specified address, but the earlier
-    // elements get the values before that, except masked to 0xF. So for example here,
-    // elems 4-7 get bytes 0-3 of the vertex as it looks like they should, but elems
-    // 0-3 get bytes C-F of the vertex (which is what we want).
-    luv     vPairRGBA[4], (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Colors as unsigned, lower 4
-    vmadh   $v29, vM3I, vOne
-    luv     vCCC[0],      (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
-    vmadn   $v29, vM0F, vPairPosI[0h]
-    lpv     vPairNrml[4], (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Normals as signed, lower 4
-    vmadh   $v29, vM0I, vPairPosI[0h]
-    lpv     vDDD[0],      (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
-    vmadn   $v29, vM1F, vPairPosI[1h]
-    llv     vPairST[0],   (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // ST in 0:1
-    vmadh   $v29, vM1I, vPairPosI[1h]
-    llv     vPairST[8],   (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // ST in 4:5
-    vmadn   vPairPosF, vM2F, vPairPosI[2h]
+    vlt     $v29, $v31, $v31[4]                   // Set VCC to 11110000
     andi    $11, $5, G_LIGHTING >> 8
-    vmadh   vPairPosI, vM2I, vPairPosI[2h] // vPairPosI/F = vertices world coords
-    // Elems 0-1 get bytes 6-7 of the following vertex (0)
-    lpv     vAAA[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
-    vmrg    vPairRGBA, vPairRGBA, vCCC // Merge colors
+    vmrg    vPairRGBA, sCOL, vPairRGBA // Merge colors
     bnez    $11, ovl234_lighting_entrypoint
-     // Elems 4-5 get bytes 6-7 of the following vertex (1)
-     lpv    vBBB[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
+     // Elems 0-1 get bytes 6-7 of the following vertex (0)
+     lpv    vAAA[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
 vtx_return_from_lighting:
     vclr    $v26
     andi    $11, $5, G_ATTROFFSET_ST_ENABLE >> 8
@@ -1297,10 +1278,11 @@ sWRH equ $v26 // vtx_store W Reciprocal High | using different ones saves one cy
     vrcph   $v29[0], s1WH[3]
     cfc2    $10, $vcc // Load screen clipping results
     vrcpl   sWRL[2], s1WL[3]
+    sdv     vPairTPosF[0],    (VTX_FRAC_VEC  )(outputVtxPos)
     vrcph   sWRH[3], s1WH[7]
+    move    $19, outputVtxPos  // Else $19 is initialized to temp memory on first pre-loop
     vrcpl   sWRL[6], s1WL[7]
     vrcph   sWRH[7], $v31[2] // 0
-    sdv     vPairTPosF[0],    (VTX_FRAC_VEC  )(outputVtxPos)
 sSCL equ $v20 // vtx_store Scaled Clipping Low
 sSCH equ $v21 // vtx_store Scaled Clipping High
     vmudn   sSCL, vPairTPosF, $v31[3] // W * clip ratio for scaled clipping
@@ -1351,20 +1333,24 @@ sOC1 equ $v21 // vtx_store OCclusion temp 1
     vmadh   vPairTPosI, vPairTPosI, s1WH[3h] // pos * 1/W
     ssv     s1WH[6],          (VTX_INV_W_INT )(outputVtxPos)
     vadd    sOC1, sOC1, sOC1[0q] // Add pairs upwards
-    // vnop
 sVPO equ $v17 // vtx_store ViewPort Offset
 sVPS equ $v16 // vtx_store ViewPort Scale
     lqv     sVPO, (0x10)(rdpCmdBufEndP1) // Load viewport offset from temp mem
-    vmudl   $v29, vPairTPosF, $v30[3] // Persp norm
+    // vnop
     lqv     sVPS, (0x00)(rdpCmdBufEndP1) // Load viewport scale from temp mem
-    vmadm   vPairTPosI, vPairTPosI, $v30[3] // Persp norm
+    vmudl   $v29, vPairTPosF, $v30[3] // Persp norm
+middle_of_vtx_store:
 // vPairPosI is $v20
     ldv     vPairPosI[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
-    vmadn   vPairTPosF, $v31, $v31[2] // 0
+    vmadm   vPairTPosI, vPairTPosI, $v30[3] // Persp norm
     ldv     vPairPosI[8],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
+    vmadn   vPairTPosF, $v31, $v31[2] // 0
+// vPairST is $v22
+    llv     vPairST[0],   (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // ST in 0:1
     vadd    sOC1, sOC1, sOC1[1h] // Add elems 1, 5 to 3, 7
+    llv     vPairST[8],   (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // ST in 4:5
     // vnop
-sO03 equ $v25 // vtx_store Occlusion coeffs 0-3
+sO03 equ $v26 // vtx_store Occlusion coeffs 0-3
     ldv     sO03[0], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // Load coeffs 0-3
     vmudh   $v29, sVPO, vOne // offset * 1
     ldv     sO03[8], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // and for vtx 2
@@ -1383,33 +1369,43 @@ sOSC equ $v21 // vtx_store Occlusion SCaled up
     ssv     vPairTPosF[12],   (VTX_SCR_Z_FRAC)(secondVtxPos)
     vge     sFOG, sFOG, $v31[6] // 0x7F00; clamp fog to >= 0 (want low byte only)
     andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
-sCLZ equ $v26 // vtx_store CLipped Z
+sCLZ equ $v25 // vtx_store CLipped Z
     vge     sCLZ, vPairTPosI, $v31[2] // 0; clamp Z to >= 0
-    ssv     vPairTPosF[4],    (VTX_SCR_Z_FRAC)(outputVtxPos)
+    ssv     vPairTPosF[4],    (VTX_SCR_Z_FRAC)($19)
     vmulf   $v29, sOPM, vPairTPosI[1h] // -0x4000*Y1, --, +0x4000*Y1, --, repeat vtx 2
-    slv     vPairTPosI[8],    (VTX_SCR_VEC   )(secondVtxPos)
-sOC2 equ $v22 // vtx_store OCclusion temp 2, $v22 = vPairST
-    vmacf   sOC2, sO03, sOSC[0h]       //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
 sO47 equ $v23 // vtx_store Occlusion coeffs 0-3; $v23 = vPairTPosF
     ldv     sO47[0], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // Load coeffs 4-7
+sOC2 equ $v27 // vtx_store OCclusion temp 2; $v27 = vPairRGBA
+    vmacf   sOC2, sO03, sOSC[0h]       //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
+    ldv     sO47[8], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // and for vtx 2
     vmulf   $v29, sOPM, vPairTPosI[0h] // --, -0x4000*X1, --, +0x4000*X1, repeat vtx 2
     beqz    $7, @@skipfog
-sOC3 equ $v17 // vtx_store OCclusion temp 3
+sOC3 equ $v21 // vtx_store OCclusion temp 3
      vmacf  sOC3, sO03, sOSC[1h]       // --,    4*Y1*c1, --,    4*Y1*c3, repeat vtx 2
     sbv     sFOG[15],         (VTX_COLOR_A   )(secondVtxPos)
-    sbv     sFOG[7],          (VTX_COLOR_A   )(outputVtxPos)
+    sbv     sFOG[7],          (VTX_COLOR_A   )($19)
 @@skipfog:
-    ldv     sO47[8], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // and for vtx 2
+    slv     vPairTPosI[8],    (VTX_SCR_VEC   )(secondVtxPos)
     veq     $v29, $v31, $v31[0q]       // Set VCC to 10101010
+    slv     vPairTPosI[0],    (VTX_SCR_VEC   )($19)
     vmrg    sOC2, $sOC2, sOC3          // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
-    // vnop; vnop; vnop
-    slv     vPairTPosI[0],    (VTX_SCR_VEC   )(outputVtxPos)
-    vge     $v29, sOC2, sO47           // Each compare to coeffs 4-7
+// vPairNrml is $v16
+    lpv     vPairNrml[4],     (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Normals as signed, lower 4
+    // vnop
     ssv     sCLZ[12],         (VTX_SCR_Z     )(secondVtxPos)
+    // vnop
+// vDDD is $v26
+    lpv     vDDD[0],          (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
+    // vnop
+    ssv     sCLZ[4],          (VTX_SCR_Z     )($19)
+    vge     $v29, sOC2, sO47           // Each compare to coeffs 4-7
+sCOL equ $v17
+    luv     sCOL[4],          (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Colors as unsigned, lower 4
     vmudn   $v29, vM3F, vOne
     cfc2    $20, $vcc
     vmadh   $v29, vM3I, vOne
-    ssv     sCLZ[4],          (VTX_SCR_Z     )(outputVtxPos)
+// vPairRGBA is $v27
+    luv     vPairRGBA[0],     (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
     vmadn   $v29, vM0F, vPairPosI[0h]
     andi    $11, $11, CLIP_OCCLUDED | (CLIP_OCCLUDED >> 4) // Only bits 3, 7 from occlusion
     vmadh   $v29, vM0I, vPairPosI[0h]
@@ -1429,7 +1425,7 @@ sOC3 equ $v17 // vtx_store OCclusion temp 3
 @@skipv1:    
     vmadh   vPairPosI, vM2I, vPairPosI[2h] // vPairPosI/F = vertices world coords
     jr      $ra
-     sh     $10,              (VTX_CLIP      )(outputVtxPos) // Store first vertex results
+     sh     $10,              (VTX_CLIP      )($19)          // Store first vertex results
     
     
     
@@ -2692,14 +2688,16 @@ lt_continue_setup:
     // New available locals: $6, $7 (existing: $11, $10, $20, $24)
     vmrg    vPairNrml, vPairNrml, vDDD       // Merge normals
     beqz    $11, lt_skip_packed_normals
-     vmrg   vAAA, vAAA, vBBB          // Merge packed normals
+     // Elems 4-5 get bytes 6-7 of the following vertex (1)
+     lpv    vBBB[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
+    vmrg    vAAA, vAAA, vBBB                 // Merge packed normals
     // Packed normals algorithm. This produces a vector (one for each input vertex)
     // in vPairNrml such that |X| + |Y| + |Z| = 0x7F00 (called L1 norm), in the
     // same direction as the standard normal vector. The length is not "correct"
     // compared to the standard normal, but it's is normalized anyway after the M
     // matrix transform.
-vPackPXY   equ $v25 // = vCCC; positive X and Y in packed normals
-vPackZ     equ $v26 // = vDDD; Z in packed normals
+vPackPXY equ $v25 // = vCCC; positive X and Y in packed normals
+vPackZ   equ $v26 // = vDDD; Z in packed normals
     vand    vPackPXY, vAAA, $v31[6]          // 0x7F00; positive X, Y
     vmudh   $v29, vOne, $v31[1]              // -1; set all elems of $v29 to -1
     vaddc   vBBB, vPackPXY, vPackPXY[1q]     // elems 0, 4: +X + +Y, no clamping; VCO always 0
