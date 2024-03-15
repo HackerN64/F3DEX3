@@ -1207,13 +1207,15 @@ vtx_after_calc_mit:
     ldv     vVP0F[8], (vpMatrix  + 0x20)($zero)
     ldv     vVP2F[8], (vpMatrix  + 0x30)($zero)
     li      $19, clipTempVerts     // Temp mem we can freely overwrite replaces outputVtxPos
-    move    secondVtxPos, $19      // for first pre-loop, same for secondVtxPos
-    j       while_wait_dma_busy                   // Wait for vertex load to finish
-     li     $ra, middle_of_vtx_store
+    jal     while_wait_dma_busy                   // Wait for vertex load to finish
+     move   secondVtxPos, $19      // for first pre-loop, same for secondVtxPos
+    j       middle_of_vtx_store
+     li     $ra, vtx_load_loop
     
 vtx_load_loop:
     vlt     $v29, $v31, $v31[4]                   // Set VCC to 11110000
     andi    $11, $5, G_LIGHTING >> 8
+sCOL equ $v17 // from near end of vtx_write
     vmrg    vPairRGBA, sCOL, vPairRGBA // Merge colors
     bnez    $11, ovl234_lighting_entrypoint
      // Elems 0-1 get bytes 6-7 of the following vertex (0)
@@ -1266,29 +1268,29 @@ s1WL equ $v17 // vtx_store 1/W Low
 sWRL equ $v25 // vtx_store W Reciprocal Low  | IMPORTANT: Can be the same reg as sWRH, but
 sWRH equ $v26 // vtx_store W Reciprocal High | using different ones saves one cycle delay
     vmudl   $v29, vPairTPosF, $v30[3] // Persp norm
-    slv     vPairST[8],       (VTX_TC_VEC    )(secondVtxPos)
-    vmadm   s1WH, vPairTPosI, $v30[3] // Persp norm
-    slv     vPairST[0],       (VTX_TC_VEC    )(outputVtxPos)
-    vmadn   s1WL, $v31, $v31[2] // 0
     suv     vPairRGBA[4],     (VTX_COLOR_VEC )(secondVtxPos)
-    vch     $v29, vPairTPosI, vPairTPosI[3h] // Clip screen high
+    vmadm   s1WH, vPairTPosI, $v30[3] // Persp norm
     suv     vPairRGBA[0],     (VTX_COLOR_VEC )(outputVtxPos)
-    vcl     $v29, vPairTPosF, vPairTPosF[3h] // Clip screen low
+    vmadn   s1WL, $v31, $v31[2] // 0
     sdv     vPairTPosF[8],    (VTX_FRAC_VEC  )(secondVtxPos)
+    vch     $v29, vPairTPosI, vPairTPosI[3h] // Clip screen high
+    sdv     vPairTPosF[0],    (VTX_FRAC_VEC  )(outputVtxPos)
+    vcl     $v29, vPairTPosF, vPairTPosF[3h] // Clip screen low
+    sdv     vPairTPosI[8],    (VTX_INT_VEC   )(secondVtxPos)
     vrcph   $v29[0], s1WH[3]
     cfc2    $10, $vcc // Load screen clipping results
     vrcpl   sWRL[2], s1WL[3]
-    sdv     vPairTPosF[0],    (VTX_FRAC_VEC  )(outputVtxPos)
+    sdv     vPairTPosI[0],    (VTX_INT_VEC   )(outputVtxPos)
     vrcph   sWRH[3], s1WH[7]
     move    $19, outputVtxPos  // Else $19 is initialized to temp memory on first pre-loop
     vrcpl   sWRL[6], s1WL[7]
+    slv     vPairST[8],       (VTX_TC_VEC    )(secondVtxPos)
     vrcph   sWRH[7], $v31[2] // 0
+    slv     vPairST[0],       (VTX_TC_VEC    )(outputVtxPos)
 sSCL equ $v20 // vtx_store Scaled Clipping Low
 sSCH equ $v21 // vtx_store Scaled Clipping High
     vmudn   sSCL, vPairTPosF, $v31[3] // W * clip ratio for scaled clipping
-    sdv     vPairTPosI[8],    (VTX_INT_VEC   )(secondVtxPos)
     vmadh   sSCH, vPairTPosI, $v31[3] // W * clip ratio for scaled clipping
-    sdv     vPairTPosI[0],    (VTX_INT_VEC   )(outputVtxPos)
     vmudl   $v29, s1WL, sWRL[2h]
     vmadm   $v29, s1WH, sWRL[2h]
 sOCM equ $v22 // vtx_store OCclusion Mid, $v22 = vPairST
@@ -1388,7 +1390,7 @@ sOC3 equ $v21 // vtx_store OCclusion temp 3
     slv     vPairTPosI[8],    (VTX_SCR_VEC   )(secondVtxPos)
     veq     $v29, $v31, $v31[0q]       // Set VCC to 10101010
     slv     vPairTPosI[0],    (VTX_SCR_VEC   )($19)
-    vmrg    sOC2, $sOC2, sOC3          // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
+    vmrg    sOC2, sOC2, sOC3           // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
 // vPairNrml is $v16
     lpv     vPairNrml[4],     (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Normals as signed, lower 4
     // vnop
@@ -1399,7 +1401,7 @@ sOC3 equ $v21 // vtx_store OCclusion temp 3
     // vnop
     ssv     sCLZ[4],          (VTX_SCR_Z     )($19)
     vge     $v29, sOC2, sO47           // Each compare to coeffs 4-7
-sCOL equ $v17
+// sCOL is $v17, defined at start of loop
     luv     sCOL[4],          (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Colors as unsigned, lower 4
     vmudn   $v29, vM3F, vOne
     cfc2    $20, $vcc
@@ -1413,13 +1415,13 @@ sCOL equ $v17
     vmadn   $v29, vM1F, vPairPosI[1h]
     andi    $11, $20, 0x00F0 // Bits 4-7 for vtx 2
     vmadh   $v29, vM1I, vPairPosI[1h]
-    beqz    $11, @@skipv2    // If nonzero, at least one equation false, don't set occluded flag
+    bnez    $11, @@skipv2    // If nonzero, at least one equation false, don't set occluded flag
      andi   $20, $20, 0x000F // Bits 0-3 for vtx 1
     ori     $24, $24, CLIP_OCCLUDED // All equations true, set vtx 2 occluded flag
 @@skipv2:
     // vPairPosF is $v21
     vmadn   vPairPosF, vM2F, vPairPosI[2h]
-    beqz    $20, @@skipv1    // If nonzero, at least one equation false, don't set occluded flag
+    bnez    $20, @@skipv1    // If nonzero, at least one equation false, don't set occluded flag
      sh     $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex clip flags
     ori     $10, $10, CLIP_OCCLUDED // All equations true, set vtx 1 occluded flag
 @@skipv1:    
@@ -1611,11 +1613,11 @@ sO47 equ TODO // vtx_store Occlusion coeffs 0-3
     cfc2    $20, $vcc
     or      $20, $20, $11    // Combine occlusion results. Any set in 0-3, 4-7 = not occluded
     andi    $11, $20, 0x00F0 // Bits 4-7 for vtx 2
-    beqz    $11, @@skipv2    // If nonzero, at least one equation false, don't set occluded flag
+    bnez    $11, @@skipv2    // If nonzero, at least one equation false, don't set occluded flag
      andi   $20, $20, 0x000F // Bits 0-3 for vtx 1
     ori     $24, $24, CLIP_OCCLUDED // All equations true, set vtx 2 occluded flag
 @@skipv2:
-    beqz    $20, @@skipv1    // If nonzero, at least one equation false, don't set occluded flag
+    bnez    $20, @@skipv1    // If nonzero, at least one equation false, don't set occluded flag
      sh     $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex clip flags
     ori     $10, $10, CLIP_OCCLUDED // All equations true, set vtx 1 occluded flag
 @@skipv1:    
