@@ -1293,6 +1293,106 @@ sSCH equ $v21 // vtx_store Scaled Clipping High
     vmadh   sSCH, vPairTPosI, $v31[3] // W * clip ratio for scaled clipping
     vmudl   $v29, s1WL, sWRL[2h]
     vmadm   $v29, s1WH, sWRL[2h]
+
+.if CFG_NO_OCCLUSION_PLANE
+
+    vmadn   s1WL, s1WL, sWRH[3h]
+    vmadh   s1WH, s1WH, sWRH[3h]
+    srl     $24, $10, 4            // Shift second vertex screen clipping to first slots
+    vch     $v29, vPairTPosI, sSCH[3h] // Clip scaled high
+    andi    $24, $24, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
+    vmudh   $v29, vOne, $v31[4] // 4 * 1 in elems 3, 7
+    lsv     vPairTPosI[14], (VTX_Z_INT     )(secondVtxPos) // load Z into W slot, will be for fog below
+    vmadn   s1WL, s1WL, $v31[0] // -4
+    lsv     vPairTPosI[6],  (VTX_Z_INT     )(outputVtxPos) // load Z into W slot, will be for fog below
+    vmadh   s1WH, s1WH, $v31[0] // -4
+    andi    $10, $10, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
+    vcl     $v29, vPairTPosF, sSCL[3h] // Clip scaled low
+    ori     $10, $10, CLIP_VTX_USED // Write for all first verts, only matters for generated verts
+    vnop
+    cfc2    $20, $vcc // Load scaled clipping results
+    vmudl   $v29, s1WL, sWRL[2h]
+    lsv     vPairTPosF[14], (VTX_Z_FRAC    )(secondVtxPos) // load Z into W slot, will be for fog below
+    vmadm   $v29, s1WH, sWRL[2h]
+    lsv     vPairTPosF[6],  (VTX_Z_FRAC    )(outputVtxPos) // load Z into W slot, will be for fog below
+    vmadn   s1WL, s1WL, sWRH[3h]
+middle_of_vtx_store:
+// vPairPosI is $v20
+    ldv     vPairPosI[8],      (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
+    vmadh   s1WH, s1WH, sWRH[3h] // s1WH:s1WL is 1/W
+    ldv     vPairPosI[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
+    vnop
+    sll     $11, $20, 4            // Shift first vertex scaled clipping to second slots
+    vnop
+    andi    $20, $20, CLIP_SCAL_NPXY // Mask to only bits we care about
+    vmudl   $v29, vPairTPosF, s1WL[3h]
+    ssv     s1WL[14],         (VTX_INV_W_FRAC)(secondVtxPos)
+    vmadm   $v29, vPairTPosI, s1WL[3h]
+    ssv     s1WL[6],          (VTX_INV_W_FRAC)($19)
+    vmadn   vPairTPosF, vPairTPosF, s1WH[3h]
+    ssv     s1WH[14],         (VTX_INV_W_INT )(secondVtxPos)
+    vmadh   vPairTPosI, vPairTPosI, s1WH[3h] // pos * 1/W
+    ssv     s1WH[6],          (VTX_INV_W_INT )($19)
+    vnop
+sVPO equ $v17 // vtx_store ViewPort Offset
+    lqv     sVPO, (0x10)(rdpCmdBufEndP1) // Load viewport offset from temp mem
+    vnop
+sVPS equ $v16 // vtx_store ViewPort Scale
+    lqv     sVPS, (0x00)(rdpCmdBufEndP1) // Load viewport scale from temp mem
+    vmudl   $v29, vPairTPosF, $v30[3] // Persp norm
+// vPairST is $v22
+    llv     vPairST[0],   (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // ST in 0:1
+    vmadm   vPairTPosI, vPairTPosI, $v30[3] // Persp norm
+    llv     vPairST[8],   (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // ST in 4:5
+    vmadn   vPairTPosF, $v31, $v31[2] // 0
+// vDDD is $v26
+    lpv     vDDD[0],          (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
+    vnop
+// vPairRGBA is $v27
+    luv     vPairRGBA[0],     (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Upper 4
+    vnop
+    vmudh   $v29, sVPO, vOne // offset * 1
+    andi    $11, $11, CLIP_SCAL_NPXY // Mask to only bits we care about
+    vmadn   vPairTPosF, vPairTPosF, sVPS // + XYZ * scale
+// sCOL is $v17, defined at start of loop
+    luv     sCOL[4],          (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Colors as unsigned, lower 4
+    vmadh   vPairTPosI, vPairTPosI, sVPS
+    or      $24, $24, $20          // Combine results for second vertex
+sFOG equ $v25
+    vmadh   sFOG, vOne, $v31[6] // + 0x7F00 in all elements, clamp to 0x7FFF for fog
+    or      $10, $10, $11          // Combine results for first vertex
+    vnop
+    sh      $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex clip flags
+    vnop
+    sh      $10,              (VTX_CLIP      )($19)          // Store first vertex results
+sCLZ equ $v21 // vtx_store CLipped Z
+    vge     sCLZ, vPairTPosI, $v31[2] // 0; clamp Z to >= 0
+    slv     vPairTPosI[8],    (VTX_SCR_VEC   )(secondVtxPos)
+    vge     sFOG, sFOG, $v31[6] // 0x7F00; clamp fog to >= 0 (want low byte only)
+    slv     vPairTPosI[0],    (VTX_SCR_VEC   )($19)
+    vmudn   $v29, vM3F, vOne
+    ssv     vPairTPosF[12],   (VTX_SCR_Z_FRAC)(secondVtxPos)
+    vmadh   $v29, vM3I, vOne
+    ssv     vPairTPosF[4],    (VTX_SCR_Z_FRAC)($19)
+    vmadn   $v29, vM0F, vPairPosI[0h]
+    andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
+    vmadh   $v29, vM0I, vPairPosI[0h]
+    ssv     sCLZ[12],         (VTX_SCR_Z     )(secondVtxPos)
+    vmadn   $v29, vM1F, vPairPosI[1h]
+    ssv     sCLZ[4],          (VTX_SCR_Z     )($19)
+    vmadh   $v29, vM1I, vPairPosI[1h]
+// vPairNrml is $v16
+    lpv     vPairNrml[4],     (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Normals as signed, lower 4
+// vPairPosF is $v21
+    vmadn   vPairPosF, vM2F, vPairPosI[2h]
+    beqz    $7, return_routine
+     vmadh  vPairPosI, vM2I, vPairPosI[2h] // vPairPosI/F = vertices world coords
+    sbv     sFOG[15],         (VTX_COLOR_A   )(secondVtxPos)
+    jr      $ra
+     sbv    sFOG[7],          (VTX_COLOR_A   )($19)
+    
+.else
+    
 sOCM equ $v22 // vtx_store OCclusion Mid, $v22 = vPairST
     ldv     sOCM[0], (occlusionPlaneMidCoeffs - altBase)(altBaseReg)
     vmadn   s1WL, s1WL, sWRH[3h]
@@ -1336,9 +1436,9 @@ sOC1 equ $v21 // vtx_store OCclusion temp 1
     ssv     s1WH[6],          (VTX_INV_W_INT )(outputVtxPos)
     vadd    sOC1, sOC1, sOC1[0q] // Add pairs upwards
 sVPO equ $v17 // vtx_store ViewPort Offset
-sVPS equ $v16 // vtx_store ViewPort Scale
     lqv     sVPO, (0x10)(rdpCmdBufEndP1) // Load viewport offset from temp mem
     // vnop
+sVPS equ $v16 // vtx_store ViewPort Scale
     lqv     sVPS, (0x00)(rdpCmdBufEndP1) // Load viewport scale from temp mem
     vmudl   $v29, vPairTPosF, $v30[3] // Persp norm
 middle_of_vtx_store:
@@ -1419,7 +1519,7 @@ sOC3 equ $v21 // vtx_store OCclusion temp 3
      andi   $20, $20, 0x000F // Bits 0-3 for vtx 1
     ori     $24, $24, CLIP_OCCLUDED // All equations true, set vtx 2 occluded flag
 @@skipv2:
-    // vPairPosF is $v21
+// vPairPosF is $v21
     vmadn   vPairPosF, vM2F, vPairPosI[2h]
     bnez    $20, @@skipv1    // If nonzero, at least one equation false, don't set occluded flag
      sh     $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex clip flags
@@ -1428,8 +1528,8 @@ sOC3 equ $v21 // vtx_store OCclusion temp 3
     vmadh   vPairPosI, vM2I, vPairPosI[2h] // vPairPosI/F = vertices world coords
     jr      $ra
      sh     $10,              (VTX_CLIP      )($19)          // Store first vertex results
-    
-    
+
+.endif
     
 /*
     // Temp reg names with s = store (for vtx_store)

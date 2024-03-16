@@ -8,6 +8,7 @@ default: F3DEX3_BrZ F3DEX3_BrW
 ALL_OPTIONS := \
   CFG_G_BRANCH_W \
   CFG_DEBUG_NORMALS \
+  CFG_NO_OCCLUSION_PLANE \
   CFG_PROFILING_A \
   CFG_PROFILING_B \
   CFG_PROFILING_C
@@ -174,6 +175,30 @@ NAME := F3DEX3_BrW_PC
 DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, PROFILING_C)
 ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, PROFILING_C_________________
 OPTIONS := CFG_G_BRANCH_W CFG_PROFILING_C
+$(eval $(call ucode_rule))
+
+NAME := F3DEX3_BrW_NOC
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, no occlusion plane, default profiling)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, no occ, default profiling___
+OPTIONS := CFG_G_BRANCH_W CFG_NO_OCCLUSION_PLANE
+$(eval $(call ucode_rule))
+
+NAME := F3DEX3_BrW_NOC_PA
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, no occlusion plane, PROFILING_A)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, no occ, PROFILING_A_________
+OPTIONS := CFG_G_BRANCH_W CFG_NO_OCCLUSION_PLANE CFG_PROFILING_A
+$(eval $(call ucode_rule))
+
+NAME := F3DEX3_BrW_NOC_PB
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, no occlusion plane, PROFILING_B)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, no occ, PROFILING_B_________
+OPTIONS := CFG_G_BRANCH_W CFG_NO_OCCLUSION_PLANE CFG_PROFILING_B
+$(eval $(call ucode_rule))
+
+NAME := F3DEX3_BrW_NOC_PC
+DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, no occlusion plane, PROFILING_C)
+ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, no occ, PROFILING_C_________
+OPTIONS := CFG_G_BRANCH_W CFG_NO_OCCLUSION_PLANE CFG_PROFILING_C
 $(eval $(call ucode_rule))
 
 .PHONY: default ok all clean
