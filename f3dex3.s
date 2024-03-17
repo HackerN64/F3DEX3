@@ -2459,7 +2459,7 @@ load_overlay_inner:
 .if CFG_PROFILING_C
     mfc0    $9, DPC_CLOCK  // see below
 .endif
-    jal     dma_read_write
+    jal     shared_dma_read_write  // If CFG_PROFILING_C, use the one without perfCounterD
      add    cmd_w1_dram, cmd_w1_dram, $11
     move    $ra, postOvlRA
     // Fall through to while_wait_dma_busy
@@ -2468,19 +2468,28 @@ load_overlay_inner:
 // to the manual, almost no instructions are issued while an IMEM DMA is happening.
 // So we have to time it using counters.
     mfc0    $11, SP_DMA_BUSY
-overlay_load_while_dma_busy:
-    bnez    $11, overlay_load_while_dma_busy
+@@while_dma_busy:
+    bnez    $11, @@while_dma_busy
      mfc0   $11, SP_DMA_BUSY
     mfc0    $11, DPC_CLOCK
     sub     $11, $11, $9
     jr      $ra
      add    perfCounterD, perfCounterD, $11
+
+// Also, normal dma_read_write below can't be changed to insert perfCounterD due to
+// S2DEX constraints. So we have to duplicate that part of it.
+dma_read_write:
+    mfc0    $11, SP_DMA_FULL
+    bnez    $11, dma_read_write
+     addi   perfCounterD, perfCounterD, 6  // 3 instr + 2 after mfc + 1 taken branch
+    j       dma_read_write_not_full
+     // Padding nops or $11 load in delay slot are not harmful.
 .endif
 
 totalImemUseUpTo1FC8:
 
 .if . > 0x1FC8
-    .error "Constraints violated on what can be overwritten at end of ucode (relevant for G_LOAD_UCODE)"
+    .error "Out of IMEM space"
 .endif
 .org 0x1FC8
 
@@ -2504,13 +2513,15 @@ tri_culled_by_occlusion_plane:
 return_routine:
     jr      $ra
 
+.if !CFG_PROFILING_C
 dma_read_write:
+.endif
+shared_dma_read_write:
      mfc0   $11, SP_DMA_FULL          // load the DMA_FULL value
-while_dma_full:
-    // TODO this wait needs to be added to perfCounterD / CFG_PROFILING_C!
-    // But we have to check this routine in S2DEX too.
-    bnez    $11, while_dma_full       // Loop until DMA_FULL is cleared
+@@while_dma_full:
+    bnez    $11, @@while_dma_full     // Loop until DMA_FULL is cleared
      mfc0   $11, SP_DMA_FULL          // Update DMA_FULL value
+dma_read_write_not_full:
     mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from/to
     bltz    dmemAddr, dma_write       // If the DMEM address is negative, this is a DMA write, if not read
      mtc0   cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA from/to
@@ -2520,8 +2531,8 @@ dma_write:
     jr      $ra
      mtc0   dmaLen, SP_WR_LEN         // Initiate a DMA write with a length of dmaLen
 
-.if . > 0x00002000
-    .error "Not enough room in IMEM"
+.if . != 0x00002000
+    .error "Code at end of IMEM shared with other ucodes has been corrupted"
 .endif
 
 .headersize 0x00001000 - orga()
