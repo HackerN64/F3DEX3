@@ -60,7 +60,7 @@ ACC_LOWER equ 2
 // shaded.
 //
 
-// Config A TODO
+// Profiling Configuration A
 // perfCounterA:
 //     cycles RSP spent processing vertex commands (incl. vertex DMAs)
 // perfCounterB:
@@ -78,9 +78,8 @@ ENABLE_PROFILING equ 1
 COUNTER_A_UPPER_VERTEX_COUNT equ 0
 COUNTER_B_LOWER_CMD_COUNT equ 1
 COUNTER_C_FIFO_FULL equ 1
-NEED_START_COUNTER_DMEM equ 1
 
-// Config B TODO
+// Profiling Configuration B
 // perfCounterA:
 //     upper 16 bits: vertex count
 //     lower 16 bits: lit vertex count
@@ -89,10 +88,10 @@ NEED_START_COUNTER_DMEM equ 1
 //     lower 14 bits: clipped (input) tris count
 // perfCounterC:
 //     upper 18 bits: overlay (all 0-4) load count
-//     lower 14 bits: overlay 2 (lighting) load count TODO
+//     lower 14 bits: overlay 2 (lighting) load count
 // perfCounterD:
-//     upper 18 bits: overlay 3 (clipping) load count TODO
-//     lower 14 bits: overlay 4 (misc) load count TODO
+//     upper 18 bits: overlay 3 (clipping) load count
+//     lower 14 bits: overlay 4 (misc) load count
 .elseif CFG_PROFILING_B
 .if CFG_PROFILING_C
 .error "At most one CFG_PROFILING_ option can be enabled at a time"
@@ -101,9 +100,8 @@ ENABLE_PROFILING equ 1
 COUNTER_A_UPPER_VERTEX_COUNT equ 1
 COUNTER_B_LOWER_CMD_COUNT equ 0
 COUNTER_C_FIFO_FULL equ 0
-NEED_START_COUNTER_DMEM equ 0
 
-// Config C TODO
+// Profiling Configuration C
 // perfCounterA:
 //     cycles RSP believes it was running (this ucode only)
 // perfCounterB:
@@ -119,7 +117,6 @@ ENABLE_PROFILING equ 1
 COUNTER_A_UPPER_VERTEX_COUNT equ 0
 COUNTER_B_LOWER_CMD_COUNT equ 1
 COUNTER_C_FIFO_FULL equ 0
-NEED_START_COUNTER_DMEM equ 1
 
 // Default (extra profiling disabled)
 // perfCounterA:
@@ -137,7 +134,6 @@ ENABLE_PROFILING equ 0
 COUNTER_A_UPPER_VERTEX_COUNT equ 1
 COUNTER_B_LOWER_CMD_COUNT equ 0
 COUNTER_C_FIFO_FULL equ 1
-NEED_START_COUNTER_DMEM equ 0
 
 .endif
 
@@ -449,11 +445,6 @@ normalsMode:
 lastMatDLPhyAddr:
     .dw 0
     
-.if NEED_START_COUNTER_DMEM
-startCounterTime:
-    .dw 0
-.endif
-    
 // Constants for clipping algorithm
 clipCondShifts:
     .db CLIP_SCAL_NY_SHIFT
@@ -667,6 +658,8 @@ inputBufferEnd:
 // 0x0FC0-0x1000: OSTask
 OSTask:
     .skip 0x40
+// This word is not used by F3DEX3, S2DEX, or even boot. Reuse it as a temp.
+startCounterTime equ (OSTask + OSTask_ucode_size)
 
 .close // DATA_FILE
 
@@ -808,11 +801,8 @@ start: // This is at IMEM 0x1080, not the start of IMEM
      mtc0   $1, SP_STATUS
     andi    $10, $10, OS_TASK_YIELDED       // Resumed from yield or came from called ucode?
     beqz    $10, continue_from_os_task      // If latter, load DL (task data) pointer from OSTask
-     // TODO move this to load_ucode and use the first qword of OSTask for MVP
-     sw     $zero, OSTask + OSTask_flags    // Clear all task flags, incl. yielded
-continue_from_yield:
-    // Perf counters saved here at yield
-    lw      perfCounterA, yieldDataFooter + YDF_OFFSET_PERFCOUNTERA
+     // Otherwise continuing from yield; perf counters saved here at yield
+     lw     perfCounterA, yieldDataFooter + YDF_OFFSET_PERFCOUNTERA
     lw      perfCounterB, yieldDataFooter + YDF_OFFSET_PERFCOUNTERB
     lw      perfCounterC, yieldDataFooter + YDF_OFFSET_PERFCOUNTERC
     lw      perfCounterD, yieldDataFooter + YDF_OFFSET_PERFCOUNTERD
@@ -1579,8 +1569,8 @@ middle_of_vtx_store:
     slv     vPairST[0],       (VTX_TC_VEC    )(outputVtxPos)
     
     
-sOCM equ TODO // vtx_store OCclusion Mid
-sOC1 equ TODO // vtx_store OCclusion temp 1
+sOCM equ ---- // vtx_store OCclusion Mid
+sOC1 equ ---- // vtx_store OCclusion temp 1
     ldv     sOCM[0], (occlusionPlaneMidCoeffs - altBase)(altBaseReg)
     ldv     sOCM[8], (occlusionPlaneMidCoeffs - altBase)(altBaseReg)
     vmudn   $v29, vPairTPosF, sOCM // X * kx, Y * ky, Z * kz
@@ -1620,8 +1610,8 @@ sOC1 equ TODO // vtx_store OCclusion temp 1
     andi    $10, $10, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
     ori     $10, $10, CLIP_VTX_USED // Write for all first verts, only matters for generated verts
     
-sSCL equ TODO // vtx_store Scaled Clipping Low
-sSCH equ TODO // vtx_store Scaled Clipping High
+sSCL equ ---- // vtx_store Scaled Clipping Low
+sSCH equ ---- // vtx_store Scaled Clipping High
     vmudn   sSCL, vPairTPosF, $v31[3] // W * clip ratio for scaled clipping
     vmadh   sSCH, vPairTPosI, $v31[3] // W * clip ratio for scaled clipping
     vnop
@@ -1647,10 +1637,10 @@ sSCH equ TODO // vtx_store Scaled Clipping High
     lsv     vPairTPosI[14], (VTX_Z_INT     )(secondVtxPos) // load Z into W slot, will be for fog below
     lsv     vPairTPosI[6],  (VTX_Z_INT     )(outputVtxPos) // load Z into W slot, will be for fog below
     
-s1WH equ TODO // vtx_store 1/W High
-s1WL equ TODO // vtx_store 1/W Low
-sWRL equ TODO // vtx_store W Reciprocal Low  | IMPORTANT: Can be the same reg as sWRH, but
-sWRH equ TODO // vtx_store W Reciprocal High | using different ones saves one cycle delay
+s1WH equ ---- // vtx_store 1/W High
+s1WL equ ---- // vtx_store 1/W Low
+sWRL equ ---- // vtx_store W Reciprocal Low  | IMPORTANT: Can be the same reg as sWRH, but
+sWRH equ ---- // vtx_store W Reciprocal High | using different ones saves one cycle delay
     vmudl   $v29, vPairTPosF, $v30[3] // Persp norm
     vmadm   s1WH, vPairTPosI, $v30[3] // Persp norm
     vmadn   s1WL, $v31, $v31[2] // 0
@@ -1694,14 +1684,14 @@ sWRH equ TODO // vtx_store W Reciprocal High | using different ones saves one cy
     vmadn   vPairTPosF, $v31, $v31[2] // 0
     vnop
     vnop
-sVPO equ TODO // vtx_store ViewPort Offset
-sVPS equ TODO // vtx_store ViewPort Scale
+sVPO equ ---- // vtx_store ViewPort Offset
+sVPS equ ---- // vtx_store ViewPort Scale
     lqv     sVPO, (0x10)(rdpCmdBufEndP1) // Load viewport offset from temp mem
     lqv     sVPS, (0x00)(rdpCmdBufEndP1) // Load viewport scale from temp mem
     vmudh   $v29, sVPO, vOne // offset * 1
     vmadn   vPairTPosF, vPairTPosF, sVPS // + XYZ * scale
     vmadh   vPairTPosI, vPairTPosI, sVPS
-sFOG equ TODO
+sFOG equ ----
     vmadh   sFOG, vOne, $v31[6] // + 0x7F00 in all elements, clamp to 0x7FFF for fog
     
     ssv     vPairTPosF[12],   (VTX_SCR_Z_FRAC)(secondVtxPos)
@@ -1717,30 +1707,30 @@ sFOG equ TODO
     sbv     sFOG[7],          (VTX_COLOR_A   )(outputVtxPos)
 vtx_skip_fog:
 
-sCLZ equ TODO // vtx_store CLipped Z
+sCLZ equ ---- // vtx_store CLipped Z
     vge     sCLZ, vPairTPosI, $v31[2] // 0; clamp Z to >= 0
     ssv     sCLZ[12],         (VTX_SCR_Z     )(secondVtxPos)
     ssv     sCLZ[4],          (VTX_SCR_Z     )(outputVtxPos)
     
     
-sO03 equ TODO // vtx_store Occlusion coeffs 0-3
+sO03 equ ---- // vtx_store Occlusion coeffs 0-3
     ldv     sO03[0], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // Load coeffs 0-3
     ldv     sO03[8], (occlusionPlaneEdgeCoeffs - altBase)(altBaseReg) // and for vtx 2
-sOPM equ TODO // vtx_store Occlusion Plus Minus constants
+sOPM equ ---- // vtx_store Occlusion Plus Minus constants
     vge     $v29, $v31, $v31[2h] // Set VCC to 00110011
     vmrg    sOPM, vOne, $v31[1] // Signs of sOPM are --++--++
     vmudh   sOPM, sOPM, $v31[5] // sOPM is 0xC000, 0xC000, 0x4000, 0x4000, repeat
-sOSC equ TODO // vtx_store Occlusion SCaled up
+sOSC equ ---- // vtx_store Occlusion SCaled up
     vmudh   sOSC, vPairTPosI, $v31[4] // 4; scale up x and y
-sOC2 equ TODO // vtx_store OCclusion temp 2
-sOC3 equ TODO // vtx_store OCclusion temp 3
+sOC2 equ ---- // vtx_store OCclusion temp 2
+sOC3 equ ---- // vtx_store OCclusion temp 3
     vmulf   $v29, sO03, sOSC[0h]       //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
     vmacf   sOC2, sOPM, vPairTPosI[1h] // -0x4000*Y1, --, +0x4000*Y1, --, repeat vtx 2
     vmulf   $v29, sO03, sOSC[1h]       // --,    4*Y1*c1, --,    4*Y1*c3, repeat vtx 2
     vmacf   sOC3, sOPM, vPairTPosI[0h] // --, -0x4000*X1, --, +0x4000*X1, repeat vtx 2
     veq     $v29, $v31, $v31[0q]       // Set VCC to 10101010
     vmrg    sOC2, $sOC2, sOC3           // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
-sO47 equ TODO // vtx_store Occlusion coeffs 0-3
+sO47 equ ---- // vtx_store Occlusion coeffs 0-3
     ldv     sO47[0], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // Load coeffs 4-7
     ldv     sO47[8], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // and for vtx 2
     vge     $v29, sOC2, sO47           // Each compare to coeffs 4-7
@@ -2556,6 +2546,8 @@ ovl0_start:
      mtc0   $24, DPC_END            // Set the end pointer of the RDP so that it starts the task
 load_ucode:
     lw      cmd_w1_dram, (inputBufferEnd - 0x04)(inputBufferPos) // word 1 = ucode code DRAM addr
+    sw      $zero, OSTask + OSTask_flags    // So next ucode knows it didn't come from yield
+    li      dmemAddr, start         // Beginning of overwritable part of IMEM
     sw      taskDataPtr, OSTask + OSTask_data_ptr // Store where we are in the DL
     sw      cmd_w1_dram, OSTask + OSTask_ucode // Store pointer to new ucode about to execute
     // Store counters in mITMatrix; first 0x180 of DMEM will be preserved in ucode swap AND
@@ -2564,7 +2556,6 @@ load_ucode:
     sw      perfCounterB, mITMatrix + YDF_OFFSET_PERFCOUNTERB
     sw      perfCounterC, mITMatrix + YDF_OFFSET_PERFCOUNTERC
     sw      perfCounterD, mITMatrix + YDF_OFFSET_PERFCOUNTERD
-    li      dmemAddr, start         // Beginning of overwritable part of IMEM
     jal     dma_read_write          // DMA DRAM read -> IMEM write
      li     dmaLen, (while_wait_dma_busy - start) - 1 // End of overwritable part of IMEM
     lw      cmd_w1_dram, rdpHalf1Val // Get DRAM address of ucode data from rdpHalf1Val
