@@ -15,20 +15,20 @@ YDF_OFFSET_UCODE        equ 0x14
 
 // OSTask data member offsets
 OSTask_type             equ 0x0000
-OSTask_flags            equ 0x0004
+OSTask_flags            equ 0x0004 // used
 OSTask_ucode_boot       equ 0x0008
 OSTask_ucode_boot_size  equ 0x000C
-OSTask_ucode            equ 0x0010
+OSTask_ucode            equ 0x0010 // used
 OSTask_ucode_size       equ 0x0014
 OSTask_ucode_data       equ 0x0018
 OSTask_ucode_data_size  equ 0x001C
-OSTask_dram_stack       equ 0x0020
+OSTask_dram_stack       equ 0x0020 // used
 OSTask_dram_stack_size  equ 0x0024
-OSTask_output_buff      equ 0x0028
-OSTask_output_buff_size equ 0x002C
-OSTask_data_ptr         equ 0x0030
+OSTask_output_buff      equ 0x0028 // used
+OSTask_output_buff_size equ 0x002C // actually end pointer; used
+OSTask_data_ptr         equ 0x0030 // used
 OSTask_data_size        equ 0x0034
-OSTask_yield_data_ptr   equ 0x0038
+OSTask_yield_data_ptr   equ 0x0038 // used
 OSTask_yield_data_size  equ 0x003C
 
 // flags

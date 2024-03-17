@@ -209,6 +209,8 @@ all_brz: F3DEX3_BrZ F3DEX3_BrZ_PA F3DEX3_BrZ_PB F3DEX3_BrZ_PC
 
 all_brw: F3DEX3_BrW F3DEX3_BrW_PA F3DEX3_BrW_PB F3DEX3_BrW_PC
 
+all_brw_noc: F3DEX3_BrW_NOC F3DEX3_BrW_NOC_PA F3DEX3_BrW_NOC_PB F3DEX3_BrW_NOC_PC
+
 clean:
 	@printf "$(WARNING)Deleting all built microcode files$(NO_COL)\n"
 	@rm -rf $(ALL_OUTPUT_DIRS)
