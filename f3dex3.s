@@ -282,10 +282,12 @@ displayListStack:
 
 // ucode text (shared with DL stack)
     .ascii ID_STR, 0x0A
-
-.align 16
-.if . - displayListStack != 0x48
-    .warning "ID_STR incorrect length, affects displayListStack"
+endIdStr:
+.if endIdStr < 0x180
+    .fill (0x180 - endIdStr)
+.elseif endIdStr > 0x180
+    .error "ID_STR is too long"
+    .align 16  // to suppress subsequent errors 
 .endif
 
 endSharedDMEM:
@@ -1357,7 +1359,7 @@ middle_of_vtx_store:
     ssv     s1WH[14],         (VTX_INV_W_INT )(secondVtxPos)
     vmadh   vPairTPosI, vPairTPosI, s1WH[3h] // pos * 1/W
     ssv     s1WH[6],          (VTX_INV_W_INT )($19)
-    vnop
+    // vnop
 // sVPO is $v17 // vtx_store ViewPort Offset
     lqv     sVPO, (0x10)(rdpCmdBufEndP1) // Load viewport offset from temp mem
     // vnop

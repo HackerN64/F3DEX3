@@ -1,3 +1,7 @@
+# To build, run something like `make F3DEX3_BrZ` or
+# `make F3DEX3_BrW_LVP_NOC_PA_dbgN`. For an explanation of what all the suffixes
+# mean, see README.md.
+
 MAKEFLAGS += --no-builtin-rules
 MAKEFLAGS += --no-builtin-variables
 .SUFFIXES:
@@ -9,6 +13,7 @@ ALL_OPTIONS := \
   CFG_G_BRANCH_W \
   CFG_DEBUG_NORMALS \
   CFG_NO_OCCLUSION_PLANE \
+  CFG_LEGACY_VTX_PIPE \
   CFG_PROFILING_A \
   CFG_PROFILING_B \
   CFG_PROFILING_C
@@ -52,7 +57,6 @@ define reset_vars
   NAME := 
   DESCRIPTION := (Not used in any retail games)
   ID_STR := Custom F3DEX2-based microcode, github.com/Mr-Wiseguy/f3dex2 & Nintendo
-  ID_STR := RSP Gfx ucode F3DEX       fifo 2.04H Yoshitaka Yasumoto 1998 Nintendo.
   MD5_CODE := 
   MD5_DATA := 
   OPTIONS := 
@@ -121,95 +125,85 @@ define ucode_rule
   ifneq ($(MD5_CODE),)
 	@(printf "$(MD5_CODE) *$$(CODE_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) code matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) code differs$(NO_COL)\n"
 	@(printf "$(MD5_DATA) *$$(DATA_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) data matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) data differs$(NO_COL)\n"
-  else ifneq ($(1),1)
-	@printf "(MD5 sums not in database for $(NAME), this is normal in development)\n"
   endif
   $$(eval $$(call reset_vars))
 endef
 
 $(eval $(call reset_vars))
 
-NAME := F3DEX3_BrZ
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z, default profiling)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_Z, default profiling___________
-OPTIONS :=
-$(eval $(call ucode_rule))
+define rule_builder_final
+  NAME := F3DEX3$(NAME_FINAL)
+  DESCRIPTION := Will make you want to finally ditch HLE ($(OPTIONS_FINAL))
+  ID_STR := F3DEX3$(NAME_FINAL) by Sauraen & Yoshitaka Yasumoto/Nintendo
+  OPTIONS := $(OPTIONS_FINAL)
+  $$(eval $$(call ucode_rule))
+endef
 
-NAME := F3DEX3_BrZ_PA
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z, PROFILING_A)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_Z, PROFILING_A_________________
-OPTIONS := CFG_PROFILING_A
-$(eval $(call ucode_rule))
+define rule_builder_dbgn
+  NAME_FINAL := $(NAME_DBGN)
+  OPTIONS_FINAL := $(OPTIONS_DBGN)
+  $$(eval $$(call rule_builder_final))
+  
+  NAME_FINAL := $(NAME_DBGN)_dbgN
+  OPTIONS_FINAL := $(OPTIONS_DBGN) CFG_DEBUG_NORMALS
+  $$(eval $$(call rule_builder_final))
+endef
 
-NAME := F3DEX3_BrZ_PB
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z, PROFILING_B)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_Z, PROFILING_B_________________
-OPTIONS := CFG_PROFILING_B
-$(eval $(call ucode_rule))
+define rule_builder_prof
+  NAME_DBGN := $(NAME_PROF)
+  OPTIONS_DBGN := $(OPTIONS_PROF)
+  $$(eval $$(call rule_builder_dbgn))
+  
+  NAME_DBGN := $(NAME_PROF)_PA
+  OPTIONS_DBGN := $(OPTIONS_PROF) CFG_PROFILING_A
+  $$(eval $$(call rule_builder_dbgn))
+  
+  NAME_DBGN := $(NAME_PROF)_PB
+  OPTIONS_DBGN := $(OPTIONS_PROF) CFG_PROFILING_B
+  $$(eval $$(call rule_builder_dbgn))
+  
+  NAME_DBGN := $(NAME_PROF)_PC
+  OPTIONS_DBGN := $(OPTIONS_PROF) CFG_PROFILING_C
+  $$(eval $$(call rule_builder_dbgn))
+endef
 
-NAME := F3DEX3_BrZ_PC
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_Z, PROFILING_C)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_Z, PROFILING_C_________________
-OPTIONS := CFG_PROFILING_C
-$(eval $(call ucode_rule))
+define rule_builder_noc
+  NAME_PROF := $(NAME_NOC)
+  OPTIONS_PROF := $(OPTIONS_NOC)
+  $$(eval $$(call rule_builder_prof))
+  
+  NAME_PROF := $(NAME_NOC)_NOC
+  OPTIONS_PROF := $(OPTIONS_NOC) CFG_NO_OCCLUSION_PLANE
+  $$(eval $$(call rule_builder_prof))
+endef
 
-NAME := F3DEX3_BrW
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, default profiling)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, default profiling___________
-OPTIONS := CFG_G_BRANCH_W
-$(eval $(call ucode_rule))
+define rule_builder_lvp
+  NAME_NOC := $(NAME_LVP)
+  OPTIONS_NOC := $(OPTIONS_LVP)
+  $$(eval $$(call rule_builder_noc))
+  
+  NAME_NOC := $(NAME_LVP)_LVP
+  OPTIONS_NOC := $(OPTIONS_LVP) CFG_LEGACY_VTX_PIPE
+  $$(eval $$(call rule_builder_noc))
+endef
 
-NAME := F3DEX3_BrW_PA
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, PROFILING_A)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, PROFILING_A_________________
-OPTIONS := CFG_G_BRANCH_W CFG_PROFILING_A
-$(eval $(call ucode_rule))
+define rule_builder_br
+  NAME_LVP := $(NAME_BR)_BrZ
+  OPTIONS_LVP := $(OPTIONS_BR)
+  $$(eval $$(call rule_builder_lvp))
+  
+  NAME_LVP := $(NAME_BR)_BrW
+  OPTIONS_LVP := $(OPTIONS_BR) CFG_G_BRANCH_W
+  $$(eval $$(call rule_builder_lvp))
+endef
 
-NAME := F3DEX3_BrW_PB
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, PROFILING_B)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, PROFILING_B_________________
-OPTIONS := CFG_G_BRANCH_W CFG_PROFILING_B
-$(eval $(call ucode_rule))
-
-NAME := F3DEX3_BrW_PC
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, PROFILING_C)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, PROFILING_C_________________
-OPTIONS := CFG_G_BRANCH_W CFG_PROFILING_C
-$(eval $(call ucode_rule))
-
-NAME := F3DEX3_BrW_NOC
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, no occlusion plane, default profiling)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, no occ, default profiling___
-OPTIONS := CFG_G_BRANCH_W CFG_NO_OCCLUSION_PLANE
-$(eval $(call ucode_rule))
-
-NAME := F3DEX3_BrW_NOC_PA
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, no occlusion plane, PROFILING_A)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, no occ, PROFILING_A_________
-OPTIONS := CFG_G_BRANCH_W CFG_NO_OCCLUSION_PLANE CFG_PROFILING_A
-$(eval $(call ucode_rule))
-
-NAME := F3DEX3_BrW_NOC_PB
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, no occlusion plane, PROFILING_B)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, no occ, PROFILING_B_________
-OPTIONS := CFG_G_BRANCH_W CFG_NO_OCCLUSION_PLANE CFG_PROFILING_B
-$(eval $(call ucode_rule))
-
-NAME := F3DEX3_BrW_NOC_PC
-DESCRIPTION := Will make you want to finally ditch HLE (G_BRANCH_W, no occlusion plane, PROFILING_C)
-ID_STR := F3DEX3 by Sauraen & Nintendo; G_BRANCH_W, no occ, PROFILING_C_________
-OPTIONS := CFG_G_BRANCH_W CFG_NO_OCCLUSION_PLANE CFG_PROFILING_C
-$(eval $(call ucode_rule))
+NAME_BR := 
+OPTIONS_BR := 
+$(eval $(call rule_builder_br))
 
 .PHONY: default ok all clean
 
 all: $(ALL_UCODES)
-
-all_brz: F3DEX3_BrZ F3DEX3_BrZ_PA F3DEX3_BrZ_PB F3DEX3_BrZ_PC
-
-all_brw: F3DEX3_BrW F3DEX3_BrW_PA F3DEX3_BrW_PB F3DEX3_BrW_PC
-
-all_brw_noc: F3DEX3_BrW_NOC F3DEX3_BrW_NOC_PA F3DEX3_BrW_NOC_PB F3DEX3_BrW_NOC_PC
 
 clean:
 	@printf "$(WARNING)Deleting all built microcode files$(NO_COL)\n"
