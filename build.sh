@@ -16,6 +16,14 @@ UCODES=(
     F3DEX3_BrW_NOC_PA
     F3DEX3_BrW_NOC_PB
     F3DEX3_BrW_NOC_PC
+    F3DEX3_BrW_LVP
+    F3DEX3_BrW_LVP_PA
+    F3DEX3_BrW_LVP_PB
+    F3DEX3_BrW_LVP_PC
+    F3DEX3_BrW_LVP_NOC
+    F3DEX3_BrW_LVP_NOC_PA
+    F3DEX3_BrW_LVP_NOC_PB
+    F3DEX3_BrW_LVP_NOC_PC
 )
 for ucode in "${UCODES[@]}"; do
     make $ucode

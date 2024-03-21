@@ -1222,11 +1222,11 @@ vtx_setup_constants:
     sqv     sOPMs, (0x20)(rdpCmdBufEndP1)         // Store occlusion plane -/+4000 constants to temp mem
 .endif
 .if CFG_LEGACY_VTX_PIPE
-    llv     $v8[0], (textureSettings2)($zero)  // Texture ST scale in 0, 1
+    llv     sSTS[0], (textureSettings2)($zero)    // Texture ST scale in 0, 1
 .endif
     vmrg    sVPO, sVPO, $v23[1]                   // Put fog offset in elements 3,7 of vtrans
 .if CFG_LEGACY_VTX_PIPE
-    llv     $v8[8], (textureSettings2)($zero)  // Texture ST scale in 4, 5
+    llv     sSTS[8], (textureSettings2)($zero)    // Texture ST scale in 4, 5
 .else
     vge     $v29, $v31, $v31[3]                   // VCC = 00011111
 .endif
@@ -1237,8 +1237,8 @@ vtx_setup_constants:
      vmov   sVPS[5], $v20[1]                      // Same for second half
 .if CFG_LEGACY_VTX_PIPE
     bnez    $11, skip_vtx_mvp
-     li     $2, mMatrix
-    li      $3, vpMatrix
+     li     $2, vpMatrix
+    li      $3, mMatrix
     addi    $10, $3, 0x0018
 @@loop:
     vmadn   $v9, $v31, $v31[2]  // 0
@@ -1266,7 +1266,7 @@ vtx_setup_constants:
     sqv     $v8[0], (mITMatrix + 0x0000)($zero)
     sqv     $v7[0], (fourthQWMVP +    0)($zero)
     sqv     $v6[0], (mITMatrix + 0x0010)($zero)
-    sb      $10, mITValid  // $10 is nonzero, in fact 0x58
+    sb      $10, mITValid  // $10 is nonzero, in fact 0x18
 skip_vtx_mvp:
     lqv     vM0I,     (mITMatrix + 0x00)($zero)  // Load MVP matrix
     lqv     vM2I,     (mITMatrix + 0x10)($zero)
@@ -1286,6 +1286,7 @@ skip_vtx_mvp:
     ldv     vM2I[8],  (mITMatrix + 0x10)($zero)
     ldv     vM0F[8],  (mITMatrix + 0x20)($zero)
     ldv     vM2F[8],  (mITMatrix + 0x30)($zero)
+vtx_after_calc_mit: // Not actually used on this codepath
     // TODO lighting setup
 .else
     bnez    $11, @@skipzeroao                     // Continue if AO disabled
@@ -1352,12 +1353,15 @@ vtx_load_loop:
     addi    $1, $1, -2*inputVtxSize     // Counter of remaining verts * inputVtxSize
 .endif
     vmrg    vPairRGBA, sCOL, vPairRGBA            // Merge colors
-    bnez    $11, ovl234_lighting_entrypoint
+    bnez    $11, vtx_lighting
 .if CFG_LEGACY_VTX_PIPE
      addi   outputVtxPos, outputVtxPos, 2*vtxSize
 .else
      // Elems 0-1 get bytes 6-7 of the following vertex (0)
      lpv    vAAA[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
+.endif
+.if CFG_LEGACY_VTX_PIPE
+vtx_lighting: // TODO not yet implemented
 .endif
 vtx_return_from_lighting:
 .if CFG_LEGACY_VTX_PIPE
@@ -2719,6 +2723,9 @@ ovl2_start:
 // Jump here to do lighting. If overlay 2 is loaded (this code), jumps into the
 // rest of the lighting code below.
 ovl234_lighting_entrypoint:
+.if !CFG_LEGACY_VTX_PIPE
+vtx_lighting:
+.endif
 .if CFG_PROFILING_B
     addi    perfCounterA, perfCounterA, 2    // Increment lit vertex count by 2
 .endif

@@ -55,12 +55,12 @@ ALL_OUTPUT_DIRS :=
 
 define reset_vars
   NAME := 
-  DESCRIPTION := (Not used in any retail games)
-  ID_STR := Custom F3DEX2-based microcode, github.com/Mr-Wiseguy/f3dex2 & Nintendo
+  DESCRIPTION := 
+  ID_STR := 
   MD5_CODE := 
   MD5_DATA := 
   OPTIONS := 
-  EXTRA_DEPS :=
+  EXTRA_DEPS := 
 endef
 
 define ucode_rule
