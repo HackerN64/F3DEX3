@@ -862,6 +862,7 @@ finish_setup:
     mfc0    $11, DPC_CLOCK
     sw      $11, startCounterTime
 .endif
+    sb      $zero, mITValid
     li      inputBufferPos, 0
     li      cmd_w1_dram, orga(ovl1_start)
     j       load_overlays_0_1
@@ -1241,31 +1242,31 @@ vtx_setup_constants:
     li      $3, mMatrix
     addi    $10, $3, 0x0018
 @@loop:
-    vmadn   $v9, $v31, $v31[2]  // 0
+    vmadn   $v7, $v31, $v31[2]  // 0
     addi    $11, $3, 0x0008
-    vmadh   $v8, $v31, $v31[2]  // 0
+    vmadh   $v6, $v31, $v31[2]  // 0
     addi    $2, $2, -0x0020
     vmudh   $v29, $v31, $v31[2] // 0
 @@innerloop:
-    ldv     $v5[0], 0x0040($2)
-    ldv     $v5[8], 0x0040($2)
-    lqv     $v3[0], 0x0020($3) // Input 1
-    ldv     $v4[0], 0x0020($2)
-    ldv     $v4[8], 0x0020($2)
-    lqv     $v2[0], 0x0000($3) // Input 1
-    vmadl   $v29, $v5, $v3[0h]
+    ldv     $v3[0], 0x0040($2)
+    ldv     $v3[8], 0x0040($2)
+    lqv     $v1[0], 0x0020($3) // Input 1
+    ldv     $v2[0], 0x0020($2)
+    ldv     $v2[8], 0x0020($2)
+    lqv     $v0[0], 0x0000($3) // Input 1
+    vmadl   $v29, $v3, $v1[0h]
     addi    $3, $3, 0x0002
-    vmadm   $v29, $v4, $v3[0h]
+    vmadm   $v29, $v2, $v1[0h]
     addi    $2, $2, 0x0008 // Increment input 0 pointer
-    vmadn   $v7, $v5, $v2[0h]
+    vmadn   $v5, $v3, $v0[0h]
     bne     $3, $11, @@innerloop
-     vmadh  $v6, $v4, $v2[0h]
+     vmadh  $v4, $v2, $v0[0h]
     bne     $3, $10, @@loop
      addi   $3, $3, 0x0008
-    sqv     $v9[0], (mITMatrix + 0x0020)($zero)
-    sqv     $v8[0], (mITMatrix + 0x0000)($zero)
-    sqv     $v7[0], (fourthQWMVP +    0)($zero)
-    sqv     $v6[0], (mITMatrix + 0x0010)($zero)
+    sqv     $v7[0], (mITMatrix + 0x0020)($zero)
+    sqv     $v6[0], (mITMatrix + 0x0000)($zero)
+    sqv     $v5[0], (fourthQWMVP +    0)($zero)
+    sqv     $v4[0], (mITMatrix + 0x0010)($zero)
     sb      $10, mITValid  // $10 is nonzero, in fact 0x18
 skip_vtx_mvp:
     lqv     vM0I,     (mITMatrix + 0x00)($zero)  // Load MVP matrix
@@ -1285,7 +1286,7 @@ skip_vtx_mvp:
     ldv     vM0I[8],  (mITMatrix + 0x00)($zero)
     ldv     vM2I[8],  (mITMatrix + 0x10)($zero)
     ldv     vM0F[8],  (mITMatrix + 0x20)($zero)
-    ldv     vM2F[8],  (mITMatrix + 0x30)($zero)
+    ldv     vM2F[8],  (fourthQWMVP +  0)($zero)
 vtx_after_calc_mit: // Not actually used on this codepath
     // TODO lighting setup
 .else
@@ -1312,6 +1313,7 @@ vtx_after_calc_mit: // Not actually used on this codepath
     srl     $7, $5, 9                          // G_LIGHTING in bit 1
     and     $7, $7, $11                        // If lighting enabled and need to update matrix,
     and     $7, $7, $10                        // and computing mIT,
+    move    inputVtxPos, dmemAddr  // this must be before overlay load, can be clobbered
     ldv     vM3F[0],  (mMatrix + 0x38)($zero)
     ldv     vM0I[8],  (mMatrix + 0x00)($zero)
     ldv     vM2I[8],  (mMatrix + 0x10)($zero)
@@ -1324,8 +1326,7 @@ vtx_after_calc_mit:
     lqv     vVP0F,    (vpMatrix  + 0x20)($zero)
     lqv     vVP2F,    (vpMatrix  + 0x30)($zero)
     addi    outputVtxPos, outputVtxPos, -2*vtxSize // Going to increment this by 2 verts in loop
-    vcopy   vVP1I,  vVP0I
-    move    inputVtxPos, dmemAddr
+    vcopy   vVP1I, vVP0I
     vcopy   vVP3I, vVP2I
     ldv     vVP1I[0], (vpMatrix  + 0x08)($zero)
     vcopy   vVP1F, vVP0F
@@ -1361,7 +1362,7 @@ vtx_load_loop:
      lpv    vAAA[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
 .endif
 .if CFG_LEGACY_VTX_PIPE
-vtx_lighting: // TODO not yet implemented
+vtx_lighting: // TODO not yet implemented. Also: $ra has to be set to vtx_load_loop in legacy lighting.
 .endif
 vtx_return_from_lighting:
 .if CFG_LEGACY_VTX_PIPE
