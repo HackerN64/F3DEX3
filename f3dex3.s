@@ -664,6 +664,8 @@ OSTask:
 fourthQWMVP equ -(0x1000 - (OSTask + OSTask_type))
 // This word is not used by F3DEX3, S2DEX, or even boot. Reuse it as a temp.
 startCounterTime equ (OSTask + OSTask_ucode_size)
+// These two words are used by boot, but not by F3DEX3 or S2DEX.
+xfrmLookatDirs equ (OSTask + OSTask_ucode_data) // and OSTask_ucode_data_size
 
 .close // DATA_FILE
 
@@ -699,14 +701,19 @@ vNrmOut    equ $v18 // Output of lt_normalize (rarely used, but needed as all te
 vPairPosI  equ $v20 // Vertex pair model / world space position int/frac
 vPairPosF  equ $v21
 vPairST    equ $v22 // Vertex pair ST texture coordinates
+vPairTPosF equ $v23 // Vertex pair transformed (clip / screen) space position frac/int
+vPairTPosI equ $v24
+.if CFG_LEGACY_VTX_PIPE
+vAAA       equ $v20
+vBBB       equ $v21
+.else
 vAAA       equ $v23 // Temps
 vBBB       equ $v24
+.endif
 vCCC       equ $v25
 vDDD       equ $v26
 vPairRGBA  equ $v27 // Vertex pair color
 // Vertex write, after lighting:
-vPairTPosF equ $v23 // Vertex pair transformed (clip / screen) space position frac/int
-vPairTPosI equ $v24
 // Global:
 vOne       equ $v28 // Global, all elements = 1
 // $v29: permanent temp register, also write results here to discard
@@ -1215,6 +1222,7 @@ vtx_setup_constants:
     vmudh   $v20, sVPS, $v31[1]                   // -1; -vscale
 .if CFG_LEGACY_VTX_PIPE
     lbu     $11, mITValid
+    lbu     $7, dirLightsXfrmValid
 .else
     andi    $11, $10, G_AMBOCCLUSION
 .endif
@@ -1237,6 +1245,7 @@ vtx_setup_constants:
 .endif
      vmov   sVPS[5], $v20[1]                      // Same for second half
 .if CFG_LEGACY_VTX_PIPE
+    and     $7, $7, $11                           // 0 if lights or matrix invalid
     bnez    $11, skip_vtx_mvp
      li     $2, vpMatrix
     li      $3, mMatrix
@@ -1269,13 +1278,19 @@ vtx_setup_constants:
     sqv     $v4[0], (mITMatrix + 0x0010)($zero)
     sb      $10, mITValid  // $10 is nonzero, in fact 0x18
 skip_vtx_mvp:
+    bnez    $7, @@skip_lt_recompute             // $7 is nonzero if both already valid
+     sll    $10, $5, 31-9                       // G_LIGHTING in sign bit
+    bltz    $10, ovl234_lighting_entrypoint     // $7 zero to indicate do recompute
+@@skip_lt_recompute:
+     move   inputVtxPos, dmemAddr               // Must be before overlay load
+vtx_after_xfrm_dir_lights:
+vtx_after_calc_mit: // Not actually used on this codepath
     lqv     vM0I,     (mITMatrix + 0x00)($zero)  // Load MVP matrix
     lqv     vM2I,     (mITMatrix + 0x10)($zero)
     lqv     vM0F,     (mITMatrix + 0x20)($zero)
     lqv     vM2F,     (fourthQWMVP +  0)($zero)
     addi    outputVtxPos, outputVtxPos, -2*vtxSize // Going to increment this by 2 verts in loop
     vcopy   vM1I,  vM0I
-    move    inputVtxPos, dmemAddr
     vcopy   vM3I,  vM2I
     ldv     vM1I[0],  (mITMatrix + 0x08)($zero)
     vcopy   vM1F,  vM0F
@@ -1287,8 +1302,6 @@ skip_vtx_mvp:
     ldv     vM2I[8],  (mITMatrix + 0x10)($zero)
     ldv     vM0F[8],  (mITMatrix + 0x20)($zero)
     ldv     vM2F[8],  (fourthQWMVP +  0)($zero)
-vtx_after_calc_mit: // Not actually used on this codepath
-    // TODO lighting setup
 .else
     bnez    $11, @@skipzeroao                     // Continue if AO disabled
      sqv    sVPO, (0x10)(rdpCmdBufEndP1)          // Store viewport offset to temp mem
@@ -1349,20 +1362,17 @@ vtx_load_loop:
 .if CFG_LEGACY_VTX_PIPE
     blez    $1, vertex_end
 .endif
-     andi   $11, $5, G_LIGHTING >> 8
+     andi   $7, $5, G_LIGHTING >> 8
 .if CFG_LEGACY_VTX_PIPE
     addi    $1, $1, -2*inputVtxSize     // Counter of remaining verts * inputVtxSize
 .endif
     vmrg    vPairRGBA, sCOL, vPairRGBA            // Merge colors
-    bnez    $11, vtx_lighting
+    bnez    $7, ovl234_lighting_entrypoint        // $7 nonzero for CFG_LEGACY_VTX_PIPE
 .if CFG_LEGACY_VTX_PIPE
      addi   outputVtxPos, outputVtxPos, 2*vtxSize
 .else
      // Elems 0-1 get bytes 6-7 of the following vertex (0)
      lpv    vAAA[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
-.endif
-.if CFG_LEGACY_VTX_PIPE
-vtx_lighting: // TODO not yet implemented. Also: $ra has to be set to vtx_load_loop in legacy lighting.
 .endif
 vtx_return_from_lighting:
 .if CFG_LEGACY_VTX_PIPE
@@ -2724,14 +2734,15 @@ ovl2_start:
 // Jump here to do lighting. If overlay 2 is loaded (this code), jumps into the
 // rest of the lighting code below.
 ovl234_lighting_entrypoint:
-.if !CFG_LEGACY_VTX_PIPE
-vtx_lighting:
-.endif
 .if CFG_PROFILING_B
     addi    perfCounterA, perfCounterA, 2    // Increment lit vertex count by 2
 .endif
     j       lt_continue_setup
+.if CFG_LEGACY_VTX_PIPE
+     lbu    curLight, numLightsxSize
+.else
      andi   $11, $5, G_PACKED_NORMALS >> 8
+.endif
 
 // Jump here for all overlay 4 features. If overlay 2 is loaded (this code), loads
 // overlay 4 and jumps to right here, which is now in the new code.
@@ -2758,6 +2769,132 @@ lt_continue_setup:
     // Locals: vAAA and vBBB after merge and normals selection, vCCC, vDDD, vPairLt, vNrmOut
     // New available locals: $6, $7 (existing: $11, $10, $20, $24)
     vmrg    vPairNrml, vPairNrml, vDDD       // Merge normals
+.if CFG_LEGACY_VTX_PIPE
+    beqz    $7, xfrm_dir_lights // $7 is 0 if transform, nonzero if lighting
+     addi   curLight, curLight, altBase // Point to ambient light
+    // Lighting
+    luv     vPairLt,     (ltBufOfs + 0)(curLight) // Total light level, init to ambient
+lt_loop:
+    lpv     vAAA[4],     (ltBufOfs + 0 - lightSize)(curLight) // Xfrmed dir in elems 0-2
+    vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
+    lpv     vCCC[0],     (ltBufOfs + 8 - lightSize)(curLight) // Xfrmed dir in elems 4-6
+    beq     curLight, altBaseReg, lt_post
+     luv    vDDD,        (ltBufOfs + 0 - lightSize)(curLight) // Light color
+    // nop
+    vmrg    vAAA, vAAA, vCCC  // vAAA = light direction
+    // vnop; vnop; vnop
+    vmulf   vAAA, vAAA, vPairNrml // Light dir * normalized normals
+    // vnop; vnop; vnop
+    vmudh   $v29, vOne, vAAA[0h] // Sum components of dot product as signed
+    vmadh   $v29, vOne, vAAA[1h]
+    addi    curLight, curLight, -lightSize
+    vmadh   vAAA, vOne, vAAA[2h]
+    /* TODO try this, this saves one vnop cycle before
+    vmudh   $v29, $v31, $v31[2] // 0; clear whole accumulator
+    vadd    $v29, vAAA, vAAA[1h] // accum lo 0 = 0 + 1, 4 = 4 + 5
+    vmadn   vAAA, vOne, vAAA[2h] // + 2,6; built-in saturation (clamping) ends up not a problem
+    */
+    // vnop; vnop; vnop
+    vge     vAAA, vAAA, $v31[2] // 0; clamp dot product to >= 0
+    // vnop; vnop
+    vmudh   $v29, vOne, vPairLt // Load accum mid with current light level
+    j       lt_loop
+     vmacf  vPairLt, vDDD, vAAA[0h] // + light color * dot product
+    
+lt_post:
+    li      $ra, vtx_load_loop             // Because overlay load may have clobbered
+    vne     $v29, $v31, $v31[3h]           // Set VCC to 11101110
+    j       vtx_return_from_lighting
+     vmrg   vPairRGBA, vPairLt, vPairRGBA  // RGB = light, A = vtx alpha
+    
+xfrm_dir_lights:
+    // Transform directional lights' direction by M transpose.
+    // First, load M transpose. Can use any regs except $v8-$v12, $v28-$v31.
+    // This algorithm clobbers all of $v0-$v7 and $v16-$v23 with the transposes.
+    // The F3DEX2 implementation takes 18 instructions and about 11 cycles.
+    // This implementation is 16 instructions and about 10 cycles. However, since
+    // this code is in an overlay and is not run per vertex, that doesn't really
+    // matter and it's really just an excuse to use the rare ltv instructions.
+    // Memory at mMatrix contains, in shorts within qwords, for the elements we care about:
+    // A B C - D E F - (X int, Y int)
+    // G H I - - - - - (Z int, W int)
+    // M N O - P Q R - (X frac, Y frac)
+    // S T U - - - - - (Z frac, W frac)
+    // First, make $v0-$v7 contain this, and same for $v16-$v23 frac parts.
+    // $v0 A - G - - - - -   $v16 M - S - - - - -
+    // $v1 - B - H - - - -   $v17 - N - T - - - -
+    // $v2 - - C - I - - -   $v18 - - O - U - - -
+    // $v3 - - - - - - - -   $v19 - - - - - - - -
+    // $v4 - - - - D - - -   $v20 - - - - P - - -
+    // $v5 - - - - - E - -   $v21 - - - - - Q - -
+    // $v6 - - - - - - F -   $v22 - - - - - - R -
+    // $v7 - - - - - - - -   $v23 - - - - - - - -
+    ltv     $v0[0],   (mMatrix + 0x00)($zero)
+    ltv     $v0[12],  (mMatrix + 0x10)($zero)
+    ltv     $v16[0],  (mMatrix + 0x20)($zero)
+    ltv     $v16[12], (mMatrix + 0x30)($zero)
+    li      $10, -1   // To mark lights valid
+    lsv     $v0[2],   (mMatrix + 0x08)($zero) // Place D into $v0 element 1
+    vmudh   $v1, vOne, $v1[1q]                // Shift $v1 left one element (B, H)
+    lsv     $v2[0],   (mMatrix + 0x04)($zero) // Place C into $v2 element 0
+    vmov    $v1[1], $v5[5]                    // Move E into $v1 element 1
+    lsv     $v2[4],   (mMatrix + 0x14)($zero) // Place I into $v2 element 2
+    vmov    $v2[1], $v6[6]                    // Move F into $v2 element 2
+    lsv     $v16[2],  (mMatrix + 0x28)($zero) // Place P into $v16 element 1
+    vmudh   $v17, vOne, $v17[1q]              // Shift $v17 left one element (N, T)
+    lsv     $v18[0],  (mMatrix + 0x24)($zero) // Place O into $v18 element 0
+    vmov    $v17[1], $v21[5]                  // Move Q into $v17 element 1
+    lsv     $v18[4],  (mMatrix + 0x34)($zero) // Place U into $v18 element 2
+    vmov    $v18[1], $v22[6]                  // Move R into $v18 element 1
+    // Resulting matrix (M transpose) in $v0:$v2 int, $v16:$v18 frac.
+xfrm_light_loop:
+    beq     curLight, altBaseReg, xfrm_light_post
+     lpv    $v3,  (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 0 dir in elems 0-2
+    addi    $20, curLight, (ltBufOfs + 12 - lightSize) // Target = last word of light
+    addi    curLight, curLight, -lightSize
+    j       xfrm_single_dir
+     li     $ra, xfrm_light_loop
+    
+xfrm_light_post:
+    // Lookat 0: input already in $v3, target is xfrmLookatDirs + 0.
+    jal     xfrm_single_dir
+     li     $20, xfrmLookatDirs + 0
+    // Lookat 1: curLight still pointing to light 0, target is 4 bytes later.
+    lpv     $v3[4], (ltBufOfs + 0 - lightSize)(curLight) // Lookat 1 dir in elems 0-2
+    addi    $20, $20, 4
+    li      $ra, vtx_after_xfrm_dir_lights
+    j       xfrm_single_dir
+     sb     $10, dirLightsXfrmValid
+
+xfrm_single_dir:
+    vmudn   $v29, $v16, $v3[0]
+    vmadh   $v29, $v0,  $v3[0]
+    vmadn   $v29, $v17, $v3[1]
+    vmadh   $v29, $v1,  $v3[1]
+    vmadn   $v29, $v18, $v3[2]
+    vmadh   $v4,  $v2,  $v3[2]   // $v4[0:2] = light dir in model space
+    vmudh   $v29, $v4, $v4       // Squared
+    vreadacc $v7, ACC_MIDDLE     // Read not-clamped value
+    vreadacc $v6, ACC_UPPER
+    vmudm   $v29, vOne, $v7[2]   // Sum of squared components
+    vmadh   $v29, vOne, $v6[2]
+    vmadm   $v29, vOne, $v7[1]
+    vmadh   $v29, vOne, $v6[1]
+    vmadn   $v7,  $v7,  vOne     // elem 0; swapped so we can do vmadn and get result
+    vmadh   $v6,  $v6,  vOne
+    vrsqh   $v29[0], $v6[0]
+    vrsql   $v7[0], $v7[0]
+    vrsqh   $v6[0], $v31[2]      // 0
+    vmudm   $v29, $v4, $v7[0]    // Vec int * frac scaling
+    vmadh   $v4, $v4, $v6[0]     // Vec int * int scaling
+    spv     $v4[0], (0x30)(rdpCmdBufEndP1) // Store elem 0-2 as bytes to temp memory
+    lw      $11, (0x30)(rdpCmdBufEndP1)    // Load 3 (4) bytes to scalar unit
+    jr      $ra
+     sw     $11, (0)($20)                  // Store 3 (4) bytes to target address
+     // This clobbers the specular size
+    
+    
+.else
     beqz    $11, lt_skip_packed_normals
      // Elems 4-5 get bytes 6-7 of the following vertex (1)
      lpv    vBBB[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
@@ -2767,8 +2904,10 @@ lt_continue_setup:
     // same direction as the standard normal vector. The length is not "correct"
     // compared to the standard normal, but it's is normalized anyway after the M
     // matrix transform.
+.endif
 vPackPXY equ $v25 // = vCCC; positive X and Y in packed normals
 vPackZ   equ $v26 // = vDDD; Z in packed normals
+.if !CFG_LEGACY_VTX_PIPE
     vand    vPackPXY, vAAA, $v31[6]          // 0x7F00; positive X, Y
     vmudh   $v29, vOne, $v31[1]              // -1; set all elems of $v29 to -1
     vaddc   vBBB, vPackPXY, vPackPXY[1q]     // elems 0, 4: +X + +Y, no clamping; VCO always 0
@@ -2795,12 +2934,14 @@ lt_skip_packed_normals:
     beqz    $11, lt_after_xfrm_normals // Skip if G_NORMALSMODE_FAST
      vmadh  vAAA, vM2I, vPairNrml[2h] // vAAA = normals int
     // Transform normals by M inverse transpose, for G_NORMALSMODE_AUTO or G_NORMALSMODE_MANUAL
+.endif
 vLtMIT0I   equ $v26 // = vDDD
 vLtMIT1I   equ $v25 // = vCCC
 vLtMIT2I   equ $v23 // = vAAA; last in multiply
 vLtMIT0F   equ $v29 // = temp; first
 vLtMIT1F   equ $v17 // = vPairLt
 vLtMIT2F   equ $v24 // = vBBB; second to last
+.if !CFG_LEGACY_VTX_PIPE
     lqv     vLtMIT0I,    (mITMatrix + 0x00)($zero) // x int, y int
     lqv     vLtMIT2I,    (mITMatrix + 0x10)($zero) // z int, x frac
     lqv     vLtMIT1F,    (mITMatrix + 0x20)($zero) // y frac, z frac
@@ -2892,10 +3033,12 @@ lt_skip_specular:
 lt_post:
     // Valid: vPairPosI/F, vPairST, modified vPairRGBA ([3h] = alpha - 1),
     // vPairNrml normal [0h:2h] fresnel [3h], vPairLt [0h:2h], vAAA lookat 0 dir
+.endif
 vLtRGBOut  equ $v25 // = vCCC: light / effects RGB output
 vLtAOut    equ $v26 // = vDDD: light / effects alpha output
 vLookat1   equ $v23 // = vAAA: lookat direction 1
 vLookat0   equ $v17 // = vPairLt:   lookat direction 0 (not initially)
+.if !CFG_LEGACY_VTX_PIPE
     vadd    vPairRGBA, vPairRGBA, $v31[7]  // 0x7FFF; undo change for ambient occlusion
     andi    $11, $5, G_LIGHTTOALPHA >> 8
     andi    $20, $5, G_PACKED_NORMALS >> 8
@@ -3048,6 +3191,7 @@ lt_normalize:
     vmadm   vBBB, vAAA, $v29[1h] // Vec int * frac scaling, discard result
     jr      $ra
      vmadh  vNrmOut, vAAA, $v29[0h] // Vec int * int scaling
+.endif
 
 ovl2_end:
 .align 8
