@@ -42,15 +42,20 @@
     vor     dst, src, src
 .endmacro
 
+// Using $v31 instead of dst as the source because $v31 doesn't change, whereas
+// dst might have been modified 2 or 3 cycles ago, causing a stall.
 .macro vclr, dst
-    vxor    dst, dst, dst
+    vxor    dst, $v31, $v31
 .endmacro
 
+// Also using $v31 for the dummy args here to avoid stalls. dst was once written
+// in vanilla tri code just before reading (should have been $v29), leading to
+// stalls!
 ACC_UPPER equ 0
 ACC_MIDDLE equ 1
 ACC_LOWER equ 2
 .macro vreadacc, dst, N
-    vsar    dst, dst, dst[N]
+    vsar    dst, $v31, $v31[N]
 .endmacro
 
 //
@@ -798,16 +803,16 @@ postOvlRA equ $10 // Commonly used locally
 // Initialization routines
 // Everything up until ovl01_end will get overwritten by ovl0 and/or ovl1
 start: // This is at IMEM 0x1080, not the start of IMEM
-    vadd    $v29, $v29, $v29 // Consume VCO (carry) value possibly set by the previous ucode
     lqv     $v31[0], (v31Value)($zero)
-    vclr    vOne
+    vadd    $v29, $v29, $v29 // Consume VCO (carry) value possibly set by the previous ucode
     li      altBaseReg, altBase
     li      rdpCmdBufPtr, rdpCmdBuffer1
+    vclr    vOne
     li      rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word
     lw      $11, rdpFifoPos
     lw      $10, OSTask + OSTask_flags
-    vsub    vOne, vOne, $v31[1]             // 1 = 0 - -1
     li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // Clear task done and yielded signals
+    vsub    vOne, vOne, $v31[1]             // 1 = 0 - -1
     beqz    $11, initialize_rdp             // If RDP FIFO not set up yet, starting ucode from scratch
      mtc0   $1, SP_STATUS
     andi    $10, $10, OS_TASK_YIELDED       // Resumed from yield or came from called ucode?
@@ -1221,8 +1226,7 @@ vtx_setup_constants:
     lqv     $v30, (fxParams - altBase)(altBaseReg) // Parameters for vtx and lighting
     vmudh   $v20, sVPS, $v31[1]                   // -1; -vscale
 .if CFG_LEGACY_VTX_PIPE
-    lbu     $11, mITValid
-    lbu     $7, dirLightsXfrmValid
+    lbu     $7, mITValid
 .else
     andi    $11, $10, G_AMBOCCLUSION
 .endif
@@ -1245,8 +1249,7 @@ vtx_setup_constants:
 .endif
      vmov   sVPS[5], $v20[1]                      // Same for second half
 .if CFG_LEGACY_VTX_PIPE
-    and     $7, $7, $11                           // 0 if lights or matrix invalid
-    bnez    $11, skip_vtx_mvp
+    bnez    $7, skip_vtx_mvp
      li     $2, vpMatrix
     li      $3, mMatrix
     addi    $10, $3, 0x0018
@@ -1278,12 +1281,10 @@ vtx_setup_constants:
     sqv     $v4[0], (mITMatrix + 0x0010)($zero)
     sb      $10, mITValid  // $10 is nonzero, in fact 0x18
 skip_vtx_mvp:
-    bnez    $7, @@skip_lt_recompute             // $7 is nonzero if both already valid
-     sll    $10, $5, 31-9                       // G_LIGHTING in sign bit
-    bltz    $10, ovl234_lighting_entrypoint     // $7 zero to indicate do recompute
-@@skip_lt_recompute:
+    andi    $11, $5, G_LIGHTING >> 8
+    bnez    $11, ovl234_lighting_entrypoint     // Lighting setup, incl. transform
      move   inputVtxPos, dmemAddr               // Must be before overlay load
-vtx_after_xfrm_dir_lights:
+vtx_after_lt_setup:
 vtx_after_calc_mit: // Not actually used on this codepath
     lqv     vM0I,     (mITMatrix + 0x00)($zero)  // Load MVP matrix
     lqv     vM2I,     (mITMatrix + 0x10)($zero)
@@ -1358,16 +1359,17 @@ vtx_after_calc_mit:
      move   secondVtxPos, $19                  // for first pre-loop, same for secondVtxPos
     
 vtx_load_loop:
-    vlt     $v29, $v31, $v31[4]                   // Set VCC to 11110000
+    vlt     $v29, $v31, $v31[4]            // Set VCC to 11110000
 .if CFG_LEGACY_VTX_PIPE
     blez    $1, vertex_end
 .endif
-     andi   $7, $5, G_LIGHTING >> 8
+     andi   $11, $5, G_LIGHTING >> 8
 .if CFG_LEGACY_VTX_PIPE
-    addi    $1, $1, -2*inputVtxSize     // Counter of remaining verts * inputVtxSize
+    vmrg    vPairNrml, vPairNrml, vDDD     // Merge normals
+    addi    $1, $1, -2*inputVtxSize        // Counter of remaining verts * inputVtxSize
 .endif
-    vmrg    vPairRGBA, sCOL, vPairRGBA            // Merge colors
-    bnez    $7, ovl234_lighting_entrypoint        // $7 nonzero for CFG_LEGACY_VTX_PIPE
+    vmrg    vPairRGBA, sCOL, vPairRGBA     // Merge colors
+    bnez    $11, lt_vtx_pair
 .if CFG_LEGACY_VTX_PIPE
      addi   outputVtxPos, outputVtxPos, 2*vtxSize
 .else
@@ -1422,7 +1424,7 @@ vtx_store:
     // Locals: $v20, $v21, $v25, $v26, $v16, $v17 ($v29 is temp). Also vPairST and
     // vPairRGBA can be used as temps once stored ($v22, $v27).
     // Scalar regs: secondVtxPos, outputVtxPos; set to the same thing if only write 1 vtx
-    // temps $3, $7, $11, $10, $19, $20, $24
+    // temps $7, $10, $11, $19, $20, $24
     // Temp reg names with s = store (for vtx_store)
 s1WH equ $v16 // vtx_store 1/W High
 s1WL equ $v17 // vtx_store 1/W Low
@@ -2114,9 +2116,9 @@ tV3AtI equ $v21
     llv     $v13[0], VTX_INV_W_VEC($1)
     vsub    $v15, $v10, $v2
     llv     $v13[8], VTX_INV_W_VEC($2)
-    vmudh   $v16, $v6, $v8[0]
+    vmudh   $v29, $v6, $v8[0]
     llv     $v13[12], VTX_INV_W_VEC($3)
-    vmadh   $v16, $v8, $v11[0]
+    vmadh   $v29, $v8, $v11[0]
     lpv     tV1AtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vreadacc $v17, ACC_UPPER
     lpv     tV2AtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
@@ -2734,12 +2736,19 @@ ovl2_start:
 // Jump here to do lighting. If overlay 2 is loaded (this code), jumps into the
 // rest of the lighting code below.
 ovl234_lighting_entrypoint:
+.if !CFG_LEGACY_VTX_PIPE
+lt_vtx_pair:
+.endif
 .if CFG_PROFILING_B
+.if CFG_LEGACY_VTX_PIPE
+    nop
+.else
     addi    perfCounterA, perfCounterA, 2    // Increment lit vertex count by 2
+.endif
 .endif
     j       lt_continue_setup
 .if CFG_LEGACY_VTX_PIPE
-     lbu    curLight, numLightsxSize
+     lbu    $3, numLightsxSize
 .else
      andi   $11, $5, G_PACKED_NORMALS >> 8
 .endif
@@ -2763,50 +2772,13 @@ ovl234_clipping_entrypoint_ovl2ver:        // same IMEM address as ovl234_clippi
      li     cmd_w1_dram, orga(ovl3_start)  // set up a load for overlay 3
 
 lt_continue_setup:
-    // Inputs: vPairPosI/F vertices pos world int:frac, vPairRGBA, vPairST,
-    // vPairNrml, vAAA:vBBB (to be merged) packed normals
-    // Outputs: leave alone vPairPosI/F; update vPairRGBA, vPairST 
-    // Locals: vAAA and vBBB after merge and normals selection, vCCC, vDDD, vPairLt, vNrmOut
-    // New available locals: $6, $7 (existing: $11, $10, $20, $24)
-    vmrg    vPairNrml, vPairNrml, vDDD       // Merge normals
 .if CFG_LEGACY_VTX_PIPE
-    beqz    $7, xfrm_dir_lights // $7 is 0 if transform, nonzero if lighting
-     addi   curLight, curLight, altBase // Point to ambient light
-    // Lighting
-    luv     vPairLt,     (ltBufOfs + 0)(curLight) // Total light level, init to ambient
-lt_loop:
-    lpv     vAAA[4],     (ltBufOfs + 0 - lightSize)(curLight) // Xfrmed dir in elems 0-2
-    vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
-    lpv     vCCC[0],     (ltBufOfs + 8 - lightSize)(curLight) // Xfrmed dir in elems 4-6
-    beq     curLight, altBaseReg, lt_post
-     luv    vDDD,        (ltBufOfs + 0 - lightSize)(curLight) // Light color
-    // nop
-    vmrg    vAAA, vAAA, vCCC  // vAAA = light direction
-    // vnop; vnop; vnop
-    vmulf   vAAA, vAAA, vPairNrml // Light dir * normalized normals
-    // vnop; vnop; vnop
-    vmudh   $v29, vOne, vAAA[0h] // Sum components of dot product as signed
-    vmadh   $v29, vOne, vAAA[1h]
-    addi    curLight, curLight, -lightSize
-    vmadh   vAAA, vOne, vAAA[2h]
-    /* TODO try this, this saves one vnop cycle before
-    vmudh   $v29, $v31, $v31[2] // 0; clear whole accumulator
-    vadd    $v29, vAAA, vAAA[1h] // accum lo 0 = 0 + 1, 4 = 4 + 5
-    vmadn   vAAA, vOne, vAAA[2h] // + 2,6; built-in saturation (clamping) ends up not a problem
-    */
-    // vnop; vnop; vnop
-    vge     vAAA, vAAA, $v31[2] // 0; clamp dot product to >= 0
-    // vnop; vnop
-    vmudh   $v29, vOne, vPairLt // Load accum mid with current light level
-    j       lt_loop
-     vmacf  vPairLt, vDDD, vAAA[0h] // + light color * dot product
-    
-lt_post:
-    li      $ra, vtx_load_loop             // Because overlay load may have clobbered
-    vne     $v29, $v31, $v31[3h]           // Set VCC to 11101110
-    j       vtx_return_from_lighting
-     vmrg   vPairRGBA, vPairLt, vPairRGBA  // RGB = light, A = vtx alpha
-    
+    lb      $11, dirLightsXfrmValid
+    li      $10, -1                   // To mark lights valid
+    addi    $3, $3, altBase           // Point to ambient light; stored through vtx proc
+    and     $11, $11, $7              // Zero if either matrix or lights invalid
+    bnez    $11, lt_setup_skip_xfrm
+     sb     $10, dirLightsXfrmValid
 xfrm_dir_lights:
     // Transform directional lights' direction by M transpose.
     // First, load M transpose. Can use any regs except $v8-$v12, $v28-$v31.
@@ -2833,7 +2805,7 @@ xfrm_dir_lights:
     ltv     $v0[12],  (mMatrix + 0x10)($zero)
     ltv     $v16[0],  (mMatrix + 0x20)($zero)
     ltv     $v16[12], (mMatrix + 0x30)($zero)
-    li      $10, -1   // To mark lights valid
+    move    curLight, $3
     lsv     $v0[2],   (mMatrix + 0x08)($zero) // Place D into $v0 element 1
     vmudh   $v1, vOne, $v1[1q]                // Shift $v1 left one element (B, H)
     lsv     $v2[0],   (mMatrix + 0x04)($zero) // Place C into $v2 element 0
@@ -2861,10 +2833,15 @@ xfrm_light_post:
      li     $20, xfrmLookatDirs + 0
     // Lookat 1: curLight still pointing to light 0, target is 4 bytes later.
     lpv     $v3[4], (ltBufOfs + 0 - lightSize)(curLight) // Lookat 1 dir in elems 0-2
-    addi    $20, $20, 4
-    li      $ra, vtx_after_xfrm_dir_lights
-    j       xfrm_single_dir
-     sb     $10, dirLightsXfrmValid
+    jal     xfrm_single_dir
+     addi   $20, $20, 4
+lt_setup_skip_xfrm:
+    // Load first light direction to $v13, which is not used throughout vtx processing.
+    lpv     $v4[4],     (ltBufOfs + 0 - lightSize)($3) // Xfrmed dir in elems 0-2
+    vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
+    lpv     $v5[0],     (ltBufOfs + 8 - lightSize)($3) // Xfrmed dir in elems 4-6
+    j       vtx_after_lt_setup
+     vmrg   $v13, $v4, $v5  // $v13 = first light direction
 
 xfrm_single_dir:
     vmudn   $v29, $v16, $v3[0]
@@ -2893,8 +2870,49 @@ xfrm_single_dir:
      sw     $11, (0)($20)                  // Store 3 (4) bytes to target address
      // This clobbers the specular size
     
+lt_vtx_pair:
+    luv     vPairLt,     (ltBufOfs + 0)($3)  // Total light level, init to ambient
+    vmulf   vAAA, $v13, vPairNrml            // First light dir * normals
+.if CFG_PROFILING_B
+    addi    perfCounterA, perfCounterA, 2    // Increment lit vertex count by 2
+.endif
+    move    curLight, $3                     // Point to ambient light
+lt_loop:
+    /* TODO try this, this saves one vnop cycle before
+    vmudh   $v29, $v31, $v31[2] // 0; clear whole accumulator
+    vadd    $v29, vAAA, vAAA[1h] // accum lo 0 = 0 + 1, 4 = 4 + 5
+    vmadn   vAAA, vOne, vAAA[2h] // + 2,6; built-in saturation (clamping) ends up not a problem
+    */
+    vmudh   $v29, vOne, vAAA[0h] // Sum components of dot product as signed
+    lpv     vCCC[4],     (ltBufOfs + 0 - 2*lightSize)(curLight) // Xfrmed dir in elems 0-2
+    vmadh   $v29, vOne, vAAA[1h]
+    lpv     vDDD[0],     (ltBufOfs + 8 - 2*lightSize)(curLight) // Xfrmed dir in elems 4-6
+    vmadh   vAAA, vOne, vAAA[2h]
+    beq     curLight, altBaseReg, lt_post
+     luv    vBBB,        (ltBufOfs + 0 - lightSize)(curLight) // Light color
+    vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
+    addi    curLight, curLight, -lightSize
+    vmrg    vCCC, vCCC, vDDD  // vCCC = light direction
+    vge     vAAA, vAAA, $v31[2] // 0; clamp dot product to >= 0
+    // vnop; vnop
+    vmudh   $v29, vOne, vPairLt // Load accum mid with current light level
+    vmacf   vPairLt, vBBB, vAAA[0h] // + light color * dot product
+    j       lt_loop
+     vmulf  vAAA, vCCC, vPairNrml // Light dir * normals
+    
+lt_post:
+    vne     $v29, $v31, $v31[3h]           // Set VCC to 11101110
+    j       vtx_return_from_lighting
+     vmrg   vPairRGBA, vPairLt, vPairRGBA  // RGB = light, A = vtx alpha
+    
     
 .else
+    // Inputs: vPairPosI/F vertices pos world int:frac, vPairRGBA, vPairST,
+    // vPairNrml, vAAA:vBBB (to be merged) packed normals
+    // Outputs: leave alone vPairPosI/F; update vPairRGBA, vPairST 
+    // Locals: vAAA and vBBB after merge and normals selection, vCCC, vDDD, vPairLt, vNrmOut
+    // New available locals: $6, $7 (existing: $11, $10, $20, $24)
+    vmrg    vPairNrml, vPairNrml, vDDD       // Merge normals
     beqz    $11, lt_skip_packed_normals
      // Elems 4-5 get bytes 6-7 of the following vertex (1)
      lpv    vBBB[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
