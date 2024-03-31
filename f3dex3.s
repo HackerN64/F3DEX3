@@ -2878,16 +2878,12 @@ lt_vtx_pair:
 .endif
     move    curLight, $3                     // Point to ambient light
 lt_loop:
-    /* TODO try this, this saves one vnop cycle before
     vmudh   $v29, $v31, $v31[2] // 0; clear whole accumulator
-    vadd    $v29, vAAA, vAAA[1h] // accum lo 0 = 0 + 1, 4 = 4 + 5
-    vmadn   vAAA, vOne, vAAA[2h] // + 2,6; built-in saturation (clamping) ends up not a problem
-    */
-    vmudh   $v29, vOne, vAAA[0h] // Sum components of dot product as signed
     lpv     vCCC[4],     (ltBufOfs + 0 - 2*lightSize)(curLight) // Xfrmed dir in elems 0-2
-    vmadh   $v29, vOne, vAAA[1h]
+    // vnop
+    vadd    $v29, vAAA, vAAA[1h] // accum lo 0 = 0 + 1, 4 = 4 + 5
     lpv     vDDD[0],     (ltBufOfs + 8 - 2*lightSize)(curLight) // Xfrmed dir in elems 4-6
-    vmadh   vAAA, vOne, vAAA[2h]
+    vmadn   vAAA, vOne, vAAA[2h] // + 2,6; built-in saturation (clamping) ends up not a problem
     beq     curLight, altBaseReg, lt_post
      luv    vBBB,        (ltBufOfs + 0 - lightSize)(curLight) // Light color
     vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
@@ -3022,13 +3018,13 @@ lt_loop:
      vmrg   vAAA, vAAA, vCCC                            // vAAA = light direction
     bnez    $11, lt_point
      luv    vDDD,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
+    vcopy   vBBB, vOne // Directional light dot scaling = 0001.0001, approx == 1.0
     vmulf   vAAA, vAAA, vPairNrml // Light dir * normalized normals
     vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
     vmadm   vCCC, vPairRGBA, $v30[1] // + (alpha - 1) * aoDir factor; elems 3, 7
-    vcopy   vBBB, vOne // Directional light dot scaling = 0001.0001, approx == 1.0
-    vmudh   $v29, vOne, vAAA[0h] // Sum components of dot product as signed
-    vmadh   $v29, vOne, vAAA[1h]
-    vmadh   vAAA, vOne, vAAA[2h]
+    vmudh   $v29, $v31, $v31[2]  // 0; clear whole accumulator
+    vadd    $v29, vAAA, vAAA[1h] // accum lo 0 = 0 + 1, 4 = 4 + 5
+    vmadn   vAAA, vOne, vAAA[2h] // + 2,6; built-in saturation (clamping) ends up not a problem
 lt_finish_light:
     // vAAA is unclamped dot product, vBBB[2h:3h] is point light scaling on dot product,
     // vCCC is amb occ factor, vDDD is light color
@@ -3094,17 +3090,17 @@ lt_skip_novtxcolor:
 lt_skip_fresnel:
     beqz    $10, vtx_return_from_lighting  // no texgen
     // Texgen: vLookat0, vPairNrml, have to leave vPairPosI/F, vPairRGBA; output vPairST
-     vmudh  $v29, vOne, vLookat0[0h]
+     vmudh  $v29, $v31, $v31[2]            // 0; clear whole accumulator
     lpv     vLookat1[4], (ltBufOfs + 0 - lightSize)(curLight) // Lookat 1 dir in elems 0-2
-    vmadh   $v29, vOne, vLookat0[1h]
+    vadd    $v29, vLookat0, vLookat0[1h]   // accum lo 0 = 0 + 1, 4 = 4 + 5
     lpv     vDDD[0],     (ltBufOfs + 8 - lightSize)(curLight) // Lookat 1 dir in elems 4-6
-    vmadh   vLookat0, vOne, vLookat0[2h]   // vLookat0 = dot product 0
+    vmadn   vLookat0, vOne, vLookat0[2h]   // + 2,6; vLookat0 = dot product 0
     vlt     $v29, $v31, $v31[4]            // Set VCC to 11110000
     vmrg    vLookat1, vLookat1, vDDD       // vLookat1 = lookat 1 dir
     vmulf   vLookat1, vPairNrml, vLookat1  // Normal * lookat 1 dir
-    vmudh   $v29, vOne, vLookat1[0h]
-    vmadh   $v29, vOne, vLookat1[1h]
-    vmadh   vLookat1, vOne, vLookat1[2h]   // vLookat1 = dot product 1
+    vmudh   $v29, $v31, $v31[2]            // 0; clear whole accumulator
+    vadd    $v29, vLookat1, vLookat1[1h]   // accum lo 0 = 0 + 1, 4 = 4 + 5
+    vmadn   vLookat1, vOne, vLookat1[2h]   // + 2,6; vLookat1 = dot product 1
     vne     $v29, $v31, $v31[1h]           // Set VCC to 10111011
     andi    $11, $5, G_TEXTURE_GEN_LINEAR >> 8
     vmrg    vLookat0, vLookat0, vLookat1[0h] // Dot products in elements 0, 1, 4, 5
@@ -3156,10 +3152,10 @@ lt_normal_to_vertex:
     vmadm   vBBB, vCCC, vCCC[3]        // PL: + len^2 int * quadratic factor frac
     vmadn   $v29, vDDD, vCCC[7]        // PL: + len^2 frac * quadratic factor int = $v29 frac
     vmadh   vCCC, vCCC, vCCC[7]        // PL: + len^2 int * quadratic factor int  = vCCC int
-    vmudh   vBBB, vOne, vAAA[0h]       // Both: Sum components of dot product as signed
-    vmadh   vBBB, vOne, vAAA[1h]       // Both:
+    vmudh   vBBB, $v31, $v31[2]        // Both: Clear accumulator (sum dot product components)
+    vadd    vBBB, vAAA, vAAA[1h]       // Both: accum lo 0 = 0 + 1, 4 = 4 + 5
     bnez    $10, lt_after_camera       // $10 set if computing specular or fresnel
-     vmadh  vAAA, vOne, vAAA[2h]       // Both: vAAA dot product
+     vmadn  vAAA, vOne, vAAA[2h]       // Both: + 2,6; vAAA dot product
     vrcph   vBBB[1], vCCC[0]     // 1/(2*light factor), input of 0000.8000 -> no change normals
     luv     vDDD,    (ltBufOfs + 0 - lightSize)(curLight) // vDDD = light color
     vrcpl   vBBB[2], $v29[0]     // Light factor 0001.0000 -> normals /= 2
