@@ -670,7 +670,7 @@ fourthQWMVP equ -(0x1000 - (OSTask + OSTask_type))
 // This word is not used by F3DEX3, S2DEX, or even boot. Reuse it as a temp.
 startCounterTime equ (OSTask + OSTask_ucode_size)
 // These two words are used by boot, but not by F3DEX3 or S2DEX.
-xfrmLookatDirs equ (OSTask + OSTask_ucode_data) // and OSTask_ucode_data_size
+xfrmLookatDirs equ -(0x1000 - (OSTask + OSTask_ucode_data)) // and OSTask_ucode_data_size
 
 .close // DATA_FILE
 
@@ -2773,6 +2773,9 @@ ovl234_clipping_entrypoint_ovl2ver:        // same IMEM address as ovl234_clippi
 
 lt_continue_setup:
 .if CFG_LEGACY_VTX_PIPE
+//
+// LVP lighting setup
+//
     lb      $11, dirLightsXfrmValid
     li      $10, -1                   // To mark lights valid
     addi    $3, $3, altBase           // Point to ambient light; stored through vtx proc
@@ -2828,18 +2831,18 @@ xfrm_light_loop:
      li     $ra, xfrm_light_loop
     
 xfrm_light_post:
-    // Lookat 0: input already in $v3, target is xfrmLookatDirs + 0.
+    // Lookat 0: input already in $v3, target is xfrmLookatDirs.
     jal     xfrm_single_dir
-     li     $20, xfrmLookatDirs + 0
+     li     $20, OSTask + OSTask_ucode_data //xfrmLookatDirs
     // Lookat 1: curLight still pointing to light 0, target is 4 bytes later.
     lpv     $v3[4], (ltBufOfs + 0 - lightSize)(curLight) // Lookat 1 dir in elems 0-2
     jal     xfrm_single_dir
-     addi   $20, $20, 4
+     li     $20, OSTask + OSTask_ucode_data_size
 lt_setup_skip_xfrm:
     // Load first light direction to $v13, which is not used throughout vtx processing.
-    lpv     $v4[4],     (ltBufOfs + 0 - lightSize)($3) // Xfrmed dir in elems 0-2
+    lpv     $v4[4], (ltBufOfs + 0 - lightSize)($3) // Xfrmed dir in elems 0-2
     vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
-    lpv     $v5[0],     (ltBufOfs + 8 - lightSize)($3) // Xfrmed dir in elems 4-6
+    lpv     $v5[0], (ltBufOfs + 8 - lightSize)($3) // Xfrmed dir in elems 4-6
     j       vtx_after_lt_setup
      vmrg   $v13, $v4, $v5  // $v13 = first light direction
 
@@ -2871,6 +2874,9 @@ xfrm_single_dir:
      // This clobbers the specular size
     
 lt_vtx_pair:
+//
+// LVP main lighting
+//
     luv     vPairLt,     (ltBufOfs + 0)($3)  // Total light level, init to ambient
     vmulf   vAAA, $v13, vPairNrml            // First light dir * normals
 .if CFG_PROFILING_B
@@ -2897,12 +2903,34 @@ lt_loop:
      vmulf  vAAA, vCCC, vPairNrml // Light dir * normals
     
 lt_post:
+    andi    $11, $5, G_TEXTURE_GEN >> 8
     vne     $v29, $v31, $v31[3h]           // Set VCC to 11101110
-    j       vtx_return_from_lighting
+    beqz    $11, vtx_return_from_lighting
      vmrg   vPairRGBA, vPairLt, vPairRGBA  // RGB = light, A = vtx alpha
+.endif
+// These definitions are shared by both versions
+vLookat1 equ vAAA
+vLookat0 equ vPairLt
+.if CFG_LEGACY_VTX_PIPE
+    lpv     vCCC[0],     (xfrmLookatDirs + 0)($zero) // Lookat 0 in 0-2, lookat 1 in 4-6
+    vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
+    lpv     vLookat0[4], (xfrmLookatDirs + 0)($zero) // Garbage  in 0-2, lookat 0 in 4-6
+    lpv     vLookat1[4], (xfrmLookatDirs - 8)($zero) // Lookat 1 in 0-2, garbage  in 4-6
+    vmrg    vLookat0, vCCC, vLookat0       // Lookat 0 in 0-2, 4-6
+    vmrg    vLookat1, vLookat1, vCCC       // Lookat 1 in 0-2, 4-6
+    vmulf   vLookat0, vPairNrml, vLookat0  // Normal * lookat 0 dir
+    vmulf   vLookat1, vPairNrml, vLookat1  // Normal * lookat 1 dir
+    vmudh   $v29, $v31, $v31[2]            // 0; clear whole accumulator
+    vadd    $v29, vLookat0, vLookat0[1h]   // accum lo 0 = 0 + 1, 4 = 4 + 5
+    vmadn   vLookat0, vOne, vLookat0[2h]   // + 2,6; vLookat0 = dot product 0
+    // Continue to rest of texgen shared by both versions.
+.endif
     
     
-.else
+.if !CFG_LEGACY_VTX_PIPE
+//
+// F3DEX3 native lighting
+//
     // Inputs: vPairPosI/F vertices pos world int:frac, vPairRGBA, vPairST,
     // vPairNrml, vAAA:vBBB (to be merged) packed normals
     // Outputs: leave alone vPairPosI/F; update vPairRGBA, vPairST 
@@ -3050,8 +3078,6 @@ lt_post:
 .endif
 vLtRGBOut  equ $v25 // = vCCC: light / effects RGB output
 vLtAOut    equ $v26 // = vDDD: light / effects alpha output
-vLookat1   equ $v23 // = vAAA: lookat direction 1
-vLookat0   equ $v17 // = vPairLt:   lookat direction 0 (not initially)
 .if !CFG_LEGACY_VTX_PIPE
     vadd    vPairRGBA, vPairRGBA, $v31[7]  // 0x7FFF; undo change for ambient occlusion
     andi    $11, $5, G_LIGHTTOALPHA >> 8
@@ -3098,6 +3124,8 @@ lt_skip_fresnel:
     vlt     $v29, $v31, $v31[4]            // Set VCC to 11110000
     vmrg    vLookat1, vLookat1, vDDD       // vLookat1 = lookat 1 dir
     vmulf   vLookat1, vPairNrml, vLookat1  // Normal * lookat 1 dir
+.endif
+    // Rest of texgen shared by F3DEX3 native and LVP
     vmudh   $v29, $v31, $v31[2]            // 0; clear whole accumulator
     vadd    $v29, vLookat1, vLookat1[1h]   // accum lo 0 = 0 + 1, 4 = 4 + 5
     vmadn   vLookat1, vOne, vLookat1[2h]   // + 2,6; vLookat1 = dot product 1
@@ -3117,6 +3145,7 @@ lt_skip_fresnel:
     j       vtx_return_from_lighting
      vmacf  vPairST, vDDD, vCCC            // + ST squared * (ST + ST * coeff)
     
+.if !CFG_LEGACY_VTX_PIPE
 lt_point:
     /*
     Input vector 1 elem size 7FFF.0000 -> len^2 3FFF0001 -> 1/len 0001.0040 -> vec +801E.FFC0 -> clamped 7FFF
