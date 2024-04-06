@@ -114,7 +114,66 @@ breaking changes.**
 
 F3DEX3 introduces a suite of performance profiling capabilities. These take the
 form of performance counters, which report cycle counts for various operations
-or the number of items processed of a given type. There are far too many
+or the number of items processed of a given type. There are a total of 21
+performance counters across multiple microcode versions. See the Profiling
+section below.
+
+
+## Microcode Configuration
+
+There are several selectable configuration settings when building F3DEX3, which
+can be enabled in any combination. With a couple minor exceptions, none of these
+settings affect the GBI--in fact, you can swap between the microcode versions on
+a per-frame basis if you build multiple versions into your game.
+
+### Legacy Vertex Pipeline
+
+The primary tradeoff for all the new lighting features in F3DEX3 is increased
+RSP time for vertex processing. For a basic configuration without lighting or
+with one directional light, when F3DEX2 is at its fastest, vertex processing in
+F3DEX3 takes roughly **2.5x** the RSP cycles as in F3DEX2. However, under most
+circumstances, this is not an issue at all:
+- This only applies to vertex processing, not triangle processing or other
+  miscellaneous microcode tasks. So the total RSP cycles spent doing useful work
+  during the frame is only modestly increased.
+- In scenes which are complex enough to fill the RSP->RDP FIFO in DRAM, the RSP
+  usually spends a significant fraction of time waiting for the FIFO to not be
+  full (as revealed by the F3DEX3 performance counters, see below). In these
+  cases, slower vertex processing simply means less time spent waiting, and
+  little to no change in total RSP time.
+- When the FIFO does not fill up, usually the RSP takes significantly less time
+  during the frame compared to the RDP, so increased RSP time does not affect
+  the overall framerate.
+
+Thus, you should always start with the base version of F3DEX3 in your game, and
+if the RSP never becomes the bottleneck, you can stick with that.
+
+However, if you have done extreme optimizations in your game to reduce RDP time
+(i.e. if you are Kaze Emanuar), it's possible for the RSP to sometimes become
+the bottleneck with F3DEX3's advanced vertex processing. As a result, the Legacy
+Vertex Pipeline (LVP) configuration has been introduced.
+
+This configuration replaces F3DEX3's native vertex and lighting code with a
+faster version based on the same algorithms as F3DEX2. This removes:
+- Point lighting
+- F3DEX3 lighting features: packed normals, ambient occlusion, light-to-alpha
+  (cel shading), Fresnel, and specular lighting
+- ST attribute offsets
+
+However, it retains all other F3DEX3 features:
+- 56 verts, 9 directional lights
+- Occlusion plane (optional, see below)
+- Z attribute offsets
+- All features not related to vertex/lighting: auto-batched rendering, packed 5
+  triangles commands, hints system, etc.
+
+The performance of F3DEX3 vertex processing with LVP and NOC (no occlusion
+plane, see below) is only about 16% slower than F3DEX2, instead of 250% slower.
+
+
+### Profiling
+
+There are far too many
 counters for a single microcode to maintain, so multiple configurations of the
 microcode can be built, each containing a different set of performance counters.
 These can be swapped while the game is running so the full set of counters can
@@ -131,7 +190,7 @@ The default configuration of F3DEX3 provides a few of the most basic counters.
 The additional profiling configurations, called A, B, and C (for example
 `F3DEX3_BrZ_PA`), provide additional counters, but have two default features
 removed to make space for the profiling. These two features were selected
-because their removal do not affect the RDP render time.
+because their removal does not affect the RDP render time.
 - The `SPLightToRDP` commands are removed (they become no-ops)
 - Flat shading mode, i.e. `!G_SHADING_SMOOTH`, is removed (all tris are smooth)
 

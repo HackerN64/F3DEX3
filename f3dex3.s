@@ -2884,12 +2884,12 @@ lt_vtx_pair:
 .endif
     move    curLight, $3                     // Point to ambient light
 lt_loop:
-    vmudh   $v29, $v31, $v31[2] // 0; clear whole accumulator
+    // vnop; vnop
+    vmudh   $v29, vOne, vAAA[0h] // Sum components of dot product
     lpv     vCCC[4],     (ltBufOfs + 0 - 2*lightSize)(curLight) // Xfrmed dir in elems 0-2
-    // vnop
-    vadd    $v29, vAAA, vAAA[1h] // accum lo 0 = 0 + 1, 4 = 4 + 5
+    vmadh   $v29, vOne, vAAA[1h]
     lpv     vDDD[0],     (ltBufOfs + 8 - 2*lightSize)(curLight) // Xfrmed dir in elems 4-6
-    vmadn   vAAA, vOne, vAAA[2h] // + 2,6; built-in saturation (clamping) ends up not a problem
+    vmadh   vAAA, vOne, vAAA[2h]
     beq     curLight, altBaseReg, lt_post
      luv    vBBB,        (ltBufOfs + 0 - lightSize)(curLight) // Light color
     vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
@@ -2899,9 +2899,24 @@ lt_loop:
     // vnop; vnop
     vmudh   $v29, vOne, vPairLt // Load accum mid with current light level
     vmacf   vPairLt, vBBB, vAAA[0h] // + light color * dot product
-    j       lt_loop
+    bne     curLight, altBaseReg, lt_loop
      vmulf  vAAA, vCCC, vPairNrml // Light dir * normals
-    
+
+
+/*
+    lpv     vCCC[4],     (ltBufOfs + 0 - XXX)(curLight) // Xfrmed dir in elems 0-2
+    lpv     vDDD[0],     (ltBufOfs + 8 - XXX)(curLight) // Xfrmed dir in elems 4-6
+    vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
+    vmrg    vCCC, vCCC, vDDD  // vCCC = light direction
+    vmulf   vAAA, vCCC, vPairNrml // Light dir * normals
+    vmudh   $v29, vOne, vAAA[0h] // Sum components of dot product
+    vmadh   $v29, vOne, vAAA[1h]
+    vmadh   vAAA, vOne, vAAA[2h]
+    vge     vAAA, vAAA, $v31[2] // 0; clamp dot product to >= 0
+    vmudh   $v29, vOne, vPairLt // Load accum mid with current light level
+    vmacf   vPairLt, vBBB, vAAA[0h] // + light color * dot product
+*/
+
 lt_post:
     andi    $11, $5, G_TEXTURE_GEN >> 8
     vne     $v29, $v31, $v31[3h]           // Set VCC to 11101110
@@ -2920,9 +2935,9 @@ vLookat0 equ vPairLt
     vmrg    vLookat1, vLookat1, vCCC       // Lookat 1 in 0-2, 4-6
     vmulf   vLookat0, vPairNrml, vLookat0  // Normal * lookat 0 dir
     vmulf   vLookat1, vPairNrml, vLookat1  // Normal * lookat 1 dir
-    vmudh   $v29, $v31, $v31[2]            // 0; clear whole accumulator
-    vadd    $v29, vLookat0, vLookat0[1h]   // accum lo 0 = 0 + 1, 4 = 4 + 5
-    vmadn   vLookat0, vOne, vLookat0[2h]   // + 2,6; vLookat0 = dot product 0
+    vmudh   $v29, vOne, vLookat0[0h]       // Sum components of dot product
+    vmadh   $v29, vOne, vLookat0[1h]
+    vmadh   vLookat0, vOne, vLookat0[2h]   // vLookat0 = dot product 0
     // Continue to rest of texgen shared by both versions.
 .endif
     
@@ -3050,9 +3065,9 @@ lt_loop:
     vmulf   vAAA, vAAA, vPairNrml // Light dir * normalized normals
     vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
     vmadm   vCCC, vPairRGBA, $v30[1] // + (alpha - 1) * aoDir factor; elems 3, 7
-    vmudh   $v29, $v31, $v31[2]  // 0; clear whole accumulator
-    vadd    $v29, vAAA, vAAA[1h] // accum lo 0 = 0 + 1, 4 = 4 + 5
-    vmadn   vAAA, vOne, vAAA[2h] // + 2,6; built-in saturation (clamping) ends up not a problem
+    vmudh   $v29, vOne, vAAA[0h]
+    vmadh   $v29, vOne, vAAA[1h]
+    vmadh   vAAA, vOne, vAAA[2h]
 lt_finish_light:
     // vAAA is unclamped dot product, vBBB[2h:3h] is point light scaling on dot product,
     // vCCC is amb occ factor, vDDD is light color
@@ -3116,19 +3131,19 @@ lt_skip_novtxcolor:
 lt_skip_fresnel:
     beqz    $10, vtx_return_from_lighting  // no texgen
     // Texgen: vLookat0, vPairNrml, have to leave vPairPosI/F, vPairRGBA; output vPairST
-     vmudh  $v29, $v31, $v31[2]            // 0; clear whole accumulator
+     vmudh  $v29, vOne, vLookat0[0h]
     lpv     vLookat1[4], (ltBufOfs + 0 - lightSize)(curLight) // Lookat 1 dir in elems 0-2
-    vadd    $v29, vLookat0, vLookat0[1h]   // accum lo 0 = 0 + 1, 4 = 4 + 5
+    vmadh   $v29, vOne, vLookat0[1h]
     lpv     vDDD[0],     (ltBufOfs + 8 - lightSize)(curLight) // Lookat 1 dir in elems 4-6
-    vmadn   vLookat0, vOne, vLookat0[2h]   // + 2,6; vLookat0 = dot product 0
+    vmadh   vLookat0, vOne, vLookat0[2h]   // vLookat0 = dot product 0
     vlt     $v29, $v31, $v31[4]            // Set VCC to 11110000
     vmrg    vLookat1, vLookat1, vDDD       // vLookat1 = lookat 1 dir
     vmulf   vLookat1, vPairNrml, vLookat1  // Normal * lookat 1 dir
 .endif
     // Rest of texgen shared by F3DEX3 native and LVP
-    vmudh   $v29, $v31, $v31[2]            // 0; clear whole accumulator
-    vadd    $v29, vLookat1, vLookat1[1h]   // accum lo 0 = 0 + 1, 4 = 4 + 5
-    vmadn   vLookat1, vOne, vLookat1[2h]   // + 2,6; vLookat1 = dot product 1
+    vmudh   $v29, vOne, vLookat1[0h]
+    vmadh   $v29, vOne, vLookat1[1h]
+    vmadh   vLookat1, vOne, vLookat1[2h]
     vne     $v29, $v31, $v31[1h]           // Set VCC to 10111011
     andi    $11, $5, G_TEXTURE_GEN_LINEAR >> 8
     vmrg    vLookat0, vLookat0, vLookat1[0h] // Dot products in elements 0, 1, 4, 5
