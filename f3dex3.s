@@ -2904,17 +2904,27 @@ lt_loop:
 
 
 /*
-    lpv     vCCC[4],     (ltBufOfs + 0 - XXX)(curLight) // Xfrmed dir in elems 0-2
+.if CFG_PROFILING_B
+    addi    perfCounterA, perfCounterA, 2    // Increment lit vertex count by 2
+.endif
+    vmulf   $v29, $v14, $v13[4] // Normals X elems 0, 4 * first light dir
+    luv     vPairLt,     (ltBufOfs + 0)($3)  // Total light level, init to ambient
+    vmacf   $v29, $v15, $v13[5] // Normals Y elems 0, 4 * first light dir
     lpv     vDDD[0],     (ltBufOfs + 8 - XXX)(curLight) // Xfrmed dir in elems 4-6
-    vlt     $v29, $v31, $v31[4] // Set VCC to 11110000
-    vmrg    vCCC, vCCC, vDDD  // vCCC = light direction
-    vmulf   vAAA, vCCC, vPairNrml // Light dir * normals
-    vmudh   $v29, vOne, vAAA[0h] // Sum components of dot product
-    vmadh   $v29, vOne, vAAA[1h]
-    vmadh   vAAA, vOne, vAAA[2h]
-    vge     vAAA, vAAA, $v31[2] // 0; clamp dot product to >= 0
+    vmacf   vAAA, vPairNrml, $v13[6] // Normals Z elems 0, 4 * first light dir
+    beq     $3, altBaseReg, lt_post
+     move   curLight, $3                     // Point to ambient light
+lt_loop:
+    vge     vCCC, vAAA, $v31[2] // 0; clamp dot product to >= 0
+    vmulf   $v29, $v14, vDDD[4] // Normals X elems 0, 4
+    addi    curLight, curLight, -lightSize
+    vmacf   $v29, $v15, vDDD[5] // Normals Y elems 0, 4
+    luv     vBBB,        (ltBufOfs + 0 - XXX)(curLight) // Light color
+    vmacf   vAAA, vPairNrml, vDDD[6] // Normals Z elems 0, 4
+    lpv     vDDD[0],     (ltBufOfs + 8 - XXX)(curLight) // Xfrmed dir in elems 4-6
     vmudh   $v29, vOne, vPairLt // Load accum mid with current light level
-    vmacf   vPairLt, vBBB, vAAA[0h] // + light color * dot product
+    bne     curLight, altBaseReg, lt_loop
+     vmacf  vPairLt, vBBB, vCCC[0h] // + light color * dot product
 */
 
 lt_post:
