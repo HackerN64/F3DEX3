@@ -1353,6 +1353,8 @@ vtx_after_calc_mit:
     ldv     vVP0F[8], (vpMatrix  + 0x20)($zero)
     ldv     vVP2F[8], (vpMatrix  + 0x30)($zero)
 .endif
+    andi    $16, $5, G_LIGHTING >> 8  // This is clipFlags, but not touched during vtx_store
+    andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
     jal     while_wait_dma_busy  // Wait for vertex load to finish
      li     $19, clipTempVerts                 // Temp mem we can freely overwrite replaces outputVtxPos
     jal     middle_of_vtx_store  // Sets $ra to vtx_load_loop
@@ -1363,13 +1365,13 @@ vtx_load_loop:
 .if CFG_LEGACY_VTX_PIPE
     blez    $1, vertex_end
 .endif
-     andi   $11, $5, G_LIGHTING >> 8
+     nop    // TODO
 .if CFG_LEGACY_VTX_PIPE
     vmrg    vPairNrml, vPairNrml, vDDD     // Merge normals
     addi    $1, $1, -2*inputVtxSize        // Counter of remaining verts * inputVtxSize
 .endif
     vmrg    vPairRGBA, sCOL, vPairRGBA     // Merge colors
-    bnez    $11, lt_vtx_pair
+    bnez    $16, lt_vtx_pair               // Lighting enabled in clipFlags
 .if CFG_LEGACY_VTX_PIPE
      addi   outputVtxPos, outputVtxPos, 2*vtxSize
 .else
@@ -1379,9 +1381,6 @@ vtx_load_loop:
 vtx_return_from_lighting:
 .if CFG_LEGACY_VTX_PIPE
     vmudm   vPairST, vPairST, sSTS      // Scale ST; must be after texgen
-    bltz    $1, @@skipsecond            // ...if < 0 verts remain, ...
-     move   secondVtxPos, outputVtxPos  // Second and output vertices write to same mem...
-    addi    secondVtxPos, outputVtxPos, vtxSize // ...otherwise, second vtx is next vtx
 @@skipsecond:
 .else
     vclr    sSTO
@@ -1403,12 +1402,8 @@ vtx_return_from_lighting:
     vmadm   $v29, vVP1I, vPairPosF[1h]
     addi    $1, $1, -2*inputVtxSize     // Counter of remaining verts * inputVtxSize
     vmadn   $v29, vVP1F, vPairPosI[1h]
-    move    secondVtxPos, outputVtxPos  // Second and output vertices write to same mem...
     vmadh   $v29, vVP1I, vPairPosI[1h]
-    bltz    $1, @@skipsecond            // ...if < 0 verts remain, ...
-     vmadl  $v29, vVP2F, vPairPosF[2h]
-    addi    secondVtxPos, outputVtxPos, vtxSize // ...otherwise, second vtx is next vtx
-@@skipsecond:
+    vmadl   $v29, vVP2F, vPairPosF[2h]
     vmadm   $v29, vVP2I, vPairPosF[2h]
     vmadn   vPairTPosF, vVP2F, vPairPosI[2h]
     li      $ra, vertex_end             // Done with vertex processing...
@@ -1424,38 +1419,42 @@ vtx_store:
     // Locals: $v20, $v21, $v25, $v26, $v16, $v17 ($v29 is temp). Also vPairST and
     // vPairRGBA can be used as temps once stored ($v22, $v27).
     // Scalar regs: secondVtxPos, outputVtxPos; set to the same thing if only write 1 vtx
-    // temps $7, $10, $11, $19, $20, $24
+    // temps $10, $11, $20, $24
     // Temp reg names with s = store (for vtx_store)
 s1WH equ $v16 // vtx_store 1/W High
 s1WL equ $v17 // vtx_store 1/W Low
 sWRL equ $v25 // vtx_store W Reciprocal Low  | IMPORTANT: Can be the same reg as sWRH, but
 sWRH equ $v26 // vtx_store W Reciprocal High | using different ones saves one cycle delay
+    move    secondVtxPos, outputVtxPos          // Second and output vertices write to same mem...
     vmudl   $v29, vPairTPosF, $v30[3] // Persp norm
-    suv     vPairRGBA[4],     (VTX_COLOR_VEC )(secondVtxPos)
-    vmadm   s1WH, vPairTPosI, $v30[3] // Persp norm
-    suv     vPairRGBA[0],     (VTX_COLOR_VEC )(outputVtxPos)
+    bltz    $1, @@skipsecond                    // ...if < 0 verts remain, ...
+     vmadm  s1WH, vPairTPosI, $v30[3] // Persp norm
+    addi    secondVtxPos, outputVtxPos, vtxSize // ...otherwise, second vtx is next vtx
+@@skipsecond:
     vmadn   s1WL, $v31, $v31[2] // 0
-    sdv     vPairTPosF[8],    (VTX_FRAC_VEC  )(secondVtxPos)
+    addi    inputVtxPos, inputVtxPos, 2*inputVtxSize
     vch     $v29, vPairTPosI, vPairTPosI[3h] // Clip screen high
-    sdv     vPairTPosF[0],    (VTX_FRAC_VEC  )(outputVtxPos)
+    suv     vPairRGBA[4],     (VTX_COLOR_VEC )(secondVtxPos)
     vcl     $v29, vPairTPosF, vPairTPosF[3h] // Clip screen low
-    sdv     vPairTPosI[8],    (VTX_INT_VEC   )(secondVtxPos)
+    suv     vPairRGBA[0],     (VTX_COLOR_VEC )(outputVtxPos)
     vrcph   $v29[0], s1WH[3]
     cfc2    $10, $vcc // Load screen clipping results
     vrcpl   sWRL[2], s1WL[3]
-    sdv     vPairTPosI[0],    (VTX_INT_VEC   )(outputVtxPos)
+    sdv     vPairTPosF[8],    (VTX_FRAC_VEC  )(secondVtxPos)
     vrcph   sWRH[3], s1WH[7]
     move    $19, outputVtxPos  // Else $19 is initialized to temp memory on first pre-loop
     vrcpl   sWRL[6], s1WL[7]
-    slv     vPairST[8],       (VTX_TC_VEC    )(secondVtxPos)
+    sdv     vPairTPosF[0],    (VTX_FRAC_VEC  )(outputVtxPos)
     vrcph   sWRH[7], $v31[2] // 0
-    slv     vPairST[0],       (VTX_TC_VEC    )(outputVtxPos)
+    sdv     vPairTPosI[8],    (VTX_INT_VEC   )(secondVtxPos)
 sSCL equ $v20 // vtx_store Scaled Clipping Low
 sSCH equ $v21 // vtx_store Scaled Clipping High
     vmudn   sSCL, vPairTPosF, $v31[3] // W * clip ratio for scaled clipping
-    addi    inputVtxPos, inputVtxPos, 2*inputVtxSize
+    sdv     vPairTPosI[0],    (VTX_INT_VEC   )(outputVtxPos)
     vmadh   sSCH, vPairTPosI, $v31[3] // W * clip ratio for scaled clipping
+    slv     vPairST[8],       (VTX_TC_VEC    )(secondVtxPos)
     vmudl   $v29, s1WL, sWRL[2h]
+    slv     vPairST[0],       (VTX_TC_VEC    )(outputVtxPos)
     vmadm   $v29, s1WH, sWRL[2h]
 
 .if CFG_NO_OCCLUSION_PLANE
@@ -1543,7 +1542,7 @@ middle_of_vtx_store:
     vmadh   $v29, vM3I, vOne
     ssv     vPairTPosF[4],    (VTX_SCR_Z_FRAC)($19)
     vmadn   $v29, vM0F, vPairPosI[0h]
-    andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
+    // nop TODO
     vmadh   $v29, vM0I, vPairPosI[0h]
     ssv     sCLZ[12],         (VTX_SCR_Z     )(secondVtxPos)
     vmadn   $v29, vM1F, vPairPosI[1h]
@@ -1553,7 +1552,7 @@ middle_of_vtx_store:
     lpv     vPairNrml[4],     (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos) // Normals as signed, lower 4
 // sOUTF = vPairPosF is $v21, or vPairTPosF is $v23
     vmadn   sOUTF, vM2F, vPairPosI[2h] // vPairPosI/F = vertices world coords
-    beqz    $7, return_routine
+    beqz    $7, return_routine // fog disabled
 // sOUTI = vPairPosI is $v20, or vPairTPosI is $v24
      vmadh  sOUTI, vM2I, vPairPosI[2h] // or vPairTPosI/F = vertices clip coords
     sbv     sFOG[15],         (VTX_COLOR_A   )(secondVtxPos)
@@ -1645,7 +1644,7 @@ middle_of_vtx_store:
     vmudh   sOSC, vPairTPosI, $v31[4] // 4; scale up x and y
     ssv     vPairTPosF[12],   (VTX_SCR_Z_FRAC)(secondVtxPos)
     vge     sFOG, sFOG, $v31[6] // 0x7F00; clamp fog to >= 0 (want low byte only)
-    andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
+    // nop TODO
 // sCLZ is $v25 // vtx_store CLipped Z
     vge     sCLZ, vPairTPosI, $v31[2] // 0; clamp Z to >= 0
     ssv     vPairTPosF[4],    (VTX_SCR_Z_FRAC)($19)
@@ -1656,7 +1655,7 @@ middle_of_vtx_store:
     vmacf   sOC2, sO03, sOSC[0h]       //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
     ldv     sO47[8], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // and for vtx 2
     vmulf   $v29, sOPM, vPairTPosI[0h] // --, -0x4000*X1, --, +0x4000*X1, repeat vtx 2
-    beqz    $7, @@skipfog
+    beqz    $7, @@skipfog // fog disabled
 // sOC3 is $v21 // vtx_store OCclusion temp 3
      vmacf  sOC3, sO03, sOSC[1h]       // --,    4*Y1*c1, --,    4*Y1*c3, repeat vtx 2
     sbv     sFOG[15],         (VTX_COLOR_A   )(secondVtxPos)
@@ -1878,16 +1877,17 @@ clip_skipxy:
     vge     vClDiffI, vClDiffI, $v31[2]   // 0; If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
     vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
     vmudn   vClFade2, vClFade1, $v31[1]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
+    lhu     $5, geometryModeLabel + 1     // Load middle 2 bytes of geom mode, incl fog setting
     // Fade between attributes for on screen and off screen vert
     // Colors are now in $v23 and vPairRGBA, ST now in $v24 and vPairST.
     vmudm   $v29, $v23, vClFade1[3]       //   Fade factor for off screen vert * off screen vert color and TC
     lhu     $11, VTX_CLIP($3)             // Load clip flags for off screen vert
     vmadm   vPairRGBA, vPairRGBA, vClFade2[3]  // + Fade factor for on  screen vert * on  screen vert color
-    lhu     $5, geometryModeLabel + 1     // Load middle 2 bytes of geom mode, incl fog setting
+    li      $1, -1                        // $1 < 0 triggers secondVtxPos = outputVtxPos
     vmudm   $v29, $v24, vClFade1[3]       //   Fade factor for off screen vert * off screen vert TC
-    move    secondVtxPos, outputVtxPos    // Writes garbage second vertex and then output vertex to same place
+    andi    $7, $5, G_FOG >> 8            // Nonzero if fog enabled
     vmadm   vPairST, vPairST, vClFade2[3] // + Fade factor for on  screen vert * on  screen vert TC
-    andi    $11, $11, ~CLIP_VTX_USED  // Clear used flag from off screen vert
+    andi    $11, $11, ~CLIP_VTX_USED      // Clear used flag from off screen vert
     vmudl   $v29, $v6, vClFade1[3]        //   Fade factor for off screen vert * off screen vert pos frac
     sh      outputVtxPos, (clipPoly)(clipPolyWrite) // Write pointer to generated vertex to polygon
     vmadm   $v29, $v7, vClFade1[3]        // + Fade factor for off screen vert * off screen vert pos int
@@ -2960,7 +2960,7 @@ vLookat0 equ vPairLt
     // vPairNrml, vAAA:vBBB (to be merged) packed normals
     // Outputs: leave alone vPairPosI/F; update vPairRGBA, vPairST 
     // Locals: vAAA and vBBB after merge and normals selection, vCCC, vDDD, vPairLt, vNrmOut
-    // New available locals: $6, $7 (existing: $11, $10, $20, $24)
+    // New available locals: $6 (existing: $11, $10, $20, $24)
     vmrg    vPairNrml, vPairNrml, vDDD       // Merge normals
     beqz    $11, lt_skip_packed_normals
      // Elems 4-5 get bytes 6-7 of the following vertex (1)
