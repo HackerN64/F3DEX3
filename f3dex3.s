@@ -1670,6 +1670,8 @@ skip_return_to_lt_or_loop:
     // vnop
 .if CFG_LEGACY_VTX_PIPE
     lpv     $v15[6],          (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos) // Z to elem 0, 4
+.else
+    ssv     vPairPosI[6],     (VTX_IN_Y  + inputVtxSize * 1)(inputVtxPos) // Vtx 0 packed normals to vtx 1 Y
 .endif
     // vnop
     ssv     sCLZ[4],          (VTX_SCR_Z     )($19)
@@ -2927,12 +2929,11 @@ vLookat0 equ vPairLt
     // Locals: vAAA and vBBB after merge and normals selection, vCCC, vDDD, vPairLt, vNrmOut
     // New available locals: $6 (existing: $11, $10, $20, $24)
     beqz    $11, lt_skip_packed_normals
-     // Elems 4-5 get bytes 6-7 of the following vertex (1)
-     lpv    vBBB[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Upper 2 in 4:5
-    // Elems 0-1 get bytes 6-7 of the following vertex (0)
-    lpv     vAAA[2],      (VTX_IN_TC - inputVtxSize * 1)(inputVtxPos) // Packed normals as signed, lower 2
-    vlt     $v29, $v31, $v31[4]              // Set VCC to 11110000
-    vmrg    vAAA, vAAA, vBBB                 // Merge packed normals
+.if CFG_NO_OCCLUSION_PLANE // Couldn't squeeze in the store in vtx_store so have to redo it
+     ldv    vBBB[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
+    ssv     vBBB[6],      (VTX_IN_Y  + inputVtxSize * 1)(inputVtxPos) // Vtx 0 packed normals to vtx 1 Y
+.endif
+     lpv    vAAA[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Y in 0,1; pn in 4,5
     // Packed normals algorithm. This produces a vector (one for each input vertex)
     // in vPairNrml such that |X| + |Y| + |Z| = 0x7F00 (called L1 norm), in the
     // same direction as the standard normal vector. The length is not "correct"
