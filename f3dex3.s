@@ -1457,14 +1457,15 @@ sSCH equ $v21 // vtx_store Scaled Clipping High
     andi    $10, $10, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
     vcl     $v29, vPairTPosF, sSCL[3h] // Clip scaled low
     ori     $10, $10, CLIP_VTX_USED // Write for all first verts, only matters for generated verts
-    // vnop
+    vmov    vPairTPosF[7], vPairTPosF[6] // load Z into W slot, will be for fog below
     cfc2    $20, $vcc // Load scaled clipping results
     vmudl   $v29, s1WL, sWRL[2h]
-    lsv     vPairTPosF[14], (VTX_Z_FRAC    )(secondVtxPos) // load Z into W slot, will be for fog below
-    vmadm   $v29, s1WH, sWRL[2h]
     lsv     vPairTPosF[6],  (VTX_Z_FRAC    )(outputVtxPos) // load Z into W slot, will be for fog below
-    vmadn   s1WL, s1WL, sWRH[3h]
+    vmadm   $v29, s1WH, sWRL[2h]
 middle_of_vtx_store:
+// vPairPosI is $v20
+    ldv     vPairPosI[0], (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
+    vmadn   s1WL, s1WL, sWRH[3h]
 // vPairST is $v22
     ldv     vPairST[0],   (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // ST in 0:1, RGBA in 2:3
     vmadh   s1WH, s1WH, sWRH[3h] // s1WH:s1WL is 1/W
@@ -1498,27 +1499,28 @@ middle_of_vtx_store:
     lqv     sVPS, (0x00)(rdpCmdBufEndP1) // Load viewport scale from temp mem
 .endif
     vmadm   vPairTPosI, vPairTPosI, $v30[3] // Persp norm
-// vPairPosI is $v20
-    ldv     vPairPosI[0], (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
-    vmadn   vPairTPosF, $v31, $v31[2] // 0
     ldv     vPairPosI[8], (VTX_IN_OB + inputVtxSize * 1)(inputVtxPos)
-    // vnop
+    vmadn   vPairTPosF, $v31, $v31[2] // 0
 // vPairRGBA is $v27
     luv     vPairRGBA[0], (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Vtx pair RGBA
     // vnop
 // vPairNrml is $v16
     lpv     vPairNrml[0], (VTX_IN_TC + inputVtxSize * 1)(inputVtxPos) // Vtx pair normals
-    vmudh   $v29, sVPO, vOne // offset * 1
+    // vnop
     andi    $11, $11, CLIP_SCAL_NPXY // Mask to only bits we care about
-    vmadn   vPairTPosF, vPairTPosF, sVPS // + XYZ * scale
+    vmudh   $v29, sVPO, vOne // offset * 1
     or      $24, $24, $20          // Combine results for second vertex
-    vmadh   vPairTPosI, vPairTPosI, sVPS
+    vmadn   vPairTPosF, vPairTPosF, sVPS // + XYZ * scale
     or      $10, $10, $11          // Combine results for first vertex
+    vmadh   vPairTPosI, vPairTPosI, sVPS
+    sh      $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex clip flags
 // sFOG is $v25
     vmadh   sFOG, vOne, $v31[6] // + 0x7F00 in all elements, clamp to 0x7FFF for fog
-    sh      $24,              (VTX_CLIP      )(secondVtxPos) // Store second vertex clip flags
-    // vnop
     sh      $10,              (VTX_CLIP      )($19)          // Store first vertex results
+    // vnop
+.if !CFG_LEGACY_VTX_PIPE
+    ssv     vPairPosI[6],     (VTX_IN_Y  + inputVtxSize * 1)(inputVtxPos) // Vtx 0 packed normals to vtx 1 Y
+.endif
     // vnop
     ssv     vPairTPosF[12],   (VTX_SCR_Z_FRAC)(secondVtxPos)
 // sCLZ is $v21 // vtx_store CLipped Z
@@ -2929,11 +2931,7 @@ vLookat0 equ vPairLt
     // Locals: vAAA and vBBB after merge and normals selection, vCCC, vDDD, vPairLt, vNrmOut
     // New available locals: $6 (existing: $11, $10, $20, $24)
     beqz    $11, lt_skip_packed_normals
-.if CFG_NO_OCCLUSION_PLANE // Couldn't squeeze in the store in vtx_store so have to redo it
-     ldv    vBBB[0],      (VTX_IN_OB + inputVtxSize * 0)(inputVtxPos)
-    ssv     vBBB[6],      (VTX_IN_Y  + inputVtxSize * 1)(inputVtxPos) // Vtx 0 packed normals to vtx 1 Y
-.endif
-     lpv    vAAA[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // Y in 0,1; pn in 4,5
+     lpv    vAAA[6],      (VTX_IN_TC + inputVtxSize * 0)(inputVtxPos) // V1 Y (V0 PN) in 0,1; V1 PN in 4,5
     // Packed normals algorithm. This produces a vector (one for each input vertex)
     // in vPairNrml such that |X| + |Y| + |Z| = 0x7F00 (called L1 norm), in the
     // same direction as the standard normal vector. The length is not "correct"
