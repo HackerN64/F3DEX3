@@ -1358,15 +1358,19 @@ vtx_after_calc_mit:
 .endif
     andi    $11, $5, G_LIGHTING >> 8  
     beqz    $11, @@skip_lighting          
-    li      $16, vtx_return_from_lighting // This is clipFlags, but not modified
-     li     $16, lt_vtx_pair              // during vtx_store
+    li      $16, vtx_return_from_lighting  // This is clipFlags, but not modified
+     li     $16, lt_vtx_pair               // during vtx_store
 @@skip_lighting:
     andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
-    jal     while_wait_dma_busy  // Wait for vertex load to finish
-     li     $19, clipTempVerts                 // Temp mem we can freely overwrite replaces outputVtxPos
+    jal     while_wait_dma_busy   // Wait for vertex load to finish
+     li     $19, clipTempVerts    // Temp mem we can freely overwrite replaces outputVtxPos
     j       middle_of_vtx_store
-     move   secondVtxPos, $19                  // for first pre-loop, same for secondVtxPos
+     move   secondVtxPos, $19     // for first pre-loop, same for secondVtxPos
 
+.if CFG_LEGACY_VTX_PIPE
+vtx_early_return_from_lighting:
+    vmrg    vPairRGBA, vPairLt, vPairRGBA  // RGB = light, A = vtx alpha
+.endif
 vtx_return_from_lighting:
     li      $ra, vertex_end
 .if CFG_LEGACY_VTX_PIPE
@@ -2903,9 +2907,8 @@ lt_loop:
     bne     curLight, altBaseReg, lt_loop
      vmacf  vPairLt, vBBB, vCCC[0h] // + light color * dot product
 lt_post:
-    vne     $v29, $v31, $v31[3h]           // Set VCC to 11101110
-    beqz    $17, vtx_return_from_lighting
-     vmrg   vPairRGBA, vPairLt, vPairRGBA  // RGB = light, A = vtx alpha
+    beqz    $17, vtx_early_return_from_lighting
+     vne    $v29, $v31, $v31[3h]           // Set VCC to 11101110
 .endif
 // These definitions are shared by both versions
 vLookat1 equ vAAA
@@ -2917,6 +2920,7 @@ vLookat0 equ vPairLt
     vmulf   $v29, vPairNrml, $v18[4] // Normals X elems 0, 4 * lookat 1 X
     vmacf   $v29, $v14, $v18[5]      // Normals Y elems 0, 4 * lookat 1 Y
     vmacf   vLookat1, $v15, $v18[6]  // Normals Z elems 0, 4 * lookat 1 Z
+    vmrg    vPairRGBA, vPairLt, vPairRGBA  // RGB = light, A = vtx alpha
     // Continue to rest of texgen shared by both versions.
 .endif
     

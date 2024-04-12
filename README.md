@@ -124,15 +124,37 @@ section below.
 There are several selectable configuration settings when building F3DEX3, which
 can be enabled in any combination. With a couple minor exceptions, none of these
 settings affect the GBI--in fact, you can swap between the microcode versions on
-a per-frame basis if you build multiple versions into your game.
+a per-frame basis if you build multiple versions into your romhack.
 
-### Legacy Vertex Pipeline
+### No Occlusion Plane (NOC)
+
+If you are not using the occlusion plane feature in your romhack, you can
+use this configuration, which removes the computation of the occlusion plane
+in the vertex processing pipeline, saving some RSP time.
+
+If you care about performance, please do consider using the occlusion plane!
+When it occludes even a small percentage of the total triangles drawn, not only
+is RDP time saved (which is the point), but RSP time is also saved when those
+tris are not drawn. This can offset the extra RSP time for computing the
+occlusion plane for all vertices.
+
+You can also build both the NOC and base microcodes into your ROM and switch
+between them on a per-frame basis. If there is no occlusion plane active or the
+best occlusion plane candidate would be very small on screen, you can use the
+NOC microcode and save RSP time. If there is a significant occlusion plane, you
+can use the base microcode and reduce the RDP time. You could also determine
+which version to use on the profiling results from the previous frame: if the
+RSP is the bottleneck (e.g. the RDP `CLK - CMD` is high), use the NOC version,
+and otherwise use the base version.
+
+### Legacy Vertex Pipeline (LVP)
 
 The primary tradeoff for all the new lighting features in F3DEX3 is increased
-RSP time for vertex processing. For a basic configuration without lighting or
-with one directional light, when F3DEX2 is at its fastest, vertex processing in
-F3DEX3 takes roughly **2.5x** the RSP cycles as in F3DEX2. However, under most
-circumstances, this is not an issue at all:
+RSP time for vertex processing. The base version of F3DEX3 takes about
+**2-2.5x** more RSP time for vertex processing than F3DEX2 (see Performance
+Results section below), assuming no lighting or directional lights only.
+However, under most circumstances, this does not affect the game's overall
+framerate:
 - This only applies to vertex processing, not triangle processing or other
   miscellaneous microcode tasks. So the total RSP cycles spent doing useful work
   during the frame is only modestly increased.
@@ -142,11 +164,11 @@ circumstances, this is not an issue at all:
   cases, slower vertex processing simply means less time spent waiting, and
   little to no change in total RSP time.
 - When the FIFO does not fill up, usually the RSP takes significantly less time
-  during the frame compared to the RDP, so increased RSP time does not affect
-  the overall framerate.
+  during the frame compared to the RDP, so increased RSP time usually does not
+  affect the overall framerate.
 
-Thus, you should always start with the base version of F3DEX3 in your game, and
-if the RSP never becomes the bottleneck, you can stick with that.
+As a result, you should always start with the base version of F3DEX3 in your
+romhack, and if the RSP never becomes the bottleneck, you can stick with that.
 
 However, if you have done extreme optimizations in your game to reduce RDP time
 (i.e. if you are Kaze Emanuar), it's possible for the RSP to sometimes become
@@ -167,17 +189,16 @@ However, it retains all other F3DEX3 features:
 - All features not related to vertex/lighting: auto-batched rendering, packed 5
   triangles commands, hints system, etc.
 
-The performance of F3DEX3 vertex processing with LVP and NOC (no occlusion
-plane, see below) is only about 16% slower than F3DEX2, instead of 250% slower.
-
+The performance of F3DEX3 vertex processing with LVP and NOC is almost the same
+as that of F3DEX2; see the Performance Results section below.
 
 ### Profiling
 
-There are far too many
-counters for a single microcode to maintain, so multiple configurations of the
-microcode can be built, each containing a different set of performance counters.
-These can be swapped while the game is running so the full set of counters can
-be effectively accessed over multiple frames.
+As mentioned above, F3DEX3 includes many performance counters. There are far too
+many counters for a single microcode to maintain, so multiple configurations of
+the microcode can be built, each containing a different set of performance
+counters. These can be swapped while the game is running so the full set of
+counters can be effectively accessed over multiple frames.
 
 There are a total of 21 performance counters, including:
 - Counts of vertices, triangles, rectangles, matrices, DL commands, etc.
@@ -189,10 +210,58 @@ There are a total of 21 performance counters, including:
 The default configuration of F3DEX3 provides a few of the most basic counters.
 The additional profiling configurations, called A, B, and C (for example
 `F3DEX3_BrZ_PA`), provide additional counters, but have two default features
-removed to make space for the profiling. These two features were selected
+removed to make space for the extra profiling. These two features were selected
 because their removal does not affect the RDP render time.
 - The `SPLightToRDP` commands are removed (they become no-ops)
 - Flat shading mode, i.e. `!G_SHADING_SMOOTH`, is removed (all tris are smooth)
+
+### Branch Depth Instruction (`BrZ` / `BrW`)
+
+Use `BrZ` if the microcode is replacing F3DEX2 or an earlier F3D version (i.e.
+SM64), or `BrW` if the microcode is replacing F3DZEX (i.e. OoT or MM). This
+controls whether `SPBranchLessZ*` uses the vertex's W coordinate or screen Z
+coordinate.
+
+### Debug Normals (`dbgN`)
+
+To help debug lighting issues when integrating F3DEX3 into your romhack, this
+feature causes the vertex colors of any material with lighting enabled to be set
+to the transformed, normalized world space normals. The X, Y, and Z components
+map to R, G, and B, with each dimension's conceptual (-1.0 ... 1.0) range mapped
+to (0 ... 255). This is not compatible with LVP as world space normals do not
+exist in that pipeline. This also breaks vertex alpha and texgen / lookat.
+
+Some ways to use this for debugging are:
+- If the normals have obvious problems (e.g. flickering, or not changing
+  smoothly as the object rotates / animates), there is likely a problem with the
+  model space normals or the M matrix. Conversely, if there is a problem with
+  the standard lighting results (e.g. flickering) but the normals don't have
+  this problem, the problem is likely in the lighting data.
+- Check that the colors don't change based on the camera position, but DO change
+  as the object rotates, so that the same side of an object in world space is
+  always the same color.
+- Make a simple object like an octahedron or sphere, view it in game, and check
+  that the normals are correct. A normal pointing along +X would be
+  (1.0, 0.0, 0.0), meaning (255, 128, 128) or pink. A normal pointing along -X
+  would be (-1.0, 0.0, 0.0), meaning (0, 128, 128) or dark cyan. Bright, fully
+  saturated colors like green (0, 255, 0), yellow (255, 255, 0), or black should
+  never appear as these would correspond to impossibly long normals.
+- Make the same object (octahedron is easiest in this case) with vertex colors
+  which match what the normals should be, and compare them.
+
+
+## Performance Results
+
+Vertex pipeline cycles per vertex pair in steady state. Hand-counted timings
+taking into account all pipeline stalls, but not instruction alignment.
+
+| Microcode      | No Lighting | First Dir Lt | Second Dir Lt |
+|----------------|-------------|--------------|---------------|
+| F3DEX3         |
+| F3DEX3_NOC     |
+| F3DEX3_LVP     |
+| F3DEX3_LVP_NOC |
+| F3DEX2         | 54          | 19           | 3             |
 
 
 ## Porting Your Romhack Codebase to F3DEX3
@@ -200,12 +269,6 @@ because their removal does not affect the RDP render time.
 For an OoT codebase, only a few minor changes are required to use F3DEX3.
 However, more changes are recommended to increase performance and enable new
 features.
-
-Select the correct version of F3DEX3 for your game: use `make F3DEX3_BrW` if the
-microcode is replacing F3DZEX (i.e. OoT or MM), otherwise `make F3DEX3_BrZ` if
-the microcode is replacing F3DEX2 or an earlier F3D version (i.e. SM64). This
-controls whether `SPBranchLessZ*` uses the vertex's W coordinate or screen Z
-coordinate.
 
 How to modify the microcode in your HackerOoT based romhack (steps may be
 similar for other games):
@@ -585,35 +648,6 @@ segment 0 must always be 0x00000000 so that this address resolves to e.g.
   drawing tris with those verts will lead to incorrect fog values for those
   tris. In F3DEX2, the fog settings at vertex load time would always be used,
   even if they were changed before drawing tris.
-
-
-## Debugging
-
-To help debug lighting issues, add `CFG_DEBUG_NORMALS` to the `OPTIONS :=` line
-of your selected microcode version in the Makefile (near the bottom), then
-`make clean` and `make` again. This feature causes the vertex colors of any
-material with lighting enabled to be set to the transformed, normalized world
-space normals. The X, Y, and Z components map to R, G, and B, with each
-dimension's conceptual (-1.0 ... 1.0) range mapped to (0 ... 255). This also
-breaks vertex alpha and texgen / lookat.
-
-Some ways to use this for debugging are:
-- If the normals have obvious problems (e.g. flickering, or not changing
-  smoothly as the object rotates / animates), there is likely a problem with the
-  model space normals or the M matrix. Conversely, if there is a problem with
-  the standard lighting results (e.g. flickering) but the normals don't have
-  this problem, the problem is likely in the lighting data.
-- Check that the colors don't change based on the camera position, but DO change
-  as the object rotates, so that the same side of an object in world space is
-  always the same color.
-- Make a simple object like an octahedron or sphere, view it in game, and check
-  that the normals are correct. A normal pointing along +X would be
-  (1.0, 0.0, 0.0), meaning (255, 128, 128) or pink. A normal pointing along -X
-  would be (-1.0, 0.0, 0.0), meaning (0, 128, 128) or dark cyan. Bright, fully
-  saturated colors like green (0, 255, 0), yellow (255, 255, 0), or black should
-  never appear as these would correspond to impossibly long normals.
-- Make the same object (octahedron is easiest in this case) with vertex colors
-  which match what the normals should be, and compare them.
 
 
 ## Credits
