@@ -1416,7 +1416,7 @@ sWRL equ $v25 // vtx_store W Reciprocal Low  | IMPORTANT: Can be the same reg as
 sWRH equ $v26 // vtx_store W Reciprocal High | using different ones saves one cycle delay
     vmudl   $v29, vPairTPosF, $v30[3] // Persp norm
     move    secondVtxPos, outputVtxPos          // Second and output vertices write to same mem...
-    vmadm  s1WH, vPairTPosI, $v30[3] // Persp norm
+    vmadm   s1WH, vPairTPosI, $v30[3] // Persp norm
     bltz    $1, @@skipsecond                    // ...if < 0 verts remain, ...
      vmadn  s1WL, $v31, $v31[2] // 0
     addi    secondVtxPos, outputVtxPos, vtxSize // ...otherwise, second vtx is next vtx
@@ -3038,6 +3038,7 @@ lt_loop:
     lpv     vCCC[4], (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 0 dir in elems 4-6
     lbu     $11,     (ltBufOfs + 3 - lightSize)(curLight) // Light type / constant attenuation
     beq     curLight, altBaseReg, lt_post
+     // nop
      vmrg   vAAA, vAAA, vCCC                            // vAAA = light direction
     bnez    $11, lt_point
      luv    vDDD,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
@@ -3045,6 +3046,7 @@ lt_loop:
     vmulf   vAAA, vAAA, vPairNrml // Light dir * normalized normals
     vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
     vmadm   vCCC, vPairRGBA, $v30[1] // + (alpha - 1) * aoDir factor; elems 3, 7
+    // vnop
     vmudh   $v29, vOne, vAAA[0h]
     vmadh   $v29, vOne, vAAA[1h]
     vmadh   vAAA, vOne, vAAA[2h]
@@ -3060,9 +3062,11 @@ lt_finish_light:
     vxor    vAAA, vAAA, $v31[7] // = 0x7FFF - result
 lt_skip_specular:
     vge     vAAA, vAAA, $v31[2] // 0; clamp dot product to >= 0
+    // vnop; vnop; vnop
     vmudm   $v29, vAAA, vBBB[2h] // Dot product int * scale frac
     vmadh   vAAA, vAAA, vBBB[3h] // Dot product int * scale int, clamp to 0x7FFF
     addi    curLight, curLight, -lightSize
+    // vnop; vnop
     vmudh   $v29, vOne, vPairLt // Load accum mid with current light level
     j       lt_loop
      vmacf  vPairLt, vDDD, vAAA[0h] // + light color * dot product
@@ -3078,6 +3082,7 @@ vLtAOut    equ $v26 // = vDDD: light / effects alpha output
     andi    $11, $5, G_LIGHTTOALPHA >> 8
     andi    $20, $5, G_PACKED_NORMALS >> 8
     andi    $10, $5, G_TEXTURE_GEN >> 8
+    // nop
     vmulf   vLtRGBOut, vPairRGBA, vPairLt  // RGB output is RGB * light
     beqz    $11, lt_skip_cel
      vcopy  vLtAOut, vPairRGBA             // Alpha output = vertex alpha (only 3, 7 matter)
@@ -3203,6 +3208,7 @@ lt_normalize:
     vreadacc vDDD, ACC_MIDDLE
     vreadacc vCCC, ACC_UPPER
     mtc2    $11, vPairLt[6] // Constant frac part in elem 3
+    // vnop; vnop
     vmudm   $v29, vOne, vDDD[2h] // Sum of squared components
     vmadh   $v29, vOne, vCCC[2h]
     srl     $11, $24, 5 // Top 3 bits
@@ -3214,6 +3220,7 @@ lt_normalize:
     ori     $20, $20, 0x20 // Append leading 1 to mantissa
     vmadh   vCCC, vCCC, vOne
     sllv    $20, $20, $11 // Left shift to create floating point
+    // vnop; vnop; vnop
     vrsqh   $v29[2], vCCC[0] // High input, garbage output
     sll     $20, $20, 8 // Min range 00002000, 00002100... 00003F00, max 00100000...001F8000
     vrsql   $v29[1], vDDD[0] // Low input, low output
@@ -3224,6 +3231,7 @@ lt_normalize:
     vrsql   $v29[5], vDDD[4] // Low input, low output
     vrsqh   $v29[4], $v31[2] // 0 input, high output
     mtc2    $20, vCCC[6] // Quadratic frac part in elem 3
+    // vnop; vnop; vnop
     vmudn   vBBB, vBBB, $v29[0h] // Vec frac * int scaling, discard result
     srl     $20, $20, 16
     vmadm   vBBB, vAAA, $v29[1h] // Vec int * frac scaling, discard result

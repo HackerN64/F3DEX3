@@ -158,6 +158,8 @@ framerate:
 - This only applies to vertex processing, not triangle processing or other
   miscellaneous microcode tasks. So the total RSP cycles spent doing useful work
   during the frame is only modestly increased.
+- The increase in time is only RSP cycles; there is no additional memory
+  traffic, so the RDP time is not directly affected.
 - In scenes which are complex enough to fill the RSP->RDP FIFO in DRAM, the RSP
   usually spends a significant fraction of time waiting for the FIFO to not be
   full (as revealed by the F3DEX3 performance counters, see below). In these
@@ -184,13 +186,13 @@ faster version based on the same algorithms as F3DEX2. This removes:
 
 However, it retains all other F3DEX3 features:
 - 56 verts, 9 directional lights
-- Occlusion plane (optional, see below)
+- Occlusion plane (optional with NOC configuration)
 - Z attribute offsets
 - All features not related to vertex/lighting: auto-batched rendering, packed 5
   triangles commands, hints system, etc.
 
-The performance of F3DEX3 vertex processing with LVP and NOC is almost the same
-as that of F3DEX2; see the Performance Results section below.
+The performance of F3DEX3 vertex processing with both LVP and NOC is almost the
+same as that of F3DEX2; see the Performance Results section below.
 
 ### Profiling
 
@@ -252,16 +254,36 @@ Some ways to use this for debugging are:
 
 ## Performance Results
 
-Vertex pipeline cycles per vertex pair in steady state. Hand-counted timings
-taking into account all pipeline stalls, but not instruction alignment.
+Vertex pipeline cycles per **vertex pair** in steady state. Hand-counted timings
+taking into account all pipeline stalls and all dual-issue conditions except for
+instruction alignment.
 
-| Microcode      | No Lighting | First Dir Lt | Second Dir Lt |
-|----------------|-------------|--------------|---------------|
-| F3DEX3         |
-| F3DEX3_NOC     |
-| F3DEX3_LVP     |
-| F3DEX3_LVP_NOC |
-| F3DEX2         | 54          | 19           | 3             |
+| Microcode      | No Lighting | First Dir Lt | Total for 1 Dir Lt | Extra Dir Lts |
+|----------------|-------------|--------------|--------------------|---------------|
+| F3DEX3         | 97          | 103          | 200                | 29            |
+| F3DEX3_NOC     | 79          | 103          | 182                | 29            |
+| F3DEX3_LVP     | 80          | 15           | 95                 | 7             |
+| F3DEX3_LVP_NOC | 62          | 15           | 77                 | 7             |
+| F3DEX2         | 54          | 19           | 73                 | 3 then 12     |
+
+Vertex processing time as reported by the performance counter in the `PA`
+configuration.
+- Scene 1: Kakariko, adult day, from DMT entrance
+- Scene 2: Custom empty scene with Suzanne monkey head with 1 dir light
+- Scene 3: Same but Suzanne has vertex colors instead of lighting (Link is still
+  on screen and has lighting)
+
+| Microcode      | Scene 1 | Scene 2 | Scene 3 |
+|----------------|---------|---------|---------|
+| F3DEX3         | 7.64ms  | 3.13ms  | 2.37ms  |
+| F3DEX3_NOC     | 7.07ms  | 2.89ms  | 2.14ms  |
+| F3DEX3_LVP     | 4.57ms  | 1.77ms  | 1.67ms  |
+| F3DEX3_LVP_NOC | 3.96ms  | 1.52ms  | 1.41ms  |
+| F3DEX2         | No*     | No*     | No*     |
+| Vertex count   | 3664    | 1608    | 1608    |
+
+*F3DEX2 does not contain performance counters, so the portion of the RSP time
+taken for vertex processing cannot be measured.
 
 
 ## Porting Your Romhack Codebase to F3DEX3
@@ -484,12 +506,7 @@ always use the new encoding.
 
 ### Vertex Processing RSP Time
 
-The vertex processing algorithm in F3DEX3 is redesigned compared to F3DEX2,
-which enables several of the new graphical features in F3DEX3 as well as the
-56 vertex buffer. With the new algorithm, the RSP takes significantly longer to
-process vertices in F3DEX3, especially vertices without lighting or with a very
-small number of directional lights. Note that this is RSP cycles only, not RDP
-cycles or DRAM traffic.
+See the Microcode Configuration and Performance Results sections above.
 
 ### Overlay 4
 
@@ -560,11 +577,15 @@ It is recommended to use `G_NORMALS_MODE_FAST` (the default) for most things,
 and use `G_NORMALS_MODE_AUTO` only for objects while they currently have a
 nonuniform scale (e.g. Mario only while he is squashed).
 
+Note that in the LVP configuration, lighting is computed in model space by
+transforming light directions into model space with M transpose, like in F3DEX2.
+Thus there is no mIT matrix and the SPNormalsMode setting is ignored.
+
 ### Optimizing for RSP code size
 
-A number of over-zealous optimizations in F3DEX2 which saved a few cycles but
-took several more instructions have been removed. This has a very small impact
-on overall RSP time and no impact on RDP time.
+A number of optimizations in F3DEX2 which saved a few cycles but took several
+more instructions have been removed. Outside of vertex processing, these have a
+very small impact on overall RSP time and no impact on RDP time.
 
 ### Far clipping removal
 
@@ -578,22 +599,25 @@ The removal of far clipping saved a bunch of DMEM space, and enabled other
 changes to the clipping implementation which saved even more DMEM space.
 
 NoN (No Nearclipping) is also mandatory in F3DEX3, though this was already the
-microcode option used in OoT.
+microcode option used in OoT. Note that tris are still clipped at the camera
+plane; nearclipping means they are clipped at the nearplane, which is a short
+distance in front of the camera plane.
 
 ### Removal of scaled vertex normals
 
 A few clever romhackers figured out that you could shrink the normals on verts
 in your mesh (so their length is less than "1") to make the lighting on those
-verts dimmer and create a version of ambient occlusion. F3DEX3 normalizes vertex
-normals after transforming them, which is required for most features of the
-lighting system including packed normals, so this no longer works. However,
-F3DEX3 has support for ambient occlusion via vertex alpha, which accomplishes
-the same goal with some extra benefits:
+verts dimmer and create a version of ambient occlusion. In the base vertex
+pipeline, F3DEX3 normalizes vertex normals after transforming them, which is
+required for most features of the lighting system including packed normals, so
+this no longer works. However, F3DEX3 has support for ambient occlusion via
+vertex alpha, which accomplishes the same goal with some extra benefits:
 - Much easier to create: just paint the vertex alpha in Blender / fast64. The
   scaled normals approach was not supported in fast64 and had to be done with
   scripts or by hand.
-- The amount of ambient occlusion in F3DEX3 can be set at runtime based on scene
-  lighting, whereas the scaled normals approach is baked into the mesh.
+- The amount of ambient occlusion in F3DEX3 can be set at runtime based on
+  variable scene lighting, whereas the scaled normals approach is baked into the
+  mesh.
 - F3DEX3 can have the vertex alpha affect ambient, directional, and point lights
   by different amounts, which is not possible with scaled normals. In fact,
   scaled normals never affect the ambient light, contrary to the concept of
@@ -606,6 +630,9 @@ F3DEX3 will fix the normals' scale but then apply the AO.
 
 The only case where scaled normals work but F3DEX3 AO doesn't work is for meshes
 with vertex alpha actually used for transparency (therefore also no fog).
+
+Note that in LVP mode, scaled normals are supported and work the same way as in
+F3DEX2, while ambient occlusion is not supported.
 
 ### RDP temporary buffers shrinking
 
