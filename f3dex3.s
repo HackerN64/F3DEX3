@@ -803,7 +803,8 @@ postOvlRA equ $10 // Commonly used locally
 // Initialization routines
 // Everything up until ovl01_end will get overwritten by ovl0 and/or ovl1
 start: // This is at IMEM 0x1080, not the start of IMEM
-    lqv     $v31[0], (v31Value)($zero)
+    vnop    // Return to here from S2DEX overlay 0 G_LOAD_UCODE jumps to start+4!
+    lqv     $v31[0], (v31Value)($zero)      // Actual start is here
     vadd    $v29, $v29, $v29 // Consume VCO (carry) value possibly set by the previous ucode
     li      altBaseReg, altBase
     li      rdpCmdBufPtr, rdpCmdBuffer1
