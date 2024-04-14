@@ -33,7 +33,13 @@ the code here for every candidate occlusion plane.
 
 4. Take a look at the commented out code using occPlaneMessage. Except for
 "Offscreen" and the candidate counts, all the messages written to it represent
-errors or problems with the occlusion plane setup, or bugs in these algorithms.
+errors or problems with the occlusion plane setup (or bugs in these algorithms).
+For example, "Edge %d now has no cands" occurs when the occlusion plane is being
+viewed nearly edge-on, causing there to be too many edges oriented too similarly
+to be representable by the occlusion plane equations. If you get this message,
+your choice of occlusion plane was poor and the occlusion plane will be
+disabled.
+
 While it's not recommended to use occPlaneMessage besides for debugging, you
 should create an "error flag" which is set if any of these messages would have
 been written, and display something visually on the screen (such as an error
