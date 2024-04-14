@@ -486,9 +486,9 @@ movewordTable:
 
 // G_POPMTX, G_MTX, G_MOVEMEM Command Jump Table
 movememHandlerTable:
-jumpTableEntry G_POPMTX_end            // G_POPMTX
-jumpTableEntry ovl234_ovl4_entrypoint  // G_MTX (multiply)
-jumpTableEntry G_MOVEMEM_end           // G_MOVEMEM, G_MTX (load)
+jumpTableEntry G_POPMTX_end   // G_POPMTX
+jumpTableEntry G_MTX_end      // G_MTX (multiply)
+jumpTableEntry G_MOVEMEM_end  // G_MOVEMEM, G_MTX (load)
 
 .macro miniTableEntry, addr
     .if addr < 0x1000 || addr >= 0x1400
@@ -499,7 +499,7 @@ jumpTableEntry G_MOVEMEM_end           // G_MOVEMEM, G_MTX (load)
 
 // RDP/Immediate Command Mini Table
 // 1 byte per entry, after << 2 points to an addr in first 1/4 of IMEM
-miniTableEntry ovl4_cmd_handler // G_DMA_IO
+miniTableEntry G_DMA_IO_handler
 miniTableEntry G_TEXTURE_handler
 miniTableEntry G_POPMTX_handler
 miniTableEntry G_GEOMETRYMODE_handler
@@ -546,7 +546,7 @@ miniTableEntry G_SYNC_handler // G_NOOP
 miniTableEntry G_VTX_handler
 miniTableEntry G_MODIFYVTX_handler
 miniTableEntry G_CULLDL_handler
-miniTableEntry ovl4_cmd_handler // G_BRANCH_WZ
+miniTableEntry G_BRANCH_WZ_handler
 miniTableEntry G_TRI1_handler
 miniTableEntry G_TRI2_handler
 miniTableEntry G_QUAD_handler
@@ -987,8 +987,38 @@ G_SETxIMG_handler:
     j       G_RDP_handler
      sb     $7, materialCullMode
 
-ovl4_cmd_handler:
+.if CFG_LEGACY_VTX_PIPE
+
+G_DMA_IO_handler:
+    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
+     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
+    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
+    // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
+    // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
+    sra     dmemAddr, dmemAddr, 2
+    j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
+     li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
+
+G_BRANCH_WZ_handler:
+    j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $10
+     li     $11, branchwz_return_from_addrs
+branchwz_return_from_addrs:
+.if CFG_G_BRANCH_W                      // G_BRANCH_W/G_BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
+    lh      $10, VTX_W_INT($10)         // read the w coordinate of the vertex (f3dzex)
+.else
+    lw      $10, VTX_SCR_Z($10)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
+.endif
+    sub     $2, $10, cmd_w1_dram        // subtract the w/z value being tested
+    bgez    $2, run_next_DL_command     // if vtx.w/z >= cmd w/z, continue running this DL
+     lw     cmd_w1_dram, rdpHalf1Val    // load the RDPHALF1 value as the location to branch to
+    j       branch_dl                   // need $2 < 0 for nopush and cmd_w1_dram
+     li     cmd_w0, 0                   // No count of DL cmds to skip
+
+.else
+G_DMA_IO_handler:
+G_BRANCH_WZ_handler:
     j       ovl234_ovl4_entrypoint          // Delay slot is harmless
+.endif
 load_cmds_handler:
      lb     $3, materialCullMode
     bltz    $3, run_next_DL_command  // If cull mode is < 0, in mat second time, skip the load
@@ -1256,40 +1286,16 @@ vtx_setup_constants:
     bnez    $7, skip_vtx_mvp
      li     $2, vpMatrix
     li      $3, mMatrix
-    addi    $10, $3, 0x0018
-@@loop:
-    vmadn   $v7, $v31, $v31[2]  // 0
-    addi    $11, $3, 0x0008
-    vmadh   $v6, $v31, $v31[2]  // 0
-    addi    $2, $2, -0x0020
-    vmudh   $v29, $v31, $v31[2] // 0
-@@innerloop:
-    ldv     $v3[0], 0x0040($2)
-    ldv     $v3[8], 0x0040($2)
-    lqv     $v1[0], 0x0020($3) // Input 1
-    ldv     $v2[0], 0x0020($2)
-    ldv     $v2[8], 0x0020($2)
-    lqv     $v0[0], 0x0000($3) // Input 1
-    vmadl   $v29, $v3, $v1[0h]
-    addi    $3, $3, 0x0002
-    vmadm   $v29, $v2, $v1[0h]
-    addi    $2, $2, 0x0008 // Increment input 0 pointer
-    vmadn   $v5, $v3, $v0[0h]
-    bne     $3, $11, @@innerloop
-     vmadh  $v4, $v2, $v0[0h]
-    bne     $3, $10, @@loop
-     addi   $3, $3, 0x0008
-    sqv     $v7[0], (mITMatrix + 0x0020)($zero)
-    sqv     $v6[0], (mITMatrix + 0x0000)($zero)
+    j       mtx_multiply
+     li     $6, mITMatrix
+vtx_after_mtx_multiply:
     sqv     $v5[0], (fourthQWMVP +    0)($zero)
-    sqv     $v4[0], (mITMatrix + 0x0010)($zero)
-    sb      $10, mITValid  // $10 is nonzero, in fact 0x18
+    sb      $10, mITValid  // $10 is nonzero from mtx_multiply, in fact 0x18
 skip_vtx_mvp:
     andi    $11, $5, G_LIGHTING >> 8
     bnez    $11, ovl234_lighting_entrypoint     // Lighting setup, incl. transform
      move   inputVtxPos, dmemAddr               // Must be before overlay load
 vtx_after_lt_setup:
-vtx_after_calc_mit: // Not actually used on this codepath
     lqv     vM0I,     (mITMatrix + 0x00)($zero)  // Load MVP matrix
     lqv     vM2I,     (mITMatrix + 0x10)($zero)
     lqv     vM0F,     (mITMatrix + 0x20)($zero)
@@ -1714,6 +1720,45 @@ skip_return_to_lt_or_loop:
 
 .endif // CFG_NO_OCCLUSION_PLANE
 
+.if CFG_LEGACY_VTX_PIPE || CFG_NO_OCCLUSION_PLANE
+G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
+    lhu     $6, (movememTable + G_MV_MMTX)($1) // Output; $1 holds 0 for M or 4 for VP.
+    li      $3, tempMemRounded // Input 1 = temp mem (loaded mtx)
+    jal     while_wait_dma_busy
+     move   $2, $6 // Input 0 = output
+mtx_multiply: // $3, $2 are input matrices; $6 is output matrix; $7 is 0 for return to vtx
+    addi    $10, $3, 0x0018
+@@loop:
+    vmadn   $v7, $v31, $v31[2]  // 0
+    addi    $11, $3, 0x0008
+    vmadh   $v6, $v31, $v31[2]  // 0
+    addi    $2, $2, -0x0020
+    vmudh   $v29, $v31, $v31[2] // 0
+@@innerloop:
+    ldv     $v3[0], 0x0040($2)
+    ldv     $v3[8], 0x0040($2)
+    lqv     $v1[0], 0x0020($3) // Input 1
+    ldv     $v2[0], 0x0020($2)
+    ldv     $v2[8], 0x0020($2)
+    lqv     $v0[0], 0x0000($3) // Input 1
+    vmadl   $v29, $v3, $v1[0h]
+    addi    $3, $3, 0x0002
+    vmadm   $v29, $v2, $v1[0h]
+    addi    $2, $2, 0x0008 // Increment input 0 pointer
+    vmadn   $v5, $v3, $v0[0h]
+    bne     $3, $11, @@innerloop
+     vmadh  $v4, $v2, $v0[0h]
+    bne     $3, $10, @@loop
+     addi   $3, $3, 0x0008
+    sqv     $v7[0], (0x0020)($6)
+    sqv     $v6[0], (0x0000)($6)
+.if CFG_LEGACY_VTX_PIPE
+    beqz    $7, vtx_after_mtx_multiply
+.endif
+     sqv    $v4[0], (0x0010)($6)
+    j       run_next_DL_command
+     sqv    $v5[0], (0x0030)($6)
+.endif
     
 .if (. & 4)
     .warning "One instruction of padding before ovl234"
@@ -1734,6 +1779,7 @@ ovl234_lighting_entrypoint_ovl3ver:        // same IMEM address as ovl234_lighti
     jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
      li     cmd_w1_dram, orga(ovl2_start)  // set up a load for overlay 2
 
+.if !CFG_LEGACY_VTX_PIPE
 // Jump here for all overlay 4 features. If overlay 3 is loaded (this code), loads
 // overlay 4 and jumps to right here, which is now in the new code.
 ovl234_ovl4_entrypoint_ovl3ver:            // same IMEM address as ovl234_ovl4_entrypoint
@@ -1742,6 +1788,7 @@ ovl234_ovl4_entrypoint_ovl3ver:            // same IMEM address as ovl234_ovl4_e
 .endif
     jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
      li     cmd_w1_dram, orga(ovl4_start)  // set up a load for overlay 4
+.endif //!CFG_LEGACY_VTX_PIPE
 
 // Jump here to do clipping. If overlay 3 is loaded (this code), directly starts
 // the clipping code.
@@ -2762,6 +2809,7 @@ lt_vtx_pair:
      andi   $11, $5, G_PACKED_NORMALS >> 8
 .endif
 
+.if !CFG_LEGACY_VTX_PIPE
 // Jump here for all overlay 4 features. If overlay 2 is loaded (this code), loads
 // overlay 4 and jumps to right here, which is now in the new code.
 ovl234_ovl4_entrypoint_ovl2ver:            // same IMEM address as ovl234_ovl4_entrypoint
@@ -2770,6 +2818,7 @@ ovl234_ovl4_entrypoint_ovl2ver:            // same IMEM address as ovl234_ovl4_e
 .endif
     jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
      li     cmd_w1_dram, orga(ovl4_start)  // set up a load for overlay 4
+.endif //!CFG_LEGACY_VTX_PIPE
 
 // Jump here to do clipping. If overlay 2 is loaded (this code), loads overlay 3
 // and jumps to right here, which is now in the new code.
@@ -3247,6 +3296,9 @@ ovl2_padded_end:
 .headersize ovl234_start - orga()
 
 ovl4_start:
+
+.if !CFG_LEGACY_VTX_PIPE
+
 // Contains M inverse transpose (mIT) computation, and some rarely-used command handlers.
 
 // Jump here to do lighting. If overlay 4 is loaded (this code), loads overlay 2
@@ -3261,6 +3313,9 @@ ovl234_lighting_entrypoint_ovl4ver:        // same IMEM address as ovl234_lighti
 // Jump here for all overlay 4 features. If overlay 4 is loaded (this code), jumps
 // to the instruction selection below.
 ovl234_ovl4_entrypoint:
+.if !CFG_LEGACY_VTX_PIPE && !CFG_NO_OCCLUSION_PLANE
+G_MTX_end:
+.endif
 .if CFG_PROFILING_B
     nop                                    // Needs to take up the space for the other perf counter
 .endif
@@ -3279,47 +3334,50 @@ ovl234_clipping_entrypoint_ovl4ver:        // same IMEM address as ovl234_clippi
 ovl4_select_instr:
     beq     $2, $7, calc_mit // otherwise $7 = command byte
      li     $3, G_BRANCH_WZ
-    beq     $3, $7, G_BRANCH_WZ_handler
+    beq     $3, $7, g_branch_wz_real
      li     $2, (0xFF00 | G_DMA_IO)
-    beq     $2, $7, G_DMA_IO_handler
-     // Otherwise G_MTX_end, which starts with a harmless instruction
+    beq     $2, $7, g_dma_io_real
+     nop
+     // Otherwise g_mtx_end_real
 
-G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
-    lhu     $5, (movememTable + G_MV_MMTX)($1) // Output; $1 holds 0 for M or 4 for VP.
-    move    $2, $5 // Input 0 = output
+.if !CFG_NO_OCCLUSION_PLANE
+g_mtx_end_real:
+// Multiplies the temp loaded matrix into the M or VP matrix
+    lhu     $6, (movememTable + G_MV_MMTX)($1) // Output; $1 holds 0 for M or 4 for VP.
+    li      $3, tempMemRounded // Input 1 = temp mem (loaded mtx)
     jal     while_wait_dma_busy // If ovl4 already in memory, was not done
-     li     $3, tempMemRounded // Input 1 = temp mem (loaded mtx)
+     move   $2, $6 // Input 0 = output
     addi    $10, $3, 0x0018
 @@loop:
-    vmadn   $v9, $v31, $v31[2]  // 0
+    vmadn   $v7, $v31, $v31[2]  // 0
     addi    $11, $3, 0x0008
-    vmadh   $v8, $v31, $v31[2]  // 0
+    vmadh   $v6, $v31, $v31[2]  // 0
     addi    $2, $2, -0x0020
     vmudh   $v29, $v31, $v31[2] // 0
 @@innerloop:
-    ldv     $v5[0], 0x0040($2)
-    ldv     $v5[8], 0x0040($2)
-    lqv     $v3[0], 0x0020($3) // Input 1
-    ldv     $v4[0], 0x0020($2)
-    ldv     $v4[8], 0x0020($2)
-    lqv     $v2[0], 0x0000($3) // Input 1
-    vmadl   $v29, $v5, $v3[0h]
+    ldv     $v3[0], 0x0040($2)
+    ldv     $v3[8], 0x0040($2)
+    lqv     $v1[0], 0x0020($3) // Input 1
+    ldv     $v2[0], 0x0020($2)
+    ldv     $v2[8], 0x0020($2)
+    lqv     $v0[0], 0x0000($3) // Input 1
+    vmadl   $v29, $v3, $v1[0h]
     addi    $3, $3, 0x0002
-    vmadm   $v29, $v4, $v3[0h]
+    vmadm   $v29, $v2, $v1[0h]
     addi    $2, $2, 0x0008 // Increment input 0 pointer
-    vmadn   $v7, $v5, $v2[0h]
+    vmadn   $v5, $v3, $v0[0h]
     bne     $3, $11, @@innerloop
-     vmadh  $v6, $v4, $v2[0h]
+     vmadh  $v4, $v2, $v0[0h]
     bne     $3, $10, @@loop
      addi   $3, $3, 0x0008
-    // Store the results in M or VP
-    sqv     $v9[0], 0x0020($5)
-    sqv     $v8[0], 0x0000($5)
-    sqv     $v7[0], 0x0030($5)
+    sqv     $v7[0], (0x0020)($6)
+    sqv     $v6[0], (0x0000)($6)
+    sqv     $v4[0], (0x0010)($6)
     j       run_next_DL_command
-     sqv    $v6[0], 0x0010($5)
+     sqv    $v5[0], (0x0030)($6)
+.endif
 
-G_DMA_IO_handler:
+g_dma_io_real:
     jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
      lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
     andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
@@ -3329,7 +3387,7 @@ G_DMA_IO_handler:
     j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
      li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
 
-G_BRANCH_WZ_handler:
+g_branch_wz_real:
     j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $10
      li     $11, branchwz_return_from_addrs
 branchwz_return_from_addrs:
@@ -3482,6 +3540,8 @@ calc_mit:
     sdv     $v21[0], (mITMatrix + 0x18)($zero)
     j       vtx_after_calc_mit
      sdv    $v20[0], (mITMatrix + 0x00)($zero)
+     
+.endif // !CFG_LEGACY_VTX_PIPE
 
 ovl4_end:
 .align 8

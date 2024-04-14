@@ -254,9 +254,9 @@ Some ways to use this for debugging are:
 
 ## Performance Results
 
-Vertex pipeline cycles per **vertex pair** in steady state. Hand-counted timings
-taking into account all pipeline stalls and all dual-issue conditions except for
-instruction alignment.
+Vertex pipeline cycles per **vertex pair** in steady state (lower is better).
+Hand-counted timings taking into account all pipeline stalls and all dual-issue
+conditions except for instruction alignment.
 
 | Microcode      | No Lighting | First Dir Lt | Total for 1 Dir Lt | Extra Dir Lts |
 |----------------|-------------|--------------|--------------------|---------------|
@@ -510,6 +510,11 @@ See the Microcode Configuration and Performance Results sections above.
 
 ### Overlay 4
 
+(Note that in the LVP configuration, Overlay 4 is absent; there is no M inverse
+transpose matrix discussed below, and the other commands mentioned below are
+directly in the microcode without an overlay, due to there being enough IMEM
+space.)
+
 F3DEX2 contains Overlay 2, which does lighting, and Overlay 3, which does
 clipping (run on any large triangle which extends a large distance offscreen).
 These overlays are more RSP assembly code which are loaded into the same space
@@ -535,7 +540,9 @@ F3DEX3 introduces Overlay 4, which can occupy the same IMEM as Overlay 2 and 3.
 This overlay contains handlers for:
 - Computing the inverse transpose of the model matrix M (abbreviated as mIT),
   discussed below
-- The codepath for `SPMatrix` with `G_MTX_MUL` set
+- The codepath for `SPMatrix` with `G_MTX_MUL` set (base version only; this is
+  moved out of the overlay to normal microcode in the NOC configuration due to
+  having extra IMEM space available)
 - `SPBranchLessZ*`
 - `SPDma_io`
 
@@ -576,10 +583,6 @@ F3DEX3 provides three options for handling this (see `SPNormalsMode`):
 It is recommended to use `G_NORMALS_MODE_FAST` (the default) for most things,
 and use `G_NORMALS_MODE_AUTO` only for objects while they currently have a
 nonuniform scale (e.g. Mario only while he is squashed).
-
-Note that in the LVP configuration, lighting is computed in model space by
-transforming light directions into model space with M transpose, like in F3DEX2.
-Thus there is no mIT matrix and the SPNormalsMode setting is ignored.
 
 ### Optimizing for RSP code size
 
