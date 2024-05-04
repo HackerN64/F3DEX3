@@ -1191,6 +1191,16 @@ typedef struct {
     short kc;
 } OcclusionPlane_t;
 
+typedef struct {
+    /* Four vertices of a quad, XYZ components in world space */
+    struct {
+        short x;
+        short y;
+        short z;
+    } v[4];
+    float weight; /* Higher if there's a lot of stuff behind it */
+} OcclusionPlaneCandidate;
+
 typedef union {
     Light_t l;
     long long int force_structure_alignment[2];
