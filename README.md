@@ -61,7 +61,7 @@ breaking changes.**
   display lists shorter.
 - New **occlusion plane** system allows the placement of a 3D quadrilateral
   where objects behind this plane in screen space are culled. This can
-  substantially reduce the performance penalty of overdraw in scenes with walls
+  dramatically improve RDP performance by reducing overdraw in scenes with walls
   in the middle, such as a city or an indoor scene.
 - If a material display list being drawn is the same as the last material, the
   texture loads in the material are skipped (the second time). This effectively
@@ -133,10 +133,12 @@ use this configuration, which removes the computation of the occlusion plane
 in the vertex processing pipeline, saving some RSP time.
 
 If you care about performance, please do consider using the occlusion plane!
-When it occludes even a small percentage of the total triangles drawn, not only
-is RDP time saved (which is the point), but RSP time is also saved when those
-tris are not drawn. This can offset the extra RSP time for computing the
-occlusion plane for all vertices.
+RDP time savings of 3-4 ms are common in scenes with reasonable occlusion
+planes, and even saving a third of the total RDP time can sometimes happen.
+Furthermore, when even a small percentage of the total triangles drawn are
+occluded, not only is RDP time saved (which is the point), but RSP time is also
+saved from not having to process those tris. This can offset the extra RSP time
+for computing the occlusion plane for all vertices.
 
 You can also build both the NOC and base microcodes into your ROM and switch
 between them on a per-frame basis. If there is no occlusion plane active or the
