@@ -3255,10 +3255,10 @@ lt_normal_to_vertex:
     vmadm   vBBB, vCCC, vCCC[3]        // PL: + len^2 int * quadratic factor frac
     vmadn   $v29, vDDD, vCCC[7]        // PL: + len^2 frac * quadratic factor int = $v29 frac
     vmadh   vCCC, vCCC, vCCC[7]        // PL: + len^2 int * quadratic factor int  = vCCC int
-    vmudh   vBBB, $v31, $v31[2]        // Both: Clear accumulator (sum dot product components)
-    vadd    vBBB, vAAA, vAAA[1h]       // Both: accum lo 0 = 0 + 1, 4 = 4 + 5
+    vmudh   vBBB, vOne, vAAA[0h]       // Both: Sum components of dot product as signed
+    vmadh   vBBB, vOne, vAAA[1h]       // Both:
     bnez    $10, lt_after_camera       // $10 set if computing specular or fresnel
-     vmadn  vAAA, vOne, vAAA[2h]       // Both: + 2,6; vAAA dot product
+     vmadh  vAAA, vOne, vAAA[2h]       // Both: vAAA dot product
     vrcph   vBBB[1], vCCC[0]     // 1/(2*light factor), input of 0000.8000 -> no change normals
     luv     vDDD,    (ltBufOfs + 0 - lightSize)(curLight) // vDDD = light color
     vrcpl   vBBB[2], $v29[0]     // Light factor 0001.0000 -> normals /= 2

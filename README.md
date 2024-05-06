@@ -260,9 +260,9 @@ conditions except for instruction alignment.
 
 | Microcode      | No Lighting | First Dir Lt | Total for 1 Dir Lt | Extra Dir Lts |
 |----------------|-------------|--------------|--------------------|---------------|
-| F3DEX3         | 97          | 103          | 200                | 29            |
+| F3DEX3         | 98          | 103          | 201                | 29            |
 | F3DEX3_NOC     | 79          | 103          | 182                | 29            |
-| F3DEX3_LVP     | 80          | 15           | 95                 | 7             |
+| F3DEX3_LVP     | 81          | 15           | 96                 | 7             |
 | F3DEX3_LVP_NOC | 62          | 15           | 77                 | 7             |
 | F3DEX2         | 54          | 19           | 73                 | 3 then 12     |
 
