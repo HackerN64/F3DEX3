@@ -3021,25 +3021,19 @@ vPackZ   equ $v26 // = vDDD; Z in packed normals
 .if !CFG_LEGACY_VTX_PIPE
     vand    vPackPXY, vAAA, $v31[6]          // 0x7F00; positive X, Y
     vmudh   $v29, vOne, $v31[1]              // -1; set all elems of $v29 to -1
-    // vnop
-    // vnop
+    // vnop; vnop
     vaddc   vBBB, vPackPXY, vPackPXY[1q]     // elems 0, 4: +X + +Y, no clamping; VCO always 0
     vxor    vPairNrml, vPackPXY, $v31[6]     // 0x7F00 - x, 0x7F00 - y
-    // vnop
-    // vnop
+    // vnop; vnop
     vxor    vPackZ, vBBB, $v31[6]            // 0x7F00 - +X - +Y in elems 0, 4
     vge     $v29, $v29, vBBB[0h]             // set 0-3, 4-7 vcc if -1 >= (+X + +Y), = negative
     vmrg    vPairNrml, vPairNrml, vPackPXY   // If so, use 0x7F00 - +X, else +X (same for Y)
     vne     $v29, $v31, $v31[2h]             // Set VCC to 11011101
-    // vnop
-    // vnop
+    // vnop; vnop
     vabs    vPairNrml, vAAA, vPairNrml       // Apply sign of original X and Y to new X and Y
-    // vnop
-    // vnop
-    // vnop
+    // vnop; vnop; vnop
     vmrg    vPairNrml, vPairNrml, vPackZ[0h] // Move Z to elements 2, 6
-    // vnop
-    // vnop
+    // vnop; vnop
 lt_skip_packed_normals:
     // Transform normals by M, in case normalsMode = G_NORMALSMODE_FAST.
     vsub    vPairRGBA, vPairRGBA, $v31[7] // 0x7FFF; offset alpha, will be fixed later
@@ -3170,6 +3164,7 @@ vLtAOut    equ $v26 // = vDDD: light / effects alpha output
     andi    $20, $5, G_PACKED_NORMALS >> 8
     // vnop
     andi    $10, $5, G_TEXTURE_GEN >> 8
+    // vnop
     // nop
     vmulf   vLtRGBOut, vPairRGBA, vPairLt  // RGB output is RGB * light
     beqz    $11, lt_skip_cel
