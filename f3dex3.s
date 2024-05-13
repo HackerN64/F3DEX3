@@ -3358,7 +3358,7 @@ G_MTX_end:
     nop                                    // Needs to take up the space for the other perf counter
 .endif
     j       ovl4_select_instr
-     li     $2, 1                // $7 = 1 (lighting && mIT invalid) if doing calc_mit
+     lw     cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Overwritten by overlay load
 
 // Jump here to do clipping. If overlay 4 is loaded (this code), loads overlay 3
 // and jumps to right here, which is now in the new code.
@@ -3370,6 +3370,7 @@ ovl234_clipping_entrypoint_ovl4ver:        // same IMEM address as ovl234_clippi
      li     cmd_w1_dram, orga(ovl3_start)  // set up a load for overlay 3
 
 ovl4_select_instr:
+    li      $2, 1                // $7 = 1 (lighting && mIT invalid) if doing calc_mit
     beq     $2, $7, calc_mit // otherwise $7 = command byte
      li     $3, G_BRANCH_WZ
     beq     $3, $7, g_branch_wz_real
