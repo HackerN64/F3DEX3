@@ -914,6 +914,9 @@ G_LIGHTTORDP_handler:
 vertex_end:
 tri_end:
 .endif
+.if CFG_LEGACY_VTX_PIPE
+G_MEMSET_handler:
+.endif
 G_SPNOOP_handler:
 run_next_DL_command:
      mfc0   $1, SP_STATUS                               // load the status word into register $1
@@ -3348,7 +3351,7 @@ ovl234_lighting_entrypoint_ovl4ver:        // same IMEM address as ovl234_lighti
 // Jump here for all overlay 4 features. If overlay 4 is loaded (this code), jumps
 // to the instruction selection below.
 ovl234_ovl4_entrypoint:
-.if !CFG_LEGACY_VTX_PIPE && !CFG_NO_OCCLUSION_PLANE
+.if !CFG_NO_OCCLUSION_PLANE
 G_MTX_end:
 .endif
 .if CFG_PROFILING_B
@@ -3428,7 +3431,7 @@ g_memset_real:
 memsetBufferStart equ ((vertexBuffer + 0xF) & 0xFF0)
 memsetBufferEnd equ (clipTempVertsEnd & 0xFF0)
 memsetBufferSize equ (memsetBufferEnd - memsetBufferStart)
-    llv     $v2[0], rdpHalf1Val         // Load the memset value
+    llv     $v2[0], (rdpHalf1Val)($zero) // Load the memset value
     sll     cmd_w0, cmd_w0, 8           // Clear upper byte
     jal     segmented_to_physical
      srl    cmd_w0, cmd_w0, 8           // Number of bytes to memset (must be mult of 16)
@@ -3448,7 +3451,7 @@ memsetBufferSize equ (memsetBufferEnd - memsetBufferStart)
     sub     cmd_w0, cmd_w0, $2
     bgtz    cmd_w0, @@transaction_loop
      add    cmd_w1_dram, cmd_w1_dram, $2
-    jr      $ra
+    j       wait_for_dma_and_run_next_command
      // Delay slot harmless
 clamp_to_memset_buffer:
     addi    $11, cmd_w0, -memsetBufferSize // Is more than a whole buffer left?

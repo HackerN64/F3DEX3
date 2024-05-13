@@ -44,6 +44,7 @@ of warnings if you use -Wpedantic. */
 /*#define G_SPECIAL_3       0xD3  no-op in F3DEX2 */
 /*#define G_SPECIAL_2       0xD4  no-op in F3DEX2 */
 /*#define G_SPECIAL_1       0xD5  triggered MVP recalculation, not supported in F3DEX3 */
+#define G_MEMSET            0xD5
 #define G_DMA_IO            0xD6
 #define G_TEXTURE           0xD7
 #define G_POPMTX            0xD8
@@ -2384,6 +2385,22 @@ _DW({                                               \
 #define gSPDmaWrite(pkt,dmem,dram,size) gSPDma_io((pkt),1,(dmem),(dram),(size))
 #define gsSPDmaWrite(dmem,dram,size)    gsSPDma_io(     1,(dmem),(dram),(size))
 
+/**
+ * Use RSP DMAs to set a region of memory to a repeated 16-bit value. This can
+ * clear the color framebuffer or Z-buffer faster than the RDP can in fill mode.
+ * dram: Segmented or physical start address. Must be aligned to 16 bytes.
+ * value: 16-bit value to fill the memory with. e.g. 0 for color, 0xFFFC for Z.
+ * size: Size in bytes to fill, must be nonzero and a multiple of 16 bytes.
+ */
+#define gSPMemset(pkt, dram, value, size)               \
+_DW({                                                   \
+    gImmp1(pkt, G_RDPHALF_1, ((value) & 0xFFFF));       \
+    gDma0p(pkt, G_MEMSET, (dram), ((size) & 0xFFFFF0)); \
+})
+
+#define gsSPMemset(pkt, dram, value, size)    \
+    gsImmp1(G_RDPHALF_1, ((value) & 0xFFFF)), \
+    gsDma0p(G_MEMSET, (dram), ((size) & 0xFFFFF0))
 
 /*
  * RSP short command (no DMA required) macros
