@@ -499,6 +499,7 @@ jumpTableEntry G_MOVEMEM_end  // G_MOVEMEM, G_MTX (load)
 
 // RDP/Immediate Command Mini Table
 // 1 byte per entry, after << 2 points to an addr in first 1/4 of IMEM
+miniTableEntry G_MEMSET_handler
 miniTableEntry G_DMA_IO_handler
 miniTableEntry G_TEXTURE_handler
 miniTableEntry G_POPMTX_handler
@@ -1017,6 +1018,7 @@ branchwz_return_from_addrs:
 .else
 G_DMA_IO_handler:
 G_BRANCH_WZ_handler:
+G_MEMSET_handler:
     j       ovl234_ovl4_entrypoint          // Delay slot is harmless
 .endif
 load_cmds_handler:
@@ -3370,6 +3372,8 @@ ovl4_select_instr:
     beq     $3, $7, g_branch_wz_real
      li     $2, (0xFF00 | G_DMA_IO)
     beq     $2, $7, g_dma_io_real
+     li     $3, (0xFF00 | G_MEMSET)
+    beq     $3, $7, g_memset_real
      nop
      // Otherwise g_mtx_end_real
 
@@ -3419,6 +3423,39 @@ g_dma_io_real:
     sra     dmemAddr, dmemAddr, 2
     j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
      li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
+
+g_memset_real:
+memsetBufferStart equ ((vertexBuffer + 0xF) & 0xFF0)
+memsetBufferEnd equ (clipTempVertsEnd & 0xFF0)
+memsetBufferSize equ (memsetBufferEnd - memsetBufferStart)
+    llv     $v2[0], rdpHalf1Val         // Load the memset value
+    sll     cmd_w0, cmd_w0, 8           // Clear upper byte
+    jal     segmented_to_physical
+     srl    cmd_w0, cmd_w0, 8           // Number of bytes to memset (must be mult of 16)
+    li      $3, memsetBufferStart + 0x10 // Last qword set is memsetBufferStart
+    jal     clamp_to_memset_buffer
+     vmudh  $v2, vOne, $v2[1]           // Move element 1 (lower bytes) to all
+    addi    $2, $2, memsetBufferStart   // First qword set is one below memsetBufferEnd
+@@pre_loop:
+    sqv     $v2, (-0x10)($2)
+    bne     $2, $3, @@pre_loop
+     addi   $2, -0x10
+@@transaction_loop:
+    jal     clamp_to_memset_buffer
+     li     dmemAddr, 0x8000 | memsetBufferStart  // Always write from start of buffer
+    jal     dma_read_write
+     addi   dmaLen, $2, -1
+    sub     cmd_w0, cmd_w0, $2
+    bgtz    cmd_w0, @@transaction_loop
+     add    cmd_w1_dram, cmd_w1_dram, $2
+    jr      $ra
+     // Delay slot harmless
+clamp_to_memset_buffer:
+    addi    $11, cmd_w0, -memsetBufferSize // Is more than a whole buffer left?
+    bltz    $11, return_routine
+     move   $2, cmd_w0                  // No, use partial buffer
+    jr      $ra
+     li     $2, memsetBufferSize
 
 g_branch_wz_real:
     j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $10
