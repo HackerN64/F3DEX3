@@ -582,6 +582,13 @@ MAX_CLIP_GEN_VERTS equ 7
 // which are portions of the 3 original edges plus portions of 5 edges along the
 // 5 clip planes. But the edge portion along the no-nearclipping plane is at
 // infinity, so that edge can't be on screen.
+// It is rare but possible for these assumptions to be violated and a polygon
+// with more than 7 verts to be generated. For example, numerical precision
+// issues could cause the polygon to be slightly non-convex at one of the clip
+// planes, causing the plane to cut off more than one tip. However, this
+// implementation checks for an imminent overflow and aborts clipping (draws no
+// tris) if this occurs. Because this is caused by extreme/degenerate cases like
+// the camera exactly on a tri, not drawing anything is an okay result.
 MAX_CLIP_POLY_VERTS equ 7
 clipPoly:
     .skip (MAX_CLIP_POLY_VERTS+1) * 2   // 3   5   7 + term 0
@@ -1914,9 +1921,12 @@ clip_skipxy:
     // the final result. Then the reciprocal of vClDiffI:F is computed with a Newton-
     // Raphson iteration and multiplied by vClBaseI:F. Finally scale down by $v2.
     vor     $v29, vClDiffI, vOne[0]       // round up int sum to odd; this ensures the value is not 0, otherwise v29 will be 0 instead of +/- 2
+    sub     $11, clipPolyWrite, clipPolySelect // Make sure we are not overflowing
     vrcph   $v3[3], vClDiffI[3]
+    addi    $11, $11, 6 - ((MAX_CLIP_POLY_VERTS) * 2) // Write ptr to last zero slot
     vrcpl   $v2[3], vClDiffF[3]           // frac: 1 / (x+y+z+w), vtx on screen - vtx off screen
-    vrcph   $v3[3], $v31[2]               // 0; get int result of reciprocal
+    bgez    $11, clip_done                // If so, give up
+     vrcph  $v3[3], $v31[2]               // 0; get int result of reciprocal
     vabs    $v29, $v29, $v31[3]           // 2; v29 = +/- 2 based on sum positive (incl. zero) or negative
     vmudn   $v2, $v2, $v29[3]             // multiply reciprocal by +/- 2
     vmadh   $v3, $v3, $v29[3]
@@ -1981,7 +1991,10 @@ clip_skipxy:
 clip_nextedge:
     bnez    clipFlags, clip_edgelooptop   // Discard V2 if it was off screen (whether inserted vtx or not)
      move   $3, $2                        // Move what was the end of the edge to be the new start of the edge
-    sh      $3, (clipPoly)(clipPolyWrite) // Former V2 was on screen, so add it to the output polygon
+    sub     $11, clipPolyWrite, clipPolySelect // Make sure we are not overflowing
+    addi    $11, $11, 6 - ((MAX_CLIP_POLY_VERTS) * 2) // Write ptr to last zero slot
+    bgez    $11, clip_done                // If so, give up
+     sh     $3, (clipPoly)(clipPolyWrite) // Former V2 was on screen, so add it to the output polygon
     j       clip_edgelooptop
      addi   clipPolyWrite, clipPolyWrite, 2
 
@@ -3353,7 +3366,7 @@ G_MTX_end:
     nop                                    // Needs to take up the space for the other perf counter
 .endif
     j       ovl4_select_instr
-     li     $2, 1                // $7 = 1 (lighting && mIT invalid) if doing calc_mit
+     lw     cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Overwritten by overlay load
 
 // Jump here to do clipping. If overlay 4 is loaded (this code), loads overlay 3
 // and jumps to right here, which is now in the new code.
@@ -3365,6 +3378,7 @@ ovl234_clipping_entrypoint_ovl4ver:        // same IMEM address as ovl234_clippi
      li     cmd_w1_dram, orga(ovl3_start)  // set up a load for overlay 3
 
 ovl4_select_instr:
+    li      $2, 1                // $7 = 1 (lighting && mIT invalid) if doing calc_mit
     beq     $2, $7, calc_mit // otherwise $7 = command byte
      li     $3, G_BRANCH_WZ
     beq     $3, $7, g_branch_wz_real
