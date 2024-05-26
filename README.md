@@ -88,9 +88,6 @@ breaking changes.**
   a segment to run the material, remap the segment in the material to a
   display list that immediately returns, and so if the material is called again
   it won't run.
-- Clipped triangles are drawn by minimal overlapping scanlines algorithm; this
-  **slightly improves RDP draw time** for large tris (max of about 500 us per
-  frame, usually much less or zero).
 
 ### Miscellaneous
 
@@ -98,7 +95,8 @@ breaking changes.**
   to an object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where
   a Z component was accidentally doubled in the point lighting calculations. The
   quadratic point light attenuation factor is now an E3M5 floating-point number.
-  The performance penalty for point lighting has been reduced.
+  The performance penalty for using large numbers of point lights has been
+  reduced.
 - Maximum number of directional / point **lights raised from 7 to 9**. Minimum
   number of directional / point lights lowered from 1 to 0 (F3DEX2 required at
   least one). Also supports loading all lights in one DMA transfer
@@ -682,6 +680,64 @@ segment 0 must always be 0x00000000 so that this address resolves to e.g.
   even if they were changed before drawing tris.
 
 
+## What happened to the clipping minimal scanlines algorithm?
+
+Earlier F3DEX3 versions included a modified algorithm for triangulating the
+polygon which was formed as the result of clipping. This algorithm broke up the
+polygon into triangles in such a way that the fewest scanlines were accessed
+multiple times, leading to maximum performance on the RDP. For example, if the
+polygon was a diamond shape, this algorithm would always cut it horizontally--
+leading to few or no scanlines being touched by both the top and bottom tris--as
+opposed to vertically, leading to all scanlines being touched by the left and
+right tris.
+
+In testing, this was able to save a few hundred microseconds at best in scenes
+with many large clipped tris. However, this feature has been removed, because it
+was found to cause undesirable visual artifacts. Other changes to clipping were
+experimented with in the past, and ultimately not included. These are not due to
+a bug or design issue with the microcode, but a fundamental limitation of the
+RDP: vertex colors are interpolated in screen space without perspective
+correction. In other words, the shade colors of any triangle not flat to the
+camera are slightly wrong--the same world space portion of the triangle will
+have a slightly different color depending on how the camera is rotated around
+it. The issues with clipping are a result of this.
+
+To show why this is an unavoidable issue on the N64, here is an example:
+
+![Color interpolation example](images/colorinterp.png)
+
+A: The triangle has vertex colors 0, 128, 255 (same for all three color
+components) as shown. It is clipped off the left side of the screen halfway
+through its world-space coordinates, so the generated vertices have colors 64
+and 192 respectively.
+
+B: Due to perspective and the clipped vertex being near the camera plane, the
+clipped polygon is distorted to this shape.
+
+C: If this polygon is triangulated this way, the point in the middle of the
+polygon has color 160 (halfway between 64 and 255).
+
+D: If this polygon is instead triangulated this way, the point in the middle of
+the polygon has color 96 (halfway between 192 and 0).
+
+Note that BOTH of these are wrong: the correct value for that pixel is 128,
+because all points on the horizontal midline of the original triangle are color
+128. The N64 can't draw the correct triangle here--its colors would have to
+change nonlinearly along an edge.
+
+The problem with the clipping minimal scanlines algorithm is that it would
+switch between cases C and D here based on which diagonal had a larger Y
+component. In other words, if the camera moved slightly, the choice of
+triangulation might change, causing the middle of the polygon to visibly change
+color. This was visible on large scene triangles with lighting: as you walked
+around, the colors would have slight but abrupt changes, which look wrong/bad.
+
+The best we can do, which is what all previous F3D family microcodes did and
+F3DEX3 does now, is to triangulate in a consistent way, based on the winding
+of the input triangles. The results are still wrong, but they're wrong the same
+way every frame, so there are no abrupt changes visible.
+
+
 ## Credits
 
 F3DEX3 modifications from F3DEX2 are by Sauraen and are dedicated to the public
@@ -692,7 +748,7 @@ If you use F3DEX3 in a romhack, please credit "F3DEX3 Microcode - Sauraen" in
 your project's in-game Staff Roll or wherever other contributors to your project
 are credited.
 
-Other credits:
+Other contributors:
 - Wiseguy: large chunk of F3DEX2 disassembly documentation and first version of
   build system
 - Tharo: relative segment resolution feature, other feature discussions

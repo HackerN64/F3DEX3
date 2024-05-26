@@ -2018,86 +2018,17 @@ clip_nextcond:
 clip_draw_tris:
     lqv     $v30, (v30Value)($zero)
 // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
-    addi    clipPolySelect, clipPolySelect, -6 // = Pointer to first vertex
-    // Available locals: most registers ($5, $6, $7, $8, $9, $11, $10, etc.)
-    // Available regs which won't get clobbered by tri write: 
-    // clipPolySelect, clipPolyWrite, $14 (inputVtxPos), $15 (outputVtxPos), (more)
-    // Find vertex highest on screen (lowest screen Y)
-    li      $5, 0x7FFF                // current best value
-    move    $7, clipPolySelect        // initial vertex pointer
-    lhu     $10, (clipPoly)($7)       // Load vertex address
-clip_search_highest_loop:
-    lh      $9, VTX_SCR_Y($10)        // Load screen Y
-    sub     $11, $9, $5               // Branch if new vtx Y >= best vtx Y
-    bgez    $11, clip_search_skip_better
-     addi   $7, $7, 2                 // Next vertex
-    addi    $14, $7, -2               // Save pointer to best/current vertex
-    move    $5, $9                    // Save best value
-clip_search_skip_better:
-    bne     clipPolyWrite, $7, clip_search_highest_loop
-     lhu    $10, (clipPoly)($7)       // Next vertex address
-    addi    clipPolyWrite, clipPolyWrite, -2   // = Pointer to last vertex
-    // Find next closest vertex, from the two on either side
-    bne     $14, clipPolySelect, @@skip1
-     addi   $6, $14, -2               // $6 = previous vertex
-    move    $6, clipPolyWrite
-@@skip1:
-    lhu     $7, (clipPoly)($6)
-    bne     $14, clipPolyWrite, @@skip2
-     addi   $8, $14, 2                // $8 = next vertex
-    move    $8, clipPolySelect
-@@skip2:
-    lhu     $9, (clipPoly)($8)
-    lh      $7, VTX_SCR_Y($7)
-    lh      $9, VTX_SCR_Y($9)
-    sub     $11, $7, $9               // If value from prev vtx >= value from next, use next
-    bgez    $11, clip_draw_loop
-     move   $15, $8                   // $14 is first, $8 -> $15 is next
-    move    $15, $14                  // $14 -> $15 is next
-    move    $14, $6                   // $6 -> $14 is first
-clip_draw_loop:
-    // Current edge is $14 - $15 (pointers to clipPoly). We can either draw
-    // (previous) - $14 - $15, or we can draw $14 - $15 - (next). We want the
-    // one where the lower edge covers the fewest scanlines. This edge is
-    // (previous) - $15 or $14 - (next).
-    // $1, $2, $3, $5 are vertices at $11=prev, $14, $15, $10=next
-    bne     $14, clipPolySelect, @@skip1
-     addi   $11, $14, -2
-    move    $11, clipPolyWrite
-@@skip1:
-    beq     $11, $15, clip_done // If previous is $15, we only have two verts left, done
-     lhu    $1, (clipPoly)($11)     // From the group below, need something in the delay slot
-    bne     $15, clipPolyWrite, @@skip2
-     addi   $10, $15, 2
-    move    $10, clipPolySelect
-@@skip2:
-    lhu     $2, (clipPoly)($14)
-    lhu     $3, (clipPoly)($15)
-    lhu     $5, (clipPoly)($10)
-    lsv     $v5[0], (VTX_SCR_Y)($1)
-    lsv     $v5[4], (VTX_SCR_Y)($2)
-    lsv     $v5[2], (VTX_SCR_Y)($3)
-    lsv     $v5[6], (VTX_SCR_Y)($5)
-    vsub    $v5, $v5, $v5[1q]  // Y(prev) - Y($15) in elem 0, Y($14) - Y(next) in elem 2
-    move    $8, $14            // Temp copy of $14, will be overwritten
-    vabs    $v5, $v5, $v5      // abs of each
-    vlt     $v29, $v5, $v5[0h] // Elem 2: second difference less than first difference
-    cfc2    $9, $vcc           // Get comparison results
-    andi    $9, $9, 4          // Look at only vector element 2
-    beqz    $9, clip_final_draw // Skip the change if second diff greater than or equal to first diff
-     move   $14, $11           // If skipping, drawing prev-$14-$15, so update $14 to be prev
-    move    $1, $2             // Drawing $14, $15, next
-    move    $2, $3
-    move    $3, $5
-    move    $14, $8            // Restore overwritten $14
-    move    $15, $10           // Update $15 to be next
-clip_final_draw:
+// Draws verts in pattern like 0-1-4, 1-2-4, 2-3-4
+clip_draw_tris_loop:
+    lhu     $1, (clipPoly - 6)(clipPolySelect)
+    lhu     $2, (clipPoly - 4)(clipPolySelect)
+    lhu     $3, (clipPoly - 2)(clipPolyWrite)
     mtc2    $1, $v27[10]              // Addresses go in vector regs too
     mtc2    $2, $v4[12]
-    mtc2    $3, $v27[14]
-    j       tri_noinit         // Draw tri
-     li     $ra, clip_draw_loop // When done, return to top of loop
-
+    jal     tri_noinit
+     mtc2   $3, $v27[14]
+    bne     clipPolyWrite, clipPolySelect, clip_draw_tris_loop
+     addi   clipPolySelect, clipPolySelect, 2
 clip_done:
     lh      $ra, tempTriRA
     jr      $ra
