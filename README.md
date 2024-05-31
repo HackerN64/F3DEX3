@@ -84,10 +84,14 @@ breaking changes.**
   buffers, **saving some DRAM traffic** (maybe around 100 us per frame). The
   bits used for this are ignored by HLE.
 - Segment addresses are now resolved relative to other segments (feature by
-  Tharo). This enables a strategy for skipping repeated material DLs: call
+  Tharo). This enables a strategy for **skipping repeated material DLs**: call
   a segment to run the material, remap the segment in the material to a
   display list that immediately returns, and so if the material is called again
   it won't run.
+- New `SPMemset` command fills a specified RDRAM region with a repeated 16-bit
+  value. This can be used for clearing the Z buffer or filling the framebuffer
+  or the letterbox with a solid color **faster than the RDP can in fill mode**.
+  Practical performance may vary due to scheduling constraints.
 
 ### Miscellaneous
 

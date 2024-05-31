@@ -2388,6 +2388,9 @@ _DW({                                               \
 /**
  * Use RSP DMAs to set a region of memory to a repeated 16-bit value. This can
  * clear the color framebuffer or Z-buffer faster than the RDP can in fill mode.
+ * SPMemset overwrites the DMEM vertex buffer, so vertices loaded before this
+ * command cannot be used after it (though this would not normally be done).
+ * 
  * dram: Segmented or physical start address. Must be aligned to 16 bytes.
  * value: 16-bit value to fill the memory with. e.g. 0 for color, 0xFFFC for Z.
  * size: Size in bytes to fill, must be nonzero and a multiple of 16 bytes.

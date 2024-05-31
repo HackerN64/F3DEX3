@@ -14,18 +14,18 @@ YDF_OFFSET_TASKDATAPTR  equ 0x10
 YDF_OFFSET_UCODE        equ 0x14
 
 // OSTask data member offsets
-OSTask_type             equ 0x0000
-OSTask_flags            equ 0x0004 // see note below
-OSTask_ucode_boot       equ 0x0008
-OSTask_ucode_boot_size  equ 0x000C
+OSTask_type             equ 0x0000 //                      EX3: fourthQWMVP ^
+OSTask_flags            equ 0x0004 // see note below                        |
+OSTask_ucode_boot       equ 0x0008 //                                       |
+OSTask_ucode_boot_size  equ 0x000C //                                       v
 OSTask_ucode            equ 0x0010 // used in F3D, S2D, and boot
-OSTask_ucode_size       equ 0x0014
-OSTask_ucode_data       equ 0x0018 // used in boot only
-OSTask_ucode_data_size  equ 0x001C // used in boot only
+OSTask_ucode_size       equ 0x0014 //                      EX3: startCounterTime
+OSTask_ucode_data       equ 0x0018 // used in boot only.   EX3: xfrmLookatDirs ^
+OSTask_ucode_data_size  equ 0x001C // used in boot only                        v
 OSTask_dram_stack       equ 0x0020 // used in F3D and S2D at first startup
 OSTask_dram_stack_size  equ 0x0024
 OSTask_output_buff      equ 0x0028 // used in F3D and S2D
-OSTask_output_buff_size equ 0x002C // actually end pointer; used in F3D and S2D
+OSTask_output_buff_size equ 0x002C // used in F3D and S2D; actually end pointer not size
 OSTask_data_ptr         equ 0x0030 // used in F3D and S2D
 OSTask_data_size        equ 0x0034
 OSTask_yield_data_ptr   equ 0x0038 // used in F3D and S2D

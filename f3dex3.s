@@ -185,6 +185,10 @@ Overlay 2
 Overlay 4
 */
 
+////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////// DMEM //////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
 // RSP DMEM
 .create DATA_FILE, 0x0000
 
@@ -620,6 +624,10 @@ clipTempVertsEnd:
     .error "Not enough space for temp matrix!"
 .endif
 
+memsetBufferStart equ ((vertexBuffer + 0xF) & 0xFF0)
+memsetBufferEnd equ (clipTempVertsEnd & 0xFF0)
+memsetBufferSize equ (memsetBufferEnd - memsetBufferStart)
+
 RDP_CMD_BUFSIZE equ 0xB0
 RDP_CMD_BUFSIZE_EXCESS equ 0xB0 // Maximum size of an RDP triangle command
 RDP_CMD_BUFSIZE_TOTAL equ (RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS)
@@ -682,11 +690,8 @@ xfrmLookatDirs equ -(0x1000 - (OSTask + OSTask_ucode_data)) // and OSTask_ucode_
 
 .close // DATA_FILE
 
-// RSP IMEM
-.create CODE_FILE, 0x00001080
-
 ////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////// Register Use Map ///////////////////////////////
+/////////////////////////////// Register Naming ////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
 // Vertex / lighting all regs:
@@ -808,6 +813,197 @@ postOvlRA equ $10 // Commonly used locally
 // $30: perfCounterC (global)
 // $ra: Return address for jal, b*al
 
+// Vertex configurations registers
+
+// armips only executes "equ" statements on the codepath where they are defined.
+// However, it always parses all assembly instructions, even if they current codepath
+// is not active. So, code like "A equ $20; add A, $11, $11" will cause an error
+// on a disabled codepath, as the first statement is not executed but the second
+// is parsed and A is not defined.
+// For CFG_LEGACY_VTX_PIPE, use the registers which would normally be the VP matrix
+// to store constants from setup, including through clipping. This does not save
+// cycles during vertex processing because the loads are always hidden, but it saves
+// two instructions each to save and restore them. (For ST it saves cycles too)
+.if CFG_LEGACY_VTX_PIPE
+sVPO equ $v9
+sVPS equ $v8
+sSTO equ $v11 // not supported on legacy vtx pipe, but register allocated for it
+sSTS equ $v10
+.else
+sVPO equ $v17
+.if CFG_NO_OCCLUSION_PLANE
+sVPS equ $v26
+.else
+sVPS equ $v16
+.endif
+sSTO equ $v26
+sSTS equ $v25
+.endif
+.if CFG_LEGACY_VTX_PIPE
+sOUTF equ vPairTPosF
+sOUTI equ vPairTPosI
+.else
+sOUTF equ vPairPosF
+sOUTI equ vPairPosI
+.endif
+.if CFG_NO_OCCLUSION_PLANE
+sFOG equ $v25
+sCLZ equ $v21
+sTCL equ $v21
+sTPN equ $v16
+// Occlusion plane; these don't exist on this codepath
+sO03 equ $v29
+sO47 equ $v29
+sOCM equ $v29
+sOC1 equ $v29
+sOC2 equ $v29
+sOC3 equ $v29
+sOPM equ $v29
+sOPMs equ $v29
+sOSC equ $v29
+.else
+sFOG equ $v16
+sCLZ equ $v25
+sTCL equ $v29 // does not exist on this codepath
+sTPN equ $v18
+// Occlusion plane
+sO03 equ $v26
+sO47 equ $v23
+sOCM equ $v22
+sOC1 equ $v21
+sOC2 equ $v27
+sOC3 equ $v21
+.if CFG_LEGACY_VTX_PIPE
+sOPM equ $v12  // Kept here through whole processing
+sOPMs equ $v12 // so these are the same
+.else
+sOPM equ $v17  // When used
+sOPMs equ $v24 // Just another temp register
+.endif
+sOSC equ $v21
+.endif
+// Temp storage after rdpCmdBufEndP1. There is 0xA8 of space here which will
+// always be free during vtx load or clipping.
+tempViewportScale equ 0x00
+tempViewportOffset equ 0x10
+tempOccPlusMinus equ 0x20
+tempXfrmSingle equ 0x30
+tempVpRGBA equ 0x40
+tempVpPkNorm equ 0x50
+
+
+////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////// IMEM //////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+// Macros for placing code in different places based on the microcode version
+
+.macro instantiate_mtx_end_begin
+// Multiplies the temp loaded matrix into the M or VP matrix
+    lhu     $6, (movememTable + G_MV_MMTX)($1) // Output; $1 holds 0 for M or 4 for VP.
+    li      $3, tempMemRounded // Input 1 = temp mem (loaded mtx)
+    jal     while_wait_dma_busy
+     move   $2, $6 // Input 0 = output
+    // Followed immedately by instantiate_mtx_multiply. These need to be broken
+    // up so we can insert the global mtx_multiply label between them.
+.endmacro
+.macro instantiate_mtx_multiply
+// $3, $2 are input matrices; $6 is output matrix; $7 is 0 for return to vtx
+    addi    $10, $3, 0x0018
+@@loop:
+    vmadn   $v7, $v31, $v31[2]  // 0
+    addi    $11, $3, 0x0008
+    vmadh   $v6, $v31, $v31[2]  // 0
+    addi    $2, $2, -0x0020
+    vmudh   $v29, $v31, $v31[2] // 0
+@@innerloop:
+    ldv     $v3[0], 0x0040($2)
+    ldv     $v3[8], 0x0040($2)
+    lqv     $v1[0], 0x0020($3) // Input 1
+    ldv     $v2[0], 0x0020($2)
+    ldv     $v2[8], 0x0020($2)
+    lqv     $v0[0], 0x0000($3) // Input 1
+    vmadl   $v29, $v3, $v1[0h]
+    addi    $3, $3, 0x0002
+    vmadm   $v29, $v2, $v1[0h]
+    addi    $2, $2, 0x0008 // Increment input 0 pointer
+    vmadn   $v5, $v3, $v0[0h]
+    bne     $3, $11, @@innerloop
+     vmadh  $v4, $v2, $v0[0h]
+    bne     $3, $10, @@loop
+     addi   $3, $3, 0x0008
+    sqv     $v7[0], (0x0020)($6)
+    sqv     $v6[0], (0x0000)($6)
+.if CFG_LEGACY_VTX_PIPE
+    beqz    $7, vtx_after_mtx_multiply
+.endif
+     sqv    $v4[0], (0x0010)($6)
+    j       run_next_DL_command
+     sqv    $v5[0], (0x0030)($6)
+.endmacro
+
+.macro instantiate_branch_wz
+    j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $10
+     li     $11, @@return_from_addrs
+@@return_from_addrs:
+.if CFG_G_BRANCH_W                      // G_BRANCH_W/G_BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
+    lh      $10, VTX_W_INT($10)         // read the w coordinate of the vertex (f3dzex)
+.else
+    lw      $10, VTX_SCR_Z($10)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
+.endif
+    sub     $2, $10, cmd_w1_dram        // subtract the w/z value being tested
+    bgez    $2, run_next_DL_command     // if vtx.w/z >= cmd w/z, continue running this DL
+     lw     cmd_w1_dram, rdpHalf1Val    // load the RDPHALF1 value as the location to branch to
+    j       branch_dl                   // need $2 < 0 for nopush and cmd_w1_dram
+     li     cmd_w0, 0                   // No count of DL cmds to skip
+.endmacro
+
+.macro instantiate_dma_io
+    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
+     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
+    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
+    // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
+    // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
+    sra     dmemAddr, dmemAddr, 2
+    j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
+     li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
+.endmacro
+
+.macro instantiate_memset
+    llv     $v2[0], (rdpHalf1Val)($zero) // Load the memset value
+    sll     cmd_w0, cmd_w0, 8           // Clear upper byte
+    jal     segmented_to_physical
+     srl    cmd_w0, cmd_w0, 8           // Number of bytes to memset (must be mult of 16)
+    li      $3, memsetBufferStart + 0x10 // Last qword set is memsetBufferStart
+    jal     @@clamp_to_memset_buffer
+     vmudh  $v2, vOne, $v2[1]           // Move element 1 (lower bytes) to all
+    addi    $2, $2, memsetBufferStart   // First qword set is one below memsetBufferEnd
+@@pre_loop:
+    sqv     $v2, (-0x10)($2)
+    bne     $2, $3, @@pre_loop
+     addi   $2, -0x10
+@@transaction_loop:
+    jal     @@clamp_to_memset_buffer
+     li     dmemAddr, 0x8000 | memsetBufferStart  // Always write from start of buffer
+    jal     dma_read_write
+     addi   dmaLen, $2, -1
+    sub     cmd_w0, cmd_w0, $2
+    bgtz    cmd_w0, @@transaction_loop
+     add    cmd_w1_dram, cmd_w1_dram, $2
+    j       wait_for_dma_and_run_next_command
+     // Delay slot harmless
+@@clamp_to_memset_buffer:
+    addi    $11, cmd_w0, -memsetBufferSize // Is more than a whole buffer left?
+    bltz    $11, return_routine
+     move   $2, cmd_w0                  // No, use partial buffer
+    jr      $ra
+     li     $2, memsetBufferSize
+.endmacro
+
+
+// RSP IMEM
+.create CODE_FILE, 0x00001080
+
 // Initialization routines
 // Everything up until ovl01_end will get overwritten by ovl0 and/or ovl1
 start: // This is at IMEM 0x1080, not the start of IMEM
@@ -921,9 +1117,6 @@ G_LIGHTTORDP_handler:
 vertex_end:
 tri_end:
 .endif
-.if CFG_LEGACY_VTX_PIPE
-G_MEMSET_handler:
-.endif
 G_SPNOOP_handler:
 run_next_DL_command:
      mfc0   $1, SP_STATUS                               // load the status word into register $1
@@ -972,6 +1165,75 @@ call_ret_common:
     j       displaylist_dma_with_count
      sb     $1, displayListStackLength
 
+G_LOAD_UCODE_handler:
+    j       load_overlay_0_and_enter         // Delay slot is harmless
+G_MODIFYVTX_handler:
+    // Command byte 3 = vtx being modified; its addr -> $10
+     li     $11, do_moveword  // Moveword adds cmd_w0 to $10 for final addr
+    lbu     cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx
+vtx_addrs_from_cmd:
+    // Treat eight bytes of last command each as vertex indices << 1
+    // inputBufferEnd is close enough to the end of DMEM to fit in signed offset
+    lpv     $v27[0], (-(0x1000 - (inputBufferEnd - 0x08)))(inputBufferPos)
+vtx_indices_to_addr:
+    // Input and output in $v27
+    // Also out elem 3 -> $10, elem 7 -> $3 because these are used more than once
+    lqv     $v30, (v30Value)($zero)
+    vmudl   $v29, $v27, $v30[1]   // Multiply vtx indices times length
+    vmadn   $v27, vOne, $v30[0]   // Add address of vertex buffer
+    sb      $zero, materialCullMode // This covers all tri cmds, vtx, modify vtx, branchZ, cull
+    mfc2    $10, $v27[6]
+    jr      $11
+     mfc2   $3, $v27[14]
+
+G_TRISTRIP_handler:
+    j       tri_strip_fan_start
+     li     $ra, tri_strip_fan_loop
+G_TRIFAN_handler:
+    li      $ra, tri_strip_fan_loop + 0x8000 // Negative = flag for G_TRIFAN
+tri_strip_fan_start:
+    addi    cmd_w0, inputBufferPos, inputBufferEnd - 8 // Start pointing to cmd byte
+tri_strip_fan_loop:
+    lw      cmd_w1_dram, 0(cmd_w0)       // Load tri indices to lower 3 bytes of word
+    addi    $11, inputBufferPos, inputBufferEnd - 3 // Off end of command
+    beq     $11, cmd_w0, tri_end         // If off end of command, exit
+     sll    $10, cmd_w1_dram, 24         // Put sign bit of vtx 3 in sign bit
+    bltz    $10, tri_end                 // If negative, exit
+     sw     cmd_w1_dram, 4(rdpCmdBufPtr) // Store non-shuffled indices
+    bltz    $ra, tri_fan_store           // Finish handling G_TRIFAN
+     addi   cmd_w0, cmd_w0, 1            // Increment
+    andi    $11, cmd_w0, 1               // If odd, this is the 1st/3rd/5th tri
+    bnez    $11, tri_main                // Draw as is
+     srl    $10, cmd_w1_dram, 8          // Move vtx 2 to LSBs
+    sb      cmd_w1_dram, 6(rdpCmdBufPtr) // Store vtx 3 to spot for 2
+    j       tri_main
+     sb     $10, 7(rdpCmdBufPtr)         // Store vtx 2 to spot for 3
+
+G_TRI2_handler:
+G_QUAD_handler:
+    jal     tri_main                     // Send second tri; return here for first tri
+     sw     cmd_w1_dram, 4(rdpCmdBufPtr) // Put second tri indices in temp memory
+G_TRI1_handler:
+    li      $ra, tri_end                 // After done with this tri, exit tri processing
+    sw      cmd_w0, 4(rdpCmdBufPtr)      // Put first tri indices in temp memory
+tri_main:
+    lpv     $v27[0], 0(rdpCmdBufPtr)     // Load tri indexes to elems 5, 6, 7
+    j       vtx_indices_to_addr          // elem 7 -> $3; rest in $v27
+     li     $11, tri_return_from_addrs
+
+G_VTX_handler:
+    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // $1 = size in bytes = vtx count * 0x10
+    lhu     $5, geometryModeLabel + 1          // Load middle 2 bytes of geom mode
+    srl     $2, cmd_w0, 11                     // n << 1
+    sub     $2, cmd_w0, $2                     // v0 << 1
+    sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
+.if COUNTER_A_UPPER_VERTEX_COUNT
+    sll     $11, $1, 12                        // Vtx count * 0x10000
+    add     perfCounterA, perfCounterA, $11    // Add to vertex count
+.endif
+    j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3 = $10
+     li     $11, vtx_return_from_addrs
+
 .if !ENABLE_PROFILING
 G_LIGHTTORDP_handler:
     lbu     $11, numLightsxSize          // Ambient light
@@ -1001,29 +1263,13 @@ G_SETxIMG_handler:
 .if CFG_LEGACY_VTX_PIPE
 
 G_DMA_IO_handler:
-    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
-     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
-    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
-    // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
-    // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
-    sra     dmemAddr, dmemAddr, 2
-    j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
-     li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
-
+    instantiate_dma_io
+    
 G_BRANCH_WZ_handler:
-    j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $10
-     li     $11, branchwz_return_from_addrs
-branchwz_return_from_addrs:
-.if CFG_G_BRANCH_W                      // G_BRANCH_W/G_BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
-    lh      $10, VTX_W_INT($10)         // read the w coordinate of the vertex (f3dzex)
-.else
-    lw      $10, VTX_SCR_Z($10)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
-.endif
-    sub     $2, $10, cmd_w1_dram        // subtract the w/z value being tested
-    bgez    $2, run_next_DL_command     // if vtx.w/z >= cmd w/z, continue running this DL
-     lw     cmd_w1_dram, rdpHalf1Val    // load the RDPHALF1 value as the location to branch to
-    j       branch_dl                   // need $2 < 0 for nopush and cmd_w1_dram
-     li     cmd_w0, 0                   // No count of DL cmds to skip
+    instantiate_branch_wz
+    
+G_MEMSET_handler:
+    instantiate_memset
 
 .else
 G_DMA_IO_handler:
@@ -1103,151 +1349,7 @@ flush_rdp_buffer:
     j       dma_read_write
      addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
 
-G_LOAD_UCODE_handler:
-    j       load_overlay_0_and_enter         // Delay slot is harmless
-G_MODIFYVTX_handler:
-    // Command byte 3 = vtx being modified; its addr -> $10
-     li     $11, do_moveword  // Moveword adds cmd_w0 to $10 for final addr
-    lbu     cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx
-vtx_addrs_from_cmd:
-    // Treat eight bytes of last command each as vertex indices << 1
-    // inputBufferEnd is close enough to the end of DMEM to fit in signed offset
-    lpv     $v27[0], (-(0x1000 - (inputBufferEnd - 0x08)))(inputBufferPos)
-vtx_indices_to_addr:
-    // Input and output in $v27
-    // Also out elem 3 -> $10, elem 7 -> $3 because these are used more than once
-    lqv     $v30, (v30Value)($zero)
-    vmudl   $v29, $v27, $v30[1]   // Multiply vtx indices times length
-    vmadn   $v27, vOne, $v30[0]   // Add address of vertex buffer
-    sb      $zero, materialCullMode // This covers all tri cmds, vtx, modify vtx, branchZ, cull
-    mfc2    $10, $v27[6]
-    jr      $11
-     mfc2   $3, $v27[14]
 
-G_TRISTRIP_handler:
-    j       tri_strip_fan_start
-     li     $ra, tri_strip_fan_loop
-G_TRIFAN_handler:
-    li      $ra, tri_strip_fan_loop + 0x8000 // Negative = flag for G_TRIFAN
-tri_strip_fan_start:
-    addi    cmd_w0, inputBufferPos, inputBufferEnd - 8 // Start pointing to cmd byte
-tri_strip_fan_loop:
-    lw      cmd_w1_dram, 0(cmd_w0)       // Load tri indices to lower 3 bytes of word
-    addi    $11, inputBufferPos, inputBufferEnd - 3 // Off end of command
-    beq     $11, cmd_w0, tri_end         // If off end of command, exit
-     sll    $10, cmd_w1_dram, 24         // Put sign bit of vtx 3 in sign bit
-    bltz    $10, tri_end                 // If negative, exit
-     sw     cmd_w1_dram, 4(rdpCmdBufPtr) // Store non-shuffled indices
-    bltz    $ra, tri_fan_store           // Finish handling G_TRIFAN
-     addi   cmd_w0, cmd_w0, 1            // Increment
-    andi    $11, cmd_w0, 1               // If odd, this is the 1st/3rd/5th tri
-    bnez    $11, tri_main                // Draw as is
-     srl    $10, cmd_w1_dram, 8          // Move vtx 2 to LSBs
-    sb      cmd_w1_dram, 6(rdpCmdBufPtr) // Store vtx 3 to spot for 2
-    j       tri_main
-     sb     $10, 7(rdpCmdBufPtr)         // Store vtx 2 to spot for 3
-
-G_TRI2_handler:
-G_QUAD_handler:
-    jal     tri_main                     // Send second tri; return here for first tri
-     sw     cmd_w1_dram, 4(rdpCmdBufPtr) // Put second tri indices in temp memory
-G_TRI1_handler:
-    li      $ra, tri_end                 // After done with this tri, exit tri processing
-    sw      cmd_w0, 4(rdpCmdBufPtr)      // Put first tri indices in temp memory
-tri_main:
-    lpv     $v27[0], 0(rdpCmdBufPtr)     // Load tri indexes to elems 5, 6, 7
-    j       vtx_indices_to_addr          // elem 7 -> $3; rest in $v27
-     li     $11, tri_return_from_addrs
-
-G_VTX_handler:
-// armips only executes "equ" statements on the codepath where they are defined.
-// However, it always parses all assembly instructions, even if they current codepath
-// is not active. So, code like "A equ $20; add A, $11, $11" will cause an error
-// on a disabled codepath, as the first statement is not executed but the second
-// is parsed and A is not defined.
-// For CFG_LEGACY_VTX_PIPE, use the registers which would normally be the VP matrix
-// to store constants from setup, including through clipping. This does not save
-// cycles during vertex processing because the loads are always hidden, but it saves
-// two instructions each to save and restore them. (For ST it saves cycles too)
-.if CFG_LEGACY_VTX_PIPE
-sVPO equ $v9
-sVPS equ $v8
-sSTO equ $v11 // not supported on legacy vtx pipe, but register allocated for it
-sSTS equ $v10
-.else
-sVPO equ $v17
-.if CFG_NO_OCCLUSION_PLANE
-sVPS equ $v26
-.else
-sVPS equ $v16
-.endif
-sSTO equ $v26
-sSTS equ $v25
-.endif
-.if CFG_LEGACY_VTX_PIPE
-sOUTF equ vPairTPosF
-sOUTI equ vPairTPosI
-.else
-sOUTF equ vPairPosF
-sOUTI equ vPairPosI
-.endif
-.if CFG_NO_OCCLUSION_PLANE
-sFOG equ $v25
-sCLZ equ $v21
-sTCL equ $v21
-sTPN equ $v16
-// Occlusion plane; these don't exist on this codepath
-sO03 equ $v29
-sO47 equ $v29
-sOCM equ $v29
-sOC1 equ $v29
-sOC2 equ $v29
-sOC3 equ $v29
-sOPM equ $v29
-sOPMs equ $v29
-sOSC equ $v29
-.else
-sFOG equ $v16
-sCLZ equ $v25
-sTCL equ $v29 // does not exist on this codepath
-sTPN equ $v18
-// Occlusion plane
-sO03 equ $v26
-sO47 equ $v23
-sOCM equ $v22
-sOC1 equ $v21
-sOC2 equ $v27
-sOC3 equ $v21
-.if CFG_LEGACY_VTX_PIPE
-sOPM equ $v12  // Kept here through whole processing
-sOPMs equ $v12 // so these are the same
-.else
-sOPM equ $v17  // When used
-sOPMs equ $v24 // Just another temp register
-.endif
-sOSC equ $v21
-.endif
-// Temp storage after rdpCmdBufEndP1. There is 0xA8 of space here which will
-// always be free during vtx load or clipping.
-tempViewportScale equ 0x00
-tempViewportOffset equ 0x10
-tempOccPlusMinus equ 0x20
-tempXfrmSingle equ 0x30
-tempVpRGBA equ 0x40
-tempVpPkNorm equ 0x50
-
-
-    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // $1 = size in bytes = vtx count * 0x10
-    lhu     $5, geometryModeLabel + 1          // Load middle 2 bytes of geom mode
-    srl     $2, cmd_w0, 11                     // n << 1
-    sub     $2, cmd_w0, $2                     // v0 << 1
-    sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
-.if COUNTER_A_UPPER_VERTEX_COUNT
-    sll     $11, $1, 12                        // Vtx count * 0x10000
-    add     perfCounterA, perfCounterA, $11    // Add to vertex count
-.endif
-    j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3 = $10
-     li     $11, vtx_return_from_addrs
 vtx_return_from_addrs:
     andi    $10, $10, 0xFFF8                   // Round down end addr to DMA word; one input vtx still fits in one internal vtx
     mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
@@ -1759,43 +1861,10 @@ skip_return_to_lt_or_loop:
 .endif // CFG_NO_OCCLUSION_PLANE
 
 .if CFG_LEGACY_VTX_PIPE || CFG_NO_OCCLUSION_PLANE
-G_MTX_end: // Multiplies the temp loaded matrix into the M or VP matrix
-    lhu     $6, (movememTable + G_MV_MMTX)($1) // Output; $1 holds 0 for M or 4 for VP.
-    li      $3, tempMemRounded // Input 1 = temp mem (loaded mtx)
-    jal     while_wait_dma_busy
-     move   $2, $6 // Input 0 = output
-mtx_multiply: // $3, $2 are input matrices; $6 is output matrix; $7 is 0 for return to vtx
-    addi    $10, $3, 0x0018
-@@loop:
-    vmadn   $v7, $v31, $v31[2]  // 0
-    addi    $11, $3, 0x0008
-    vmadh   $v6, $v31, $v31[2]  // 0
-    addi    $2, $2, -0x0020
-    vmudh   $v29, $v31, $v31[2] // 0
-@@innerloop:
-    ldv     $v3[0], 0x0040($2)
-    ldv     $v3[8], 0x0040($2)
-    lqv     $v1[0], 0x0020($3) // Input 1
-    ldv     $v2[0], 0x0020($2)
-    ldv     $v2[8], 0x0020($2)
-    lqv     $v0[0], 0x0000($3) // Input 1
-    vmadl   $v29, $v3, $v1[0h]
-    addi    $3, $3, 0x0002
-    vmadm   $v29, $v2, $v1[0h]
-    addi    $2, $2, 0x0008 // Increment input 0 pointer
-    vmadn   $v5, $v3, $v0[0h]
-    bne     $3, $11, @@innerloop
-     vmadh  $v4, $v2, $v0[0h]
-    bne     $3, $10, @@loop
-     addi   $3, $3, 0x0008
-    sqv     $v7[0], (0x0020)($6)
-    sqv     $v6[0], (0x0000)($6)
-.if CFG_LEGACY_VTX_PIPE
-    beqz    $7, vtx_after_mtx_multiply
-.endif
-     sqv    $v4[0], (0x0010)($6)
-    j       run_next_DL_command
-     sqv    $v5[0], (0x0030)($6)
+G_MTX_end:
+    instantiate_mtx_end_begin
+mtx_multiply:
+    instantiate_mtx_multiply
 .endif
     
 .if (. & 4)
@@ -2455,7 +2524,7 @@ dma_read_write:
     bnez    $11, dma_read_write
      addi   perfCounterD, perfCounterD, 6  // 3 instr + 2 after mfc + 1 taken branch
     j       dma_read_write_not_full
-     // Padding nops or $11 load in delay slot are not harmful.
+     // Padding nops or $11 load in delay slot are harmless.
 .endif
 
 totalImemUseUpTo1FC8:
@@ -3314,111 +3383,17 @@ ovl234_clipping_entrypoint_ovl4ver:        // same IMEM address as ovl234_clippi
      li     cmd_w1_dram, orga(ovl3_start)  // set up a load for overlay 3
 
 ovl4_select_instr:
-    li      $2, 1                // $7 = 1 (lighting && mIT invalid) if doing calc_mit
-    beq     $2, $7, calc_mit // otherwise $7 = command byte
-     li     $3, G_BRANCH_WZ
-    beq     $3, $7, g_branch_wz_real
-     li     $2, (0xFF00 | G_DMA_IO)
-    beq     $2, $7, g_dma_io_real
-     li     $3, (0xFF00 | G_MEMSET)
-    beq     $3, $7, g_memset_real
-     nop
-     // Otherwise g_mtx_end_real
-
 .if !CFG_NO_OCCLUSION_PLANE
-g_mtx_end_real:
-// Multiplies the temp loaded matrix into the M or VP matrix
-    lhu     $6, (movememTable + G_MV_MMTX)($1) // Output; $1 holds 0 for M or 4 for VP.
-    li      $3, tempMemRounded // Input 1 = temp mem (loaded mtx)
-    jal     while_wait_dma_busy // If ovl4 already in memory, was not done
-     move   $2, $6 // Input 0 = output
-    addi    $10, $3, 0x0018
-@@loop:
-    vmadn   $v7, $v31, $v31[2]  // 0
-    addi    $11, $3, 0x0008
-    vmadh   $v6, $v31, $v31[2]  // 0
-    addi    $2, $2, -0x0020
-    vmudh   $v29, $v31, $v31[2] // 0
-@@innerloop:
-    ldv     $v3[0], 0x0040($2)
-    ldv     $v3[8], 0x0040($2)
-    lqv     $v1[0], 0x0020($3) // Input 1
-    ldv     $v2[0], 0x0020($2)
-    ldv     $v2[8], 0x0020($2)
-    lqv     $v0[0], 0x0000($3) // Input 1
-    vmadl   $v29, $v3, $v1[0h]
-    addi    $3, $3, 0x0002
-    vmadm   $v29, $v2, $v1[0h]
-    addi    $2, $2, 0x0008 // Increment input 0 pointer
-    vmadn   $v5, $v3, $v0[0h]
-    bne     $3, $11, @@innerloop
-     vmadh  $v4, $v2, $v0[0h]
-    bne     $3, $10, @@loop
-     addi   $3, $3, 0x0008
-    sqv     $v7[0], (0x0020)($6)
-    sqv     $v6[0], (0x0000)($6)
-    sqv     $v4[0], (0x0010)($6)
-    j       run_next_DL_command
-     sqv    $v5[0], (0x0030)($6)
+    li      $2, (0xFF00 | G_MTX)
+    beq     $2, $7, g_mtx_end_ovl4
 .endif
-
-g_dma_io_real:
-    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
-     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
-    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
-    // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
-    // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
-    sra     dmemAddr, dmemAddr, 2
-    j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
-     li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
-
-g_memset_real:
-memsetBufferStart equ ((vertexBuffer + 0xF) & 0xFF0)
-memsetBufferEnd equ (clipTempVertsEnd & 0xFF0)
-memsetBufferSize equ (memsetBufferEnd - memsetBufferStart)
-    llv     $v2[0], (rdpHalf1Val)($zero) // Load the memset value
-    sll     cmd_w0, cmd_w0, 8           // Clear upper byte
-    jal     segmented_to_physical
-     srl    cmd_w0, cmd_w0, 8           // Number of bytes to memset (must be mult of 16)
-    li      $3, memsetBufferStart + 0x10 // Last qword set is memsetBufferStart
-    jal     clamp_to_memset_buffer
-     vmudh  $v2, vOne, $v2[1]           // Move element 1 (lower bytes) to all
-    addi    $2, $2, memsetBufferStart   // First qword set is one below memsetBufferEnd
-@@pre_loop:
-    sqv     $v2, (-0x10)($2)
-    bne     $2, $3, @@pre_loop
-     addi   $2, -0x10
-@@transaction_loop:
-    jal     clamp_to_memset_buffer
-     li     dmemAddr, 0x8000 | memsetBufferStart  // Always write from start of buffer
-    jal     dma_read_write
-     addi   dmaLen, $2, -1
-    sub     cmd_w0, cmd_w0, $2
-    bgtz    cmd_w0, @@transaction_loop
-     add    cmd_w1_dram, cmd_w1_dram, $2
-    j       wait_for_dma_and_run_next_command
-     // Delay slot harmless
-clamp_to_memset_buffer:
-    addi    $11, cmd_w0, -memsetBufferSize // Is more than a whole buffer left?
-    bltz    $11, return_routine
-     move   $2, cmd_w0                  // No, use partial buffer
-    jr      $ra
-     li     $2, memsetBufferSize
-
-g_branch_wz_real:
-    j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $10
-     li     $11, branchwz_return_from_addrs
-branchwz_return_from_addrs:
-.if CFG_G_BRANCH_W                      // G_BRANCH_W/G_BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
-    lh      $10, VTX_W_INT($10)         // read the w coordinate of the vertex (f3dzex)
-.else
-    lw      $10, VTX_SCR_Z($10)         // read the screen z coordinate (int and frac) of the vertex (f3dex2)
-.endif
-    sub     $2, $10, cmd_w1_dram        // subtract the w/z value being tested
-    bgez    $2, run_next_DL_command     // if vtx.w/z >= cmd w/z, continue running this DL
-     lw     cmd_w1_dram, rdpHalf1Val    // load the RDPHALF1 value as the location to branch to
-    j       branch_dl                   // need $2 < 0 for nopush and cmd_w1_dram
-     li     cmd_w0, 0                   // No count of DL cmds to skip
+     li     $3, G_BRANCH_WZ
+    beq     $3, $7, g_branch_wz_ovl4
+     li     $2, (0xFF00 | G_DMA_IO)
+    beq     $2, $7, g_dma_io_ovl4
+     li     $3, (0xFF00 | G_MEMSET)
+    beq     $3, $7, g_memset_ovl4
+     // Otherwise calc_mit. Delay slot is harmless.
 
 calc_mit:
     /*
@@ -3558,7 +3533,22 @@ calc_mit:
     sdv     $v21[0], (mITMatrix + 0x18)($zero)
     j       vtx_after_calc_mit
      sdv    $v20[0], (mITMatrix + 0x00)($zero)
-     
+
+.if !CFG_NO_OCCLUSION_PLANE
+g_mtx_end_ovl4:
+    instantiate_mtx_end_begin
+    instantiate_mtx_multiply
+.endif
+
+g_branch_wz_ovl4:
+    instantiate_branch_wz
+
+g_dma_io_ovl4:
+    instantiate_dma_io
+    
+g_memset_ovl4:
+    instantiate_memset
+
 .endif // !CFG_LEGACY_VTX_PIPE
 
 ovl4_end:
