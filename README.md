@@ -67,7 +67,9 @@ breaking changes.**
   texture loads in the material are skipped (the second time). This effectively
   results in **auto-batched rendering** of repeated objects, as long as each
   only uses one material. This system supports multitexture and all types of
-  loads.
+  loads. If this system incorrectly culls supposedly repeated texture loads
+  which actually differ due to segment manipulation, you can locally disable it
+  using the new `SPDontSkipTexLoadsAcross` command.
 - New `SPTriangleStrip` and `SPTriangleFan` commands **pack up to 5 tris** into
   one 64-bit GBI command (up from 2 tris in F3DEX2). In any given object, most
   tris can be drawn with these commands, with only a few at the end drawn with
