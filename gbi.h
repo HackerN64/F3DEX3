@@ -692,55 +692,181 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
  * @deprecated no longer needed
  */
 #define G_MWO_bLIGHT_2           0x14
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_aLIGHT_3           0x20
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_bLIGHT_3           0x24
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_aLIGHT_4           0x30
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_bLIGHT_4           0x34
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_aLIGHT_5           0x40
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_bLIGHT_5           0x44
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_aLIGHT_6           0x50
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_bLIGHT_6           0x54
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_aLIGHT_7           0x60
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_bLIGHT_7           0x64
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_aLIGHT_8           0x70
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_bLIGHT_8           0x74
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_aLIGHT_9           0x80
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_bLIGHT_9           0x84
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_aLIGHT_10          0x90
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_bLIGHT_10          0x94
 
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_POINT_RGBA         0x10
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_POINT_ST           0x14
-#define G_MWO_POINT_XYSCREEN     0x18 /* not recommended to use, won't work if */
-#define G_MWO_POINT_ZSCREEN      0x1C /* the tri gets clipped */
+/**
+ * @brief These are offsets from the address in the dmem table
+ * 
+ * not recommended to use, won't work if
+ */
+#define G_MWO_POINT_XYSCREEN     0x18
+/**
+ * @brief These are offsets from the address in the dmem table
+ * 
+ * the tri gets clipped
+ */
+#define G_MWO_POINT_ZSCREEN      0x1Cs
 
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_AO_AMBIENT         0x00
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_AO_DIRECTIONAL     0x02
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_AO_POINT           0x04
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_PERSPNORM          0x06
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_FRESNEL_SCALE      0x0C
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_FRESNEL_OFFSET     0x0E
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_ATTR_OFFSET_S      0x10
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_ATTR_OFFSET_T      0x12
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_ATTR_OFFSET_Z      0x14
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_ALPHA_COMPARE_CULL 0x16
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_NORMALS_MODE       0x18
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_LAST_MAT_DL_ADDR   0x1A
 
 /*
  * RDP command argument defines
  */
 
-/*
- * Coordinate shift values, number of bits of fraction
+/**
+ * @brief Coordinate shift values, number of bits of fraction
  */
 #define G_TEXTURE_IMAGE_FRAC    2
+/**
+ * @brief Coordinate shift values, number of bits of fraction
+ */
 #define G_TEXTURE_SCALE_FRAC    16
+/**
+ * @brief Coordinate shift values, number of bits of fraction
+ */
 #define G_SCALE_FRAC            8
+/**
+ * @brief Coordinate shift values, number of bits of fraction
+ */
 #define G_ROTATE_FRAC           16
 
-/*
- * Maximum z-buffer value, used to initialize the z-buffer.
+/**
+ * @brief Maximum z-buffer value, used to initialize the z-buffer.
+ * 
  * Note : this number is NOT the viewport z-scale constant.
  * See the comment next to G_MAXZ for more info.
  */
@@ -756,22 +882,46 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 
 #define GPACK_ZDZ(z, dz)    (((z) << 2) | (dz))
 
-/*
- * G_SETIMG fmt: set image formats
+/**
+ * @brief G_SETIMG fmt: set image formats
  */
 #define G_IM_FMT_RGBA   0
+/**
+ * @brief G_SETIMG fmt: set image formats
+ */
 #define G_IM_FMT_YUV    1
+/**
+ * @brief G_SETIMG fmt: set image formats
+ */
 #define G_IM_FMT_CI     2
+/**
+ * @brief G_SETIMG fmt: set image formats
+ */
 #define G_IM_FMT_IA     3
+/**
+ * @brief G_SETIMG fmt: set image formats
+ */
 #define G_IM_FMT_I      4
 
-/*
- * G_SETIMG siz: set image pixel size
+/**
+ * @brief G_SETIMG siz: set image pixel size
  */
 #define G_IM_SIZ_4b     0
+/**
+ * @brief G_SETIMG siz: set image pixel size
+ */
 #define G_IM_SIZ_8b     1
+/**
+ * @brief G_SETIMG siz: set image pixel size
+ */
 #define G_IM_SIZ_16b    2
+/**
+ * @brief G_SETIMG siz: set image pixel size
+ */
 #define G_IM_SIZ_32b    3
+/**
+ * @brief G_SETIMG siz: set image pixel size
+ */
 #define G_IM_SIZ_DD     5
 
 #define G_IM_SIZ_4b_BYTES       0
@@ -805,106 +955,257 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_IM_SIZ_16b_INCR 0
 #define G_IM_SIZ_32b_INCR 0
 
-/*
- * G_SETCOMBINE: color combine modes
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
  */
-/* Color combiner constants: */
 #define G_CCMUX_COMBINED        0
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_TEXEL0          1
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_TEXEL1          2
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_PRIMITIVE       3
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_SHADE           4
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_ENVIRONMENT     5
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_CENTER          6
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_SCALE           6
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_COMBINED_ALPHA  7
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_TEXEL0_ALPHA    8
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_TEXEL1_ALPHA    9
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_PRIMITIVE_ALPHA 10
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_SHADE_ALPHA     11
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_ENV_ALPHA       12
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_LOD_FRACTION    13
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_PRIM_LOD_FRAC   14
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_NOISE           7
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_K4              7
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_K5              15
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_1               6
+/**
+ * @brief G_SETCOMBINE: color combine modes
+ * 
+ * Color combiner constant 
+ */
 #define G_CCMUX_0               31
 
-/* Alpha combiner constants: */
+/** Alpha combiner constant */
 #define G_ACMUX_COMBINED        0
+/** Alpha combiner constant */
 #define G_ACMUX_TEXEL0          1
+/** Alpha combiner constant */
 #define G_ACMUX_TEXEL1          2
+/** Alpha combiner constant */
 #define G_ACMUX_PRIMITIVE       3
+/** Alpha combiner constant */
 #define G_ACMUX_SHADE           4
+/** Alpha combiner constant */
 #define G_ACMUX_ENVIRONMENT     5
+/** Alpha combiner constant */
 #define G_ACMUX_LOD_FRACTION    0
+/** Alpha combiner constant */
 #define G_ACMUX_PRIM_LOD_FRAC   6
+/** Alpha combiner constant */
 #define G_ACMUX_1               6
+/** Alpha combiner constant */
 #define G_ACMUX_0               7
 
-/* typical CC cycle 1 modes */
 
-/* typical CC cycle 1 modes */
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_PRIMITIVE              0, 0, 0, PRIMITIVE, 0, 0, 0, PRIMITIVE
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_SHADE                  0, 0, 0, SHADE, 0, 0, 0, SHADE
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATEI              TEXEL0, 0, SHADE, 0, 0, 0, 0, SHADE
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATEIDECALA        TEXEL0, 0, SHADE, 0, 0, 0, 0, TEXEL0
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATEIFADE          TEXEL0, 0, SHADE, 0, 0, 0, 0, ENVIRONMENT
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATERGB            G_CC_MODULATEI
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATERGBDECALA      G_CC_MODULATEIDECALA
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATERGBFADE        G_CC_MODULATEIFADE
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATEIA             TEXEL0, 0, SHADE, 0, TEXEL0, 0, SHADE, 0
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATEIFADEA         TEXEL0, 0, SHADE, 0, TEXEL0, 0, ENVIRONMENT, 0
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATEFADE           TEXEL0, 0, SHADE, 0, ENVIRONMENT, 0, TEXEL0, 0
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATERGBA           G_CC_MODULATEIA
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATERGBFADEA       G_CC_MODULATEIFADEA
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATEI_PRIM         TEXEL0, 0, PRIMITIVE, 0, 0, 0, 0, PRIMITIVE
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATEIA_PRIM        TEXEL0, 0, PRIMITIVE, 0, TEXEL0, 0, PRIMITIVE, 0
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATEIDECALA_PRIM   TEXEL0, 0, PRIMITIVE, 0, 0, 0, 0, TEXEL0
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATERGB_PRIM       G_CC_MODULATEI_PRIM
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATERGBA_PRIM      G_CC_MODULATEIA_PRIM
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_MODULATERGBDECALA_PRIM G_CC_MODULATEIDECALA_PRIM
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_FADE                   SHADE, 0, ENVIRONMENT, 0, SHADE, 0, ENVIRONMENT, 0
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_FADEA                  TEXEL0, 0, ENVIRONMENT, 0, TEXEL0, 0, ENVIRONMENT, 0
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_DECALRGB               0, 0, 0, TEXEL0, 0, 0, 0, SHADE
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_DECALRGBA              0, 0, 0, TEXEL0, 0, 0, 0, TEXEL0
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_DECALFADE              0, 0, 0, TEXEL0, 0, 0, 0, ENVIRONMENT
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_DECALFADEA             0, 0, 0, TEXEL0, TEXEL0, 0, ENVIRONMENT, 0
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_BLENDI                 ENVIRONMENT, SHADE, TEXEL0, SHADE, 0, 0, 0, SHADE
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_BLENDIA                ENVIRONMENT, SHADE, TEXEL0, SHADE, TEXEL0, 0, SHADE, 0
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_BLENDIDECALA           ENVIRONMENT, SHADE, TEXEL0, SHADE, 0, 0, 0, TEXEL0
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_BLENDRGBA              TEXEL0, SHADE, TEXEL0_ALPHA, SHADE, 0, 0, 0, SHADE
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_BLENDRGBDECALA         TEXEL0, SHADE, TEXEL0_ALPHA, SHADE, 0, 0, 0, TEXEL0
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_BLENDRGBFADEA          TEXEL0, SHADE, TEXEL0_ALPHA, SHADE, 0, 0, 0, ENVIRONMENT
 
+/** @brief typical CC cycle 1 modes */
 #define G_CC_ADDRGB                 TEXEL0, 0, TEXEL0, SHADE, 0, 0, 0, SHADE
+/** @brief typical CC cycle 1 modes */
 #define G_CC_ADDRGBDECALA           TEXEL0, 0, TEXEL0, SHADE, 0, 0, 0, TEXEL0
+/** @brief typical CC cycle 1 modes */
 #define G_CC_ADDRGBFADE             TEXEL0, 0, TEXEL0, SHADE, 0, 0, 0, ENVIRONMENT
 
+/** @brief typical CC cycle 1 modes */
 #define G_CC_REFLECTRGB             ENVIRONMENT, 0, TEXEL0, SHADE, 0, 0, 0, SHADE
+/** @brief typical CC cycle 1 modes */
 #define G_CC_REFLECTRGBDECALA       ENVIRONMENT, 0, TEXEL0, SHADE, 0, 0, 0, TEXEL0
 
+/** @brief typical CC cycle 1 modes */
 #define G_CC_HILITERGB              PRIMITIVE, SHADE, TEXEL0, SHADE, 0, 0, 0, SHADE
+/** @brief typical CC cycle 1 modes */
 #define G_CC_HILITERGBA             PRIMITIVE, SHADE, TEXEL0, SHADE, PRIMITIVE, SHADE, TEXEL0, SHADE
+/** @brief typical CC cycle 1 modes */
 #define G_CC_HILITERGBDECALA        PRIMITIVE, SHADE, TEXEL0, SHADE, 0, 0, 0, TEXEL0
 
+/** @brief typical CC cycle 1 modes */
 #define G_CC_SHADEDECALA            0, 0, 0, SHADE, 0, 0, 0, TEXEL0
+/** @brief typical CC cycle 1 modes */
 #define G_CC_SHADEFADEA             0, 0, 0, SHADE, 0, 0, 0, ENVIRONMENT
 
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_BLENDPE                PRIMITIVE, ENVIRONMENT, TEXEL0, ENVIRONMENT, TEXEL0, 0, SHADE, 0
+/** @brief typical CC cycle 1 modes */
 #define	G_CC_BLENDPEDECALA          PRIMITIVE, ENVIRONMENT, TEXEL0, ENVIRONMENT, 0, 0, 0, TEXEL0
 
 /* oddball modes */
@@ -919,8 +1220,8 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define	G_CC_TRILERP                TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0, TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0
 #define	G_CC_INTERFERENCE           TEXEL0, 0, TEXEL1, 0, TEXEL0, 0, TEXEL1, 0
 
-/*
- *  One-cycle color convert operation
+/**
+ * @brief One-cycle color convert operation
  */
 #define	G_CC_1CYUV2RGB              TEXEL0, K4, K5, TEXEL0, 0, 0, 0, SHADE
 
