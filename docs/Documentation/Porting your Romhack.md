@@ -37,8 +37,7 @@ similar for other games):
 
 Both OoT and SM64:
 
-- Remove uses of internal GBI features which have been removed in F3DEX3 (see "C
-  GBI Compatibility" section below for full list). In OoT, the only changes
+- Remove uses of internal GBI features which have been removed in F3DEX3 (see @ref compatibility for full list). In OoT, the only changes
   needed are:
     - In `src/code/ucode_disas.c`, remove the switch statement cases for
       `G_LINE3D`, `G_MW_CLIP`, `G_MV_MATRIX`, `G_MVO_LOOKATX`, `G_MVO_LOOKATY`,
