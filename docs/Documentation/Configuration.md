@@ -1,11 +1,13 @@
-## Microcode Configuration
+@page microcode Microcode Configuration
+
+# Microcode Configuration
 
 There are several selectable configuration settings when building F3DEX3, which
 can be enabled in any combination. With a couple minor exceptions, none of these
 settings affect the GBI--in fact, you can swap between the microcode versions on
 a per-frame basis if you build multiple versions into your romhack.
 
-### No Occlusion Plane (NOC)
+## No Occlusion Plane (NOC)
 
 If you are not using the occlusion plane feature in your romhack, you can
 use this configuration, which removes the computation of the occlusion plane
@@ -28,7 +30,7 @@ which version to use on the profiling results from the previous frame: if the
 RSP is the bottleneck (e.g. the RDP `CLK - CMD` is high), use the NOC version,
 and otherwise use the base version.
 
-### Legacy Vertex Pipeline (LVP)
+## Legacy Vertex Pipeline (LVP)
 
 The primary tradeoff for all the new lighting features in F3DEX3 is increased
 RSP time for vertex processing. The base version of F3DEX3 takes about
@@ -75,7 +77,7 @@ However, it retains all other F3DEX3 features:
 The performance of F3DEX3 vertex processing with both LVP and NOC is almost the
 same as that of F3DEX2; see the Performance Results section below.
 
-### Profiling
+## Profiling
 
 As mentioned above, F3DEX3 includes many performance counters. There are far too
 many counters for a single microcode to maintain, so multiple configurations of
@@ -98,14 +100,14 @@ because their removal does not affect the RDP render time.
 - The `SPLightToRDP` commands are removed (they become no-ops)
 - Flat shading mode, i.e. `!G_SHADING_SMOOTH`, is removed (all tris are smooth)
 
-### Branch Depth Instruction (`BrZ` / `BrW`)
+## Branch Depth Instruction (`BrZ` / `BrW`)
 
 Use `BrZ` if the microcode is replacing F3DEX2 or an earlier F3D version (i.e.
 SM64), or `BrW` if the microcode is replacing F3DZEX (i.e. OoT or MM). This
 controls whether `SPBranchLessZ*` uses the vertex's W coordinate or screen Z
 coordinate.
 
-### Debug Normals (`dbgN`)
+## Debug Normals (`dbgN`)
 
 To help debug lighting issues when integrating F3DEX3 into your romhack, this
 feature causes the vertex colors of any material with lighting enabled to be set

@@ -1,3 +1,5 @@
+@page camera Camera
+
 For any game, the idea is to send the camera world position to the RSP
 whenever you send / apply the view matrix. For OoT, this is not trivial because
 the game allocates the view matrix at the beginning of the frame and runs
