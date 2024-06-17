@@ -19,7 +19,7 @@ jobs:
       run: sudo apt install cmake build-essential
 
     - name: Get armips
-        uses: actions/checkout@v4.1.1
+       - uses: actions/checkout@v4.1.1
         with:
           path: armips
           repository: Kingcom/armips
