@@ -1,8 +1,11 @@
-/* This example code is for HackerOoT. The structs and the general method of
-reading the counters will be the same for any game.
+This example code is for HackerOoT. The structs and the general method of
+reading the counters will be the same for any game. The structs are valid though
+the other code is a little simplistic. A full implementation exists in
+HackerOoT, which includes a full CPU+RSP profiler with tracing, see
+`src/debug/profiler.c` and related files.
 
-Build the microcode with one of the CFG_PROFILING_* options below to select one
-of these sets of performance counters, or without any CFG_PROFILING_* option for
+Build the microcode with one of the `CFG_PROFILING_*` options below to select one
+of these sets of performance counters, or without any `CFG_PROFILING_*` option for
 the default set. You can even include all the microcode versions in your game,
 and let the player/developer swap which one is used for a given frame in order
 to switch which set of performance counters they're seeing. If you want, you
@@ -19,13 +22,13 @@ results may be garbage.
 Note that all "cycles" counters reported by F3DEX3 are RCP cycles, at 62.5 MHz.
 
 Finally, note that the implementation of the stallDMACycles counter in 
-CFG_PROFILING_C is compatible with loading S2DEX via SPLoadUcode, but it may not
+`CFG_PROFILING_C` is compatible with loading S2DEX via SPLoadUcode, but it may not
 be compatible with other microcodes. If you run into crashes when using
-CFG_PROFILING_C but not A or B or the default, contact Sauraen, as you will need
+`CFG_PROFILING_C` but not A or B or the default, contact Sauraen, as you will need
 a customized implementation based on the other microcode you are using.
-*/
 
-/* In some header, needs to be accessible to variables.h */
+In some header, needs to be accessible to variables.h:
+```
 typedef struct {  /* Default performance counters, if no CFG_PROFILING_* is enabled */
     /* Number of vertices processed by the RSP */
     u16 vertexCount;
@@ -104,11 +107,15 @@ typedef struct {
     u32 taskdataptr; /* Not a perf counter, can ignore */
     u32 ucode; /* Not a perf counter, can ignore */
 } F3DEX3YieldDataFooter;
+```
 
-/* In variables.h with the ENABLE_SPEEDMETER section */
+In variables.h with the ENABLE_SPEEDMETER section:
+```
 extern volatile F3DEX3YieldDataFooter gRSPProfilingResults;
+```
 
-/* In the true codepath of Sched_TaskComplete: */
+In the true codepath of Sched_TaskComplete:
+```
 #ifdef ENABLE_SPEEDMETER
     /* Fetch number of primitives drawn from yield data */
     if(task->list.t.type == M_GFXTASK){
@@ -119,12 +126,16 @@ extern volatile F3DEX3YieldDataFooter gRSPProfilingResults;
         bcopy(footer, &gRSPProfilingResults, sizeof(F3DEX3YieldDataFooter));
     }
 #endif
+```
 
-/* In speed_meter.c */
+In speed_meter.c:
+```
 volatile F3DEX3YieldDataFooter gRSPProfilingResults;
+```
 
-/* You can display them on screen however you wish. Here is an example, in
-SpeedMeter_DrawTimeEntries */
+You can display them on screen however you wish. Here is an example, in
+SpeedMeter_DrawTimeEntries
+```
 GfxPrint printer;
 Gfx* opaStart;
 Gfx* gfx;
@@ -156,3 +167,4 @@ gfx = GfxPrint_Close(&printer);
 gSPEndDisplayList(gfx++);
 Graph_BranchDlist(opaStart, gfx);
 POLY_OPA_DISP = gfx;
+```
