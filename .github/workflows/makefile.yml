@@ -16,7 +16,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Install dependencies
-      run: apt install cmake build-essential
+      run: sudo apt install cmake build-essential
 
     - name: Get armips
       run: git clone --recursive https://github.com/Kingcom/armips.git ; cd armips ; mkdir build && cd build ; cmake -DCMAKE_BUILD_TYPE=Release .. ; cmake --build . ; cp armips ./.. ; cd .. ; make -j2
