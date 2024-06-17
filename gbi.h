@@ -9,11 +9,11 @@
 #define F3DEX_GBI_3 1
 
 #ifdef REQUIRE_SEMICOLONS_AFTER_GBI_COMMANDS
-/* OoT style, semicolons required after using macros, cleaner code. If modding
+/*! OoT style, semicolons required after using macros, cleaner code. If modding
 SM64, will have to fix a few places the codebase omits the semicolons. */
 #define _DW(macro) do {macro} while (0)
 #else
-/* SM64 style, semicolons optional, uglier code, will produce tens of thousands
+/*! SM64 style, semicolons optional, uglier code, will produce tens of thousands
 of warnings if you use -Wpedantic. */
 #define _DW(macro) macro
 #endif
@@ -23,14 +23,63 @@ of warnings if you use -Wpedantic. */
  * never sees them, the RSP microcode generates them.
  *                                    edge, shade, texture, zbuff bits:  estz
  */
-#define G_TRI_FILL              0xC8    /* fill triangle:            11001000 */
-#define G_TRI_SHADE             0xCC    /* shade triangle:           11001100 */
-#define G_TRI_TXTR              0xCA    /* texture triangle:         11001010 */
-#define G_TRI_SHADE_TXTR        0xCE    /* shade, texture triangle:  11001110 */
-#define G_TRI_FILL_ZBUFF        0xC9    /* fill, zbuff triangle:     11001001 */
-#define G_TRI_SHADE_ZBUFF       0xCD    /* shade, zbuff triangle:    11001101 */
-#define G_TRI_TXTR_ZBUFF        0xCB    /* texture, zbuff triangle:  11001011 */
-#define G_TRI_SHADE_TXTR_ZBUFF  0xCF    /* shade, txtr, zbuff trngl: 11001111 */
+
+/**
+ * @brief The following command are the "generated" RDP commands; the user
+ * never sees them, the RSP microcode generates them.
+ * 
+ * fill triangle:            11001000 
+ */
+#define G_TRI_FILL              0xC8
+/**
+ * @brief The following command are the "generated" RDP commands; the user
+ * never sees them, the RSP microcode generates them.
+ * 
+ * shade triangle:           11001100 
+ */
+#define G_TRI_SHADE             0xCC
+/**
+ * @brief The following command are the "generated" RDP commands; the user
+ * never sees them, the RSP microcode generates them.
+ * 
+ * texture triangle:         11001010
+ */
+#define G_TRI_TXTR              0xCA
+/**
+ * @brief The following command are the "generated" RDP commands; the user
+ * never sees them, the RSP microcode generates them.
+ * 
+ * shade, texture triangle:  11001110 
+ */
+#define G_TRI_SHADE_TXTR        0xCE
+/**
+ * @brief The following command are the "generated" RDP commands; the user
+ * never sees them, the RSP microcode generates them.
+ * 
+ * fill, zbuff triangle:     11001001 
+ */
+#define G_TRI_FILL_ZBUFF        0xC9
+/**
+ * @brief The following command are the "generated" RDP commands; the user never
+ * sees them, the RSP microcode generates them.
+ * 
+ * shade, zbuff triangle:    11001101 
+ */
+#define G_TRI_SHADE_ZBUFF       0xCD
+/**
+ * @brief The following command are the "generated" RDP commands; the user never
+ * sees them, the RSP microcode generates them.
+ * 
+ * texture, zbuff triangle:  11001011 
+ */
+#define G_TRI_TXTR_ZBUFF        0xCB
+/**
+ * @brief The following command are the "generated" RDP commands; the user never
+ * sees them, the RSP microcode generates them.
+ * 
+ * shade, txtr, zbuff trngl: 11001111 
+ */
+#define G_TRI_SHADE_TXTR_ZBUFF  0xCF
 
 /* masks to create the above: */
 #define G_RDP_TRI_FILL_MASK     0x08
@@ -44,60 +93,228 @@ of warnings if you use -Wpedantic. */
 /*#define G_SPECIAL_3       0xD3  no-op in F3DEX2 */
 /*#define G_SPECIAL_2       0xD4  no-op in F3DEX2 */
 /*#define G_SPECIAL_1       0xD5  triggered MVP recalculation, not supported in F3DEX3 */
+<<<<<<< Updated upstream
 #define G_MEMSET            0xD5
+=======
+/*!
+ * @brief GBI commands in order
+ */
+>>>>>>> Stashed changes
 #define G_DMA_IO            0xD6
+/*!
+ * @brief GBI commands in order
+ */
 #define G_TEXTURE           0xD7
+/*!
+ * @brief GBI commands in order
+ */
 #define G_POPMTX            0xD8
+/*!
+ * @brief GBI commands in order
+ */
+/*!
+ * @brief GBI commands in order
+ */
 #define G_GEOMETRYMODE      0xD9
+/*!
+ * @brief GBI commands in order
+ */
 #define G_MTX               0xDA
+/*!
+ * @brief GBI commands in order
+ */
 #define G_MOVEWORD          0xDB
+/*!
+ * @brief GBI commands in order
+ */
 #define G_MOVEMEM           0xDC
+/*!
+ * @brief GBI commands in order
+ */
 #define G_LOAD_UCODE        0xDD
+/*!
+ * @brief GBI commands in order
+ */
 #define G_DL                0xDE
+/*!
+ * @brief GBI commands in order
+ */
 #define G_ENDDL             0xDF
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SPNOOP            0xE0
+/*!
+ * @brief GBI commands in order
+ */
 #define G_RDPHALF_1         0xE1
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETOTHERMODE_L    0xE2
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETOTHERMODE_H    0xE3
+/*!
+ * @brief GBI commands in order
+ */
 #define G_TEXRECT           0xE4
+/*!
+ * @brief GBI commands in order
+ */
 #define G_TEXRECTFLIP       0xE5
+/*!
+ * @brief GBI commands in order
+ */
 #define G_RDPLOADSYNC       0xE6
+/*!
+ * @brief GBI commands in order
+ */
 #define G_RDPPIPESYNC       0xE7
+/*!
+ * @brief GBI commands in order
+ */
 #define G_RDPTILESYNC       0xE8
+/*!
+ * @brief GBI commands in order
+ */
 #define G_RDPFULLSYNC       0xE9
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETKEYGB          0xEA
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETKEYR           0xEB
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETCONVERT        0xEC
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETSCISSOR        0xED
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETPRIMDEPTH      0xEE
+/*!
+ * @brief GBI commands in order
+ */
 #define G_RDPSETOTHERMODE   0xEF
+/*!
+ * @brief GBI commands in order
+ */
 #define G_LOADTLUT          0xF0
+/*!
+ * @brief GBI commands in order
+ */
 #define G_RDPHALF_2         0xF1
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETTILESIZE       0xF2
+/*!
+ * @brief GBI commands in order
+ */
 #define G_LOADBLOCK         0xF3
+/*!
+ * @brief GBI commands in order
+ */
 #define G_LOADTILE          0xF4
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETTILE           0xF5
+/*!
+ * @brief GBI commands in order
+ */
 #define G_FILLRECT          0xF6
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETFILLCOLOR      0xF7
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETFOGCOLOR       0xF8
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETBLENDCOLOR     0xF9
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETPRIMCOLOR      0xFA
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETENVCOLOR       0xFB
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETCOMBINE        0xFC
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETTIMG           0xFD
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETZIMG           0xFE
+/*!
+ * @brief GBI commands in order
+ */
 #define G_SETCIMG           0xFF
+/*!
+ * @brief GBI commands in order
+ */
 #define G_NOOP              0x00
+/*!
+ * @brief GBI commands in order
+ */
 #define G_VTX               0x01
+/*!
+ * @brief GBI commands in order
+ */
 #define G_MODIFYVTX         0x02
+/*!
+ * @brief GBI commands in order
+ */
 #define G_CULLDL            0x03
+/*!
+ * @brief GBI commands in order
+ */
 #define G_BRANCH_WZ         0x04
+/*!
+ * @brief GBI commands in order
+ */
 #define G_TRI1              0x05
+/*!
+ * @brief GBI commands in order
+ */
 #define G_TRI2              0x06
+/*!
+ * @brief GBI commands in order
+ */
 #define G_QUAD              0x07
+/*!
+ * @brief GBI commands in order
+ */
 #define G_TRISTRIP          0x08 /* = G_LINE3D was a no-op in F3DEX2, has been removed */
+/*!
+ * @brief GBI commands in order
+ */
 #define G_TRIFAN            0x09
+/*!
+ * @brief GBI commands in order
+ */
 #define G_LIGHTTORDP        0x0A
+/*!
+ * @brief GBI commands in order
+ */
 #define G_RELSEGMENT        0x0B
 
 /* names differ between F3DEX2 and F3DZEX */
@@ -108,13 +325,13 @@ of warnings if you use -Wpedantic. */
  * RSP command argument and misc defines
  */
 
-/* Maximum number of transformed vertices kept in buffer in RSP DMEM */
+/*! Maximum number of transformed vertices kept in buffer in RSP DMEM */
 #define G_MAX_VERTS 56
 
-/* Maximum number of directional / point lights, not counting ambient */
+/*! Maximum number of directional / point lights, not counting ambient */
 #define G_MAX_LIGHTS 9
 
-/* Maximum number of display list commands loaded at once into RSP DMEM */
+/*! Maximum number of display list commands loaded at once into RSP DMEM */
 #define G_INPUT_BUFFER_CMDS 21
 
 /*
@@ -126,7 +343,7 @@ of warnings if you use -Wpedantic. */
  * any other F3DEX3 effects which use shade alpha.
  */
 #define G_ZBUFFER               0x00000001
-#define G_TEXTURE_ENABLE        0x00000000  /* actually 2, but controlled by SPTexture */
+#define G_TEXTURE_ENABLE        0x00000000  /*! actually 2, but controlled by SPTexture */
 #define G_SHADE                 0x00000004
 #define G_AMBOCCLUSION          0x00000040
 #define G_ATTROFFSET_Z_ENABLE   0x00000080
@@ -134,7 +351,7 @@ of warnings if you use -Wpedantic. */
 #define G_CULL_NEITHER          0x00000000
 #define G_CULL_FRONT            0x00000200
 #define G_CULL_BACK             0x00000400
-#define G_CULL_BOTH             0x00000600  /* useless but supported */
+#define G_CULL_BOTH             0x00000600  /*! useless but supported */
 #define G_PACKED_NORMALS        0x00000800
 #define G_LIGHTTOALPHA          0x00001000
 #define G_LIGHTING_SPECULAR     0x00002000
@@ -144,10 +361,10 @@ of warnings if you use -Wpedantic. */
 #define G_LIGHTING              0x00020000
 #define G_TEXTURE_GEN           0x00040000
 #define G_TEXTURE_GEN_LINEAR    0x00080000
-#define G_LOD                   0x00100000  /* Ignored by all F3DEX* variants */
+#define G_LOD                   0x00100000  /*! Ignored by all F3DEX* variants */
 #define G_SHADING_SMOOTH        0x00200000
-#define G_LIGHTING_POSITIONAL   0x00400000  /* Ignored by F3DEX3, assumed always on */
-#define G_CLIPPING              0x00800000  /* Ignored by all F3DEX* variants */
+#define G_LIGHTING_POSITIONAL   0x00400000  /*! Ignored by F3DEX3, assumed always on */
+#define G_CLIPPING              0x00800000  /*! Ignored by all F3DEX* variants */
 
 /* See SPDisplayList / SPBranchList */
 #define G_DL_PUSH       0

@@ -951,6 +951,7 @@ WARN_LOGFILE           =
 
 INPUT                  = f3dex3.s \
                          README.md \
+                         gbi.h \
                          cpu/ \
                          rsp/ \
                          docs/
