@@ -1,0 +1,29 @@
+
+name: Make F3DEX3 Binary File.
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: apt install cmake build-essential
+
+    - name: Get armips
+      run: git clone --recursive https://github.com/Kingcom/armips.git ; cd armips ; mkdir build && cd build ; cmake -DCMAKE_BUILD_TYPE=Release .. ; cmake --build . ; cp armips ./.. ; cd .. ; make -j2
+
+    - name: Run check
+      run: make check
+
+    - name: Run distcheck
+      run: make distcheck
+
