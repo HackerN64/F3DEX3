@@ -19,7 +19,16 @@ jobs:
       run: sudo apt install cmake build-essential
 
     - name: Get armips
-      run: git clone --recursive https://github.com/Kingcom/armips.git ; cd armips ; mkdir build && cd build ; cmake -DCMAKE_BUILD_TYPE=Release .. ; cmake --build . ; sudo cp armips /usr/bin
+        uses: actions/checkout@v4.1.1
+        with:
+          path: armips
+          repository: Kingcom/armips
+          submodules: "true"
+       run: |
+          cd armips
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release ..
+          cmake --build .
 
     - name: Make The Binary
-      run: make -j
+      run: make -j ARMIPS=armips/build/armips
