@@ -488,65 +488,209 @@ of warnings if you use -Wpedantic. */
 /** @brief See SPAlphaCompareCull */
 #define G_ALPHA_COMPARE_CULL_ABOVE   -1
 
-/*
- * MOVEMEM indices
+/**
+ * @brief MOVEMEM indices
+ * 
+ * Each of these indexes an entry in a dmem table which points to an arbitrarily
+ * sized block of dmem in which to store the result of a DMA.
+ * 
+ * for internal use by G_MTX multiply mode
+ */
+#define G_MV_TEMPMTX0  0
+/**
+ * @brief MOVEMEM indices
+ * 
  * Each of these indexes an entry in a dmem table which points to an arbitrarily
  * sized block of dmem in which to store the result of a DMA.
  */
-#define G_MV_TEMPMTX0  0  /* for internal use by G_MTX multiply mode */
 #define G_MV_MMTX      2
-#define G_MV_TEMPMTX1  4  /* for internal use by G_MTX multiply mode */
+/**
+ * @brief MOVEMEM indices
+ * 
+ * Each of these indexes an entry in a dmem table which points to an arbitrarily
+ * sized block of dmem in which to store the result of a DMA.
+ * 
+ * for internal use by G_MTX multiply mode
+ */
+#define G_MV_TEMPMTX1  4
+/**
+ * @brief MOVEMEM indices
+ * 
+ * Each of these indexes an entry in a dmem table which points to an arbitrarily
+ * sized block of dmem in which to store the result of a DMA.
+ */
 #define G_MV_VPMTX     6
+/**
+ * @brief MOVEMEM indices
+ * 
+ * Each of these indexes an entry in a dmem table which points to an arbitrarily
+ * sized block of dmem in which to store the result of a DMA.
+ */
 #define G_MV_VIEWPORT  8
+/**
+ * @brief MOVEMEM indices
+ * 
+ * Each of these indexes an entry in a dmem table which points to an arbitrarily
+ * sized block of dmem in which to store the result of a DMA.
+ */
 #define G_MV_LIGHT     10
 /* G_MV_POINT is no longer supported because the internal vertex format is no
 longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 /* G_MV_MATRIX is no longer supported because there is no MVP matrix in F3DEX3. */
-#define G_MV_PMTX G_MV_VPMTX /* backwards compatibility */
+/**
+ * @brief MOVEMEM indices
+ * 
+ * Each of these indexes an entry in a dmem table which points to an arbitrarily
+ * sized block of dmem in which to store the result of a DMA.
+ * 
+ * backwards compatibility
+ */
+#define G_MV_PMTX G_MV_VPMTX
 
-/*
- * MOVEWORD indices
+
+/**
+ * @brief MOVEWORD indices
+ * 
+ * Each of these indexes an entry in a dmem table which points to a word in dmem
+ * where an immediate word will be stored.
+ * 
+ * replaces G_MW_MATRIX which is no longer supported
+ */
+#define G_MW_FX             0x00
+/**
+ * @brief MOVEWORD indices
+ * 
  * Each of these indexes an entry in a dmem table which points to a word in dmem
  * where an immediate word will be stored.
  */
-#define G_MW_FX             0x00 /* replaces G_MW_MATRIX which is no longer supported */
 #define G_MW_NUMLIGHT       0x02
 /* nothing for 0x04; G_MW_CLIP is no longer supported */
+/**
+ * @brief MOVEWORD indices
+ * 
+ * Each of these indexes an entry in a dmem table which points to a word in dmem
+ * where an immediate word will be stored.
+ */
 #define G_MW_SEGMENT        0x06
+/**
+ * @brief MOVEWORD indices
+ * 
+ * Each of these indexes an entry in a dmem table which points to a word in dmem
+ * where an immediate word will be stored.
+ */
 #define G_MW_FOG            0x08
+/**
+ * @brief MOVEWORD indices
+ * 
+ * Each of these indexes an entry in a dmem table which points to a word in dmem
+ * where an immediate word will be stored.
+ */
 #define G_MW_LIGHTCOL       0x0A
 /* G_MW_FORCEMTX is no longer supported because there is no MVP matrix in F3DEX3. */
 /* G_MW_PERSPNORM is removed; perspective norm is now set via G_MW_FX. */
+/**
+ * @brief MOVEWORD indices
+ * 
+ * Each of these indexes an entry in a dmem table which points to a word in dmem
+ * where an immediate word will be stored.
+ * 
+ * indicates store 2 bytes instead of 4
+ */
+#define G_MW_HALFWORD_FLAG 0x8000
 
-#define G_MW_HALFWORD_FLAG 0x8000 /* indicates store 2 bytes instead of 4 */
-
-/*
- * These are offsets from the address in the dmem table
+/**
+ * @brief These are offsets from the address in the dmem table
  */
 #define G_MWO_NUMLIGHT           0x00
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_FOG                0x00
 
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_0          0x00
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_1          0x01
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_2          0x02
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_3          0x03
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_4          0x04
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_5          0x05
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_6          0x06
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_7          0x07
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_8          0x08
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_9          0x09
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_A          0x0A
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_B          0x0B
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_C          0x0C
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_D          0x0D
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_E          0x0E
+/**
+ * @brief These are offsets from the address in the dmem table
+ */
 #define G_MWO_SEGMENT_F          0x0F
 
-/* These are deprecated and no longer needed. */
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_aLIGHT_1           0x00
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_bLIGHT_1           0x04
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_aLIGHT_2           0x10
+/**
+ * @brief These are offsets from the address in the dmem table
+ * @deprecated no longer needed
+ */
 #define G_MWO_bLIGHT_2           0x14
 #define G_MWO_aLIGHT_3           0x20
 #define G_MWO_bLIGHT_3           0x24
