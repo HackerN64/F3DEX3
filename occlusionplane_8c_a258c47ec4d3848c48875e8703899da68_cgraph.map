@@ -1,0 +1,12 @@
+<map id="ComputeOcclusionPlane" name="ComputeOcclusionPlane">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,56,185,81"/>
+<area shape="rect" id="Node000002" href="$occlusionplane_8c.html#a9d47fcdd39f1d317f634fcc8bd57aafd" title=" " alt="" coords="265,5,364,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="151,53,252,30,253,35,152,58"/>
+<area shape="rect" id="Node000003" href="$occlusionplane_8c.html#a7590e134ab63d47c9c3035cfd16c0a9b" title=" " alt="" coords="444,31,588,56"/>
+<area shape="poly" id="edge3_Node000001_Node000003" title=" " alt="" coords="186,61,430,46,430,51,186,66"/>
+<area shape="rect" id="Node000004" href="$occlusionplane_8c.html#a7adbfe737ce950b8fbefccc8166f0099" title=" " alt="" coords="233,107,396,132"/>
+<area shape="poly" id="edge4_Node000001_Node000004" title=" " alt="" coords="152,79,247,101,245,106,151,84"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="364,21,430,30,430,35,364,27"/>
+<area shape="rect" id="Node000005" href="$occlusionplane_8c.html#a720020361864c8467f2ff1716c4adfd8" title=" " alt="" coords="449,107,583,132"/>
+<area shape="poly" id="edge5_Node000004_Node000005" title=" " alt="" coords="396,117,435,117,435,122,396,122"/>
+</map>
