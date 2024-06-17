@@ -208,6 +208,3 @@ all: $(ALL_UCODES)
 clean:
 	@printf "$(WARNING)Deleting all built microcode files$(NO_COL)\n"
 	@rm -rf $(ALL_OUTPUT_DIRS)
-
-doc:
-  doxygen Doxyfile
