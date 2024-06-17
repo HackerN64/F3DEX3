@@ -32,38 +32,8 @@ var NAVTREE =
         [ "Miscellaneous", "md_README.html#autotoc_md4", null ],
         [ "Profiling", "md_README.html#autotoc_md5", null ]
       ] ],
-      [ "Microcode Configuration", "md_README.html#autotoc_md6", [
-        [ "No Occlusion Plane (NOC)", "md_README.html#autotoc_md7", null ],
-        [ "Legacy Vertex Pipeline (LVP)", "md_README.html#autotoc_md8", null ],
-        [ "Profiling", "md_README.html#autotoc_md9", null ],
-        [ "Branch Depth Instruction (BrZ / BrW)", "md_README.html#autotoc_md10", null ],
-        [ "Debug Normals (dbgN)", "md_README.html#autotoc_md11", null ]
-      ] ],
-      [ "Performance Results", "md_README.html#autotoc_md12", null ],
-      [ "Porting Your Romhack Codebase to F3DEX3", "md_README.html#autotoc_md13", [
-        [ "Required Changes", "md_README.html#autotoc_md14", null ],
-        [ "Recommended Changes (Non-Lighting)", "md_README.html#autotoc_md15", null ],
-        [ "Recommended Changes (Lighting)", "md_README.html#autotoc_md16", null ],
-        [ "Changes Required for New Features", "md_README.html#autotoc_md17", null ]
-      ] ],
-      [ "Backwards Compatibility with F3DEX2", "md_README.html#autotoc_md18", [
-        [ "C GBI Compatibility", "md_README.html#autotoc_md19", null ],
-        [ "Binary Display List Compatibility", "md_README.html#autotoc_md20", null ]
-      ] ],
-      [ "What are the tradeoffs for all these new features?", "md_README.html#autotoc_md21", [
-        [ "Vertex Processing RSP Time", "md_README.html#autotoc_md22", null ],
-        [ "Overlay 4", "md_README.html#autotoc_md23", null ],
-        [ "Optimizing for RSP code size", "md_README.html#autotoc_md24", null ],
-        [ "Far clipping removal", "md_README.html#autotoc_md25", null ],
-        [ "Removal of scaled vertex normals", "md_README.html#autotoc_md26", null ],
-        [ "RDP temporary buffers shrinking", "md_README.html#autotoc_md27", null ],
-        [ "Segment 0", "md_README.html#autotoc_md28", null ],
-        [ "Obscure semantic differences from F3DEX2 that should never matter in practice", "md_README.html#autotoc_md29", null ]
-      ] ],
-      [ "What happened to the clipping minimal scanlines algorithm?", "md_README.html#autotoc_md30", null ],
-      [ "Credits", "md_README.html#autotoc_md31", null ]
+      [ "Credits", "md_README.html#autotoc_md6", null ]
     ] ],
-    [ "Home", "md_docs_2Home.html", null ],
     [ "Files", "files.html", [
       [ "File List", "files.html", "files_dup" ],
       [ "Globals", "globals.html", [
@@ -77,7 +47,7 @@ var NAVTREE =
 
 var NAVTREEINDEX =
 [
-"camera_8c.html"
+"dir_5caa6f95c6a0172e6e4e4c2fbe118b5e.html"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronisation';

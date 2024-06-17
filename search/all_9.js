@@ -1,6 +1,5 @@
 var searchData=
 [
-  ['happened_20to_20the_20clipping_20minimal_20scanlines_20algorithm_0',['What happened to the clipping minimal scanlines algorithm?',['../md_README.html#autotoc_md30',1,'']]],
-  ['home_1',['Home',['../md_docs_2Home.html',1,'']]],
-  ['home_2emd_2',['Home.md',['../Home_8md.html',1,'']]]
+  ['snoocclusionplane_0',['sNoOcclusionPlane',['../occlusionplane_8c.html#a489f9499b298056909dfdda806dfcdf3',1,'occlusionplane.c']]],
+  ['somedrawfunction_1',['someDrawFunction',['../occlusionplane_8c.html#a7d3ef3b83e8c4c1100f86fb0793c0f52',1,'occlusionplane.c']]]
 ];
