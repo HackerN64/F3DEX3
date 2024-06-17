@@ -9,11 +9,11 @@
 #define F3DEX_GBI_3 1
 
 #ifdef REQUIRE_SEMICOLONS_AFTER_GBI_COMMANDS
-/*! OoT style, semicolons required after using macros, cleaner code. If modding
+/** OoT style, semicolons required after using macros, cleaner code. If modding
 SM64, will have to fix a few places the codebase omits the semicolons. */
 #define _DW(macro) do {macro} while (0)
 #else
-/*! SM64 style, semicolons optional, uglier code, will produce tens of thousands
+/** SM64 style, semicolons optional, uglier code, will produce tens of thousands
 of warnings if you use -Wpedantic. */
 #define _DW(macro) macro
 #endif
@@ -87,233 +87,229 @@ of warnings if you use -Wpedantic. */
 #define G_RDP_TRI_TXTR_MASK     0x02
 #define G_RDP_TRI_ZBUFF_MASK    0x01
 
-/*
- * GBI commands in order
- */
+/* GBI commands in order */
 /*#define G_SPECIAL_3       0xD3  no-op in F3DEX2 */
 /*#define G_SPECIAL_2       0xD4  no-op in F3DEX2 */
 /*#define G_SPECIAL_1       0xD5  triggered MVP recalculation, not supported in F3DEX3 */
-<<<<<<< Updated upstream
-#define G_MEMSET            0xD5
-=======
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
->>>>>>> Stashed changes
+#define G_MEMSET            0xD5
+/**
+ * @brief GBI command
+ */
 #define G_DMA_IO            0xD6
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_TEXTURE           0xD7
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_POPMTX            0xD8
-/*!
- * @brief GBI commands in order
- */
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_GEOMETRYMODE      0xD9
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_MTX               0xDA
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_MOVEWORD          0xDB
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_MOVEMEM           0xDC
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_LOAD_UCODE        0xDD
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_DL                0xDE
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_ENDDL             0xDF
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SPNOOP            0xE0
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_RDPHALF_1         0xE1
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETOTHERMODE_L    0xE2
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETOTHERMODE_H    0xE3
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_TEXRECT           0xE4
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_TEXRECTFLIP       0xE5
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_RDPLOADSYNC       0xE6
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_RDPPIPESYNC       0xE7
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_RDPTILESYNC       0xE8
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_RDPFULLSYNC       0xE9
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETKEYGB          0xEA
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETKEYR           0xEB
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETCONVERT        0xEC
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETSCISSOR        0xED
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETPRIMDEPTH      0xEE
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_RDPSETOTHERMODE   0xEF
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_LOADTLUT          0xF0
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_RDPHALF_2         0xF1
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETTILESIZE       0xF2
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_LOADBLOCK         0xF3
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_LOADTILE          0xF4
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETTILE           0xF5
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_FILLRECT          0xF6
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETFILLCOLOR      0xF7
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETFOGCOLOR       0xF8
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETBLENDCOLOR     0xF9
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETPRIMCOLOR      0xFA
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETENVCOLOR       0xFB
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETCOMBINE        0xFC
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETTIMG           0xFD
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETZIMG           0xFE
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_SETCIMG           0xFF
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_NOOP              0x00
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_VTX               0x01
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_MODIFYVTX         0x02
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_CULLDL            0x03
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_BRANCH_WZ         0x04
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_TRI1              0x05
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_TRI2              0x06
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_QUAD              0x07
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
+ * = G_LINE3D was a no-op in F3DEX2, has been removed
  */
-#define G_TRISTRIP          0x08 /* = G_LINE3D was a no-op in F3DEX2, has been removed */
-/*!
- * @brief GBI commands in order
+#define G_TRISTRIP          0x08
+/**
+ * @brief GBI command
  */
 #define G_TRIFAN            0x09
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_LIGHTTORDP        0x0A
-/*!
- * @brief GBI commands in order
+/**
+ * @brief GBI command
  */
 #define G_RELSEGMENT        0x0B
 
@@ -325,67 +321,171 @@ of warnings if you use -Wpedantic. */
  * RSP command argument and misc defines
  */
 
-/*! Maximum number of transformed vertices kept in buffer in RSP DMEM */
+/** Maximum number of transformed vertices kept in buffer in RSP DMEM */
 #define G_MAX_VERTS 56
 
-/*! Maximum number of directional / point lights, not counting ambient */
+/** Maximum number of directional / point lights, not counting ambient */
 #define G_MAX_LIGHTS 9
 
-/*! Maximum number of display list commands loaded at once into RSP DMEM */
+/** Maximum number of display list commands loaded at once into RSP DMEM */
 #define G_INPUT_BUFFER_CMDS 21
 
-/*
- * flags for G_SETGEOMETRYMODE
- *
- * Note that flat shading, i.e. not G_SHADING_SMOOTH, sets shade RGB for all
- * three verts to the value of the first vertex in the triangle. Shade alpha is
- * still separate for each vertex, which is desired behavior for fog but not for
- * any other F3DEX3 effects which use shade alpha.
+/**
+ * @brief flags for G_SETGEOMETRYMODE
  */
 #define G_ZBUFFER               0x00000001
-#define G_TEXTURE_ENABLE        0x00000000  /*! actually 2, but controlled by SPTexture */
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ * 
+ * actually 2, but controlled by SPTexture 
+*/
+#define G_TEXTURE_ENABLE        0x00000000
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_SHADE                 0x00000004
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_AMBOCCLUSION          0x00000040
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_ATTROFFSET_Z_ENABLE   0x00000080
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_ATTROFFSET_ST_ENABLE  0x00000100
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_CULL_NEITHER          0x00000000
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_CULL_FRONT            0x00000200
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_CULL_BACK             0x00000400
-#define G_CULL_BOTH             0x00000600  /*! useless but supported */
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ * 
+ * useless but supported 
+ */
+#define G_CULL_BOTH             0x00000600
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_PACKED_NORMALS        0x00000800
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_LIGHTTOALPHA          0x00001000
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_LIGHTING_SPECULAR     0x00002000
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_FRESNEL_COLOR         0x00004000
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_FRESNEL_ALPHA         0x00008000
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_FOG                   0x00010000
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_LIGHTING              0x00020000
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_TEXTURE_GEN           0x00040000
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ */
 #define G_TEXTURE_GEN_LINEAR    0x00080000
-#define G_LOD                   0x00100000  /*! Ignored by all F3DEX* variants */
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ * 
+ * Ignored by all F3DEX* variants
+ */
+#define G_LOD                   0x00100000
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ * 
+ * sets shade RGB for all three verts to the value of the first vertex
+ * in the triangle. Shade alpha is still separate for each vertex, which is
+ * desired behavior for fog but not for any other F3DEX3 effects which use
+ * shade alpha.
+ */
 #define G_SHADING_SMOOTH        0x00200000
-#define G_LIGHTING_POSITIONAL   0x00400000  /*! Ignored by F3DEX3, assumed always on */
-#define G_CLIPPING              0x00800000  /*! Ignored by all F3DEX* variants */
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ * 
+ * Ignored by F3DEX3, assumed always on
+ */
+#define G_LIGHTING_POSITIONAL   0x00400000
+/**
+ * @brief flags for G_SETGEOMETRYMODE
+ * 
+ * Ignored by all F3DEX* variants
+ */
+#define G_CLIPPING              0x00800000
 
-/* See SPDisplayList / SPBranchList */
+/** See SPDisplayList / SPBranchList */
 #define G_DL_PUSH       0
+/** See SPDisplayList / SPBranchList */
 #define G_DL_NOPUSH     1
 
-/* See SPMatrix */
-#define G_MTX_MODELVIEW    0x00    /* matrix types */
+/** @brief See SPMatrix 
+ * 
+ * matrix types
+ */
+#define G_MTX_MODELVIEW    0x00
+/** @brief See SPMatrix 
+ * 
+ * matrix types
+ */
 #define G_MTX_PROJECTION   0x04
-#define G_MTX_MUL          0x00    /* concat or load */
+/** @brief See SPMatrix 
+ * 
+ * concat or load
+ */
+#define G_MTX_MUL          0x00
+/** @brief See SPMatrix 
+ * 
+ * concat or load
+ */
 #define G_MTX_LOAD         0x02
-#define G_MTX_NOPUSH       0x00    /* push or not */
+/** @brief See SPMatrix 
+ * 
+ * push or not
+ */
+#define G_MTX_NOPUSH       0x00
+/** @brief See SPMatrix 
+ * 
+ * push or not
+*/
 #define G_MTX_PUSH         0x01
 
-/* See SPNormalsMode */
+/** @brief See SPNormalsMode */
 #define G_NORMALS_MODE_FAST      0x00
+/** @brief See SPNormalsMode */
 #define G_NORMALS_MODE_AUTO      0x01
+/** @brief See SPNormalsMode */
 #define G_NORMALS_MODE_MANUAL    0x02
 
-/* See SPAlphaCompareCull */
+/** @brief See SPAlphaCompareCull */
 #define G_ALPHA_COMPARE_CULL_DISABLE  0
+/** @brief See SPAlphaCompareCull */
 #define G_ALPHA_COMPARE_CULL_BELOW    1
+/** @brief See SPAlphaCompareCull */
 #define G_ALPHA_COMPARE_CULL_ABOVE   -1
 
 /*
