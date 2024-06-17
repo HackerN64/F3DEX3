@@ -1,4 +1,8 @@
-/* This is a working demo implementation of the occlusion plane, set up in an
+/*
+This is a bit outdated but still generally okay. A full implementation is
+present in HackerOoT, see src/code/occlusionplanes.c and related files.
+
+This is a working demo implementation of the occlusion plane, set up in an
 OoT scene render function. Here are some rough guidelines on how to properly
 implement this in your game.
 
@@ -166,6 +170,10 @@ bool ClipPolygon(PlayState* play, ClipVertex* verts, s8* indices, s8** idxFinalS
                     // Too many generated vertices
                     return false;
                 }
+                if(idxWrite - &indices[idxSelect] >= 9){
+                    // Polygon has too many vertices
+                    return false;
+                }
                 verts[igen].clip.x = clFade2 * v19->clip.x + clFade1 * v3->clip.x;
                 verts[igen].clip.y = clFade2 * v19->clip.y + clFade1 * v3->clip.y;
                 verts[igen].w = clFade2 * v19->w + clFade1 * v3->w;
@@ -176,6 +184,10 @@ bool ClipPolygon(PlayState* play, ClipVertex* verts, s8* indices, s8** idxFinalS
                 ++igen;
             }
             if(!v2Offscreen){
+                if(idxWrite - &indices[idxSelect] >= 9){
+                    // Polygon has too many vertices
+                    return false;
+                }
                 *idxWrite = i2;
                 ++idxWrite;
             }
