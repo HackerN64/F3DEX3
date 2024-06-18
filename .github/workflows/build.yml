@@ -35,12 +35,12 @@ jobs:
 
       
     - name: Upload a Build Artifact
-  uses: actions/upload-artifact@v4.3.3
-  with:
+      uses: actions/upload-artifact@v4.3.3
+      with:
     # Artifact name
-    name: F3DEX3 BIN
+      name: F3DEX3 BIN
     # A file, directory or wildcard pattern that describes what to upload
-    path: build
+      path: build
     # The desired behavior if no files are found using the provided path.
-    retention-days: 0
-    compression-level: 0
+      retention-days: 0
+      compression-level: 0
