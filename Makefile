@@ -210,4 +210,4 @@ clean:
 	@rm -rf $(ALL_OUTPUT_DIRS)
 
 doc:
-  doxygen Doxyfile
+	doxygen Doxyfile
