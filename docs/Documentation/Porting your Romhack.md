@@ -143,9 +143,9 @@ but is not necessary if you are not using it.
   the RSP with `SPCameraWorld`. For OoT, this is not trivial because the game
   rendering creates and sets the view matrix in the main DL, then renders the
   game contents, then updates the camera, and finally retroactively modifies the
-  view matrix at the beginning of the main DL. See the code in `docs/Code/Camera.md`.
+  view matrix at the beginning of the main DL. See the code in @ref camera.
 - For specular lighting: Set the `size` field of any `Light_t` and `PosLight_t`
   to an appropriate value based on the game engine parameters for that light.
 - For the occlusion plane: Bring the code from `cpu/occlusionplane.c` into your
   game and follow the included instructions.
-- For the performance counters: See `docs/Code/Counters.md`.
+- For the performance counters: See @ref counters.
