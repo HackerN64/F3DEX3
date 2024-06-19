@@ -31,4 +31,4 @@ jobs:
         cmake --build .
 
     - name: Make The Binary
-      run: make -j ARMIPS=armips/build/armips
+      run: make all -j ARMIPS=armips/build/armips

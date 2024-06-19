@@ -146,4 +146,5 @@ Other contributors:
 - thecozies: Fresnel feature suggestion
 - Rasky: memset feature suggestion
 - coco875: Doxygen / GitHub Pages setup
+- ThePerfectLuigi64: CI build setup
 - neoshaman: feature discussions
