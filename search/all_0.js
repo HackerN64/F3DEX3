@@ -1,4 +1,4 @@
 var searchData=
 [
-  ['0_0',['Segment 0',['../md_docs_2Documentation_2Design_01Tradeoffs.html#autotoc_md23',1,'']]]
+  ['0_0',['Segment 0',['../design-tradeoffs.html#autotoc_md25',1,'']]]
 ];

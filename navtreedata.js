@@ -34,14 +34,8 @@ var NAVTREE =
       ] ],
       [ "Credits", "md_README.html#autotoc_md6", null ]
     ] ],
-    [ "Camera", "md_docs_2Code_2Camera.html", null ],
-    [ "Counters", "md_docs_2Code_2Counters.html", null ],
-    [ "Backwards Compatibility with F3DEX2", "md_docs_2Documentation_2Backwards_01Compatibility.html", null ],
-    [ "Microcode Configuration", "md_docs_2Documentation_2Configuration.html", null ],
-    [ "What are the tradeoffs for all these new features?", "md_docs_2Documentation_2Design_01Tradeoffs.html", null ],
-    [ "What happened to the clipping minimal scanlines algorithm?", "md_docs_2Documentation_2Minimal_01Scanlines.html", null ],
-    [ "Performance Results", "md_docs_2Documentation_2Performance.html", null ],
-    [ "Porting Your Romhack Codebase to F3DEX3", "md_docs_2Documentation_2Porting_01your_01Romhack.html", null ],
+    [ "Code", "md_docs_2code.html", "md_docs_2code" ],
+    [ "Documentation", "md_docs_2documentation.html", "md_docs_2documentation" ],
     [ "Files", "files.html", [
       [ "File List", "files.html", "files_dup" ],
       [ "Globals", "globals.html", [
@@ -55,7 +49,7 @@ var NAVTREE =
 
 var NAVTREEINDEX =
 [
-"dir_49e56c817e5e54854c35e136979f97ca.html"
+"camera.html"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronisation';

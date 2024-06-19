@@ -1,4 +1,5 @@
 var searchData=
 [
-  ['new_20features_0',['What are the tradeoffs for all these new features?',['../md_docs_2Documentation_2Design_01Tradeoffs.html',1,'']]]
+  ['microcode_20configuration_0',['Microcode Configuration',['../microcode.html',1,'md_docs_2documentation']]],
+  ['minimal_20scanlines_20algorithm_1',['What happened to the clipping minimal scanlines algorithm?',['../minimal-scanlines.html',1,'md_docs_2documentation']]]
 ];

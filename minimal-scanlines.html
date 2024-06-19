@@ -5,7 +5,7 @@
 <meta http-equiv="X-UA-Compatible" content="IE=11"/>
 <meta name="generator" content="Doxygen 1.11.0"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>F3DEX3: Camera</title>
+<title>F3DEX3: What happened to the clipping minimal scanlines algorithm?</title>
 <link href="tabs.css" rel="stylesheet" type="text/css"/>
 <script type="text/javascript" src="jquery.js"></script>
 <script type="text/javascript" src="dynsections.js"></script>
@@ -71,7 +71,7 @@ $(function() {
 </div>
 <script type="text/javascript">
 /* @license magnet:?xt=urn:btih:d3d9a9a6595521f9666a5e94cc830dab83b65699&amp;dn=expat.txt MIT */
-$(function(){initNavTree('md_docs_2Code_2Camera.html',''); initResizable(true); });
+$(function(){initNavTree('minimal-scanlines.html',''); initResizable(true); });
 /* @license-end */
 </script>
 <div id="doc-content">
@@ -97,32 +97,34 @@ $(function(){initNavTree('md_docs_2Code_2Camera.html',''); initResizable(true); 
 </div>
 
 <div><div class="header">
-  <div class="headertitle"><div class="title">Camera</div></div>
+  <div class="headertitle"><div class="title">What happened to the clipping minimal scanlines algorithm?</div></div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><p>For any game, the idea is to send the camera world position to the RSP whenever you send / apply the view matrix. For OoT, this is not trivial because the game allocates the view matrix at the beginning of the frame and runs gSPMatrix, but at the end of the frame it updates the camera and then rewrites the allocated view matrix, changing it retroactively for the frame. So, we have to similarly save a pointer to the camera position, set at the beginning of the frame, and update it at the end of the frame.</p>
-<p>In z64view.h, in the definition of the View struct, after Mtx* viewingPtr </p><div class="fragment"><div class="line">PlainVtx* cameraWorldPosPtr;</div>
-</div><!-- fragment --><p>In z_view.c somewhere towards the top </p><div class="fragment"><div class="line">void View_SetCameraWorld(PlainVtx* cameraWorldPos, View* view){</div>
-<div class="line">    cameraWorldPos-&gt;c.pos[0] = (s16)view-&gt;eye.x;</div>
-<div class="line">    cameraWorldPos-&gt;c.pos[1] = (s16)view-&gt;eye.y;</div>
-<div class="line">    cameraWorldPos-&gt;c.pos[2] = (s16)view-&gt;eye.z;</div>
-<div class="line">}</div>
-<div class="line">PlainVtx* View_CreateCameraWorld(View* view){</div>
-<div class="line">    PlainVtx* cameraWorldPos = Graph_Alloc(view-&gt;gfxCtx, sizeof(PlainVtx));</div>
-<div class="line">    View_SetCameraWorld(cameraWorldPos, view);</div>
-<div class="line">    return cameraWorldPos;</div>
-<div class="line">}</div>
-</div><!-- fragment --><p>After each place in the functions in z_view.c where view-&gt;viewingPtr gets set </p><div class="fragment"><div class="line">PlainVtx* cameraWorldPos = View_CreateCameraWorld(view);</div>
-<div class="line">view-&gt;cameraWorldPosPtr = cameraWorldPos;</div>
-</div><!-- fragment --><p>In those same functions, right after the calls to <code>gSPMatrix(GFX, viewing, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION)</code> where <code>GFX</code> is <code>POLY_OPA_DISP++</code>, <code>POLY_XLU_DISP++</code>, <code>OVERLAY_DISP++</code>, or <code>gfx++</code> </p><div class="fragment"><div class="line">gSPCameraWorld(GFX, cameraWorldPos);</div>
-</div><!-- fragment --><p>The important part: in View_UpdateViewingMatrix </p><div class="fragment"><div class="line">View_SetCameraWorld(view-&gt;cameraWorldPosPtr, view);</div>
-</div><!-- fragment --><p>The same issue happens (in the vanilla game) for lookat vectors&ndash;they are computed during the frame based on the camera position and direction, but these are updated at the end of the frame so the lookat vectors are one frame behind. You can see this when going into C-up next to an object with hilite or env map&ndash; it's wrong for one frame and then is fixed. You could solve this by either tracking all lookat vectors created during the frame and updating them at the end as we did here. Another option is to only send lookat once at the start of each frame (and update it at the end of the frame), rather than once per object using it. This is not exactly the same for objects not in the middle of the screen, but the difference is minor. </p>
+<div class="textblock"><h1><a class="anchor" id="autotoc_md27"></a>
+What happened to the clipping minimal scanlines algorithm?</h1>
+<p>Earlier F3DEX3 versions included a modified algorithm for triangulating the polygon which was formed as the result of clipping. This algorithm broke up the polygon into triangles in such a way that the fewest scanlines were accessed multiple times, leading to maximum performance on the RDP. For example, if the polygon was a diamond shape, this algorithm would always cut it horizontally&ndash; leading to few or no scanlines being touched by both the top and bottom tris&ndash;as opposed to vertically, leading to all scanlines being touched by the left and right tris.</p>
+<p>In testing, this was able to save a few hundred microseconds at best in scenes with many large clipped tris. However, this feature has been removed, because it was found to cause undesirable visual artifacts. Other changes to clipping were experimented with in the past, and ultimately not included. These are not due to a bug or design issue with the microcode, but a fundamental limitation of the RDP: vertex colors are interpolated in screen space without perspective correction. In other words, the shade colors of ANY triangle not flat to the camera are slightly wrong, regardless of which microcode is in use. The same world space portion of the triangle will have a slightly different color depending on how the camera is rotated around it. The issues with clipping are a result of this.</p>
+<p>To show why this is an unavoidable issue on the N64, here is an example:</p>
+<div class="image">
+<img src="colorinterp.png" alt=""/>
+<div class="caption">
+Color interpolation example</div></div>
+    <p>A: The triangle has vertex colors 0, 128, 255 (same for all three color components) as shown. It is clipped off the left side of the screen halfway through its world-space coordinates, so the generated vertices have colors 64 and 192 respectively.</p>
+<p>B: Due to perspective and the clipped vertex being near the camera plane, the clipped polygon is distorted to this shape.</p>
+<p>C: If this polygon is triangulated this way, the point in the middle of the polygon has color 160 (halfway between 64 and 255).</p>
+<p>D: If this polygon is instead triangulated this way, the point in the middle of the polygon has color 96 (halfway between 192 and 0).</p>
+<p>Note that BOTH of these are wrong: the correct value for that pixel is 128, because all points on the horizontal midline of the original triangle are color</p><ol type="1">
+<li>The N64 can't draw the correct triangle here&ndash;its colors would have to change nonlinearly along an edge.</li>
+</ol>
+<p>The problem with the clipping minimal scanlines algorithm is that it would switch between cases C and D here based on which diagonal had a larger Y component. In other words, if the camera moved slightly, the choice of triangulation might change, causing the middle of the polygon to visibly change color. This was visible on large scene triangles with lighting: as you walked around, the colors would have slight but abrupt changes, which look wrong/bad.</p>
+<p>The best we can do, which is what all previous F3D family microcodes did and F3DEX3 does now, is to triangulate in a consistent way, based on the winding of the input triangles. The results are still wrong, but they're wrong the same way every frame, so there are no abrupt changes visible. </p>
 </div></div><!-- contents -->
 </div><!-- PageDoc -->
 </div><!-- doc-content -->
 <!-- start footer part -->
 <div id="nav-path" class="navpath"><!-- id is needed for treeview function! -->
   <ul>
+    <li class="navelem"><a class="el" href="md_docs_2documentation.html">Documentation</a></li>
     <li class="footer">Generated by <a href="https://www.doxygen.org/index.html"><img class="footer" src="doxygen.svg" width="104" height="31" alt="doxygen"/></a> 1.11.0 </li>
   </ul>
 </div>

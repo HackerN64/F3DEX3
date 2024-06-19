@@ -1,4 +1,5 @@
 var searchData=
 [
-  ['happened_20to_20the_20clipping_20minimal_20scanlines_20algorithm_0',['What happened to the clipping minimal scanlines algorithm?',['../md_docs_2Documentation_2Minimal_01Scanlines.html',1,'']]]
+  ['f3dex2_0',['Backwards Compatibility with F3DEX2',['../compatibility.html',1,'md_docs_2documentation']]],
+  ['f3dex3_1',['F3DEX3',['../md_README.html',1,'F3DEX3'],['../porting.html',1,'Porting Your Romhack Codebase to F3DEX3']]]
 ];
