@@ -1,4 +1,6 @@
-## What happened to the clipping minimal scanlines algorithm?
+@page minimal-scanlines What happened to the clipping minimal scanlines algorithm?
+
+# What happened to the clipping minimal scanlines algorithm?
 
 Earlier F3DEX3 versions included a modified algorithm for triangulating the
 polygon which was formed as the result of clipping. This algorithm broke up the
@@ -23,7 +25,7 @@ result of this.
 
 To show why this is an unavoidable issue on the N64, here is an example:
 
-![Color interpolation example](images/colorinterp.png)
+![Color interpolation example](colorinterp.png)
 
 A: The triangle has vertex colors 0, 128, 255 (same for all three color
 components) as shown. It is clipped off the left side of the screen halfway

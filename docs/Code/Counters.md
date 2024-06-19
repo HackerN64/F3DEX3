@@ -1,3 +1,5 @@
+@page counters Performance Counters
+
 This example code is for HackerOoT. The structs and the general method of
 reading the counters will be the same for any game. The structs are valid though
 the other code is a little simplistic. A full implementation exists in

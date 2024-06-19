@@ -1,4 +1,6 @@
-## Performance Results
+@page performance Performance Results
+
+# Performance Results
 
 Vertex pipeline cycles per **vertex pair** in steady state (lower is better).
 Hand-counted timings taking into account all pipeline stalls and all dual-issue

@@ -1,4 +1,6 @@
-## Porting Your Romhack Codebase to F3DEX3
+@page porting Porting Your Romhack Codebase to F3DEX3
+
+# Porting Your Romhack Codebase to F3DEX3
 
 For an OoT codebase, only a few minor changes are required to use F3DEX3.
 However, more changes are recommended to increase performance and enable new
@@ -31,12 +33,11 @@ similar for other games):
 - If you start using new features in F3DEX3, make the "Changes required for new
   features" listed below.
 
-### Required Changes
+## Required Changes
 
 Both OoT and SM64:
 
-- Remove uses of internal GBI features which have been removed in F3DEX3 (see "C
-  GBI Compatibility" section below for full list). In OoT, the only changes
+- Remove uses of internal GBI features which have been removed in F3DEX3 (see @ref compatibility for full list). In OoT, the only changes
   needed are:
     - In `src/code/ucode_disas.c`, remove the switch statement cases for
       `G_LINE3D`, `G_MW_CLIP`, `G_MV_MATRIX`, `G_MVO_LOOKATX`, `G_MVO_LOOKATY`,
@@ -72,7 +73,7 @@ SM64 only:
   using matrix stack fix and enabling `G_NORMALS_MODE_AUTO` to correct the
   matrix).
 
-### Recommended Changes (Non-Lighting)
+## Recommended Changes (Non-Lighting)
 
 - Clean up any code using the deprecated, hacky `SPLookAtX` and `SPLookAtY` to
   use `SPLookAt` instead (this is only a few lines change). Also remove any
@@ -105,7 +106,7 @@ SM64 only:
   are typically drawn between each material change. For more information, see
   the GBI documentation near this define.
 
-### Recommended Changes (Lighting)
+## Recommended Changes (Lighting)
 
 - Change your game engine lighting code to load all lights in one DMA transfer
   with `SPSetLights`, instead of one-at-a-time with repeated `SPLight` commands.
@@ -132,7 +133,7 @@ SM64 only:
   you will need to redesign how game engine light parameters (e.g. "light
   radius") map to these parameters.
 
-### Changes Required for New Features
+## Changes Required for New Features
 
 Each of these changes is required if you want to use the respective new feature,
 but is not necessary if you are not using it.

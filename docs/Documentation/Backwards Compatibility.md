@@ -1,6 +1,8 @@
-## Backwards Compatibility with F3DEX2
+@page compatibility Backwards Compatibility with F3DEX2
 
-### C GBI Compatibility
+# Backwards Compatibility with F3DEX2
+
+## C GBI Compatibility
 
 F3DEX3 is backwards compatible with F3DEX2 at the C GBI level for all features
 and commands except:
@@ -39,7 +41,7 @@ and commands except:
   `SPSetLights`, so it is not usually necessary to use `SPLight` and `SPAmbient`
   at all.
 
-### Binary Display List Compatibility
+## Binary Display List Compatibility
 
 F3DEX3 is generally binary backwards compatible with OoT-style display lists for
 objects, scenes, etc. **It is not compatible at the binary level with SM64-style
