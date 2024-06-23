@@ -5260,10 +5260,7 @@ _DW({                                   \
 }
 
 /**
- * Notice that textured rectangles are 128-bit commands, therefore
- * gsDPTextureRectangle() should not be used in display lists
- * under normal circumstances (use gsSPTextureRectangle()).
- * That is also why there is no gDPTextureRectangle() macros.
+ * @copydetails gsDPTextureRectangle
  */
 #define gDPTextureRectangle(pkt, xl, yl, xh, yh, tile, s, t, dsdx, dtdy)    \
 _DW({                                                                       \
