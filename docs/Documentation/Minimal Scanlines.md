@@ -42,9 +42,9 @@ D: If this polygon is instead triangulated this way, the point in the middle of
 the polygon has color 96 (halfway between 192 and 0).
 
 Note that BOTH of these are wrong: the correct value for that pixel is 128,
-because all points on the horizontal midline of the original triangle are color
-128. The N64 can't draw the correct triangle here--its colors would have to
-change nonlinearly along an edge.
+because all points on the horizontal midline of the original triangle are
+color 128. The N64 can't draw the correct triangle here--its colors would have
+to change nonlinearly along an edge.
 
 The problem with the clipping minimal scanlines algorithm is that it would
 switch between cases C and D here based on which diagonal had a larger Y
