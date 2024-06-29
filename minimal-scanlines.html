@@ -116,9 +116,7 @@ Color interpolation example</div></div>
 <p>B: Due to perspective and the clipped vertex being near the camera plane, the clipped polygon is distorted to this shape.</p>
 <p>C: If this polygon is triangulated this way, the point in the middle of the polygon has color 160 (halfway between 64 and 255).</p>
 <p>D: If this polygon is instead triangulated this way, the point in the middle of the polygon has color 96 (halfway between 192 and 0).</p>
-<p>Note that BOTH of these are wrong: the correct value for that pixel is 128, because all points on the horizontal midline of the original triangle are color</p><ol type="1">
-<li>The N64 can't draw the correct triangle here&ndash;its colors would have to change nonlinearly along an edge.</li>
-</ol>
+<p>Note that BOTH of these are wrong: the correct value for that pixel is 128, because all points on the horizontal midline of the original triangle are color 128. The N64 can't draw the correct triangle here&ndash;its colors would have to change nonlinearly along an edge.</p>
 <p>The problem with the clipping minimal scanlines algorithm is that it would switch between cases C and D here based on which diagonal had a larger Y component. In other words, if the camera moved slightly, the choice of triangulation might change, causing the middle of the polygon to visibly change color. This was visible on large scene triangles with lighting: as you walked around, the colors would have slight but abrupt changes, which look wrong/bad.</p>
 <p>The best we can do, which is what all previous F3D family microcodes did and F3DEX3 does now, is to triangulate in a consistent way, based on the winding of the input triangles. The results are still wrong, but they're wrong the same way every frame, so there are no abrupt changes visible. </p>
 </div></div><!-- contents -->
