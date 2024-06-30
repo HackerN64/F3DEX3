@@ -1158,9 +1158,9 @@ typedef struct {
  * the microcode.
  */
 typedef struct {
-    unsigned char col[3];   /* point light value (rgba) */
+    unsigned char col[3];   /* point light color (rgb) */
     unsigned char kc;       /* constant attenuation (> 0 indicates point light) */
-    unsigned char colc[3];  /* copy of point light value (rgba) */
+    unsigned char colc[3];  /* copy of point light color (rgb) */
     unsigned char kl;       /* linear attenuation */
     short         pos[3];   /* world-space position of light */
     unsigned char kq;       /* quadratic attenuation */
