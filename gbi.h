@@ -2265,11 +2265,11 @@ _DW({                                                   \
  * @brief macro who inserts a matrix operation at the end display list.
  * 
  * It inserts a matrix operation in the display list. The parameters allow you to select which matrix stack to use (projection or model view), where to load or concatenate, and whether or not to push the matrix stack. The following parameters are bit OR'ed together:
- * - G_MTX_PROJECTION G_MTX_MODELVIEW - @copybrief G_MTX_MODELVIEW
- * - G_MTX_MUL - @copybrief G_MTX_MUL
- * - G_MTX_LOAD - @copybrief G_MTX_LOAD
- * - G_MTX_NOPUSH - @copybrief G_MTX_NOPUSH
- * - G_MTX_PUSH - @copybrief G_MTX_PUSH
+ * - @ref G_MTX_PROJECTION G_MTX_MODELVIEW - @copybrief G_MTX_MODELVIEW
+ * - @ref G_MTX_MUL - @copybrief G_MTX_MUL
+ * - @ref G_MTX_LOAD - @copybrief G_MTX_LOAD
+ * - @ref G_MTX_NOPUSH - @copybrief G_MTX_NOPUSH
+ * - @ref G_MTX_PUSH - @copybrief G_MTX_PUSH
  * # Matrix Format
  * The format of the fixed-point matrices may seem a little awkward to the application programmer because it is optimized for the RSP geometry engine. This unusual format is hidden in the graphics utility libraries and not usually exposed to the application programmer, but in some cases (static matrix declarations or direct element manipulation) it is necessary to understand the format.
  * 
@@ -2312,12 +2312,12 @@ _DW({                                                   \
  * Each concatenation results in the rounding of the LSB of each matrix term. This means that each concatenation injects 1/2 LSB of error into the matrix. To keep full precision, concatenate matrices in floating-point on the processor and just load the result into the RSP.
  * 
  * # Performance
- * Each G_MTX_MODELVIEW matrix operation has an implicit matrix multiplication even if you specify G_MTX_LOAD. This is the combined model view (M) and projection (P) matrix that is necessary for the vertex transformation to use a single matrix during transformation.
+ * Each @ref G_MTX_MODELVIEW matrix operation has an implicit matrix multiplication even if you specify @ref G_MTX_LOAD. This is the combined model view (M) and projection (P) matrix that is necessary for the vertex transformation to use a single matrix during transformation.
  * 
  * You can optimize this by concatenating modeling matrices on the CPU and then putting the viewing (V) and projection matrices on the projection stack. By doing this, you only incur the single MxVP matrix concatenation each time you load a modeling matrix. Furthermore, the application has more information on how to do a cheap hack for modeling matrix concatenation. For example, if you want to combine a single axis rotation with a translation, just place the coefficients in the correct entries of the resulting matrix.
  * 
  * @param m is the pointer to the 4x4 fixed-point matrix (see note below about format)
- * @param p are the bit OR'd parameters to the matrix macro (G_MTX_PROJECTION, G_MTX_MODELVIEW, G_MTX_MUL, G_MTX_LOAD, G_MTX_NOPUSH)
+ * @param p are the bit OR'd parameters to the matrix macro (@ref G_MTX_PROJECTION, @ref G_MTX_MODELVIEW, @ref G_MTX_MUL, @ref G_MTX_LOAD, @ref G_MTX_NOPUSH)
  */
 #define gSPMatrix(pkt, m, p) \
         gDma2p((pkt),G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH, 0)
@@ -2340,8 +2340,8 @@ _DW({                                                   \
  * If the stack is empty, the macro is ignored.
  * 
  * @param n is the flag field that identifies which matrix stack to pop:
- * - G_MTX_MODELVIEW pops the modeling/viewing matrix stack
- * - G_MTX_PROJECTION pops the projection matrix stack (NOT IMPLEMENTED)
+ * - @ref G_MTX_MODELVIEW pops the modeling/viewing matrix stack
+ * - @ref G_MTX_PROJECTION pops the projection matrix stack (NOT IMPLEMENTED)
  */
 #define gSPPopMatrix(pkt, n)       gSPPopMatrixN((pkt), (n), 1)
 /**
