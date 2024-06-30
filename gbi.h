@@ -1,4 +1,8 @@
-/* Modded GBI for use with F3DEX3 custom microcode. */
+/**
+ * @file gbi.h
+ * @brief Modded GBI for use with F3DEX3 custom microcode
+ * 
+ */
 
 #include "mbi.h"
 
@@ -995,30 +999,33 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
  * Data Structures
  */
 
-/*
+/**
  * Vertex (set up for use with colors)
  */
 typedef struct {
-    short          ob[3];   /* x, y, z */
-    unsigned short flag;    /* Holds packed normals, or unused */
-    short          tc[2];   /* texture coord */
-    unsigned char  cn[4];   /* color & alpha */
+    short          ob[3];   /** x, y, z */
+    unsigned short flag;    /** Holds packed normals, or unused */
+    short          tc[2];   /** texture coord */
+    unsigned char  cn[4];   /** color & alpha */
 } Vtx_t;
 
-/*
- * Vertex (set up for use with normals)
+/**
+ * @copydetails Vtx_t
  */
 typedef struct {
-    short          ob[3];   /* x, y, z */
-    unsigned short flag;    /* Packed normals are not used when normals are in colors */
-    short          tc[2];   /* texture coord */
-    signed char    n[3];    /* normal */
-    unsigned char  a;       /* alpha  */
+    short          ob[3];   /** x, y, z */
+    unsigned short flag;    /** Packed normals are not used when normals are in colors */
+    short          tc[2];   /** texture coord */
+    signed char    n[3];    /** normal */
+    unsigned char  a;       /** alpha  */
 } Vtx_tn;
 
+/**
+ * @copydetails Vtx_t
+ */
 typedef union {
-    Vtx_t  v;   /* Use this one for colors  */
-    Vtx_tn n;   /* Use this one for normals */
+    Vtx_t  v;   /** Use this one for colors  */
+    Vtx_tn n;   /** Use this one for normals */
     long long int force_structure_alignment;
 } Vtx;
 
@@ -1032,7 +1039,7 @@ typedef union {
     long long int force_structure_alignment;
 } PlainVtx;
 
-/*
+/**
  * Triangle face
  */
 typedef struct {
@@ -1040,7 +1047,7 @@ typedef struct {
     unsigned char v[3];
 } Tri;
 
-/*
+/**
  * 4x4 matrix, fixed point s15.16 format.
  * First 8 words are integer portion of the 4x4 matrix
  * Last 8 words are the fraction portion of the 4x4 matrix
@@ -1104,7 +1111,7 @@ typedef union {
  */
 #define G_MAXZ  0x03FF  /* 10 bits of integer screen-Z precision */
 
-/*
+/**
  * The viewport structure elements have 2 bits of fraction, necessary
  * to accomodate the sub-pixel positioning scaling for the hardware.
  * This can also be exploited to handle odd-sized viewports.
@@ -1126,38 +1133,46 @@ typedef union {
     long long int force_structure_alignment[2];
 } Vp;
 
-/*
+/**
  * Light structure.
  *
  * Note: the weird order is for the DMEM alignment benefit of
  * the microcode.
  */
-
 typedef struct {
-    unsigned char col[3];   /* diffuse light color (rgb) */
-    unsigned char type;     /* formerly pad1; MUST SET TO 0 to indicate directional light */
-    unsigned char colc[3];  /* copy of diffuse light color (rgb) */
+    unsigned char col[3];   /** diffuse light color (rgb) */
+    unsigned char type;     /** formerly pad1; MUST SET TO 0 to indicate directional light */
+    unsigned char colc[3];  /** copy of diffuse light color (rgb) */
     char          pad2;
-    signed char   dir[3];   /* direction of light (normalized) */
+    signed char   dir[3];   /** direction of light (normalized) */
     char          pad3;
     char          pad4[3];
-    unsigned char size;     /* For specular only; reasonable values are 1-4 */
+    unsigned char size;     /** For specular only; reasonable values are 1-4 */
 } Light_t;
 
+/**
+ * Light structure.
+ *
+ * Note: the weird order is for the DMEM alignment benefit of
+ * the microcode.
+ */
 typedef struct {
-    unsigned char col[3];   /* point light color (rgb) */
-    unsigned char kc;       /* point light enable flag (> 0) & constant attenuation Kc */
-    unsigned char colc[3];  /* copy of point light color (rgb) */
-    unsigned char kl;       /* linear attenuation Kl */
-    short pos[3];           /* light position x, y, z in world space */
-    unsigned char kq;       /* quadratic attenuation Kq */
-    unsigned char size;     /* For specular only; reasonable values are 1-4 */
+    unsigned char col[3];   /** point light color (rgb) */
+    unsigned char kc;       /** point light enable flag (> 0) & constant attenuation Kc */
+    unsigned char colc[3];  /** copy of point light color (rgb) */
+    unsigned char kl;       /** linear attenuation Kl */
+    short pos[3];           /** light position x, y, z in world space */
+    unsigned char kq;       /** quadratic attenuation Kq */
+    unsigned char size;     /** For specular only; reasonable values are 1-4 */
 } PosLight_t;
 
+/**
+ * @copydetails PosLight_t
+ */
 typedef struct {
-    unsigned char col[3];   /* ambient light color (rgb) */
+    unsigned char col[3];   /** ambient light color (rgb) */
     char          pad1;
-    unsigned char colc[3];  /* copy of ambient light color (rgb) */
+    unsigned char colc[3];  /** copy of ambient light color (rgb) */
     char          pad2;
 } Ambient_t;
 
@@ -1855,7 +1870,7 @@ typedef struct {
     } value;
 } Gnoop;
 
-/*
+/**
  *  Graphics DMA Packet
  */
 typedef struct {
@@ -1865,6 +1880,9 @@ typedef struct {
     unsigned int addr;
 } Gdma;
 
+/**
+ * @copydoc Gdma
+ */
 typedef struct {
     int          cmd : 8;
     unsigned int len : 8;
@@ -1873,8 +1891,8 @@ typedef struct {
     unsigned int addr;
 } Gdma2;
 
-/*
- *  Graphics Moveword Packet
+/**
+ * Graphics Moveword Packet
  */
 typedef struct {
     int          cmd    : 8;
@@ -1883,8 +1901,8 @@ typedef struct {
     unsigned int data;
 } Gmovewd;
 
-/*
- *  Graphics Movemem Packet
+/**
+ * @copydetails Gmovewd
  */
 typedef struct {
     int          cmd    : 8;
@@ -1894,7 +1912,7 @@ typedef struct {
     unsigned int data;
 } Gmovemem;
 
-/*
+/**
  * Graphics Immediate Mode Packet types
  */
 typedef struct {
@@ -1978,7 +1996,7 @@ typedef struct {
 } Gperspnorm;
 
 
-/*
+/**
  * RDP Packet types
  */
 typedef struct {
@@ -2094,7 +2112,7 @@ typedef struct {
 #define MakeTexRect(xh,yh,flip,tile,xl,yl,s,t,dsdx,dtdy)        \
     G_TEXRECT, xh, yh, 0, flip, 0, tile, xl, yl, s, t, dsdx, dtdy
 
-/*
+/**
  * Textured rectangles are 128 bits not 64 bits
  */
 typedef struct {
@@ -2113,7 +2131,7 @@ typedef struct {
     unsigned int  addr;
 } Gvtx;
 
-/*
+/**
  * Generic Gfx Packet
  */
 typedef struct {
@@ -2121,7 +2139,7 @@ typedef struct {
     unsigned int w1;
 } Gwords;
 
-/*
+/**
  * This union is the fundamental type of the display list.
  * It is, by law, exactly 64 bits in size.
  */
@@ -2229,7 +2247,7 @@ _DW({                                                   \
 #define gSPPopMatrix(pkt, n)       gSPPopMatrixN((pkt), (n), 1)
 #define gsSPPopMatrix(n)           gsSPPopMatrixN(      (n), 1)
 
-/*
+/**
  *        +--------+----+---+---+----+------+-+
  *  G_VTX |  cmd:8 |0000|  n:8  |0000|v0+n:7|0|
  *        +-+---+--+----+---+---+----+------+-+
@@ -2246,6 +2264,9 @@ _DW({                                               \
     _g->words.w1 = (unsigned int)(v);               \
 })
 
+/**
+ * @copydetails gSPVertex
+ */
 #define gsSPVertex(v, n, v0)        \
 {                                   \
    (_SHIFTL(G_VTX,      24, 8) |    \
@@ -2280,7 +2301,7 @@ _DW({                                               \
     (((count) > 0 && ((count) % G_INPUT_BUFFER_CMDS) > 0) ? \
     ((G_INPUT_BUFFER_CMDS - ((count) % G_INPUT_BUFFER_CMDS)) << 3) : 0)
 
-/*
+/**
  * Optimization for reduced memory traffic. In count, put the estimated number
  * of DL commands in the target DL (the DL being called / jumped to, or the DL
  * being returned to, starting from the next command to be executed) up to and
@@ -2290,32 +2311,62 @@ _DW({                                               \
  * will be best if count is correct, and potentially worse than not specifying
  * count if it is wrong.
  * Feature suggested by Kaze Emanuar
-*/
-
+ */
 #define gSPDisplayListHint(pkt, dl, count) _gSPDisplayListRaw(pkt, dl, _DLHINTVALUE(count))
+/**
+ * @copydetails gSPDisplayListHint
+ */
 #define gsSPDisplayListHint(    dl, count) _gsSPDisplayListRaw(    dl, _DLHINTVALUE(count))
 
+/**
+ * @copydetails gSPDisplayListHint
+ */
 #define gSPBranchListHint(pkt, dl, count) _gSPBranchListRaw( pkt, dl, _DLHINTVALUE(count))
+
+/**
+ * @copydetails gSPDisplayListHint
+ */
 #define gsSPBranchListHint(    dl, count) _gsSPBranchListRaw(     dl, _DLHINTVALUE(count))
 
+/**
+ * @copydetails gSPDisplayListHint
+ */
 #define gSPEndDisplayListHint(pkt, count) _gSPEndDisplayListRaw( pkt, _DLHINTVALUE(count))
+
+/**
+ * @copydetails gSPDisplayListHint
+ */
 #define gsSPEndDisplayListHint(    count) _gsSPEndDisplayListRaw(     _DLHINTVALUE(count))
 
-/*
- * Normal control flow commands; same as above but with hint of 0
+/**
+ * Normal control flow commands; same as @ref gSPDisplayListHint but with hint of 0
  */
-
 #define gSPDisplayList(pkt, dl) _gSPDisplayListRaw(pkt, dl, 0)
+/**
+ * Normal control flow commands; same as @ref gsSPDisplayListHint but with hint of 0
+ */
 #define gsSPDisplayList(    dl) _gsSPDisplayListRaw(    dl, 0)
 
+/**
+ * Normal control flow commands; same as @ref gSPBranchListHint but with hint of 0
+ */
 #define gSPBranchList(pkt, dl)  _gSPBranchListRaw( pkt, dl, 0)
+/**
+ * Normal control flow commands; same as @ref gsSPBranchListHint but with hint of 0
+ */
 #define gsSPBranchList(    dl)  _gsSPBranchListRaw(     dl, 0)
 
+/**
+ * Normal control flow commands; same as @ref gSPEndDisplayListHint but with hint of 0
+ */
 #define gSPEndDisplayList(pkt)  _gSPEndDisplayListRaw( pkt, 0)
+/**
+ * Normal control flow commands; same as @ref gsSPEndDisplayListHint but with hint of 0
+ */
 #define gsSPEndDisplayList(  )  _gsSPEndDisplayListRaw(     0)
 
 
-/*
+/**
  * gSPLoadUcode   RSP loads specified ucode.
  *
  * uc_start  = ucode text section start
@@ -2335,6 +2386,9 @@ _DW({                                                       \
     _g->words.w1 = (unsigned int)(uc_start);                \
 })
 
+/**
+ * @copydetails gSPLoadUcodeEx
+ */
 #define gsSPLoadUcodeEx(uc_start, uc_dstart, uc_dsize)  \
 {                                                       \
     _SHIFTL(G_RDPHALF_1, 24, 8),                        \
@@ -2358,7 +2412,7 @@ _DW({                                                       \
         gsSPLoadUcode(      OS_K0_TO_PHYSICAL(& ucode##TextStart),  \
                             OS_K0_TO_PHYSICAL(& ucode##DataStart))
 
-/*
+/**
  * gSPDma_io  DMA to/from DMEM/IMEM for DEBUG.
  */
 #define gSPDma_io(pkt, flag, dmem, dram, size)      \
@@ -2372,6 +2426,9 @@ _DW({                                               \
     _g->words.w1 = (unsigned int)(dram);            \
 })
 
+/**
+ * @copydetails gSPDma_io
+ */
 #define gsSPDma_io(flag, dmem, dram, size)  \
 {                                           \
    (_SHIFTL(G_DMA_IO,   24,  8) |           \
@@ -2402,11 +2459,14 @@ _DW({                                                   \
     gDma0p(pkt, G_MEMSET, (dram), ((size) & 0xFFFFF0)); \
 })
 
+/**
+ * @copydetails gSPMemset
+ */
 #define gsSPMemset(pkt, dram, value, size)    \
     gsImmp1(G_RDPHALF_1, ((value) & 0xFFFF)), \
     gsDma0p(G_MEMSET, (dram), ((size) & 0xFFFFF0))
 
-/*
+/**
  * RSP short command (no DMA required) macros
  */
 #define gImmp0(pkt, c)                  \
@@ -2416,6 +2476,9 @@ _DW({                                   \
     _g->words.w0 = _SHIFTL((c), 24, 8); \
 })
 
+/**
+ * @copydetails gImmp0
+ */
 #define gsImmp0(c)      \
 {                       \
     _SHIFTL((c), 24, 8) \
@@ -2525,9 +2588,9 @@ _DW({                                       \
                     __gsSP1Triangle_w1(v3, v1, v2))
 
 
-/***
- ***  1 Triangle
- ***/
+/**
+ * 1 Triangle
+ */
 #define gSP1Triangle(pkt, v0, v1, v2, flag)                 \
 _DW({                                                       \
     Gfx *_g = (Gfx *)(pkt);                                 \
@@ -2535,6 +2598,9 @@ _DW({                                                       \
                     __gsSP1Triangle_w1f(v0, v1, v2, flag)); \
     _g->words.w1 = 0;                                       \
 })
+/**
+ * @copydetails gSP1Triangle
+ */
 #define gsSP1Triangle(v0, v1, v2, flag)     \
 {                                           \
    (_SHIFTL(G_TRI1, 24, 8) |                \
@@ -2542,9 +2608,9 @@ _DW({                                                       \
     0                                       \
 }
 
-/***
- ***  1 Quadrangle
- ***/
+/**
+ * 1 Quadrangle
+ */
 #define gSP1Quadrangle(pkt, v0, v1, v2, v3, flag)                   \
 _DW({                                                               \
     Gfx *_g = (Gfx *)(pkt);                                         \
@@ -2553,6 +2619,9 @@ _DW({                                                               \
     _g->words.w1 = (__gsSP1Quadrangle_w2f(v0, v1, v2, v3, flag));   \
 })
 
+/**
+ * @copydetails gSP1Quadrangle
+ */
 #define gsSP1Quadrangle(v0, v1, v2, v3, flag)       \
 {                                                   \
    (_SHIFTL(G_QUAD, 24, 8) |                        \
@@ -2560,9 +2629,9 @@ _DW({                                                               \
     __gsSP1Quadrangle_w2f(v0, v1, v2, v3, flag)     \
 }
 
-/***
- ***  2 Triangles
- ***/
+/**
+ * 2 Triangles
+ */
 #define gSP2Triangles(pkt, v00, v01, v02, flag0, v10, v11, v12, flag1)  \
 _DW({                                                                   \
     Gfx *_g = (Gfx *)(pkt);                                             \
@@ -2571,6 +2640,9 @@ _DW({                                                                   \
     _g->words.w1 =  __gsSP1Triangle_w1f(v10, v11, v12, flag1);          \
 })
 
+/**
+ * @copydetails gSP2Triangles
+ */
 #define gsSP2Triangles(v00, v01, v02, flag0, v10, v11, v12, flag1)  \
 {                                                                   \
    (_SHIFTL(G_TRI2, 24, 8) |                                        \
@@ -2604,7 +2676,7 @@ _DW({                                                        \
      _SHIFTL((v6)*2,  8, 8) |                                \
      _SHIFTL((v7)*2,  0, 8))                                 \
 })
-/*
+/**
  * 5 Triangles in strip arrangement. Draws the following tris:
  * v1-v2-v3, v3-v2-v4, v3-v4-v5, v5-v4-v6, v5-v6-v7
  * If you want to draw fewer tris, set indices to -1 from the right.
@@ -2616,15 +2688,21 @@ _DW({                                                        \
  */
 #define gSPTriStrip(pkt, v1, v2, v3, v4, v5, v6, v7) \
     _gSP5Triangles(pkt, G_TRISTRIP, v1, v2, v3, v4, v5, v6, v7)
+/**
+ * @copydetails gSPTriStrip
+ */
 #define gsSPTriStrip(v1, v2, v3, v4, v5, v6, v7) \
     _gsSP5Triangles(G_TRISTRIP, v1, v2, v3, v4, v5, v6, v7)
-/*
+/**
  * 5 Triangles in fan arrangement. Draws the following tris:
  * v1-v2-v3, v1-v3-v4, v1-v4-v5, v1-v5-v6, v1-v6-v7
  * Otherwise works the same as SPTriStrip, see above.
  */
 #define gSPTriFan(pkt, v1, v2, v3, v4, v5, v6, v7) \
     _gSP5Triangles(pkt, G_TRIFAN, v1, v2, v3, v4, v5, v6, v7)
+/**
+ * @copydetails gSPTriFan
+ */
 #define gsSPTriFan(v1, v2, v3, v4, v5, v6, v7) \
     _gsSP5Triangles(G_TRIFAN, v1, v2, v3, v4, v5, v6, v7)
 
@@ -2641,21 +2719,31 @@ _DW({                                                        \
 #define gSPPerspNormalize(pkt, s)   gMoveHalfwd(pkt, G_MW_FX, G_MWO_PERSPNORM, (s))
 #define gsSPPerspNormalize(s)       gsMoveHalfwd(    G_MW_FX, G_MWO_PERSPNORM, (s))
 
-/*
- * Clipping Macros - Deprecated, encodes SP no-ops
- * It is not possible to change the clip ratio from 2 in F3DEX3.
+/**
+ * @brief Clipping Macros
+ * @deprecated
+ * encodes SP no-ops it is not possible to change the clip ratio from 2 in F3DEX3.
  */
 #define gSPClipRatio(pkt, r) gSPNoOp(pkt)
+/**
+ * @brief @copybrief gSPClipRatio
+ * @deprecated
+ * @copydetails gSPClipRatio
+ */
 #define gsSPClipRatio(r) gsSPNoOp()
 
-/*
+/**
  * Load new MVP matrix directly.
  * This is no longer supported as there is no MVP matrix in F3DEX3.
+ * @deprecated
  */
 #define gSPForceMatrix(pkt, mptr) gSPNoOp(pkt)
+/**
+ * @copydetails gSPForceMatrix
+ */
 #define gsSPForceMatrix(mptr)    gsSPNoOp()
 
-/*
+/**
  * Ambient occlusion
  * Enabled with the G_AMBOCCLUSION bit in geometry mode.
  * Each of these factors sets how much ambient occlusion affects lights of
@@ -2690,12 +2778,26 @@ _DW({                                                        \
  *   lights
  * - To allow the lighting to be adjusted at the scene level on-the-fly
  */
- 
 #define gSPAmbOcclusionAmb(pkt, amb)     gMoveHalfwd(pkt, G_MW_FX, G_MWO_AO_AMBIENT, amb)
+/**
+ * @copydetails gSPAmbOcclusionAmb
+ */
 #define gsSPAmbOcclusionAmb(amb)        gsMoveHalfwd(     G_MW_FX, G_MWO_AO_AMBIENT, amb)
+/**
+ * @copydetails gSPAmbOcclusionAmb
+ */
 #define gSPAmbOcclusionDir(pkt, dir)     gMoveHalfwd(pkt, G_MW_FX, G_MWO_AO_DIRECTIONAL, dir)
+/**
+ * @copydetails gSPAmbOcclusionAmb
+ */
 #define gsSPAmbOcclusionDir(dir)        gsMoveHalfwd(     G_MW_FX, G_MWO_AO_DIRECTIONAL, dir)
+/**
+ * @copydetails gSPAmbOcclusionAmb
+ */
 #define gSPAmbOcclusionPoint(pkt, point) gMoveHalfwd(pkt, G_MW_FX, G_MWO_AO_POINT, point)
+/**
+ * @copydetails gSPAmbOcclusionAmb
+ */
 #define gsSPAmbOcclusionPoint(point)    gsMoveHalfwd(     G_MW_FX, G_MWO_AO_POINT, point)
 
 #define gSPAmbOcclusionAmbDir(pkt, amb, dir) \
@@ -2720,7 +2822,7 @@ _DW({                                         \
     gsSPAmbOcclusionAmbDir(amb, dir),         \
     gsSPAmbOcclusionPoint(point)
 
-/*
+/**
  * Fresnel - Feature suggested by thecozies
  * Enabled with the G_FRESNEL bit in geometry mode.
  * The dot product between a vertex normal and the vector from the vertex to the
@@ -2755,20 +2857,35 @@ _DW({                                         \
  */
 #define gSPFresnelScale(pkt, scale) \
     gMoveHalfwd(pkt, G_MW_FX, G_MWO_FRESNEL_SCALE, scale)
+/**
+ * @copydetails gSPFresnelScale
+ */
 #define gsSPFresnelScale(scale) \
     gsMoveHalfwd(G_MW_FX, G_MWO_FRESNEL_SCALE, scale)
+/**
+ * @copydetails gSPFresnelScale
+ */
 #define gSPFresnelOffset(pkt, offset) \
     gMoveHalfwd(pkt, G_MW_FX, G_MWO_FRESNEL_OFFSET, offset)
+/**
+ * @copydetails gSPFresnelScale
+ */
 #define gsSPFresnelOffset(offset) \
     gsMoveHalfwd(G_MW_FX, G_MWO_FRESNEL_OFFSET, offset)
+/**
+ * @copydetails gSPFresnelScale
+ */
 #define gSPFresnel(pkt, scale, offset) \
     gMoveWd(pkt, G_MW_FX, G_MWO_FRESNEL_SCALE, \
         (_SHIFTL((scale), 16, 16) | _SHIFTL((offset), 0, 16)))
+/**
+ * @copydetails gSPFresnelScale
+ */
 #define gsSPFresnel(scale, offset) \
     gsMoveWd(G_MW_FX, G_MWO_FRESNEL_SCALE, \
         (_SHIFTL((scale), 16, 16) | _SHIFTL((offset), 0, 16)))
 
-/*
+/**
  * Attribute offsets
  * These are added to ST or Z values after vertices are loaded and transformed.
  * They are all s16s.
@@ -2784,15 +2901,24 @@ _DW({                                         \
 #define gSPAttrOffsetST(pkt, s, t) \
     gMoveWd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_S, \
         (_SHIFTL((s), 16, 16) | _SHIFTL((t), 0, 16)))
+/**
+ * @copydetails gSPAttrOffsetST
+ */
 #define gsSPAttrOffsetST(s, t) \
     gsMoveWd(G_MW_FX, G_MWO_ATTR_OFFSET_S, \
         (_SHIFTL((s), 16, 16) | _SHIFTL((t), 0, 16)))
+/**
+ * @copydetails gSPAttrOffsetST
+ */
 #define gSPAttrOffsetZ(pkt, z) \
     gMoveHalfwd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_Z, z)
+/**
+ * @copydetails gSPAttrOffsetST
+ */
 #define gsSPAttrOffsetZ(z) \
     gsMoveHalfwd(G_MW_FX, G_MWO_ATTR_OFFSET_Z, z)
     
-/*
+/**
  * Alpha compare culling. Optimization for cel shading, could also be used for
  * other scenarios where lots of tris are being drawn with alpha compare.
  * 
@@ -2831,11 +2957,14 @@ _DW({                                         \
 #define gSPAlphaCompareCull(pkt, mode, thresh) \
     gMoveHalfwd(pkt, G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, \
         (_SHIFTL((mode), 8, 8) | _SHIFTL((thresh), 0, 8)))
+/**
+ * @copydetails gSPAlphaCompareCull
+ */
 #define gsSPAlphaCompareCull(mode, thresh) \
     gsMoveHalfwd(G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, \
         (_SHIFTL((mode), 8, 8) | _SHIFTL((thresh), 0, 8)))
 
-/*
+/**
  * Normals mode: How to handle transformation of vertex normals from model to
  * world space for lighting.
  * 
@@ -2872,10 +3001,13 @@ _DW({                                         \
  */
 #define gSPNormalsMode(pkt, mode) \
     gMoveHalfwd(pkt, G_MW_FX, G_MWO_NORMALS_MODE, (mode) & 0xFF)
+/**
+ * @copydetails gSPNormalsMode
+ */
 #define gsSPNormalsMode(mode) \
     gsMoveHalfwd(G_MW_FX, G_MWO_NORMALS_MODE, (mode) & 0xFF)
 
-/*
+/**
  * F3DEX3 has a basic auto-batched rendering system. At a high level, if a
  * material display list being run is the same as the last material, the texture
  * loads are automatically skipped the second time as they should already be in
@@ -2904,6 +3036,9 @@ _DW({                                         \
  */
 #define gSPDontSkipTexLoadsAcross(pkt) \
     gMoveWd(pkt, G_MW_FX, G_MWO_LAST_MAT_DL_ADDR, 0xFFFFFFFF)
+/**
+ * @copydetails gSPDontSkipTexLoadsAcross
+ */
 #define gsSPDontSkipTexLoadsAcross() \
     gsMoveWd(G_MW_FX, G_MWO_LAST_MAT_DL_ADDR, 0xFFFFFFFF)
 
@@ -2915,7 +3050,7 @@ typedef union {
     long long int force_structure_alignment;
 } MITMtx;
 
-/*
+/**
  * See SPNormalsMode. mtx is the address of a MITMtx (M inverse transpose).
  * 
  * The matrix values must be scaled down so that the matrix norm is <= 1,
@@ -2930,11 +3065,14 @@ typedef union {
  */
 #define gSPMITMatrix(pkt, mit) \
         gDma2p((pkt), G_MOVEMEM, (mit), sizeof(MITMtx), G_MV_MMTX, 0x80)
+/**
+ * @copydetails gSPMITMatrix
+ */
 #define gsSPMITMatrix(mtx) \
         gsDma2p(      G_MOVEMEM, (mit), sizeof(MITMtx), G_MV_MMTX, 0x80)
 
 
-/*
+/**
  * Insert values into Vertices
  *
  * vtx = vertex number 0-55
@@ -2950,6 +3088,9 @@ _DW({                                               \
                     _SHIFTL((vtx) * 2,    0, 16));  \
     _g->words.w1 = (unsigned int)(val);             \
 })
+/**
+ * @copydetails gSPModifyVertex
+ */
 # define gsSPModifyVertex(vtx, where, val)  \
 {                                           \
    (_SHIFTL(G_MODIFYVTX, 24,  8) |          \
@@ -2962,7 +3103,7 @@ _DW({                                               \
  * Display list optimization / object culling
  */
 
-/*
+/**
  * Cull the display list based on screen clip flags of range of loaded verts.
  * Executes SPEndDisplayList if the convex hull formed by the specified range of
  * already-loaded vertices is offscreen.
@@ -2975,7 +3116,9 @@ _DW({                                                   \
                     _SHIFTL((vstart) * 2,  0, 16));     \
     _g->words.w1 = _SHIFTL((vend) * 2, 0, 16);          \
 })
-
+/**
+ * @copydetails gSPCullDisplayList
+ */
 #define gsSPCullDisplayList(vstart,vend)    \
 {                                           \
    (_SHIFTL(G_CULLDL,     24, 8) |          \
@@ -3047,7 +3190,7 @@ _DW({                                                                       \
 #define gsSPBranchLessZ(dl, vtx, zval, near, far, flag)             \
     gsSPBranchLessZrg(dl, vtx, zval, near, far, flag, 0, G_MAXZ)
 
-/*
+/**
  *  gSPBranchLessZraw   Branch DL if (vtx.z) less than or equal (raw zval).
  *
  *  dl   = DL branch to
@@ -3069,6 +3212,9 @@ _DW({                                               \
     _g->words.w1 = (unsigned int)(zval);            \
 })
 
+/**
+ * @copydetails gSPBranchLessZraw
+ */
 #define gsSPBranchLessZraw(dl, vtx, zval)   \
 {                                           \
     _SHIFTL(G_RDPHALF_1, 24, 8),            \
@@ -3102,12 +3248,15 @@ _DW({                                               \
 #define NUMLIGHTS_8 8
 #define NUMLIGHTS_9 9
 
-/*
+/**
  * Number of directional / point lights, in the range 0-9. There is also always
  * one ambient light not counted in this number.
  */
 #define gSPNumLights(pkt, n)                            \
     gMoveWd(pkt, G_MW_NUMLIGHT, G_MWO_NUMLIGHT, NUML(n))
+/**
+ * @copydetails gSPNumLights
+ */
 #define gsSPNumLights(n)                                \
     gsMoveWd(    G_MW_NUMLIGHT, G_MWO_NUMLIGHT, NUML(n))
 
@@ -3123,7 +3272,8 @@ _DW({                                               \
 #define LIGHT_9     9
 #define LIGHT_10    10
 
-/*
+#define _LIGHT_TO_OFFSET(n) (((n) - 1) * 0x10 + 0x10) /* The + 0x10 skips cam pos and lookat */
+/**
  * l should point to a Light or PosLight struct.
  * n should be an integer 1-9 to load lights 0-8.
  * Can also load Ambient lights to lights 0-8 with this. However, if you have
@@ -3134,22 +3284,27 @@ _DW({                                               \
  * New code should not generally use SPLight, and instead use SPSetLights to set
  * all lights in one memory transaction.
  */
-#define _LIGHT_TO_OFFSET(n) (((n) - 1) * 0x10 + 0x10) /* The + 0x10 skips cam pos and lookat */
 #define gSPLight(pkt, l, n) \
     gDma2p((pkt), G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
+/**
+ * @copydetails gSPLight
+ */
 #define gsSPLight(l, n) \
     gsDma2p(      G_MOVEMEM, (l), sizeof(Light), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
 
-/*
+/**
  * l should point to an Ambient struct.
  * n should be an integer 1-10 to load lights 0-9.
  */
 #define gSPAmbient(pkt, l, n) \
     gDma2p((pkt), G_MOVEMEM, (l), sizeof(Ambient), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
+/**
+ * @copydetails gSPAmbient
+ */
 #define gsSPAmbient(l, n) \
     gsDma2p(      G_MOVEMEM, (l), sizeof(Ambient), G_MV_LIGHT, _LIGHT_TO_OFFSET(n))
 
-/*
+/**
  * gSPLightColor changes the color of a directional light without an additional
  * DMA transfer.
  * col is a 32 bit word where (col >> 24) & 0xFF is red, (col >> 16) & 0xFF is
@@ -3162,6 +3317,9 @@ _DW({                                               \
     gMoveWd(pkt, G_MW_LIGHTCOL, ((((n) - 1) * 0x10) + 0), ((col) & 0xFFFFFF00));   \
     gMoveWd(pkt, G_MW_LIGHTCOL, ((((n) - 1) * 0x10) + 4), ((col) & 0xFFFFFF00));   \
 })
+/**
+ * @copydetails gSPLightColor
+ */
 #define gsSPLightColor(n, col)                      \
     gsMoveWd(G_MW_LIGHTCOL, ((((n) - 1) * 0x10) + 0), ((col) & 0xFFFFFF00)),       \
     gsMoveWd(G_MW_LIGHTCOL, ((((n) - 1) * 0x10) + 4), ((col) & 0xFFFFFF00))
@@ -3181,7 +3339,7 @@ _DW({\
   gsMoveWd(G_MW_LIGHTCOL, ((((n) - 1) * 0x10) + 4), col2)
 
 
-/*
+/**
  * Set all your scene's lights (directional/point + ambient) with one memory
  * transaction.
  * n is the number of directional / point lights, from 0 to 9. There is also
@@ -3210,6 +3368,9 @@ _DW({ \
     gSPNumLights(pkt, n); \
     gDma2p((pkt),  G_MOVEMEM, &(name), (n) * 0x10 + 8, G_MV_LIGHT, 0x10); \
 })
+/**
+ * @copydetails gSPSetLights
+ */
 #define gsSPSetLights(n, name) \
     gsSPNumLights(n), \
     gsDma2p(G_MOVEMEM, &(name), (n) * 0x10 + 8, G_MV_LIGHT, 0x10)
@@ -3236,36 +3397,52 @@ _DW({ \
 #define gsSPSetLights9(name)      gsSPSetLights(     9, name)
 
 
-/*
+/**
  * Camera world position for Fresnel and specular lighting. Set this whenever
  * you set the VP matrix, viewport, etc. cam is the address of a PlainVtx struct.
  */
 #define gSPCameraWorld(pkt, cam) \
     gDma2p((pkt), G_MOVEMEM, (cam), sizeof(PlainVtx), G_MV_LIGHT, 0)
+/**
+ * @copydetails gSPCameraWorld
+ */
 #define gsSPCameraWorld(cam) \
     gsDma2p(      G_MOVEMEM, (cam), sizeof(PlainVtx), G_MV_LIGHT, 0)
 
 
-/*
+/**
  * Reflection/Hiliting Macros.
  * la is the address of a LookAt struct.
  */
 #define gSPLookAt(pkt, la) \
     gDma2p((pkt), G_MOVEMEM, (la), sizeof(LookAt), G_MV_LIGHT, 8)
+/**
+ * @copydetails gSPLookAt
+ */
 #define gsSPLookAt(la) \
     gsDma2p(      G_MOVEMEM, (la), sizeof(LookAt), G_MV_LIGHT, 8)
  
-/*
+/**
  * These versions are deprecated, please use g*SPLookAt. The two directions
  * cannot be set independently anymore as they both fit within one memory word.
  * (They could be set with moveword, but then the values would have to be within
  * the command itself, not at a memory address.)
  * This deprecated version has the X command set both (assuming l is the name /
  * address of a LookAt struct) and has the Y command as a SP no-op.
+ * @deprecated
  */
 #define gSPLookAtX(pkt, l) gSPLookAt(pkt, l)
+/**
+ * @copydetails gSPLookAtX
+ */
 #define gsSPLookAtX(l)     gsSPLookAt(l)
+/**
+ * @copydetails gSPLookAtX
+ */
 #define gSPLookAtY(pkt, l) gSPNoOp(pkt)
+/**
+ * @copydetails gSPLookAtX
+ */
 #define gsSPLookAtY(l)     gsSPNoOp()
 
 
@@ -3296,7 +3473,7 @@ _DW({ \
         ((((height) - 1) * 4) + (hilite)->h.y2) & 0xFFF)
 
 
-/*
+/**
  * Set the occlusion plane. This is a quadrilateral in 3D space where all
  * geometry behind it is culled. You should create occlusion plane candidates
  * just behind walls and other large objects, and have your game engine pick
@@ -3311,12 +3488,15 @@ _DW({ \
 #define gSPOcclusionPlane(pkt, o) \
     gDma2p((pkt), G_MOVEMEM, (o), sizeof(OcclusionPlane), G_MV_LIGHT, \
         (G_MAX_LIGHTS * 0x10) + 0x18)
+/**
+ * @copydetails gSPOcclusionPlane
+ */
 #define gsSPOcclusionPlane(o) \
     gsDma2p(      G_MOVEMEM, (o), sizeof(OcclusionPlane), G_MV_LIGHT, \
         (G_MAX_LIGHTS * 0x10) + 0x18)
 
 
-/*
+/**
  * FOG macros
  * fm = z multiplier
  * fo = z offset
@@ -3333,6 +3513,9 @@ _DW({ \
     gMoveWd(pkt, G_MW_FOG, G_MWO_FOG,               \
        (_SHIFTL(fm, 16, 16) | _SHIFTL(fo, 0, 16)))
 
+/**
+ * @copydetails gSPFogFactor
+ */
 #define gsSPFogFactor(fm, fo)                       \
     gsMoveWd(G_MW_FOG, G_MWO_FOG,                   \
        (_SHIFTL(fm, 16, 16) | _SHIFTL(fo, 0, 16)))
@@ -3348,7 +3531,7 @@ _DW({ \
         _SHIFTL(((500 - (min)) * 256 / ((max) - (min))), 0, 16)))
 
 
-/*
+/**
  * Macros to turn texture on/off
  */
 #define gSPTexture(pkt, s, t, level, tile, on)                 \
@@ -3362,6 +3545,9 @@ _DW({                                                           \
     _g->words.w1 = (_SHIFTL((s), 16, 16) |                      \
                     _SHIFTL((t),  0, 16));                      \
 })
+/**
+ * @copydetails gSPTexture
+ */
 #define gsSPTexture(s, t, level, tile, on) \
 {                                           \
    (_SHIFTL(G_TEXTURE,  24, 8) |            \
@@ -3372,16 +3558,19 @@ _DW({                                                           \
     _SHIFTL((t),  0, 16))                   \
 }
 
-/*
+/**
  * The bowtie value is a workaround for a bug in HW V1, and is not supported
  * by F3DEX2, let alone F3DEX3.
  */
 #define gSPTextureL(pkt, s, t, level, bowtie, tile, on) \
     gSPTexture(pkt, s, t, level, tile, on)
+/**
+ * @copydetails gSPTextureL
+ */
 #define gsSPTextureL(s, t, level, bowtie, tile, on) \
     gsSPTexture(s, t, level, tile, on)
 
-/*
+/**
  *  One gSPGeometryMode(pkt,c,s) GBI is equal to these two GBIs.
  *
  *      gSPClearGeometryMode(pkt,c)
@@ -3398,6 +3587,9 @@ _DW({                                                   \
     _g->words.w1 = (u32)(s);                            \
 })
 
+/**
+ * @copydetails gSPGeometryMode
+ */
 #define gsSPGeometryMode(c, s)          \
 {                                       \
    (_SHIFTL(G_GEOMETRYMODE, 24,  8) |   \
@@ -3432,11 +3624,14 @@ _DW({                                                       \
     (unsigned int)(data)                        \
 }
 
-/*
+/**
  * RDP setothermode register commands - register shadowed in RSP
  */
 #define gDPPipelineMode(pkt, mode)  \
     gSPSetOtherMode(pkt, G_SETOTHERMODE_H, G_MDSFT_PIPELINE, 1, mode)
+/**
+ * @copydetails gDPPipelineMode
+ */
 #define gsDPPipelineMode(mode)      \
     gsSPSetOtherMode(    G_SETOTHERMODE_H, G_MDSFT_PIPELINE, 1, mode)
 
@@ -3490,11 +3685,16 @@ _DW({                                                       \
 #define gsDPSetAlphaDither(mode)        \
     gsSPSetOtherMode(    G_SETOTHERMODE_H, G_MDSFT_ALPHADITHER, 2, mode)
 
-/* 'blendmask' is not supported anymore.
+/**
+ * 'blendmask' is not supported anymore.
  * The bits are reserved for future use.
  * Fri May 26 13:45:55 PDT 1995
+ * @deprecated
  */
 #define gDPSetBlendMask(pkt, mask)  gDPNoOp(pkt)
+/**
+ * @copydetails gDPSetBlendMask
+ */
 #define gsDPSetBlendMask(mask)      gsDPNoOp()
 
 #define gDPSetAlphaCompare(pkt, type)   \
@@ -3622,7 +3822,7 @@ _DW({                                                                       \
                            G_ACMUX_##Ab1, G_ACMUX_##Ad1))       \
 }
 
-/*
+/**
  * SetCombineMode macros are NOT redunant. It allow the C preprocessor
  * to substitute single parameter which includes commas in the token and
  * rescan for higher parameter count macro substitution.
@@ -3631,8 +3831,10 @@ _DW({                                                                       \
  *  gsDPSetCombineLERP(TEXEL0, 0, SHADE, 0, TEXEL0, 0, SHADE, 0,
  *      TEXEL0, 0, SHADE, 0, TEXEL0, 0, SHADE, 0)
  */
-
 #define gDPSetCombineMode(pkt, a, b)    gDPSetCombineLERP(pkt, a, b)
+/**
+ * @copydetails gDPSetCombineMode
+ */
 #define gsDPSetCombineMode(a, b)        gsDPSetCombineLERP(    a, b)
 
 #define gDPSetColor(pkt, c, d)          \
@@ -3719,7 +3921,7 @@ _DW({                                                   \
     _SHIFTL(a,  0, 8))                      \
 }
 
-/*
+/**
  * Send the color of the specified light to one of the RDP's color registers.
  * light is the index of a light in the RSP counting from the end, i.e. 0 is
  * the ambient light, 1 is the last directional / point light, etc. The RGB
@@ -3737,6 +3939,9 @@ _DW({                                              \
                     _SHIFTL(alpha,         0, 8)); \
     _g->words.w1 = (word0);                        \
 })
+/**
+ * @copydetails gSPLightToRDP
+ */
 #define gsSPLightToRDP(light, alpha, word0) \
 {                                           \
    (_SHIFTL(G_LIGHTTORDP, 24, 8) |          \
@@ -3755,7 +3960,7 @@ _DW({                                              \
 #define gsSPLightToFogColor(light, alpha) \
     gsSPLightToRDP(light, alpha, _SHIFTL(G_SETFOGCOLOR, 24, 8))
 
-/*
+/**
  * gDPSetOtherMode (This is for expert user.)
  *
  * This command makes all othermode parameters set.
@@ -3792,6 +3997,9 @@ _DW({                                                   \
     _g->words.w1 = (unsigned int)(mode1);               \
 })
 
+/**
+ * @copydetails gDPSetOtherMode
+ */
 #define gsDPSetOtherMode(mode0, mode1)      \
 {                                           \
    (_SHIFTL(G_RDPSETOTHERMODE, 24,  8) |    \
@@ -4121,7 +4329,7 @@ _DW({                                                                       \
         ((height) - 1) << G_TEXTURE_IMAGE_FRAC);                            \
 })
 
-/*
+/**
  *  Allow tmem address and render tile to be specified.
  *  The S at the end means odd lines are already word Swapped
  */
@@ -4207,7 +4415,7 @@ _DW({                                                                           
         ((height) - 1) << G_TEXTURE_IMAGE_FRAC);                                        \
 })
 
-/*
+/**
  *  allows tmem address and render tile to be specified
  */
 #define gDPLoadMultiBlock(pkt, timg, tmem, rtile, fmt, siz, width, height, pal, \
@@ -4311,7 +4519,7 @@ _DW({                                                                           
         ((height) - 1) << G_TEXTURE_IMAGE_FRAC)
 
 
-/*
+/**
  *  Allow tmem address and render_tile to be specified, useful when loading
  *  mutilple tiles at a time.
  */
@@ -4332,7 +4540,7 @@ _DW({                                                                           
         ((width)  - 1) << G_TEXTURE_IMAGE_FRAC,                             \
         ((height) - 1) << G_TEXTURE_IMAGE_FRAC)
 
-/*
+/**
  *  Allows tmem and render tile to be specified.  Useful when loading
  *  several tiles at a time.
  *
@@ -4340,7 +4548,6 @@ _DW({                                                                           
  *  See gDPLoadTextureBlockS() for reference.  Basically, just don't
  *  calculate DxT, use 0
  */
-
 #define gsDPLoadMultiBlockS(timg, tmem, rtile, fmt, siz, width, height, pal,    \
                             cms, cmt, masks, maskt, shifts, shiftt)             \
     gsDPSetTextureImage(fmt, siz##_LOAD_BLOCK, 1, timg),                        \
@@ -4399,7 +4606,7 @@ _DW({                                                                           
         ((height) - 1) << G_TEXTURE_IMAGE_FRAC);                                \
 })
 
-/*
+/**
  *  4-bit load block.  Useful when loading multiple tiles
  */
 #define gDPLoadMultiBlock_4b(pkt, timg, tmem, rtile, fmt, width, height, pal,   \
@@ -4421,7 +4628,7 @@ _DW({                                                                           
         ((height) - 1) << G_TEXTURE_IMAGE_FRAC);                                \
 })
 
-/*
+/**
  *  4-bit load block.  Allows tmem and render tile to be specified.  Useful when
  *  loading multiple tiles.  The S means odd lines are already word swapped.
  */
@@ -4498,7 +4705,7 @@ _DW({                                                                           
         ((width)  - 1) << G_TEXTURE_IMAGE_FRAC,                             \
         ((height) - 1) << G_TEXTURE_IMAGE_FRAC)
 
-/*
+/**
  *  4-bit load block.  Allows tmem address and render tile to be specified.
  *  Useful when loading multiple tiles.
  */
@@ -4520,7 +4727,7 @@ _DW({                                                                           
         ((height)-1) << G_TEXTURE_IMAGE_FRAC)
 
 
-/*
+/**
  *  4-bit load block.  Allows tmem address and render tile to be specified.
  *  Useful when loading multiple tiles.  S means odd lines are already swapped.
  */
@@ -4588,7 +4795,7 @@ _DW({                                                                   \
         (lrt) << G_TEXTURE_IMAGE_FRAC);                                 \
 })
 
-/*
+/**
  *  Load texture tile.  Allows tmem address and render tile to be specified.
  *  Useful for loading multiple tiles.
  */
@@ -4641,7 +4848,7 @@ _DW({                                                                       \
         (lrs) << G_TEXTURE_IMAGE_FRAC,                                  \
         (lrt) << G_TEXTURE_IMAGE_FRAC)
 
-/*
+/**
  *  Load texture tile.  Allows tmem address and render tile to be specified.
  *  Useful for loading multiple tiles.
  */
@@ -4693,7 +4900,7 @@ _DW({                                                                       \
         (lrt) << G_TEXTURE_IMAGE_FRAC);                                     \
 })
 
-/*
+/**
  *  Load texture tile.  Allows tmem address and render tile to be specified.
  *  Useful for loading multiple tiles.
  */
@@ -4745,9 +4952,8 @@ _DW({                                                                       \
         (lrs) << G_TEXTURE_IMAGE_FRAC,                                  \
         (lrt) << G_TEXTURE_IMAGE_FRAC)
 
-/*
- *  Load texture tile.  Allows tmem address and render tile to be specified.
- *  Useful for loading multiple tiles.
+/**
+ * @copydetails gDPLoadMultiTile_4b
  */
 #define gsDPLoadMultiTile_4b(timg, tmem, rtile, fmt, width, height,        \
                              uls, ult, lrs, lrt, pal,                      \
@@ -4773,13 +4979,12 @@ _DW({                                                                       \
         (lrs) << G_TEXTURE_IMAGE_FRAC,                                     \
         (lrt) << G_TEXTURE_IMAGE_FRAC)
 
-/*
+/**
  *  Load a 16-entry palette (for 4-bit CI textures)
  *  Assumes a 16 entry tlut is being loaded, palette # is 0-15
  *  With NO_SYNCS_IN_TEXTURE_LOADS: assumes that palette 0 is for multitexture
  *  texture 0 and palette 1 is for texture 1 (uses load tiles 5 and 4)
  */
-
 #define gDPLoadTLUT_pal16(pkt, pal, dram)                            \
 _DW({                                                                \
     gDPSetTextureImage(pkt, G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, dram);   \
@@ -4790,7 +4995,9 @@ _DW({                                                                \
     gDPLoadTLUTCmd(pkt, _G_PALLOADTILE((pal) & 1), 15);              \
     gDPPipeSyncInTexLoad(pkt);                                       \
 })
-
+/**
+ * @copydetails gDPLoadTLUT_pal16
+ */
 #define gsDPLoadTLUT_pal16(pal, dram)                            \
     gsDPSetTextureImage(G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, dram),   \
     gsDPTileSyncInTexLoad                                        \
@@ -4800,11 +5007,10 @@ _DW({                                                                \
     gsDPLoadTLUTCmd(_G_PALLOADTILE((pal) & 1), 15)               \
     gsDPPipeSyncEndOfTexLoad
 
-/*
+/**
  *  Load a 256-entry palette (for 8-bit CI textures)
  *  Assumes a 256 entry tlut is being loaded, palette # is not used
  */
-
 #define gDPLoadTLUT_pal256(pkt, dram)                                   \
 _DW({                                                                   \
     gDPSetTextureImage(pkt, G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, dram);      \
@@ -4816,6 +5022,9 @@ _DW({                                                                   \
     gDPPipeSyncInTexLoad(pkt);                                          \
 })
 
+/**
+ * @copydetails gDPLoadTLUT_pal256
+ */
 #define gsDPLoadTLUT_pal256(dram)                               \
     gsDPSetTextureImage(G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, dram),  \
     gsDPTileSyncInTexLoad                                       \
@@ -5028,7 +5237,8 @@ _DW({                                   \
     (param)                     \
 }
 
-/* Notice that textured rectangles are 128-bit commands, therefore
+/**
+ * Notice that textured rectangles are 128-bit commands, therefore
  * gsDPTextureRectangle() should not be used in display lists
  * under normal circumstances (use gsSPTextureRectangle()).
  * That is also why there is no gDPTextureRectangle() macros.
@@ -5049,6 +5259,9 @@ _DW({                                   \
     _SHIFTL(dtdy,  0, 16))                                              \
 }
 
+/**
+ * @copydetails gsDPTextureRectangle
+ */
 #define gDPTextureRectangle(pkt, xl, yl, xh, yh, tile, s, t, dsdx, dtdy)    \
 _DW({                                                                       \
     Gfx *_g = (Gfx *)(pkt);                                                 \
