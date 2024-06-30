@@ -2329,6 +2329,19 @@ _DW({                                                   \
 #define gsSPMatrix(m, p) \
         gsDma2p(     G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH, 0)
 
+/**
+ * @brief macro which pops one of the matrix stacks at the end display list.
+ * 
+ * It pops `num` of the matrix stacks. The model view stack can be up to 10 matrices deep. The projection stack is 1 matrix deep, so it cannot be popped.
+ * 
+ * @note
+ * If the stack is empty, the macro is ignored.
+ * 
+ * @param n is the flag field that identifies which matrix stack to pop:
+ * - @ref G_MTX_MODELVIEW pops the modeling/viewing matrix stack
+ * - @ref G_MTX_PROJECTION pops the projection matrix stack (NOT IMPLEMENTED)
+ * @param num is the number of matrices to pop
+ */
 #define gSPPopMatrixN(pkt, n, num) gDma2p((pkt), G_POPMTX, (num) * 64, 64, 2, 0)
 #define gsSPPopMatrixN(n, num)     gsDma2p(      G_POPMTX, (num) * 64, 64, 2, 0)
 /**
@@ -2837,12 +2850,15 @@ _DW({                                                        \
 #define gsSPClipRatio(r) gsSPNoOp()
 
 /**
- * Load new MVP matrix directly.
+ * @brief Load new MVP matrix directly.
+ * 
  * This is no longer supported as there is no MVP matrix in F3DEX3.
  * @deprecated
  */
 #define gSPForceMatrix(pkt, mptr) gSPNoOp(pkt)
 /**
+ * @brief Load new MVP matrix directly.
+ * 
  * @copydetails gSPForceMatrix
  */
 #define gsSPForceMatrix(mptr)    gsSPNoOp()
