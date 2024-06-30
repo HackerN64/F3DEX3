@@ -2262,7 +2262,7 @@ _DW({                                                   \
 #define gsSPNoOp()      gsDma0p(    G_SPNOOP, 0, 0)
 
 /**
- * @brief macro who inserts a matrix operation at the end display list.
+ * @brief macro which inserts a matrix operation at the end display list.
  * 
  * It inserts a matrix operation in the display list. The parameters allow you to select which matrix stack to use (projection or model view), where to load or concatenate, and whether or not to push the matrix stack. The following parameters are bit OR'ed together:
  * - @ref G_MTX_PROJECTION @ref G_MTX_MODELVIEW - @copybrief G_MTX_MODELVIEW
@@ -2322,7 +2322,7 @@ _DW({                                                   \
 #define gSPMatrix(pkt, m, p) \
         gDma2p((pkt),G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH, 0)
 /**
- * @brief macro who inserts a matrix operation in a static display list.
+ * @brief macro which inserts a matrix operation in a static display list.
  * 
  * @copydetails gSPMatrix
  */
@@ -2332,7 +2332,7 @@ _DW({                                                   \
 #define gSPPopMatrixN(pkt, n, num) gDma2p((pkt), G_POPMTX, (num) * 64, 64, 2, 0)
 #define gsSPPopMatrixN(n, num)     gsDma2p(      G_POPMTX, (num) * 64, 64, 2, 0)
 /**
- * @brief macro who pops one of the matrix stacks at the end display list.
+ * @brief macro which pops one of the matrix stacks at the end display list.
  * 
  * It pops one of the matrix stacks. The model view stack can be up to 10 matrices deep. The projection stack is 1 matrix deep, so it cannot be popped.
  * 
@@ -2345,7 +2345,7 @@ _DW({                                                   \
  */
 #define gSPPopMatrix(pkt, n)       gSPPopMatrixN((pkt), (n), 1)
 /**
- * @brief macro who pops one of the matrix stacks in a static display list.
+ * @brief macro which pops one of the matrix stacks in a static display list.
  * 
  * @copydetails gSPPopMatrix
  */
