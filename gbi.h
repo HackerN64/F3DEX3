@@ -2343,6 +2343,11 @@ _DW({                                                   \
  * @param num is the number of matrices to pop
  */
 #define gSPPopMatrixN(pkt, n, num) gDma2p((pkt), G_POPMTX, (num) * 64, 64, 2, 0)
+/**
+ * @brief macro which pops one of the matrix stacks in a static display list.
+ * 
+ * @copydetails gSPPopMatrixN
+ */
 #define gsSPPopMatrixN(n, num)     gsDma2p(      G_POPMTX, (num) * 64, 64, 2, 0)
 /**
  * @brief macro which pops one of the matrix stacks at the end display list.
