@@ -1004,35 +1004,35 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
  * Vertex (set up for use with colors)
  */
 typedef struct {
-    short          ob[3];   /* x, y, z */
-    unsigned short flag;    /* Holds packed normals, or unused */
-    short          tc[2];   /* texture coord */
-    unsigned char  cn[4];   /* color & alpha */
+    short          ob[3];   /** x, y, z */
+    unsigned short flag;    /** Holds packed normals, or unused */
+    short          tc[2];   /** texture coord */
+    unsigned char  cn[4];   /** color & alpha */
 } Vtx_t;
 
 /**
  * @copydetails Vtx_t
  */
 typedef struct {
-    short          ob[3];   /* x, y, z */
-    unsigned short flag;    /* Packed normals are not used when normals are in colors */
-    short          tc[2];   /* texture coord */
-    signed char    n[3];    /* normal */
-    unsigned char  a;       /* alpha  */
+    short          ob[3];   /** x, y, z */
+    unsigned short flag;    /** Packed normals are not used when normals are in colors */
+    short          tc[2];   /** texture coord */
+    signed char    n[3];    /** normal */
+    unsigned char  a;       /** alpha  */
 } Vtx_tn;
 
 /**
  * @copydetails Vtx_t
  */
 typedef union {
-    Vtx_t  v;   /* Use this one for colors  */
-    Vtx_tn n;   /* Use this one for normals */
+    Vtx_t  v;   /** Use this one for colors  */
+    Vtx_tn n;   /** Use this one for normals */
     long long int force_structure_alignment;
 } Vtx;
 
 typedef struct {
     short pos[3];
-    short pad; /* value ignored, need not be 0 */
+    short pad; /** value ignored, need not be 0 */
 } PlainVtx_t;
 
 typedef union {
@@ -1124,8 +1124,8 @@ typedef union {
  *      (SCREEN_WD/2)*4, (SCREEN_HT/2)*4, 0, 0,
  */
 typedef struct {
-    short vscale[4];    /* scale, 2 bits fraction */
-    short vtrans[4];    /* translate, 2 bits fraction */
+    short vscale[4];    /** scale, 2 bits fraction */
+    short vtrans[4];    /** translate, 2 bits fraction */
     /* both the above arrays are padded to 64-bit boundary */
 } Vp_t;
 
@@ -1141,14 +1141,14 @@ typedef union {
  * the microcode.
  */
 typedef struct {
-    unsigned char col[3];   /* diffuse light color (rgb) */
-    unsigned char type;     /* formerly pad1; MUST SET TO 0 to indicate directional light */
-    unsigned char colc[3];  /* copy of diffuse light color (rgb) */
+    unsigned char col[3];   /** diffuse light color (rgb) */
+    unsigned char type;     /** formerly pad1; MUST SET TO 0 to indicate directional light */
+    unsigned char colc[3];  /** copy of diffuse light color (rgb) */
     char          pad2;
-    signed char   dir[3];   /* direction of light (normalized) */
+    signed char   dir[3];   /** direction of light (normalized) */
     char          pad3;
     char          pad4[3];
-    unsigned char size;     /* For specular only; reasonable values are 1-4 */
+    unsigned char size;     /** For specular only; reasonable values are 1-4 */
 } Light_t;
 
 /**
@@ -1158,32 +1158,32 @@ typedef struct {
  * the microcode.
  */
 typedef struct {
-    unsigned char col[3];   /* point light color (rgb) */
-    unsigned char kc;       /* constant attenuation (> 0 indicates point light) */
-    unsigned char colc[3];  /* copy of point light color (rgb) */
-    unsigned char kl;       /* linear attenuation */
-    short         pos[3];   /* world-space position of light */
-    unsigned char kq;       /* quadratic attenuation */
-    unsigned char size;     /* For specular only; reasonable values are 1-4 */
+    unsigned char col[3];   /** point light color (rgb) */
+    unsigned char kc;       /** constant attenuation (> 0 indicates point light) */
+    unsigned char colc[3];  /** copy of point light color (rgb) */
+    unsigned char kl;       /** linear attenuation */
+    short         pos[3];   /** world-space position of light */
+    unsigned char kq;       /** quadratic attenuation */
+    unsigned char size;     /** For specular only; reasonable values are 1-4 */
 } PointLight_t;
 
 /**
  * @copydetails PosLight_t
  */
 typedef struct {
-    unsigned char col[3];   /* ambient light color (rgb) */
+    unsigned char col[3];   /** ambient light color (rgb) */
     char          pad1;
-    unsigned char colc[3];  /* copy of ambient light color (rgb) */
+    unsigned char colc[3];  /** copy of ambient light color (rgb) */
     char          pad2;
 } Ambient_t;
 
 typedef struct {
-    signed char   dir[3];   /* direction of lookat (normalized) */
+    signed char   dir[3];   /** direction of lookat (normalized) */
     char          pad1;
 } LookAt_t;
 
 typedef struct {
-    LookAt_t      l;        /* for backwards compatibility */
+    LookAt_t      l;        /** for backwards compatibility */
 } LookAtWrapper;
 
 typedef struct {
@@ -1210,13 +1210,12 @@ typedef struct {
 } OcclusionPlane_t;
 
 typedef struct {
-    /* Four vertices of a quad, XYZ components in world space */
     struct {
         short x;
         short y;
         short z;
-    } v[4];
-    float weight; /* Higher if there's a lot of stuff behind it */
+    } v[4]; /** Four vertices of a quad, XYZ components in world space */
+    float weight; /** Higher if there's a lot of stuff behind it */
 } OcclusionPlaneCandidate;
 
 typedef union {
@@ -2835,8 +2834,8 @@ _DW({                                         \
 
 typedef union {
     struct {
-        s16 intPart[3][4];  /* Fourth row containing translations is omitted. */
-        u16 fracPart[3][4]; /* Also the fourth column data is ignored, need not be 0. */
+        s16 intPart[3][4];  /** Fourth row containing translations is omitted. */
+        u16 fracPart[3][4]; /** Also the fourth column data is ignored, need not be 0. */
     };
     long long int force_structure_alignment;
 } MITMtx;
