@@ -2265,7 +2265,7 @@ _DW({                                                   \
  * @brief macro who inserts a matrix operation at the end display list.
  * 
  * It inserts a matrix operation in the display list. The parameters allow you to select which matrix stack to use (projection or model view), where to load or concatenate, and whether or not to push the matrix stack. The following parameters are bit OR'ed together:
- * - @ref G_MTX_PROJECTION G_MTX_MODELVIEW - @copybrief G_MTX_MODELVIEW
+ * - @ref G_MTX_PROJECTION @ref G_MTX_MODELVIEW - @copybrief G_MTX_MODELVIEW
  * - @ref G_MTX_MUL - @copybrief G_MTX_MUL
  * - @ref G_MTX_LOAD - @copybrief G_MTX_LOAD
  * - @ref G_MTX_NOPUSH - @copybrief G_MTX_NOPUSH
