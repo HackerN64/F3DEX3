@@ -2248,11 +2248,30 @@ _DW({                                                   \
 #define gsSPPopMatrix(n)           gsSPPopMatrixN(      (n), 1)
 
 /**
- *        +--------+----+---+---+----+------+-+
- *  G_VTX |  cmd:8 |0000|  n:8  |0000|v0+n:7|0|
- *        +-+---+--+----+---+---+----+------+-+
- *        | |seg|         address             |
- *        +-+---+-----------------------------+
+ * @brief macro which loads an internal vertex buffer in the RSP with points that are used by gSP1Triangle macros to generate polygons at the end display list.
+ * 
+ * 
+ * It loads an internal vertex buffer in the RSP with points that are used by gSP1Triangle macros to generate polygons. This vertex cache can hold up to 16 vertices, and the vertex loading can begin at any entry (index) within the cache. The vertex coordinates (x,y,z) are encoded in signed 2's complement, 16-bit integers. The texture coordinates (s,t) are encoded in S10.5 format. A vertex either has a color or a normal (for shading). These values are 8-bit values. The colors and alphas are treated as 8-bit unsigned values (0-255), but the normals are treated as 8-bit signed values (-128 to 127). Therefore, the appropriate member of the union to use (.v. or .n.) depends on whether you are using colors or normals.
+ * 
+ * Normal coordinates range from -1.0 to 1.0. A value of -1.0 is represented as -128, and a value of 1.0 is represented as 128, but because the maximum positive value of a signed byte is 127, a value of 1.0 can't really be represented. Therefore, 0.992 is the maximum representable positive value, which is good enough for this purpose.
+ * 
+ * The flag value of the Vtx structure currently has no meaning.
+ * 
+ * The coordinates (x,y,z) are transformed using the current 4x4 projection and model view matrices, and (s,t) are transformed using the scale defined by gSPTexture.
+ * 
+ * # Example
+ * To load vertex cache entry 2,3,4, use this code:
+ * 
+ * gSPVertex(glistp++, v, 3, 2);
+ * 
+ * The range of n or v0 has been changed along with the change in vertex cache size. The number of vertices which can be loaded at once is less than 56, so it is necessary to split the load when loading more than 56 vertices. Please use gSPVertex multiple times when loading more than 56 vertexes.
+ * 
+ * @note
+ * Because the RSP geometry transformation engine uses a vertex list with triangle list architecture, it is quite powerful. A simple one-triangle macro retains maximum performance.
+ * 
+ * @param v is the pointer to the vertex list (segment address)
+ * @param n is the number of vertices
+ * @param v0 is the load vertex by index vo(0~15) in vertex buffer
  */
 #define gSPVertex(pkt, v, n, v0)                    \
 _DW({                                               \
@@ -2265,6 +2284,8 @@ _DW({                                               \
 })
 
 /**
+ * @brief macro which loads an internal vertex buffer in the RSP with points that are used by gSP1Triangle macros to generate polygons in a static display list.
+ * 
  * @copydetails gSPVertex
  */
 #define gsSPVertex(v, n, v0)        \
