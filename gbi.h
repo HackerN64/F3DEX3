@@ -158,11 +158,35 @@ of warnings if you use -Wpedantic. */
 #define G_DL_NOPUSH     1
 
 /* See SPMatrix */
+/**
+ * @brief specifies whether the matrix operation will be performed on the projection or the model view matrix.
+ * 
+ */
 #define G_MTX_MODELVIEW    0x00    /* matrix types */
+/**
+ * @brief @copybrief G_MTX_MODELVIEW
+ * 
+ */
 #define G_MTX_PROJECTION   0x04
+/**
+ * @brief concatenates the matrix (m) with the top of the matrix stack.
+ * 
+ */
 #define G_MTX_MUL          0x00    /* concat or load */
+/**
+ * @brief loads the matrix (m) onto the top of the matrix stack.
+ * 
+ */
 #define G_MTX_LOAD         0x02
+/**
+ * @brief specifies do not push the matrix stack prior to matrix operations
+ * 
+ */
 #define G_MTX_NOPUSH       0x00    /* push or not */
+/**
+ * @brief specifies push the matrix stack prior to matrix operations
+ * 
+ */
 #define G_MTX_PUSH         0x01
 
 /* See SPNormalsMode */
@@ -2237,14 +2261,94 @@ _DW({                                                   \
 #define gSPNoOp(pkt)    gDma0p(pkt, G_SPNOOP, 0, 0)
 #define gsSPNoOp()      gsDma0p(    G_SPNOOP, 0, 0)
 
+/**
+ * @brief macro who inserts a matrix operation at the end display list.
+ * 
+ * It inserts a matrix operation in the display list. The parameters allow you to select which matrix stack to use (projection or model view), where to load or concatenate, and whether or not to push the matrix stack. The following parameters are bit OR'ed together:
+ * - G_MTX_PROJECTION G_MTX_MODELVIEW - @copybrief G_MTX_MODELVIEW
+ * - G_MTX_MUL - @copybrief G_MTX_MUL
+ * - G_MTX_LOAD - @copybrief G_MTX_LOAD
+ * - G_MTX_NOPUSH - @copybrief G_MTX_NOPUSH
+ * - G_MTX_PUSH - @copybrief G_MTX_PUSH
+ * # Matrix Format
+ * The format of the fixed-point matrices may seem a little awkward to the application programmer because it is optimized for the RSP geometry engine. This unusual format is hidden in the graphics utility libraries and not usually exposed to the application programmer, but in some cases (static matrix declarations or direct element manipulation) it is necessary to understand the format.
+ * 
+ * The integer and fractional components of the matrix elements are separated. The first 8 words (16 shorts) hold the 16-bit integer elements, the second 8 words (16 shorts) hold the 16-bit fractional elements. The fact that the Mtx type is declared as a long [4][4] array is slightly misleading. For example, to declare a static identity matrix, use code similar to this:
+ * ```#include "gbi.h"
+ * static Mtx ident =
+ * {
+ * // integer portion:
+ * 0x00010000, 0x00000000,
+ * 0x00000001, 0x00000000,
+ * 0x00000000, 0x00010000,
+ * 0x00000000, 0x00000001,
+ * 
+ * // fractional portion:
+ * 0x00000000, 0x00000000,
+ * 0x00000000, 0x00000000,
+ * 0x00000000, 0x00000000,
+ * 0x00000000, 0x00000000,
+ * };
+ * ```
+ * To force the translation elements of a matrix to be (10.5, 20.5, 30.5), use code similar to this:
+ * ```
+ * #include "gbi.h"
+ * 
+ * mat.m[1][2] =
+ *    (10 << 16) | (20);
+ * mat.m[1][3] =
+ *    (30 << 16) | (1);
+ * 
+ * mat.m[3][2] =
+ *    (0x8000 << 16) | (0x8000);
+ * mat.m[3][3] =
+ *    (0x8000 << 16) | (0);
+ * ```
+ * @note
+ * Matrix concatenation in the RSP geometry engine is done using 32-bit integer arithmetic. A 32 x 32 bit multiply results in a 64-bit number. Only the middle 32 bits of this 64-bit result are kept for the new matrix. Therefore, when concatenating matrices, remember about the resulting fixed-point numerical error.
+ * 
+ * For example, to retain maximum precision, the number ranges must be similar. Large-scale and translate parameters can decrease the transformation precision. Because rotation and projection matrices require quite a bit of fractional accuracy, these fractions may get tossed out if multiplied against large integer numbers.
+ * 
+ * Each concatenation results in the rounding of the LSB of each matrix term. This means that each concatenation injects 1/2 LSB of error into the matrix. To keep full precision, concatenate matrices in floating-point on the processor and just load the result into the RSP.
+ * 
+ * # Performance
+ * Each G_MTX_MODELVIEW matrix operation has an implicit matrix multiplication even if you specify G_MTX_LOAD. This is the combined model view (M) and projection (P) matrix that is necessary for the vertex transformation to use a single matrix during transformation.
+ * 
+ * You can optimize this by concatenating modeling matrices on the CPU and then putting the viewing (V) and projection matrices on the projection stack. By doing this, you only incur the single MxVP matrix concatenation each time you load a modeling matrix. Furthermore, the application has more information on how to do a cheap hack for modeling matrix concatenation. For example, if you want to combine a single axis rotation with a translation, just place the coefficients in the correct entries of the resulting matrix.
+ * 
+ * @param m is the pointer to the 4x4 fixed-point matrix (see note below about format)
+ * @param p are the bit OR'd parameters to the matrix macro (G_MTX_PROJECTION, G_MTX_MODELVIEW, G_MTX_MUL, G_MTX_LOAD, G_MTX_NOPUSH)
+ */
 #define gSPMatrix(pkt, m, p) \
         gDma2p((pkt),G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH, 0)
+/**
+ * @brief macro who inserts a matrix operation in a static display list.
+ * 
+ * @copydetails gSPMatrix
+ */
 #define gsSPMatrix(m, p) \
         gsDma2p(     G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH, 0)
 
 #define gSPPopMatrixN(pkt, n, num) gDma2p((pkt), G_POPMTX, (num) * 64, 64, 2, 0)
 #define gsSPPopMatrixN(n, num)     gsDma2p(      G_POPMTX, (num) * 64, 64, 2, 0)
+/**
+ * @brief macro who pops one of the matrix stacks at the end display list.
+ * 
+ * It pops one of the matrix stacks. The model view stack can be up to 10 matrices deep. The projection stack is 1 matrix deep, so it cannot be popped.
+ * 
+ * @note
+ * If the stack is empty, the macro is ignored.
+ * 
+ * @param n is the flag field that identifies which matrix stack to pop:
+ * - G_MTX_MODELVIEW pops the modeling/viewing matrix stack
+ * - G_MTX_PROJECTION pops the projection matrix stack (NOT IMPLEMENTED)
+ */
 #define gSPPopMatrix(pkt, n)       gSPPopMatrixN((pkt), (n), 1)
+/**
+ * @brief macro who pops one of the matrix stacks in a static display list.
+ * 
+ * @copydetails gSPPopMatrix
+ */
 #define gsSPPopMatrix(n)           gsSPPopMatrixN(      (n), 1)
 
 /**
