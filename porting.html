@@ -107,7 +107,7 @@ $(function(){initNavTree('porting.html',''); initResizable(true); });
 Porting Your Romhack Codebase to F3DEX3</h1>
 <p>For an OoT codebase, only a few minor changes are required to use F3DEX3. However, more changes are recommended to increase performance and enable new features.</p>
 <p>How to modify the microcode in your HackerOoT based romhack (steps may be similar for other games):</p><ul>
-<li>Replace <code>include/ultra64/gbi.h</code> in your romhack with <code>gbi.h</code> from this repo.</li>
+<li>Replace <code>include/ultra64/gbi.h</code> in your romhack with <code><a class="el" href="gbi_8h.html" title="Modded GBI for use with F3DEX3 custom microcode.">gbi.h</a></code> from this repo.</li>
 <li>Make the "Required Changes" listed below.</li>
 <li>Build this repo: install the latest version of <code>armips</code>, then <code>make F3DEX3_BrZ</code> or <code>make F3DEX3_BrW</code>.</li>
 <li>Copy the microcode binaries (<code>build/F3DEX3_X/F3DEX3_X.code</code> and <code>build/F3DEX3_X/F3DEX3_X.data</code>) to somewhere in your romhack repo, e.g. <code>data</code>.</li>
@@ -128,7 +128,7 @@ Required Changes</h2>
 <li>In <code>src/libultra/gu/lookathil.c</code>, remove the lines which set the <code>col</code>, <code>colc</code>, and <code>pad</code> fields.</li>
 </ul>
 </li>
-<li>Change your game engine lighting code to set the <code>type</code> (formerly <code>pad1</code>) field to 0 in the initialization of any directional light (<code>Light_t</code> and derived structs like <code>Light</code> or <code>Lightsn</code>). F3DEX3 ignores the state of the <code>G_LIGHTING_POSITIONAL</code> geometry mode bit in all display lists, meaning both directional and point lights are supported for all display lists (including vanilla). The light is identified as directional if <code>type</code> == 0 or point if <code>kc</code> &gt; 0 (<code>kc</code> and <code>type</code> are the same byte). This change is required because otherwise garbage nonzero values may be put in the padding byte, leading directional lights to be misinterpreted as point lights.<ul>
+<li>Change your game engine lighting code to set the <code>type</code> (formerly <code>pad1</code>) field to 0 in the initialization of any directional light (<code><a class="el" href="structLight__t.html">Light_t</a></code> and derived structs like <code>Light</code> or <code>Lightsn</code>). F3DEX3 ignores the state of the <code>G_LIGHTING_POSITIONAL</code> geometry mode bit in all display lists, meaning both directional and point lights are supported for all display lists (including vanilla). The light is identified as directional if <code>type</code> == 0 or point if <code>kc</code> &gt; 0 (<code>kc</code> and <code>type</code> are the same byte). This change is required because otherwise garbage nonzero values may be put in the padding byte, leading directional lights to be misinterpreted as point lights.<ul>
 <li>The change needed in OoT is: in <code>src/code/z_lights.c</code>, in <code>Lights_BindPoint</code>, <code>Lights_BindDirectional</code>, and <code>Lights_NewAndDraw</code>, set <code>l.type</code> to 0 right before setting <code>l.col</code>.</li>
 </ul>
 </li>
@@ -162,8 +162,8 @@ Changes Required for New Features</h2>
 <p>Each of these changes is required if you want to use the respective new feature, but is not necessary if you are not using it.</p>
 <ul>
 <li>For Fresnel and specular lighting: Whenever your code sends camera properties to the RSP (VP matrix, viewport, etc.), also send the camera world position to the RSP with <code>SPCameraWorld</code>. For OoT, this is not trivial because the game rendering creates and sets the view matrix in the main DL, then renders the game contents, then updates the camera, and finally retroactively modifies the view matrix at the beginning of the main DL. See the code in <a class="el" href="camera.html">Camera</a>.</li>
-<li>For specular lighting: Set the <code>size</code> field of any <code>Light_t</code> and <code>PosLight_t</code> to an appropriate value based on the game engine parameters for that light.</li>
-<li>For the occlusion plane: Bring the code from <code><a class="el" href="occlusionplane_8c.html">cpu/occlusionplane.c</a></code> into your game and follow the included instructions.</li>
+<li>For specular lighting: Set the <code>size</code> field of any <code><a class="el" href="structLight__t.html">Light_t</a></code> and <code><a class="el" href="structPosLight__t.html">PosLight_t</a></code> to an appropriate value based on the game engine parameters for that light.</li>
+<li>For the occlusion plane: Bring the code from <code>cpu/occlusionplane.c</code> into your game and follow the included instructions.</li>
 <li>For the performance counters: See <a class="el" href="counters.html">Performance Counters</a>. </li>
 </ul>
 </div></div><!-- contents -->

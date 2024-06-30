@@ -1,0 +1,7 @@
+<map id="Vtx" name="Vtx">
+<area shape="rect" id="Node000001" title=" " alt="" coords="53,93,97,119"/>
+<area shape="rect" id="Node000002" href="$structVtx__t.html" title=" " alt="" coords="5,5,61,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="47,42,71,92,67,94,42,44"/>
+<area shape="rect" id="Node000003" href="$structVtx__tn.html" title=" " alt="" coords="85,5,149,31"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="108,44,83,94,78,92,103,42"/>
+</map>

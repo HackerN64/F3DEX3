@@ -1,9 +1,0 @@
-<map id="FloatToS16Clamp" name="FloatToS16Clamp">
-<area shape="rect" id="Node000001" title=" " alt="" coords="639,5,773,31"/>
-<area shape="rect" id="Node000002" href="$occlusionplane_8c.html#a7adbfe737ce950b8fbefccc8166f0099" title=" " alt="" coords="428,5,591,31"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="625,21,591,21,591,15,625,15"/>
-<area shape="rect" id="Node000003" href="$occlusionplane_8c.html#a258c47ec4d3848c48875e8703899da68" title=" " alt="" coords="200,5,380,31"/>
-<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="414,21,380,21,380,15,414,15"/>
-<area shape="rect" id="Node000004" href="$occlusionplane_8c.html#a7d3ef3b83e8c4c1100f86fb0793c0f52" title=" " alt="" coords="5,5,152,31"/>
-<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="186,21,152,21,152,15,186,15"/>
-</map>

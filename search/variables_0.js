@@ -1,4 +1,4 @@
 var searchData=
 [
-  ['snoocclusionplane_0',['sNoOcclusionPlane',['../occlusionplane_8c.html#a489f9499b298056909dfdda806dfcdf3',1,'occlusionplane.c']]]
+  ['a_0',['a',['../structVtx__tn.html#a24420a9beaac7cee08b5e255a4c29db1',1,'Vtx_tn']]]
 ];
