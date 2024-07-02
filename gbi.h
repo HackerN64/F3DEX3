@@ -2273,7 +2273,7 @@ _DW({                                                   \
  * 
  * Normal coordinates range from -1.0 to 1.0. A value of -1.0 is represented as -128, and a value of 1.0 is represented as 128, but because the maximum positive value of a signed byte is 127, a value of 1.0 can't really be represented. Therefore, 0.992 is the maximum representable positive value, which is good enough for this purpose.
  * 
- * The flag value of the Vtx structure currently has no meaning.
+ * The flag value is used for the packed normals feature to store normals with octahedral encoding.
  * 
  * The coordinates (x,y,z) are transformed using the current 4x4 projection and model view matrices, and (s,t) are transformed using the scale defined by gSPTexture.
  * 
