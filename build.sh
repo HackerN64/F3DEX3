@@ -27,6 +27,11 @@ UCODES=(
 )
 for ucode in "${UCODES[@]}"; do
     make $ucode
+
+    # Create a .o (linkable object) file equivalent usable for most projects.
+
+    ./create_grucode_object.sh $ucode
+
     cp build/$ucode/$ucode.code ../../Mods/HackerOoT/data/F3DEX3/$ucode.code
     cp build/$ucode/$ucode.data ../../Mods/HackerOoT/data/F3DEX3/$ucode.data
 done
