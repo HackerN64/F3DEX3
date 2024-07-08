@@ -12,7 +12,7 @@ var searchData=
   ['code_9',['Code',['../md_docs_2code.html',1,'']]],
   ['code_20size_10',['Optimizing for RSP code size',['../design-tradeoffs.html#autotoc_md21',1,'']]],
   ['codebase_20to_20f3dex3_11',['Codebase to F3DEX3',['../porting.html',1,'Porting Your Romhack Codebase to F3DEX3'],['../porting.html#autotoc_md29',1,'Porting Your Romhack Codebase to F3DEX3']]],
-  ['colc_12',['colc',['../structLight__t.html#a777970fc9405076cf854e6695d89b4c4',1,'Light_t::colc'],['../structPosLight__t.html#a777970fc9405076cf854e6695d89b4c4',1,'PosLight_t::colc']]],
+  ['colc_12',['colc',['../structLight__t.html#a777970fc9405076cf854e6695d89b4c4',1,'Light_t::colc'],['../structPointLight__t.html#a777970fc9405076cf854e6695d89b4c4',1,'PointLight_t::colc']]],
   ['compatibility_13',['Compatibility',['../compatibility.html#autotoc_md11',1,'Binary Display List Compatibility'],['../compatibility.html#autotoc_md10',1,'C GBI Compatibility']]],
   ['compatibility_20with_20f3dex2_14',['Compatibility with F3DEX2',['../compatibility.html',1,'Backwards Compatibility with F3DEX2'],['../compatibility.html#autotoc_md9',1,'Backwards Compatibility with F3DEX2']]],
   ['configuration_15',['Configuration',['../microcode.html',1,'Microcode Configuration'],['../microcode.html#autotoc_md12',1,'Microcode Configuration']]],

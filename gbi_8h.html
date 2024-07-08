@@ -138,7 +138,7 @@ Data Structures</h2></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structLight__t.html">Light_t</a></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structPosLight__t.html">PosLight_t</a></td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structPointLight__t.html">PointLight_t</a></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAmbient__t.html">Ambient_t</a></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -1241,7 +1241,7 @@ Typedefs</h2></td></tr>
 <div class="line">                    _SHIFTL(mode0, 0, 24));             \</div>
 <div class="line">    _g-&gt;words.w1 = (<span class="keywordtype">unsigned</span> int)(mode1);               \</div>
 <div class="line">})</div>
-<div class="ttc" id="aunionGfx_html"><div class="ttname"><a href="unionGfx.html">Gfx</a></div><div class="ttdef"><b>Definition</b> gbi.h:2146</div></div>
+<div class="ttc" id="aunionGfx_html"><div class="ttname"><a href="unionGfx.html">Gfx</a></div><div class="ttdef"><b>Definition</b> gbi.h:1936</div></div>
 </div><!-- fragment --><p>gDPSetOtherMode (This is for expert user.)</p>
 <p>This command makes all othermode parameters set. Do not use this command in the same DL with another g*SPSetOtherMode DLs.</p>
 <p>[Usage] <a class="el" href="#a3264496f9b6d03ea021eec53d41e4e2c">gDPSetOtherMode(pkt, modeA, modeB)</a> </p><pre class="fragment">'modeA' is described all parameters of GroupA GBI command.
@@ -3115,7 +3115,7 @@ gSPSetGeometryMode(pkt,s)
         </tr>
       </table>
 </div><div class="memdoc">
-<p>l should point to a Light or PosLight struct. n should be an integer 1-9 to load lights 0-8. Can also load Ambient lights to lights 0-8 with this. However, if you have 9 directional / point lights, you must use SPAmbient to load light 9 (LIGHT_10) with an ambient light. (That is, the memory for light 9 (LIGHT_10) is only sizeof(Ambient), so if you load this with SPLight, it will overwrite other DMEM and corrupt unrelated things.) New code should not generally use SPLight, and instead use SPSetLights to set all lights in one memory transaction. </p>
+<p>l should point to a Light struct. n should be an integer 1-9 to load lights 0-8. Can also load Ambient lights to lights 0-8 with this. However, if you have 9 directional / point lights, you must use SPAmbient to load light 9 (LIGHT_10) with an ambient light. (That is, the memory for light 9 (LIGHT_10) is only sizeof(Ambient), so if you load this with SPLight, it will overwrite other DMEM and corrupt unrelated things.) New code should not generally use SPLight, and instead use SPSetLights to set all lights in one memory transaction. </p>
 
 </div>
 </div>
@@ -3502,8 +3502,8 @@ gSPSetGeometryMode(pkt,s)
 <div class="line">    gSPNumLights(pkt, n); \</div>
 <div class="line">    gDma2p((pkt),  G_MOVEMEM, &amp;(name), (n) * 0x10 + 8, G_MV_LIGHT, 0x10); \</div>
 <div class="line">})</div>
-</div><!-- fragment --><p>Set all your scene's lights (directional/point + ambient) with one memory transaction. n is the number of directional / point lights, from 0 to 9. There is also always an ambient light. name should be the NAME of a Lights or PosLights struct (NOT A POINTER) filled in with all the lighting data. You can use the gdSPDef* macros to fill in the struct or just do it manually. Example: PosLights2 myLights; // 2 pos + 1 ambient <code> gSPSetLights(POLY_OPA_DISP++, 2, myLights);</code></p>
-<p><code>If you need to use a pointer, e.g. if the number of lights is variable at runtime: PosLight *lights = memory_allocate((numLights + 1) * sizeof(PosLight)); lights[0].p.pos = ...; lights[1].l.dir = ...; ... lights[numLights].l.col = ambient_color(); gSPSetLights(POLY_OPA_DISP++, numLights, *lights); // &lt;- NOTE DEREFERENCE</code></p>
+</div><!-- fragment --><p>Set all your scene's lights (directional/point + ambient) with one memory transaction. n is the number of directional / point lights, from 0 to 9. There is also always an ambient light. name should be the NAME of a Lights struct (NOT A POINTER) filled in with all the lighting data. You can use the gdSPDef* macros to fill in the struct or just do it manually. Example: Lights2 myLights; // 2 dir/pos + 1 ambient <code> gSPSetLights(POLY_OPA_DISP++, 2, myLights);</code></p>
+<p><code>If you need to use a pointer, e.g. if the number of lights is variable at runtime: Light *lights = memory_allocate((numLights + 1) * sizeof(Light)); lights[0].p.pos = ...; lights[1].l.dir = ...; ... lights[numLights].l.col = ambient_color(); gSPSetLights(POLY_OPA_DISP++, numLights, *lights); // &lt;- NOTE DEREFERENCE</code></p>
 <p><code>If you're wondering why this macro takes a name / dereference instead of a pointer, it's for backwards compatibility. </code></p>
 
 </div>
@@ -4522,7 +4522,7 @@ gSPSetGeometryMode(pkt,s)
         </tr>
       </table>
 </div><div class="memdoc">
-<p>l should point to a Light or PosLight struct. n should be an integer 1-9 to load lights 0-8. Can also load Ambient lights to lights 0-8 with this. However, if you have 9 directional / point lights, you must use SPAmbient to load light 9 (LIGHT_10) with an ambient light. (That is, the memory for light 9 (LIGHT_10) is only sizeof(Ambient), so if you load this with SPLight, it will overwrite other DMEM and corrupt unrelated things.) New code should not generally use SPLight, and instead use SPSetLights to set all lights in one memory transaction.    </p>
+<p>l should point to a Light struct. n should be an integer 1-9 to load lights 0-8. Can also load Ambient lights to lights 0-8 with this. However, if you have 9 directional / point lights, you must use SPAmbient to load light 9 (LIGHT_10) with an ambient light. (That is, the memory for light 9 (LIGHT_10) is only sizeof(Ambient), so if you load this with SPLight, it will overwrite other DMEM and corrupt unrelated things.) New code should not generally use SPLight, and instead use SPSetLights to set all lights in one memory transaction.    </p>
 
 </div>
 </div>
@@ -4844,9 +4844,9 @@ gSPSetGeometryMode(pkt,s)
 </div><div class="memdoc">
 <b>Value:</b><div class="fragment"><div class="line">    <a class="code hl_define" href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a>(n), \</div>
 <div class="line">    gsDma2p(G_MOVEMEM, &amp;(name), (n) * 0x10 + 8, G_MV_LIGHT, 0x10)</div>
-<div class="ttc" id="agbi_8h_html_a05cbbc5a54641419bc1258390f3d6710"><div class="ttname"><a href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a></div><div class="ttdeci">#define gsSPNumLights(n)</div><div class="ttdef"><b>Definition</b> gbi.h:3260</div></div>
-</div><!-- fragment --><p>Set all your scene's lights (directional/point + ambient) with one memory transaction. n is the number of directional / point lights, from 0 to 9. There is also always an ambient light. name should be the NAME of a Lights or PosLights struct (NOT A POINTER) filled in with all the lighting data. You can use the gdSPDef* macros to fill in the struct or just do it manually. Example: PosLights2 myLights; // 2 pos + 1 ambient <code> gSPSetLights(POLY_OPA_DISP++, 2, myLights);</code></p>
-<p><code>If you need to use a pointer, e.g. if the number of lights is variable at runtime: PosLight *lights = memory_allocate((numLights + 1) * sizeof(PosLight)); lights[0].p.pos = ...; lights[1].l.dir = ...; ... lights[numLights].l.col = ambient_color(); gSPSetLights(POLY_OPA_DISP++, numLights, *lights); // &lt;- NOTE DEREFERENCE</code></p>
+<div class="ttc" id="agbi_8h_html_a05cbbc5a54641419bc1258390f3d6710"><div class="ttname"><a href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a></div><div class="ttdeci">#define gsSPNumLights(n)</div><div class="ttdef"><b>Definition</b> gbi.h:3050</div></div>
+</div><!-- fragment --><p>Set all your scene's lights (directional/point + ambient) with one memory transaction. n is the number of directional / point lights, from 0 to 9. There is also always an ambient light. name should be the NAME of a Lights struct (NOT A POINTER) filled in with all the lighting data. You can use the gdSPDef* macros to fill in the struct or just do it manually. Example: Lights2 myLights; // 2 dir/pos + 1 ambient <code> gSPSetLights(POLY_OPA_DISP++, 2, myLights);</code></p>
+<p><code>If you need to use a pointer, e.g. if the number of lights is variable at runtime: Light *lights = memory_allocate((numLights + 1) * sizeof(Light)); lights[0].p.pos = ...; lights[1].l.dir = ...; ... lights[numLights].l.col = ambient_color(); gSPSetLights(POLY_OPA_DISP++, numLights, *lights); // &lt;- NOTE DEREFERENCE</code></p>
 <p><code>If you're wondering why this macro takes a name / dereference instead of a pointer, it's for backwards compatibility.    </code></p>
 
 </div>

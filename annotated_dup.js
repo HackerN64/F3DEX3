@@ -10,10 +10,10 @@ var annotated_dup =
     [ "Gtri", "structGtri.html", null ],
     [ "Gwords", "structGwords.html", null ],
     [ "Light_t", "structLight__t.html", "structLight__t" ],
-    [ "PosLight_t", "structPosLight__t.html", "structPosLight__t" ],
+    [ "PointLight_t", "structPointLight__t.html", "structPointLight__t" ],
     [ "TexRect", "structTexRect.html", null ],
     [ "Tri", "structTri.html", null ],
-    [ "Vp_t", "structVp__t.html", null ],
+    [ "Vp_t", "structVp__t.html", "structVp__t" ],
     [ "Vtx", "unionVtx.html", "unionVtx" ],
     [ "Vtx_t", "structVtx__t.html", "structVtx__t" ],
     [ "Vtx_tn", "structVtx__tn.html", "structVtx__tn" ]

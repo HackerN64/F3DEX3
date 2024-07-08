@@ -100,16 +100,40 @@ $(function(){initNavTree('structVp__t.html',''); initResizable(true); });
 </div>
 
 <div class="header">
+  <div class="summary">
+<a href="#pub-attribs">Data Fields</a>  </div>
   <div class="headertitle"><div class="title">Vp_t Struct Reference</div></div>
 </div><!--header-->
 <div class="contents">
 
 <p><code>#include &lt;<a class="el" href="gbi_8h_source.html">gbi.h</a>&gt;</code></p>
+<table class="memberdecls">
+<tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-attribs" name="pub-attribs"></a>
+Data Fields</h2></td></tr>
+<tr class="memitem:a413b3bf379f48a1f039a9a7eb133a67b" id="r_a413b3bf379f48a1f039a9a7eb133a67b"><td class="memItemLeft" align="right" valign="top">short&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a413b3bf379f48a1f039a9a7eb133a67b">vtrans</a> [4]</td></tr>
+<tr class="separator:a413b3bf379f48a1f039a9a7eb133a67b"><td class="memSeparator" colspan="2">&#160;</td></tr>
+</table>
 <a name="details" id="details"></a><h2 class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>The viewport structure elements have 2 bits of fraction, necessary to accomodate the sub-pixel positioning scaling for the hardware. This can also be exploited to handle odd-sized viewports.</p>
 <p>Accounting for these fractional bits, using the default projection and viewing matrices, the viewport structure is initialized thusly: </p><pre class="fragment"> (SCREEN_WD/2)*4, (SCREEN_HT/2)*4, G_MAXZ, 0,
  (SCREEN_WD/2)*4, (SCREEN_HT/2)*4, 0, 0,
-</pre> </div><hr/>The documentation for this struct was generated from the following file:<ul>
+</pre> </div><h2 class="groupheader">Field Documentation</h2>
+<a id="a413b3bf379f48a1f039a9a7eb133a67b" name="a413b3bf379f48a1f039a9a7eb133a67b"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a413b3bf379f48a1f039a9a7eb133a67b">&#9670;&#160;</a></span>vtrans</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">short vtrans[4]</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+<p>scale, 2 bits fraction </p>
+
+</div>
+</div>
+<hr/>The documentation for this struct was generated from the following file:<ul>
 <li><a class="el" href="gbi_8h_source.html">gbi.h</a></li>
 </ul>
 </div><!-- contents -->

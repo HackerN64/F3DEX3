@@ -162,7 +162,7 @@ Changes Required for New Features</h2>
 <p>Each of these changes is required if you want to use the respective new feature, but is not necessary if you are not using it.</p>
 <ul>
 <li>For Fresnel and specular lighting: Whenever your code sends camera properties to the RSP (VP matrix, viewport, etc.), also send the camera world position to the RSP with <code>SPCameraWorld</code>. For OoT, this is not trivial because the game rendering creates and sets the view matrix in the main DL, then renders the game contents, then updates the camera, and finally retroactively modifies the view matrix at the beginning of the main DL. See the code in <a class="el" href="camera.html">Camera</a>.</li>
-<li>For specular lighting: Set the <code>size</code> field of any <code><a class="el" href="structLight__t.html">Light_t</a></code> and <code><a class="el" href="structPosLight__t.html">PosLight_t</a></code> to an appropriate value based on the game engine parameters for that light.</li>
+<li>For specular lighting: Set the <code>size</code> field of any <code><a class="el" href="structLight__t.html">Light_t</a></code> and <code>PosLight_t</code> to an appropriate value based on the game engine parameters for that light.</li>
 <li>For the occlusion plane: Bring the code from <code>cpu/occlusionplane.c</code> into your game and follow the included instructions.</li>
 <li>For the performance counters: See <a class="el" href="counters.html">Performance Counters</a>. </li>
 </ul>

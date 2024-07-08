@@ -1,4 +1,4 @@
 var searchData=
 [
-  ['poslight_5ft_0',['PosLight_t',['../structPosLight__t.html',1,'']]]
+  ['pointlight_5ft_0',['PointLight_t',['../structPointLight__t.html',1,'']]]
 ];
