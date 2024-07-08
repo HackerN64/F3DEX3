@@ -265,13 +265,13 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 /**
  * @brief change the screen coordinates of the vertex. The high 16 bits of val specify the X coordinate and the low 16 bits specify the Y coordinate. Both coordinates are S13.2 numbers with 0,0 being the upper-left of the screen, positive X going right, and positive Y going down.
  * 
- * not recommended to use, won't work if
+ * @deprecated to use, won't work if the tri gets clipped.
  */
 #define G_MWO_POINT_XYSCREEN     0x18
 /**
  * @brief changes the screen Z coordinate of the vertex. The entire 32-bit val is taken as the new screen Z value. It is a 16.16 number in the range 0x00000000 to 0x03ff0000.
  * 
- * the tri gets clipped
+ * @deprecated to use, won't work if the tri gets clipped.
  */
 #define G_MWO_POINT_ZSCREEN      0x1C
 
@@ -2269,7 +2269,7 @@ _DW({                                                   \
  * @brief macro which loads an internal vertex buffer in the RSP with points that are used by @ref gSP1Triangle macros to generate polygons at the end display list.
  * 
  * 
- * It loads an internal vertex buffer in the RSP with points that are used by @ref gSP1Triangle macros to generate polygons. This vertex cache can hold up to 16 vertices, and the vertex loading can begin at any entry (index) within the cache. The vertex coordinates (x,y,z) are encoded in signed 2's complement, 16-bit integers. The texture coordinates (s,t) are encoded in S10.5 format. A vertex either has a color or a normal (for shading). These values are 8-bit values. The colors and alphas are treated as 8-bit unsigned values (0-255), but the normals are treated as 8-bit signed values (-128 to 127). Therefore, the appropriate member of the union to use (.v. or .n.) depends on whether you are using colors or normals.
+ * It loads an internal vertex buffer in the RSP with points that are used by @ref gSP1Triangle macros to generate polygons. This vertex cache can hold up to 56 vertices, and the vertex loading can begin at any entry (index) within the cache. The vertex coordinates (x,y,z) are encoded in signed 2's complement, 16-bit integers. The texture coordinates (s,t) are encoded in S10.5 format. A vertex either has a color or a normal (for shading). These values are 8-bit values. The colors and alphas are treated as 8-bit unsigned values (0-255), but the normals are treated as 8-bit signed values (-128 to 127). Therefore, the appropriate member of the union to use (.v. or .n.) depends on whether you are using colors or normals.
  * 
  * Normal coordinates range from -1.0 to 1.0. A value of -1.0 is represented as -128, and a value of 1.0 is represented as 128, but because the maximum positive value of a signed byte is 127, a value of 1.0 can't really be represented. Therefore, 0.992 is the maximum representable positive value, which is good enough for this purpose.
  * 
@@ -2283,14 +2283,12 @@ _DW({                                                   \
  * gSPVertex(glistp++, v, 3, 2);
  * ```
  * 
- * The range of n or v0 has been changed along with the change in vertex cache size. The number of vertices which can be loaded at once is less than 56, so it is necessary to split the load when loading more than 56 vertices. Please use gSPVertex multiple times when loading more than 56 vertexes.
- * 
  * @note
- * Because the RSP geometry transformation engine uses a vertex list with triangle list architecture, it is quite powerful. A simple one-triangle macro retains maximum performance.
+ * Because the RSP geometry transformation engine uses a vertex list with triangle list architecture, it is quite powerful. A simple one-triangle macro retains least performance compared to @ref gSP2Triangles or the new 5 tris commands in EX3 (@ref gSPTriStrip, @ref gSPTriFan).
  * 
  * @param v is the pointer to the vertex list (segment address)
  * @param n is the number of vertices
- * @param v0 is the load vertex by index vo(0~15) in vertex buffer
+ * @param v0 is the load vertex by index vo(0~55) in vertex buffer
  */
 #define gSPVertex(pkt, v, n, v0)                    \
 _DW({                                               \
@@ -3115,7 +3113,7 @@ typedef union {
 /**
  * @brief You can use this macro to modify certain sections of a vertex after it has been sent to the RSP (by the gSPVertex macro).
  * 
- * This is an advanced macro. You need a good understanding of how vertices work in the RSP microcode before you use this macro (refer to gSPVertex). The range of vtx has been changed with as the vertex cache increased. Its range is now the same as that for gSPVertex.
+ * This is an advanced macro. You need a good understanding of how vertices work in the RSP microcode before you use this macro (refer to gSPVertex).
  * 
  * You can use this macro to modify certain sections of a vertex after it has been sent to the RSP (by the gSPVertex macro). This is useful for vertices that are shared between two or more triangles that must have different properties when associated with one triangle versus the other triangle.
  * 
@@ -3157,7 +3155,7 @@ typedef union {
  * gSP1Triangle(glistp++, 1,2,3,0);
  * ```
  * 
- * @param vtx specifies which of the RSP's vertices (0-15) to modify
+ * @param vtx specifies which of the RSP's vertices (0-55) to modify
  * @param where specifies which part of the vertex to modify (@ref G_MWO_POINT_RGBA, @ref G_MWO_POINT_ST, @ref G_MWO_POINT_XYSCREEN or @ref G_MWO_POINT_ZSCREEN)
  * @param val is the new value for the part of the vertex to be modified (a 32 bit integer number)
  */
