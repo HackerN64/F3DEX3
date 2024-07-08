@@ -103,13 +103,13 @@ $(function(){initNavTree('md_README.html',''); initResizable(true); });
   <div class="headertitle"><div class="title">F3DEX3</div></div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><p><a class="anchor" id="autotoc_md0"></a> Modern microcode for N64 romhacks. Will make you want to finally ditch HLE. Heavily modified version of F3DEX2, partially rewritten from scratch.</p>
+<div class="textblock"><p><a class="anchor" id="autotoc_md2"></a> Modern microcode for N64 romhacks. Will make you want to finally ditch HLE. Heavily modified version of F3DEX2, partially rewritten from scratch.</p>
 <p><b>F3DEX3 is in alpha. It is not guaranteed to be bug-free, and updates may bring breaking changes.</b></p>
 <p><a href="https://hackern64.github.io/F3DEX3/">View the documentation here</a> (or just look through the docs folder).</p>
 <p><a href="https://www.youtube.com/playlist?list=PLU2OUGtyQi6QswDQOXWIMaYFUcgQ9Psvm">Sauraen's videos on F3DEX3</a></p>
-<h1><a class="anchor" id="autotoc_md1"></a>
+<h1><a class="anchor" id="autotoc_md3"></a>
 Features</h1>
-<h2><a class="anchor" id="autotoc_md2"></a>
+<h2><a class="anchor" id="autotoc_md4"></a>
 New visual features</h2>
 <ul>
 <li>New geometry mode bit <code>G_PACKED_NORMALS</code> enables <b>simultaneous vertex colors and normals/lighting on the same mesh</b>, by encoding the normals in the unused 2 bytes of each vertex using a variant of <a href="https://knarkowicz.wordpress.com/2014/04/16/octahedron-normal-vector-encoding/">octahedral encoding</a>. The normals are effectively as precise as with the vanilla method of replacing vertex RGB with normal XYZ.</li>
@@ -124,7 +124,7 @@ New visual features</h2>
 <li>New geometry mode bit <code>G_LIGHTING_SPECULAR</code> changes lighting computation from diffuse to <b>specular</b>. If enabled, the vertex normal for lighting is replaced with the reflection of the vertex-to-camera vector over the vertex normal. Also, a new size value for each light controls how large the light reflection appears to be. This technique is lower fidelity in some ways than the vanilla <code>hilite</code> system, as it is per-vertex rather than per-pixel, but it allows the material to be textured normally. Plus, it supports all scene lights (including point) with different dynamic colors, whereas the vanilla system supports up to two directional lights and more than one dynamic color is difficult.</li>
 <li>New geometry mode bits <code>G_ATTROFFSET_ST_ENABLE</code> and <code>G_ATTROFFSET_Z_ENABLE</code> apply settable offsets to vertex ST (<code>SPAttrOffsetST</code>) and/or Z (<code>SPAttrOffsetZ</code>) values. These offsets are applied after their respective scales. For Z, this enables a method of drawing coplanar surfaces like decals but <b>without the Z fighting</b> which can happen with the RDP's native decal mode. For ST, this enables <b>UV scrolling</b> without CPU intervention.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md3"></a>
+<h2><a class="anchor" id="autotoc_md5"></a>
 Performance improvements</h2>
 <ul>
 <li><b>56 verts</b> can fit into DMEM at once, up from 32 verts in F3DEX2, and only 13% below the 64 verts of reject microcodes. This reduces DRAM traffic and RSP time as fewer verts have to be reloaded and re-transformed, and also makes display lists shorter.</li>
@@ -136,17 +136,17 @@ Performance improvements</h2>
 <li>Segment addresses are now resolved relative to other segments (feature by Tharo). This enables a strategy for <b>skipping repeated material DLs</b>: call a segment to run the material, remap the segment in the material to a display list that immediately returns, and so if the material is called again it won't run.</li>
 <li>New <code>SPMemset</code> command fills a specified RDRAM region with a repeated 16-bit value. This can be used for clearing the Z buffer or filling the framebuffer or the letterbox with a solid color <b>faster than the RDP can in fill mode</b>. Practical performance may vary due to scheduling constraints.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md4"></a>
+<h2><a class="anchor" id="autotoc_md6"></a>
 Miscellaneous</h2>
 <ul>
 <li><b>Point lighting</b> has been redesigned. The appearance when a light is close to an object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where a Z component was accidentally doubled in the point lighting calculations. The quadratic point light attenuation factor is now an E3M5 floating-point number. The performance penalty for using large numbers of point lights has been reduced.</li>
 <li>Maximum number of directional / point <b>lights raised from 7 to 9</b>. Minimum number of directional / point lights lowered from 1 to 0 (F3DEX2 required at least one). Also supports loading all lights in one DMA transfer (<code>SPSetLights</code>), rather than one per light.</li>
 <li>New <code>SPLightToRDP</code> family of commands (e.g. <code>SPLightToPrimColor</code>) writes a selectable RDP command (e.g. <code>DPSetPrimColor</code>) with the RGB color of a selectable light (any including ambient). The alpha channel and any other parameters are encoded in the command. With some limitations, this allows the tint colors of cel shading to <b>match scene lighting</b> with no code intervention. Also useful for other lighting-dependent effects.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md5"></a>
+<h2><a class="anchor" id="autotoc_md7"></a>
 Profiling</h2>
 <p>F3DEX3 introduces a suite of performance profiling capabilities. These take the form of performance counters, which report cycle counts for various operations or the number of items processed of a given type. There are a total of 21 performance counters across multiple microcode versions. See the Profiling section below.</p>
-<h1><a class="anchor" id="autotoc_md6"></a>
+<h1><a class="anchor" id="autotoc_md8"></a>
 Credits</h1>
 <p>F3DEX3 modifications from F3DEX2 are by Sauraen and are dedicated to the public domain. <code>cpu/</code> C code is entirely by Sauraen and also dedicated to the public domain.</p>
 <p>If you use F3DEX3 in a romhack, please credit "F3DEX3 Microcode - Sauraen" in your project's in-game Staff Roll or wherever other contributors to your project are credited.</p>

@@ -163,6 +163,48 @@ Data Structures</h2></td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="define-members" name="define-members"></a>
 Macros</h2></td></tr>
+<tr class="memitem:a4c9589710f911ec2c38104f51a68a8aa" id="r_a4c9589710f911ec2c38104f51a68a8aa"><td class="memItemLeft" align="right" valign="top"><a id="a4c9589710f911ec2c38104f51a68a8aa" name="a4c9589710f911ec2c38104f51a68a8aa"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>G_MTX_MODELVIEW</b>&#160;&#160;&#160;0x00    /* matrix types */</td></tr>
+<tr class="memdesc:a4c9589710f911ec2c38104f51a68a8aa"><td class="mdescLeft">&#160;</td><td class="mdescRight">specifies whether the matrix operation will be performed on the projection or the model view matrix. <br /></td></tr>
+<tr class="separator:a4c9589710f911ec2c38104f51a68a8aa"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a158b3a6e36924769f7dff7f188b46b63" id="r_a158b3a6e36924769f7dff7f188b46b63"><td class="memItemLeft" align="right" valign="top"><a id="a158b3a6e36924769f7dff7f188b46b63" name="a158b3a6e36924769f7dff7f188b46b63"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>G_MTX_PROJECTION</b>&#160;&#160;&#160;0x04</td></tr>
+<tr class="memdesc:a158b3a6e36924769f7dff7f188b46b63"><td class="mdescLeft">&#160;</td><td class="mdescRight">specifies whether the matrix operation will be performed on the projection or the model view matrix.    <br /></td></tr>
+<tr class="separator:a158b3a6e36924769f7dff7f188b46b63"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a47a812d4ce6705e0dee289707f18f693" id="r_a47a812d4ce6705e0dee289707f18f693"><td class="memItemLeft" align="right" valign="top"><a id="a47a812d4ce6705e0dee289707f18f693" name="a47a812d4ce6705e0dee289707f18f693"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>G_MTX_MUL</b>&#160;&#160;&#160;0x00    /* concat or load */</td></tr>
+<tr class="memdesc:a47a812d4ce6705e0dee289707f18f693"><td class="mdescLeft">&#160;</td><td class="mdescRight">concatenates the matrix (m) with the top of the matrix stack. <br /></td></tr>
+<tr class="separator:a47a812d4ce6705e0dee289707f18f693"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a9fbb8b7e0e1a66c5399ad158d7a219cd" id="r_a9fbb8b7e0e1a66c5399ad158d7a219cd"><td class="memItemLeft" align="right" valign="top"><a id="a9fbb8b7e0e1a66c5399ad158d7a219cd" name="a9fbb8b7e0e1a66c5399ad158d7a219cd"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>G_MTX_LOAD</b>&#160;&#160;&#160;0x02</td></tr>
+<tr class="memdesc:a9fbb8b7e0e1a66c5399ad158d7a219cd"><td class="mdescLeft">&#160;</td><td class="mdescRight">loads the matrix (m) onto the top of the matrix stack. <br /></td></tr>
+<tr class="separator:a9fbb8b7e0e1a66c5399ad158d7a219cd"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a063f7fcd1dfe2d7c199dad97eea7cc97" id="r_a063f7fcd1dfe2d7c199dad97eea7cc97"><td class="memItemLeft" align="right" valign="top"><a id="a063f7fcd1dfe2d7c199dad97eea7cc97" name="a063f7fcd1dfe2d7c199dad97eea7cc97"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>G_MTX_NOPUSH</b>&#160;&#160;&#160;0x00    /* push or not */</td></tr>
+<tr class="memdesc:a063f7fcd1dfe2d7c199dad97eea7cc97"><td class="mdescLeft">&#160;</td><td class="mdescRight">specifies do not push the matrix stack prior to matrix operations <br /></td></tr>
+<tr class="separator:a063f7fcd1dfe2d7c199dad97eea7cc97"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:af260746aec061e8a35a297e2a0e90eaa" id="r_af260746aec061e8a35a297e2a0e90eaa"><td class="memItemLeft" align="right" valign="top"><a id="af260746aec061e8a35a297e2a0e90eaa" name="af260746aec061e8a35a297e2a0e90eaa"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>G_MTX_PUSH</b>&#160;&#160;&#160;0x01</td></tr>
+<tr class="memdesc:af260746aec061e8a35a297e2a0e90eaa"><td class="mdescLeft">&#160;</td><td class="mdescRight">specifies push the matrix stack prior to matrix operations <br /></td></tr>
+<tr class="separator:af260746aec061e8a35a297e2a0e90eaa"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:aa103cc77360e990a7474fb541fd8b225" id="r_aa103cc77360e990a7474fb541fd8b225"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#aa103cc77360e990a7474fb541fd8b225">gSPMatrix</a>(pkt,  m,  p)&#160;&#160;&#160;        gDma2p((pkt),G_MTX, (m), sizeof(Mtx), (p) ^ <a class="el" href="#af260746aec061e8a35a297e2a0e90eaa">G_MTX_PUSH</a>, 0)</td></tr>
+<tr class="memdesc:aa103cc77360e990a7474fb541fd8b225"><td class="mdescLeft">&#160;</td><td class="mdescRight">macro which inserts a matrix operation at the end display list.  <br /></td></tr>
+<tr class="separator:aa103cc77360e990a7474fb541fd8b225"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:aee3588cfbd5b017041757eed414c5a40" id="r_aee3588cfbd5b017041757eed414c5a40"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#aee3588cfbd5b017041757eed414c5a40">gsSPMatrix</a>(m,  p)&#160;&#160;&#160;        gsDma2p(     G_MTX, (m), sizeof(Mtx), (p) ^ <a class="el" href="#af260746aec061e8a35a297e2a0e90eaa">G_MTX_PUSH</a>, 0)</td></tr>
+<tr class="memdesc:aee3588cfbd5b017041757eed414c5a40"><td class="mdescLeft">&#160;</td><td class="mdescRight">macro which inserts a matrix operation in a static display list.  <br /></td></tr>
+<tr class="separator:aee3588cfbd5b017041757eed414c5a40"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ae4dab5f2297069e397664e3b62a7a0bb" id="r_ae4dab5f2297069e397664e3b62a7a0bb"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ae4dab5f2297069e397664e3b62a7a0bb">gSPPopMatrixN</a>(pkt,  n,  num)&#160;&#160;&#160;gDma2p((pkt), G_POPMTX, (num) * 64, 64, 2, 0)</td></tr>
+<tr class="memdesc:ae4dab5f2297069e397664e3b62a7a0bb"><td class="mdescLeft">&#160;</td><td class="mdescRight">macro which pops one of the matrix stacks at the end display list.  <br /></td></tr>
+<tr class="separator:ae4dab5f2297069e397664e3b62a7a0bb"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a53728a24461a0b5181c5805aaaff3680" id="r_a53728a24461a0b5181c5805aaaff3680"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a53728a24461a0b5181c5805aaaff3680">gsSPPopMatrixN</a>(n,  num)&#160;&#160;&#160;gsDma2p(      G_POPMTX, (num) * 64, 64, 2, 0)</td></tr>
+<tr class="memdesc:a53728a24461a0b5181c5805aaaff3680"><td class="mdescLeft">&#160;</td><td class="mdescRight">macro which pops one of the matrix stacks in a static display list.  <br /></td></tr>
+<tr class="separator:a53728a24461a0b5181c5805aaaff3680"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ab3ce7d020b9fc77124fc2849ca3c0e9a" id="r_ab3ce7d020b9fc77124fc2849ca3c0e9a"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ab3ce7d020b9fc77124fc2849ca3c0e9a">gSPPopMatrix</a>(pkt,  n)&#160;&#160;&#160;<a class="el" href="#ae4dab5f2297069e397664e3b62a7a0bb">gSPPopMatrixN</a>((pkt), (n), 1)</td></tr>
+<tr class="memdesc:ab3ce7d020b9fc77124fc2849ca3c0e9a"><td class="mdescLeft">&#160;</td><td class="mdescRight">macro which pops one of the matrix stacks at the end display list.  <br /></td></tr>
+<tr class="separator:ab3ce7d020b9fc77124fc2849ca3c0e9a"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a339832407a1bdb6c873761c61d5caa33" id="r_a339832407a1bdb6c873761c61d5caa33"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a339832407a1bdb6c873761c61d5caa33">gsSPPopMatrix</a>(n)&#160;&#160;&#160;<a class="el" href="#a53728a24461a0b5181c5805aaaff3680">gsSPPopMatrixN</a>(      (n), 1)</td></tr>
+<tr class="memdesc:a339832407a1bdb6c873761c61d5caa33"><td class="mdescLeft">&#160;</td><td class="mdescRight">macro which pops one of the matrix stacks in a static display list.  <br /></td></tr>
+<tr class="separator:a339832407a1bdb6c873761c61d5caa33"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:aa10b6a6fa88381b34eb4325034230024" id="r_aa10b6a6fa88381b34eb4325034230024"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#aa10b6a6fa88381b34eb4325034230024">gSPVertex</a>(pkt,  v,  n,  v0)</td></tr>
 <tr class="separator:aa10b6a6fa88381b34eb4325034230024"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a57debef2e9c1dfcd0c711f8d6bb0c0e5" id="r_a57debef2e9c1dfcd0c711f8d6bb0c0e5"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a57debef2e9c1dfcd0c711f8d6bb0c0e5">gsSPVertex</a>(v,  n,  v0)</td></tr>
@@ -234,8 +276,10 @@ Macros</h2></td></tr>
 <tr class="memdesc:a9403e754757b97fe80719d6b39b76990"><td class="mdescLeft">&#160;</td><td class="mdescRight">Clipping Macros.     <br /></td></tr>
 <tr class="separator:a9403e754757b97fe80719d6b39b76990"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a7972da9c60a073b09af13b082b79b3d4" id="r_a7972da9c60a073b09af13b082b79b3d4"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a7972da9c60a073b09af13b082b79b3d4">gSPForceMatrix</a>(pkt,  mptr)&#160;&#160;&#160;gSPNoOp(pkt)</td></tr>
+<tr class="memdesc:a7972da9c60a073b09af13b082b79b3d4"><td class="mdescLeft">&#160;</td><td class="mdescRight">Load new MVP matrix directly.  <br /></td></tr>
 <tr class="separator:a7972da9c60a073b09af13b082b79b3d4"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ad491d787312f2db8106fbf61c8eac60e" id="r_ad491d787312f2db8106fbf61c8eac60e"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ad491d787312f2db8106fbf61c8eac60e">gsSPForceMatrix</a>(mptr)&#160;&#160;&#160;gsSPNoOp()</td></tr>
+<tr class="memdesc:ad491d787312f2db8106fbf61c8eac60e"><td class="mdescLeft">&#160;</td><td class="mdescRight">Load new MVP matrix directly.  <br /></td></tr>
 <tr class="separator:ad491d787312f2db8106fbf61c8eac60e"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a3b7eddef6aa29f88dcb2ac59e6149142" id="r_a3b7eddef6aa29f88dcb2ac59e6149142"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a3b7eddef6aa29f88dcb2ac59e6149142">gSPAmbOcclusionAmb</a>(pkt,  amb)&#160;&#160;&#160;gMoveHalfwd(pkt, G_MW_FX, G_MWO_AO_AMBIENT, amb)</td></tr>
 <tr class="separator:a3b7eddef6aa29f88dcb2ac59e6149142"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -1241,7 +1285,7 @@ Typedefs</h2></td></tr>
 <div class="line">                    _SHIFTL(mode0, 0, 24));             \</div>
 <div class="line">    _g-&gt;words.w1 = (<span class="keywordtype">unsigned</span> int)(mode1);               \</div>
 <div class="line">})</div>
-<div class="ttc" id="aunionGfx_html"><div class="ttname"><a href="unionGfx.html">Gfx</a></div><div class="ttdef"><b>Definition</b> gbi.h:1936</div></div>
+<div class="ttc" id="aunionGfx_html"><div class="ttname"><a href="unionGfx.html">Gfx</a></div><div class="ttdef"><b>Definition</b> gbi.h:1960</div></div>
 </div><!-- fragment --><p>gDPSetOtherMode (This is for expert user.)</p>
 <p>This command makes all othermode parameters set. Do not use this command in the same DL with another g*SPSetOtherMode DLs.</p>
 <p>[Usage] <a class="el" href="#a3264496f9b6d03ea021eec53d41e4e2c">gDPSetOtherMode(pkt, modeA, modeB)</a> </p><pre class="fragment">'modeA' is described all parameters of GroupA GBI command.
@@ -2967,7 +3011,9 @@ Typedefs</h2></td></tr>
         </tr>
       </table>
 </div><div class="memdoc">
-<p>Load new MVP matrix directly. This is no longer supported as there is no MVP matrix in F3DEX3. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000003">Deprecated</a></b></dt><dd></dd></dl>
+
+<p>Load new MVP matrix directly. </p>
+<p>This is no longer supported as there is no MVP matrix in F3DEX3. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000003">Deprecated</a></b></dt><dd></dd></dl>
 
 </div>
 </div>
@@ -3300,6 +3346,85 @@ gSPSetGeometryMode(pkt,s)
 
 </div>
 </div>
+<a id="aa103cc77360e990a7474fb541fd8b225" name="aa103cc77360e990a7474fb541fd8b225"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#aa103cc77360e990a7474fb541fd8b225">&#9670;&#160;</a></span>gSPMatrix</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define gSPMatrix</td>
+          <td>(</td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>pkt</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>m</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>p</em></span>&#160;)&#160;&#160;&#160;        gDma2p((pkt),G_MTX, (m), sizeof(Mtx), (p) ^ <a class="el" href="#af260746aec061e8a35a297e2a0e90eaa">G_MTX_PUSH</a>, 0)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>macro which inserts a matrix operation at the end display list. </p>
+<p>It inserts a matrix operation in the display list. The parameters allow you to select which matrix stack to use (projection or model view), where to load or concatenate, and whether or not to push the matrix stack. The following parameters are bit OR'ed together:</p><ul>
+<li><a class="el" href="#a158b3a6e36924769f7dff7f188b46b63">G_MTX_PROJECTION</a> <a class="el" href="#a4c9589710f911ec2c38104f51a68a8aa">G_MTX_MODELVIEW</a> -   specifies whether the matrix operation will be performed on the projection or the model view matrix.   </li>
+<li><a class="el" href="#a47a812d4ce6705e0dee289707f18f693">G_MTX_MUL</a> -   concatenates the matrix (m) with the top of the matrix stack.   </li>
+<li><a class="el" href="#a9fbb8b7e0e1a66c5399ad158d7a219cd">G_MTX_LOAD</a> -   loads the matrix (m) onto the top of the matrix stack.   </li>
+<li><a class="el" href="#a063f7fcd1dfe2d7c199dad97eea7cc97">G_MTX_NOPUSH</a> -   specifies do not push the matrix stack prior to matrix operations   </li>
+<li><a class="el" href="#af260746aec061e8a35a297e2a0e90eaa">G_MTX_PUSH</a> -   specifies push the matrix stack prior to matrix operations    </li>
+</ul>
+<h1><a class="anchor" id="autotoc_md0"></a>
+Matrix Format</h1>
+<p>The format of the fixed-point matrices may seem a little awkward to the application programmer because it is optimized for the RSP geometry engine. This unusual format is hidden in the graphics utility libraries and not usually exposed to the application programmer, but in some cases (static matrix declarations or direct element manipulation) it is necessary to understand the format.</p>
+<p>The integer and fractional components of the matrix elements are separated. The first 8 words (16 shorts) hold the 16-bit integer elements, the second 8 words (16 shorts) hold the 16-bit fractional elements. The fact that the Mtx type is declared as a long [4][4] array is slightly misleading. For example, to declare a static identity matrix, use code similar to this: </p><div class="fragment"><div class="line"><span class="preprocessor"> #include &quot;<a class="code" href="gbi_8h.html">gbi.h</a>&quot;</span></div>
+<div class="line"><span class="keyword">static</span> Mtx ident =</div>
+<div class="line">{</div>
+<div class="line"><span class="comment">// integer portion:</span></div>
+<div class="line">0x00010000, 0x00000000,</div>
+<div class="line">0x00000001, 0x00000000,</div>
+<div class="line">0x00000000, 0x00010000,</div>
+<div class="line">0x00000000, 0x00000001,</div>
+<div class="line"> </div>
+<div class="line"><span class="comment">// fractional portion:</span></div>
+<div class="line">0x00000000, 0x00000000,</div>
+<div class="line">0x00000000, 0x00000000,</div>
+<div class="line">0x00000000, 0x00000000,</div>
+<div class="line">0x00000000, 0x00000000,</div>
+<div class="line">};</div>
+<div class="ttc" id="agbi_8h_html"><div class="ttname"><a href="gbi_8h.html">gbi.h</a></div><div class="ttdoc">Modded GBI for use with F3DEX3 custom microcode.</div></div>
+</div><!-- fragment --><p> To force the translation elements of a matrix to be (10.5, 20.5, 30.5), use code similar to this: </p><div class="fragment"><div class="line"><span class="preprocessor">#include &quot;<a class="code" href="gbi_8h.html">gbi.h</a>&quot;</span></div>
+<div class="line"> </div>
+<div class="line">mat.m[1][2] =</div>
+<div class="line">   (10 &lt;&lt; 16) | (20);</div>
+<div class="line">mat.m[1][3] =</div>
+<div class="line">   (30 &lt;&lt; 16) | (1);</div>
+<div class="line"> </div>
+<div class="line">mat.m[3][2] =</div>
+<div class="line">   (0x8000 &lt;&lt; 16) | (0x8000);</div>
+<div class="line">mat.m[3][3] =</div>
+<div class="line">   (0x8000 &lt;&lt; 16) | (0);</div>
+</div><!-- fragment --> <dl class="section note"><dt>Note</dt><dd>Matrix concatenation in the RSP geometry engine is done using 32-bit integer arithmetic. A 32 x 32 bit multiply results in a 64-bit number. Only the middle 32 bits of this 64-bit result are kept for the new matrix. Therefore, when concatenating matrices, remember about the resulting fixed-point numerical error.</dd></dl>
+<p>For example, to retain maximum precision, the number ranges must be similar. Large-scale and translate parameters can decrease the transformation precision. Because rotation and projection matrices require quite a bit of fractional accuracy, these fractions may get tossed out if multiplied against large integer numbers.</p>
+<p>Each concatenation results in the rounding of the LSB of each matrix term. This means that each concatenation injects 1/2 LSB of error into the matrix. To keep full precision, concatenate matrices in floating-point on the processor and just load the result into the RSP.</p>
+<h1><a class="anchor" id="autotoc_md1"></a>
+Performance</h1>
+<p>Each <a class="el" href="#a4c9589710f911ec2c38104f51a68a8aa">G_MTX_MODELVIEW</a> matrix operation has an implicit matrix multiplication even if you specify <a class="el" href="#a9fbb8b7e0e1a66c5399ad158d7a219cd">G_MTX_LOAD</a>. This is the combined model view (M) and projection (P) matrix that is necessary for the vertex transformation to use a single matrix during transformation.</p>
+<p>You can optimize this by concatenating modeling matrices on the CPU and then putting the viewing (V) and projection matrices on the projection stack. By doing this, you only incur the single MxVP matrix concatenation each time you load a modeling matrix. Furthermore, the application has more information on how to do a cheap hack for modeling matrix concatenation. For example, if you want to combine a single axis rotation with a translation, just place the coefficients in the correct entries of the resulting matrix.</p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramname">m</td><td>is the pointer to the 4x4 fixed-point matrix (see note below about format) </td></tr>
+    <tr><td class="paramname">p</td><td>are the bit OR'd parameters to the matrix macro (<a class="el" href="#a158b3a6e36924769f7dff7f188b46b63">G_MTX_PROJECTION</a>, <a class="el" href="#a4c9589710f911ec2c38104f51a68a8aa">G_MTX_MODELVIEW</a>, <a class="el" href="#a47a812d4ce6705e0dee289707f18f693">G_MTX_MUL</a>, <a class="el" href="#a9fbb8b7e0e1a66c5399ad158d7a219cd">G_MTX_LOAD</a>, <a class="el" href="#a063f7fcd1dfe2d7c199dad97eea7cc97">G_MTX_NOPUSH</a>) </td></tr>
+  </table>
+  </dd>
+</dl>
+
+</div>
+</div>
 <a id="a48bee06f620e9930c1af1d7e1d7550d4" name="a48bee06f620e9930c1af1d7e1d7550d4"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a48bee06f620e9930c1af1d7e1d7550d4">&#9670;&#160;</a></span>gSPMemset</h2>
 
@@ -3472,6 +3597,82 @@ gSPSetGeometryMode(pkt,s)
 </div><!-- fragment --><p>Set the occlusion plane. This is a quadrilateral in 3D space where all geometry behind it is culled. You should create occlusion plane candidates just behind walls and other large objects, and have your game engine pick the most optimal one every frame to send to the RSP.</p>
 <p>Computing the coefficients for the occlusion plane is far too complicated to explain here. The reference implementation <code>guOcclusionPlane</code> is provided separately.</p>
 <p>o is the address of an OcclusionPlane struct </p>
+
+</div>
+</div>
+<a id="ab3ce7d020b9fc77124fc2849ca3c0e9a" name="ab3ce7d020b9fc77124fc2849ca3c0e9a"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ab3ce7d020b9fc77124fc2849ca3c0e9a">&#9670;&#160;</a></span>gSPPopMatrix</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define gSPPopMatrix</td>
+          <td>(</td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>pkt</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>n</em></span>&#160;)&#160;&#160;&#160;<a class="el" href="#ae4dab5f2297069e397664e3b62a7a0bb">gSPPopMatrixN</a>((pkt), (n), 1)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>macro which pops one of the matrix stacks at the end display list. </p>
+<p>It pops one of the matrix stacks. The model view stack can be up to 10 matrices deep. The projection stack is 1 matrix deep, so it cannot be popped.</p>
+<dl class="section note"><dt>Note</dt><dd>If the stack is empty, the macro is ignored.</dd></dl>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramname">n</td><td>is the flag field that identifies which matrix stack to pop:<ul>
+<li><a class="el" href="#a4c9589710f911ec2c38104f51a68a8aa">G_MTX_MODELVIEW</a> pops the modeling/viewing matrix stack</li>
+<li><a class="el" href="#a158b3a6e36924769f7dff7f188b46b63">G_MTX_PROJECTION</a> pops the projection matrix stack (NOT IMPLEMENTED) </li>
+</ul>
+</td></tr>
+  </table>
+  </dd>
+</dl>
+
+</div>
+</div>
+<a id="ae4dab5f2297069e397664e3b62a7a0bb" name="ae4dab5f2297069e397664e3b62a7a0bb"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ae4dab5f2297069e397664e3b62a7a0bb">&#9670;&#160;</a></span>gSPPopMatrixN</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define gSPPopMatrixN</td>
+          <td>(</td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>pkt</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>n</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>num</em></span>&#160;)&#160;&#160;&#160;gDma2p((pkt), G_POPMTX, (num) * 64, 64, 2, 0)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>macro which pops one of the matrix stacks at the end display list. </p>
+<p>It pops <code>num</code> of the matrix stacks. The model view stack can be up to 10 matrices deep. The projection stack is 1 matrix deep, so it cannot be popped.</p>
+<dl class="section note"><dt>Note</dt><dd>If the stack is empty, the macro is ignored.</dd></dl>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramname">n</td><td>is the flag field that identifies which matrix stack to pop:<ul>
+<li><a class="el" href="#a4c9589710f911ec2c38104f51a68a8aa">G_MTX_MODELVIEW</a> pops the modeling/viewing matrix stack</li>
+<li><a class="el" href="#a158b3a6e36924769f7dff7f188b46b63">G_MTX_PROJECTION</a> pops the projection matrix stack (NOT IMPLEMENTED) </li>
+</ul>
+</td></tr>
+    <tr><td class="paramname">num</td><td>is the number of matrices to pop </td></tr>
+  </table>
+  </dd>
+</dl>
 
 </div>
 </div>
@@ -4399,7 +4600,9 @@ gSPSetGeometryMode(pkt,s)
         </tr>
       </table>
 </div><div class="memdoc">
-<p>Load new MVP matrix directly. This is no longer supported as there is no MVP matrix in F3DEX3. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000003">Deprecated</a></b></dt><dd></dd></dl>
+
+<p>Load new MVP matrix directly. </p>
+<p>This is no longer supported as there is no MVP matrix in F3DEX3. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000003">Deprecated</a></b></dt><dd></dd></dl>
 
 </div>
 </div>
@@ -4674,6 +4877,79 @@ gSPSetGeometryMode(pkt,s)
 
 </div>
 </div>
+<a id="aee3588cfbd5b017041757eed414c5a40" name="aee3588cfbd5b017041757eed414c5a40"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#aee3588cfbd5b017041757eed414c5a40">&#9670;&#160;</a></span>gsSPMatrix</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define gsSPMatrix</td>
+          <td>(</td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>m</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>p</em></span>&#160;)&#160;&#160;&#160;        gsDma2p(     G_MTX, (m), sizeof(Mtx), (p) ^ <a class="el" href="#af260746aec061e8a35a297e2a0e90eaa">G_MTX_PUSH</a>, 0)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>macro which inserts a matrix operation in a static display list. </p>
+<p>It inserts a matrix operation in the display list. The parameters allow you to select which matrix stack to use (projection or model view), where to load or concatenate, and whether or not to push the matrix stack. The following parameters are bit OR'ed together:</p><ul>
+<li><a class="el" href="#a158b3a6e36924769f7dff7f188b46b63">G_MTX_PROJECTION</a> <a class="el" href="#a4c9589710f911ec2c38104f51a68a8aa">G_MTX_MODELVIEW</a> -   specifies whether the matrix operation will be performed on the projection or the model view matrix.   </li>
+<li><a class="el" href="#a47a812d4ce6705e0dee289707f18f693">G_MTX_MUL</a> -   concatenates the matrix (m) with the top of the matrix stack.   </li>
+<li><a class="el" href="#a9fbb8b7e0e1a66c5399ad158d7a219cd">G_MTX_LOAD</a> -   loads the matrix (m) onto the top of the matrix stack.   </li>
+<li><a class="el" href="#a063f7fcd1dfe2d7c199dad97eea7cc97">G_MTX_NOPUSH</a> -   specifies do not push the matrix stack prior to matrix operations   </li>
+<li><a class="el" href="#af260746aec061e8a35a297e2a0e90eaa">G_MTX_PUSH</a> -   specifies push the matrix stack prior to matrix operations    </li>
+</ul>
+<h1><a class="anchor" id="autotoc_md0"></a>
+Matrix Format</h1>
+<p>The format of the fixed-point matrices may seem a little awkward to the application programmer because it is optimized for the RSP geometry engine. This unusual format is hidden in the graphics utility libraries and not usually exposed to the application programmer, but in some cases (static matrix declarations or direct element manipulation) it is necessary to understand the format.</p>
+<p>The integer and fractional components of the matrix elements are separated. The first 8 words (16 shorts) hold the 16-bit integer elements, the second 8 words (16 shorts) hold the 16-bit fractional elements. The fact that the Mtx type is declared as a long [4][4] array is slightly misleading. For example, to declare a static identity matrix, use code similar to this: </p><div class="fragment"><div class="line"><span class="preprocessor"> #include &quot;<a class="code" href="gbi_8h.html">gbi.h</a>&quot;</span></div>
+<div class="line"><span class="keyword">static</span> Mtx ident =</div>
+<div class="line">{</div>
+<div class="line"><span class="comment">// integer portion:</span></div>
+<div class="line">0x00010000, 0x00000000,</div>
+<div class="line">0x00000001, 0x00000000,</div>
+<div class="line">0x00000000, 0x00010000,</div>
+<div class="line">0x00000000, 0x00000001,</div>
+<div class="line"> </div>
+<div class="line"><span class="comment">// fractional portion:</span></div>
+<div class="line">0x00000000, 0x00000000,</div>
+<div class="line">0x00000000, 0x00000000,</div>
+<div class="line">0x00000000, 0x00000000,</div>
+<div class="line">0x00000000, 0x00000000,</div>
+<div class="line">};</div>
+</div><!-- fragment --><p> To force the translation elements of a matrix to be (10.5, 20.5, 30.5), use code similar to this: </p><div class="fragment"><div class="line"><span class="preprocessor">#include &quot;<a class="code" href="gbi_8h.html">gbi.h</a>&quot;</span></div>
+<div class="line"> </div>
+<div class="line">mat.m[1][2] =</div>
+<div class="line">   (10 &lt;&lt; 16) | (20);</div>
+<div class="line">mat.m[1][3] =</div>
+<div class="line">   (30 &lt;&lt; 16) | (1);</div>
+<div class="line"> </div>
+<div class="line">mat.m[3][2] =</div>
+<div class="line">   (0x8000 &lt;&lt; 16) | (0x8000);</div>
+<div class="line">mat.m[3][3] =</div>
+<div class="line">   (0x8000 &lt;&lt; 16) | (0);</div>
+</div><!-- fragment --> <dl class="section note"><dt>Note</dt><dd>Matrix concatenation in the RSP geometry engine is done using 32-bit integer arithmetic. A 32 x 32 bit multiply results in a 64-bit number. Only the middle 32 bits of this 64-bit result are kept for the new matrix. Therefore, when concatenating matrices, remember about the resulting fixed-point numerical error.</dd></dl>
+<p>For example, to retain maximum precision, the number ranges must be similar. Large-scale and translate parameters can decrease the transformation precision. Because rotation and projection matrices require quite a bit of fractional accuracy, these fractions may get tossed out if multiplied against large integer numbers.</p>
+<p>Each concatenation results in the rounding of the LSB of each matrix term. This means that each concatenation injects 1/2 LSB of error into the matrix. To keep full precision, concatenate matrices in floating-point on the processor and just load the result into the RSP.</p>
+<h1><a class="anchor" id="autotoc_md1"></a>
+Performance</h1>
+<p>Each <a class="el" href="#a4c9589710f911ec2c38104f51a68a8aa">G_MTX_MODELVIEW</a> matrix operation has an implicit matrix multiplication even if you specify <a class="el" href="#a9fbb8b7e0e1a66c5399ad158d7a219cd">G_MTX_LOAD</a>. This is the combined model view (M) and projection (P) matrix that is necessary for the vertex transformation to use a single matrix during transformation.</p>
+<p>You can optimize this by concatenating modeling matrices on the CPU and then putting the viewing (V) and projection matrices on the projection stack. By doing this, you only incur the single MxVP matrix concatenation each time you load a modeling matrix. Furthermore, the application has more information on how to do a cheap hack for modeling matrix concatenation. For example, if you want to combine a single axis rotation with a translation, just place the coefficients in the correct entries of the resulting matrix.</p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramname">m</td><td>is the pointer to the 4x4 fixed-point matrix (see note below about format) </td></tr>
+    <tr><td class="paramname">p</td><td>are the bit OR'd parameters to the matrix macro (<a class="el" href="#a158b3a6e36924769f7dff7f188b46b63">G_MTX_PROJECTION</a>, <a class="el" href="#a4c9589710f911ec2c38104f51a68a8aa">G_MTX_MODELVIEW</a>, <a class="el" href="#a47a812d4ce6705e0dee289707f18f693">G_MTX_MUL</a>, <a class="el" href="#a9fbb8b7e0e1a66c5399ad158d7a219cd">G_MTX_LOAD</a>, <a class="el" href="#a063f7fcd1dfe2d7c199dad97eea7cc97">G_MTX_NOPUSH</a>)    </td></tr>
+  </table>
+  </dd>
+</dl>
+
+</div>
+</div>
 <a id="a100dc628b1b8952e0f3bb2e4e9ddd7e4" name="a100dc628b1b8952e0f3bb2e4e9ddd7e4"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a100dc628b1b8952e0f3bb2e4e9ddd7e4">&#9670;&#160;</a></span>gsSPMemset</h2>
 
@@ -4824,6 +5100,73 @@ gSPSetGeometryMode(pkt,s)
 
 </div>
 </div>
+<a id="a339832407a1bdb6c873761c61d5caa33" name="a339832407a1bdb6c873761c61d5caa33"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a339832407a1bdb6c873761c61d5caa33">&#9670;&#160;</a></span>gsSPPopMatrix</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define gsSPPopMatrix</td>
+          <td>(</td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>n</em></span></td><td>)</td>
+          <td>&#160;&#160;&#160;<a class="el" href="#a53728a24461a0b5181c5805aaaff3680">gsSPPopMatrixN</a>(      (n), 1)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>macro which pops one of the matrix stacks in a static display list. </p>
+<p>It pops one of the matrix stacks. The model view stack can be up to 10 matrices deep. The projection stack is 1 matrix deep, so it cannot be popped.</p>
+<dl class="section note"><dt>Note</dt><dd>If the stack is empty, the macro is ignored.</dd></dl>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramname">n</td><td>is the flag field that identifies which matrix stack to pop:<ul>
+<li><a class="el" href="#a4c9589710f911ec2c38104f51a68a8aa">G_MTX_MODELVIEW</a> pops the modeling/viewing matrix stack</li>
+<li><a class="el" href="#a158b3a6e36924769f7dff7f188b46b63">G_MTX_PROJECTION</a> pops the projection matrix stack (NOT IMPLEMENTED)    </li>
+</ul>
+</td></tr>
+  </table>
+  </dd>
+</dl>
+
+</div>
+</div>
+<a id="a53728a24461a0b5181c5805aaaff3680" name="a53728a24461a0b5181c5805aaaff3680"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a53728a24461a0b5181c5805aaaff3680">&#9670;&#160;</a></span>gsSPPopMatrixN</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define gsSPPopMatrixN</td>
+          <td>(</td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>n</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>num</em></span>&#160;)&#160;&#160;&#160;gsDma2p(      G_POPMTX, (num) * 64, 64, 2, 0)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>macro which pops one of the matrix stacks in a static display list. </p>
+<p>It pops <code>num</code> of the matrix stacks. The model view stack can be up to 10 matrices deep. The projection stack is 1 matrix deep, so it cannot be popped.</p>
+<dl class="section note"><dt>Note</dt><dd>If the stack is empty, the macro is ignored.</dd></dl>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramname">n</td><td>is the flag field that identifies which matrix stack to pop:<ul>
+<li><a class="el" href="#a4c9589710f911ec2c38104f51a68a8aa">G_MTX_MODELVIEW</a> pops the modeling/viewing matrix stack</li>
+<li><a class="el" href="#a158b3a6e36924769f7dff7f188b46b63">G_MTX_PROJECTION</a> pops the projection matrix stack (NOT IMPLEMENTED) </li>
+</ul>
+</td></tr>
+    <tr><td class="paramname">num</td><td>is the number of matrices to pop    </td></tr>
+  </table>
+  </dd>
+</dl>
+
+</div>
+</div>
 <a id="aaf15e5e8939a99813136386c513b13da" name="aaf15e5e8939a99813136386c513b13da"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#aaf15e5e8939a99813136386c513b13da">&#9670;&#160;</a></span>gsSPSetLights</h2>
 
@@ -4844,7 +5187,7 @@ gSPSetGeometryMode(pkt,s)
 </div><div class="memdoc">
 <b>Value:</b><div class="fragment"><div class="line">    <a class="code hl_define" href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a>(n), \</div>
 <div class="line">    gsDma2p(G_MOVEMEM, &amp;(name), (n) * 0x10 + 8, G_MV_LIGHT, 0x10)</div>
-<div class="ttc" id="agbi_8h_html_a05cbbc5a54641419bc1258390f3d6710"><div class="ttname"><a href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a></div><div class="ttdeci">#define gsSPNumLights(n)</div><div class="ttdef"><b>Definition</b> gbi.h:3050</div></div>
+<div class="ttc" id="agbi_8h_html_a05cbbc5a54641419bc1258390f3d6710"><div class="ttname"><a href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a></div><div class="ttdeci">#define gsSPNumLights(n)</div><div class="ttdef"><b>Definition</b> gbi.h:3175</div></div>
 </div><!-- fragment --><p>Set all your scene's lights (directional/point + ambient) with one memory transaction. n is the number of directional / point lights, from 0 to 9. There is also always an ambient light. name should be the NAME of a Lights struct (NOT A POINTER) filled in with all the lighting data. You can use the gdSPDef* macros to fill in the struct or just do it manually. Example: Lights2 myLights; // 2 dir/pos + 1 ambient <code> gSPSetLights(POLY_OPA_DISP++, 2, myLights);</code></p>
 <p><code>If you need to use a pointer, e.g. if the number of lights is variable at runtime: Light *lights = memory_allocate((numLights + 1) * sizeof(Light)); lights[0].p.pos = ...; lights[1].l.dir = ...; ... lights[numLights].l.col = ambient_color(); gSPSetLights(POLY_OPA_DISP++, numLights, *lights); // &lt;- NOTE DEREFERENCE</code></p>
 <p><code>If you're wondering why this macro takes a name / dereference instead of a pointer, it's for backwards compatibility.    </code></p>

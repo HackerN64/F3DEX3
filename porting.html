@@ -103,7 +103,7 @@ $(function(){initNavTree('porting.html',''); initResizable(true); });
   <div class="headertitle"><div class="title">Porting Your Romhack Codebase to F3DEX3</div></div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><h1><a class="anchor" id="autotoc_md29"></a>
+<div class="textblock"><h1><a class="anchor" id="autotoc_md31"></a>
 Porting Your Romhack Codebase to F3DEX3</h1>
 <p>For an OoT codebase, only a few minor changes are required to use F3DEX3. However, more changes are recommended to increase performance and enable new features.</p>
 <p>How to modify the microcode in your HackerOoT based romhack (steps may be similar for other games):</p><ul>
@@ -119,7 +119,7 @@ Porting Your Romhack Codebase to F3DEX3</h1>
 <li>If you start using new features in F3DEX3, make the "Changes required for new
   features" listed below.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md30"></a>
+<h2><a class="anchor" id="autotoc_md32"></a>
 Required Changes</h2>
 <p>Both OoT and SM64:</p>
 <ul>
@@ -138,7 +138,7 @@ Required Changes</h2>
 <li>If you are using the vanilla lighting system where light directions are always fixed, the vanilla permanent light direction of <code>{0x28, 0x28, 0x28}</code> must be changed to <code>{0x49, 0x49, 0x49}</code>, or everything will be too dark. The former vector is not properly normalized, but F3D through F3DEX2 normalize light directions in the microcode, so it doesn't matter with those microcodes. In contrast, F3DEX3 normalizes vertex normals (after transforming them), but assumes light directions have already been normalized.</li>
 <li>Matrix stack fix (world space lighting / view matrix in VP instead of in M) is basically required. If you <em>really</em> want camera space lighting, use matrix stack fix, transform the fixed camera space light direction by V inverse each frame, and send that to the RSP. This will be faster than the alternative (not using matrix stack fix and enabling <code>G_NORMALS_MODE_AUTO</code> to correct the matrix).</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md31"></a>
+<h2><a class="anchor" id="autotoc_md33"></a>
 Recommended Changes (Non-Lighting)</h2>
 <ul>
 <li>Clean up any code using the deprecated, hacky <code>SPLookAtX</code> and <code>SPLookAtY</code> to use <code>SPLookAt</code> instead (this is only a few lines change). Also remove any code which writes <code>SPClipRatio</code> or <code>SPForceMatrix</code>&ndash;these are now no-ops, so you might as well not write them.</li>
@@ -147,7 +147,7 @@ Recommended Changes (Non-Lighting)</h2>
 <li><code>#define REQUIRE_SEMICOLONS_AFTER_GBI_COMMANDS</code> (at the top of, or before including, the GBI) for a more modern, OoT-style codebase where uses of GBI commands require semicolons after them. SM64 omits the semicolons sometimes, e.g. <code>gSPDisplayList(gfx++, foo) gSPEndDisplayList(gfx++);</code>. If you are using <code>-Wpedantic</code>, using this define is required.</li>
 <li>Once everything in your romhack is ported to F3DEX3 and everything is stable, <code>#define NO_SYNCS_IN_TEXTURE_LOADS</code> (at the top of, or before including, the GBI) and fix any crashes or graphical issues that arise. Display lists exported from fast64 already do not contain these syncs, but vanilla display lists or custom ones using the texture loading multi-command macros do. Disabling the syncs saves a few percent of RDP cycles for each material setup; what percentage this is of the total RDP time depends on how many triangles are typically drawn between each material change. For more information, see the GBI documentation near this define.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md32"></a>
+<h2><a class="anchor" id="autotoc_md34"></a>
 Recommended Changes (Lighting)</h2>
 <ul>
 <li>Change your game engine lighting code to load all lights in one DMA transfer with <code>SPSetLights</code>, instead of one-at-a-time with repeated <code>SPLight</code> commands. Note that if you are using a pointer (dynamically allocated) rather than a direct variable (statically allocated), you need to dereference it; see the docstring for this macro in the GBI.</li>
@@ -157,7 +157,7 @@ Recommended Changes (Lighting)</h2>
 <li>If you are porting a game which already had point lighting (e.g. Majora's Mask), note that the point light kc, kl, and kq factors have been changed, so you will need to redesign how game engine light parameters (e.g. "light
   radius") map to these parameters.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md33"></a>
+<h2><a class="anchor" id="autotoc_md35"></a>
 Changes Required for New Features</h2>
 <p>Each of these changes is required if you want to use the respective new feature, but is not necessary if you are not using it.</p>
 <ul>

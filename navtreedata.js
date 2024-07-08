@@ -26,13 +26,13 @@ var NAVTREE =
 [
   [ "F3DEX3", "index.html", [
     [ "F3DEX3", "md_README.html", [
-      [ "Features", "md_README.html#autotoc_md1", [
-        [ "New visual features", "md_README.html#autotoc_md2", null ],
-        [ "Performance improvements", "md_README.html#autotoc_md3", null ],
-        [ "Miscellaneous", "md_README.html#autotoc_md4", null ],
-        [ "Profiling", "md_README.html#autotoc_md5", null ]
+      [ "Features", "md_README.html#autotoc_md3", [
+        [ "New visual features", "md_README.html#autotoc_md4", null ],
+        [ "Performance improvements", "md_README.html#autotoc_md5", null ],
+        [ "Miscellaneous", "md_README.html#autotoc_md6", null ],
+        [ "Profiling", "md_README.html#autotoc_md7", null ]
       ] ],
-      [ "Credits", "md_README.html#autotoc_md6", null ]
+      [ "Credits", "md_README.html#autotoc_md8", null ]
     ] ],
     [ "Code", "md_docs_2code.html", "md_docs_2code" ],
     [ "Documentation", "md_docs_2documentation.html", "md_docs_2documentation" ],
