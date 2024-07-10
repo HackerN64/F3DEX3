@@ -1,9 +1,9 @@
 var searchData=
 [
-  ['matrix_20format_0',['Matrix Format',['../gbi_8h.html#autotoc_md0',1,'']]],
-  ['matter_20in_20practice_1',['Obscure semantic differences from F3DEX2 that should never matter in practice',['../design-tradeoffs.html#autotoc_md28',1,'']]],
-  ['microcode_20configuration_2',['Microcode Configuration',['../microcode.html',1,'Microcode Configuration'],['../microcode.html#autotoc_md14',1,'Microcode Configuration']]],
-  ['minimal_20scanlines_20algorithm_3',['minimal scanlines algorithm',['../minimal-scanlines.html',1,'What happened to the clipping minimal scanlines algorithm?'],['../minimal-scanlines.html#autotoc_md29',1,'What happened to the clipping minimal scanlines algorithm?']]],
-  ['miscellaneous_4',['Miscellaneous',['../md_README.html#autotoc_md6',1,'']]],
-  ['mtx_5ft_5',['Mtx_t',['../gbi_8h.html#a337d3271dded333fc80aa798bf36efe3',1,'gbi.h']]]
+  ['legacy_20vertex_20pipeline_20lvp_0',['Legacy Vertex Pipeline (LVP)',['../microcode.html#autotoc_md18',1,'']]],
+  ['light_5ft_1',['Light_t',['../structLight__t.html',1,'']]],
+  ['lighting_2',['Lighting',['../porting.html#autotoc_md36',1,'Recommended Changes (Lighting)'],['../porting.html#autotoc_md35',1,'Recommended Changes (Non-Lighting)']]],
+  ['list_3',['Deprecated List',['../deprecated.html',1,'']]],
+  ['list_20compatibility_4',['Binary Display List Compatibility',['../compatibility.html#autotoc_md15',1,'']]],
+  ['lvp_5',['Legacy Vertex Pipeline (LVP)',['../microcode.html#autotoc_md18',1,'']]]
 ];

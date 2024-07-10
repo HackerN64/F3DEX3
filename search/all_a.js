@@ -1,6 +1,6 @@
 var searchData=
 [
-  ['kc_0',['kc',['../structPointLight__t.html#ab255bb43d89660ac7d537e25f1c398a7',1,'PointLight_t']]],
-  ['kl_1',['kl',['../structPointLight__t.html#afb81cad34fb9184ee16c2420bce5658d',1,'PointLight_t']]],
-  ['kq_2',['kq',['../structPointLight__t.html#a22b3fcef6c929db804c2624e2ff99001',1,'PointLight_t']]]
+  ['improvements_0',['Performance improvements',['../md_README.html#autotoc_md7',1,'']]],
+  ['in_20practice_1',['Obscure semantic differences from F3DEX2 that should never matter in practice',['../design-tradeoffs.html#autotoc_md30',1,'']]],
+  ['instruction_20tt_20brz_20tt_20tt_20brw_20tt_2',['Branch Depth Instruction (&lt;tt&gt;BrZ&lt;/tt&gt; / &lt;tt&gt;BrW&lt;/tt&gt;)',['../microcode.html#autotoc_md20',1,'']]]
 ];

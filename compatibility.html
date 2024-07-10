@@ -103,9 +103,9 @@ $(function(){initNavTree('compatibility.html',''); initResizable(true); });
   <div class="headertitle"><div class="title">Backwards Compatibility with F3DEX2</div></div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><h1><a class="anchor" id="autotoc_md11"></a>
+<div class="textblock"><h1><a class="anchor" id="autotoc_md13"></a>
 Backwards Compatibility with F3DEX2</h1>
-<h2><a class="anchor" id="autotoc_md12"></a>
+<h2><a class="anchor" id="autotoc_md14"></a>
 C GBI Compatibility</h2>
 <p>F3DEX3 is backwards compatible with F3DEX2 at the C GBI level for all features and commands except:</p>
 <ul>
@@ -119,7 +119,7 @@ C GBI Compatibility</h2>
 <li>As discussed above, the <code>pad1</code> field of <code><a class="el" href="structLight__t.html">Light_t</a></code> is renamed to <code>type</code> and must be set to zero.</li>
 <li>If you do not raise the maximum number of lights from 7 to 9, the lighting GBI commands are backwards compatible. However, if you do raise the number of lights, you must use <code>SPAmbient</code> to write the ambient light, as discussed above. Note that you can now load all your lights with one command, <code>SPSetLights</code>, so it is not usually necessary to use <code>SPLight</code> and <code>SPAmbient</code> at all.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md13"></a>
+<h2><a class="anchor" id="autotoc_md15"></a>
 Binary Display List Compatibility</h2>
 <p>F3DEX3 is generally binary backwards compatible with OoT-style display lists for objects, scenes, etc. <b>It is not compatible at the binary level with SM64-style display lists which encode object colors as light colors</b>, as all the command encodings related to lighting have changed. Of course, if you recompile these display lists with the new <code><a class="el" href="gbi_8h.html" title="Modded GBI for use with F3DEX3 custom microcode.">gbi.h</a></code>, it can run them.</p>
 <p>The deprecated commands mentioned above in the C GBI section have had their encodings changed (the original encodings will do bad things / crash). In addition, all lighting-related commands&ndash;e.g. <code>gdSPDefLights*</code>, <code>SPNumLights</code>, <code>SPLight</code>, <code>SPLightColor</code>, <code>SPLookAt</code>&ndash;have had their encodings changed, making them binary incompatible. The lighting data structures, e.g. <code><a class="el" href="structLight__t.html">Light_t</a></code>, <code>PosLight_t</code>, <code>LookAt_t</code>, <code>Lightsn</code>, <code>Lights*</code>, <code>PosLights*</code>, etc., have also changed&ndash;generally only slightly, so most code is compatible with no changes.</p>

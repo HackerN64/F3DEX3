@@ -187,6 +187,20 @@ Macros</h2></td></tr>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>G_MTX_PUSH</b>&#160;&#160;&#160;0x01</td></tr>
 <tr class="memdesc:af260746aec061e8a35a297e2a0e90eaa"><td class="mdescLeft">&#160;</td><td class="mdescRight">specifies push the matrix stack prior to matrix operations <br /></td></tr>
 <tr class="separator:af260746aec061e8a35a297e2a0e90eaa"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ac8752a0103acc58beebadbd52c5694dc" id="r_ac8752a0103acc58beebadbd52c5694dc"><td class="memItemLeft" align="right" valign="top"><a id="ac8752a0103acc58beebadbd52c5694dc" name="ac8752a0103acc58beebadbd52c5694dc"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>G_MWO_POINT_RGBA</b>&#160;&#160;&#160;0x10</td></tr>
+<tr class="memdesc:ac8752a0103acc58beebadbd52c5694dc"><td class="mdescLeft">&#160;</td><td class="mdescRight">changes the color of the vertex. The val parameter is interpreted as 4 bytes: red (high byte), green, blue, and alpha (low byte). <br /></td></tr>
+<tr class="separator:ac8752a0103acc58beebadbd52c5694dc"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:afb84e8da2787a5cf8ca385335a850d5c" id="r_afb84e8da2787a5cf8ca385335a850d5c"><td class="memItemLeft" align="right" valign="top"><a id="afb84e8da2787a5cf8ca385335a850d5c" name="afb84e8da2787a5cf8ca385335a850d5c"></a>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>G_MWO_POINT_ST</b>&#160;&#160;&#160;0x14</td></tr>
+<tr class="memdesc:afb84e8da2787a5cf8ca385335a850d5c"><td class="mdescLeft">&#160;</td><td class="mdescRight">changes the S and T values (texture coordinates of the vertex). The high 16 bits of val specify the S coordinate, and the low 16 bits specify the T coordinate. Each coordinate is an S10.5 number. <br /></td></tr>
+<tr class="separator:afb84e8da2787a5cf8ca385335a850d5c"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ae6de43c88b8f3a2f32a17c5e3a94ede9" id="r_ae6de43c88b8f3a2f32a17c5e3a94ede9"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ae6de43c88b8f3a2f32a17c5e3a94ede9">G_MWO_POINT_XYSCREEN</a>&#160;&#160;&#160;0x18</td></tr>
+<tr class="memdesc:ae6de43c88b8f3a2f32a17c5e3a94ede9"><td class="mdescLeft">&#160;</td><td class="mdescRight">change the screen coordinates of the vertex. The high 16 bits of val specify the X coordinate and the low 16 bits specify the Y coordinate. Both coordinates are S13.2 numbers with 0,0 being the upper-left of the screen, positive X going right, and positive Y going down.  <br /></td></tr>
+<tr class="separator:ae6de43c88b8f3a2f32a17c5e3a94ede9"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a39681fea3ef91be9ce5d51b87eb93fbb" id="r_a39681fea3ef91be9ce5d51b87eb93fbb"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a39681fea3ef91be9ce5d51b87eb93fbb">G_MWO_POINT_ZSCREEN</a>&#160;&#160;&#160;0x1C</td></tr>
+<tr class="memdesc:a39681fea3ef91be9ce5d51b87eb93fbb"><td class="mdescLeft">&#160;</td><td class="mdescRight">changes the screen Z coordinate of the vertex. The entire 32-bit val is taken as the new screen Z value. It is a 16.16 number in the range 0x00000000 to 0x03ff0000.  <br /></td></tr>
+<tr class="separator:a39681fea3ef91be9ce5d51b87eb93fbb"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:aa103cc77360e990a7474fb541fd8b225" id="r_aa103cc77360e990a7474fb541fd8b225"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#aa103cc77360e990a7474fb541fd8b225">gSPMatrix</a>(pkt,  m,  p)&#160;&#160;&#160;        gDma2p((pkt),G_MTX, (m), sizeof(Mtx), (p) ^ <a class="el" href="#af260746aec061e8a35a297e2a0e90eaa">G_MTX_PUSH</a>, 0)</td></tr>
 <tr class="memdesc:aa103cc77360e990a7474fb541fd8b225"><td class="mdescLeft">&#160;</td><td class="mdescRight">macro which inserts a matrix operation at the end display list.  <br /></td></tr>
 <tr class="separator:aa103cc77360e990a7474fb541fd8b225"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -206,8 +220,10 @@ Macros</h2></td></tr>
 <tr class="memdesc:a339832407a1bdb6c873761c61d5caa33"><td class="mdescLeft">&#160;</td><td class="mdescRight">macro which pops one of the matrix stacks in a static display list.  <br /></td></tr>
 <tr class="separator:a339832407a1bdb6c873761c61d5caa33"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:aa10b6a6fa88381b34eb4325034230024" id="r_aa10b6a6fa88381b34eb4325034230024"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#aa10b6a6fa88381b34eb4325034230024">gSPVertex</a>(pkt,  v,  n,  v0)</td></tr>
+<tr class="memdesc:aa10b6a6fa88381b34eb4325034230024"><td class="mdescLeft">&#160;</td><td class="mdescRight">macro which loads an internal vertex buffer in the RSP with points that are used by <a class="el" href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a> macros to generate polygons at the end display list.  <br /></td></tr>
 <tr class="separator:aa10b6a6fa88381b34eb4325034230024"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a57debef2e9c1dfcd0c711f8d6bb0c0e5" id="r_a57debef2e9c1dfcd0c711f8d6bb0c0e5"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a57debef2e9c1dfcd0c711f8d6bb0c0e5">gsSPVertex</a>(v,  n,  v0)</td></tr>
+<tr class="memdesc:a57debef2e9c1dfcd0c711f8d6bb0c0e5"><td class="mdescLeft">&#160;</td><td class="mdescRight">macro which loads an internal vertex buffer in the RSP with points that are used by gSP1Triangle macros to generate polygons in a static display list.  <br /></td></tr>
 <tr class="separator:a57debef2e9c1dfcd0c711f8d6bb0c0e5"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ae8ec02cb12125afc48f5af1bb14e717f" id="r_ae8ec02cb12125afc48f5af1bb14e717f"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ae8ec02cb12125afc48f5af1bb14e717f">gSPDisplayListHint</a>(pkt,  dl,  count)&#160;&#160;&#160;_gSPDisplayListRaw(pkt, dl, _DLHINTVALUE(count))</td></tr>
 <tr class="separator:ae8ec02cb12125afc48f5af1bb14e717f"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -330,8 +346,10 @@ Macros</h2></td></tr>
 <tr class="memitem:ae2ae0e0fe29b05d0f62ff6b14a94c1cd" id="r_ae2ae0e0fe29b05d0f62ff6b14a94c1cd"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ae2ae0e0fe29b05d0f62ff6b14a94c1cd">gsSPMITMatrix</a>(mtx)&#160;&#160;&#160;        gsDma2p(      G_MOVEMEM, (mit), sizeof(MITMtx), G_MV_MMTX, 0x80)</td></tr>
 <tr class="separator:ae2ae0e0fe29b05d0f62ff6b14a94c1cd"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:abc12c0642acde2394639e9f9e247dde9" id="r_abc12c0642acde2394639e9f9e247dde9"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#abc12c0642acde2394639e9f9e247dde9">gSPModifyVertex</a>(pkt,  vtx,  where,  val)</td></tr>
+<tr class="memdesc:abc12c0642acde2394639e9f9e247dde9"><td class="mdescLeft">&#160;</td><td class="mdescRight">You can use this macro to modify certain sections of a vertex after it has been sent to the RSP (by the gSPVertex macro).  <br /></td></tr>
 <tr class="separator:abc12c0642acde2394639e9f9e247dde9"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:afa7f692f104a3fca8d37ab59708148bc" id="r_afa7f692f104a3fca8d37ab59708148bc"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#afa7f692f104a3fca8d37ab59708148bc">gsSPModifyVertex</a>(vtx,  where,  val)</td></tr>
+<tr class="memdesc:afa7f692f104a3fca8d37ab59708148bc"><td class="mdescLeft">&#160;</td><td class="mdescRight">You can use this macro to modify certain sections of a vertex after it has been sent to the RSP (by the gSPVertex macro).  <br /></td></tr>
 <tr class="separator:afa7f692f104a3fca8d37ab59708148bc"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a6c94d605a0bba70cbe65a7279a2715b4" id="r_a6c94d605a0bba70cbe65a7279a2715b4"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a6c94d605a0bba70cbe65a7279a2715b4">gSPCullDisplayList</a>(pkt,  vstart,  vend)</td></tr>
 <tr class="separator:a6c94d605a0bba70cbe65a7279a2715b4"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -462,6 +480,40 @@ Typedefs</h2></td></tr>
 <a name="details" id="details"></a><h2 class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>Modded GBI for use with F3DEX3 custom microcode. </p>
 </div><h2 class="groupheader">Macro Definition Documentation</h2>
+<a id="ae6de43c88b8f3a2f32a17c5e3a94ede9" name="ae6de43c88b8f3a2f32a17c5e3a94ede9"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ae6de43c88b8f3a2f32a17c5e3a94ede9">&#9670;&#160;</a></span>G_MWO_POINT_XYSCREEN</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define G_MWO_POINT_XYSCREEN&#160;&#160;&#160;0x18</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>change the screen coordinates of the vertex. The high 16 bits of val specify the X coordinate and the low 16 bits specify the Y coordinate. Both coordinates are S13.2 numbers with 0,0 being the upper-left of the screen, positive X going right, and positive Y going down. </p>
+<dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000001">Deprecated</a></b></dt><dd>to use, won't work if the tri gets clipped. </dd></dl>
+
+</div>
+</div>
+<a id="a39681fea3ef91be9ce5d51b87eb93fbb" name="a39681fea3ef91be9ce5d51b87eb93fbb"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a39681fea3ef91be9ce5d51b87eb93fbb">&#9670;&#160;</a></span>G_MWO_POINT_ZSCREEN</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define G_MWO_POINT_ZSCREEN&#160;&#160;&#160;0x1C</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>changes the screen Z coordinate of the vertex. The entire 32-bit val is taken as the new screen Z value. It is a 16.16 number in the range 0x00000000 to 0x03ff0000. </p>
+<dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000002">Deprecated</a></b></dt><dd>to use, won't work if the tri gets clipped. </dd></dl>
+
+</div>
+</div>
 <a id="a81de7938afecb370d755ca517760508f" name="a81de7938afecb370d755ca517760508f"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a81de7938afecb370d755ca517760508f">&#9670;&#160;</a></span>gDPLoadMultiBlock</h2>
 
@@ -1222,7 +1274,7 @@ Typedefs</h2></td></tr>
         </tr>
       </table>
 </div><div class="memdoc">
-<p>'blendmask' is not supported anymore. The bits are reserved for future use. Fri May 26 13:45:55 PDT 1995 </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000005">Deprecated</a></b></dt><dd></dd></dl>
+<p>'blendmask' is not supported anymore. The bits are reserved for future use. Fri May 26 13:45:55 PDT 1995 </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000007">Deprecated</a></b></dt><dd></dd></dl>
 
 </div>
 </div>
@@ -1285,7 +1337,7 @@ Typedefs</h2></td></tr>
 <div class="line">                    _SHIFTL(mode0, 0, 24));             \</div>
 <div class="line">    _g-&gt;words.w1 = (<span class="keywordtype">unsigned</span> int)(mode1);               \</div>
 <div class="line">})</div>
-<div class="ttc" id="aunionGfx_html"><div class="ttname"><a href="unionGfx.html">Gfx</a></div><div class="ttdef"><b>Definition</b> gbi.h:1960</div></div>
+<div class="ttc" id="aunionGfx_html"><div class="ttname"><a href="unionGfx.html">Gfx</a></div><div class="ttdef"><b>Definition</b> gbi.h:1978</div></div>
 </div><!-- fragment --><p>gDPSetOtherMode (This is for expert user.)</p>
 <p>This command makes all othermode parameters set. Do not use this command in the same DL with another g*SPSetOtherMode DLs.</p>
 <p>[Usage] <a class="el" href="#a3264496f9b6d03ea021eec53d41e4e2c">gDPSetOtherMode(pkt, modeA, modeB)</a> </p><pre class="fragment">'modeA' is described all parameters of GroupA GBI command.
@@ -2100,7 +2152,7 @@ Typedefs</h2></td></tr>
         </tr>
       </table>
 </div><div class="memdoc">
-<p>'blendmask' is not supported anymore. The bits are reserved for future use. Fri May 26 13:45:55 PDT 1995 </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000005">Deprecated</a></b></dt><dd></dd></dl>
+<p>'blendmask' is not supported anymore. The bits are reserved for future use. Fri May 26 13:45:55 PDT 1995 </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000007">Deprecated</a></b></dt><dd></dd></dl>
 
 </div>
 </div>
@@ -2769,7 +2821,7 @@ Typedefs</h2></td></tr>
 </div><div class="memdoc">
 
 <p>Clipping Macros. </p>
-<dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000001">Deprecated</a></b></dt><dd>encodes SP no-ops it is not possible to change the clip ratio from 2 in F3DEX3. </dd></dl>
+<dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000003">Deprecated</a></b></dt><dd>encodes SP no-ops it is not possible to change the clip ratio from 2 in F3DEX3. </dd></dl>
 
 </div>
 </div>
@@ -3013,7 +3065,7 @@ Typedefs</h2></td></tr>
 </div><div class="memdoc">
 
 <p>Load new MVP matrix directly. </p>
-<p>This is no longer supported as there is no MVP matrix in F3DEX3. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000003">Deprecated</a></b></dt><dd></dd></dl>
+<p>This is no longer supported as there is no MVP matrix in F3DEX3. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000005">Deprecated</a></b></dt><dd></dd></dl>
 
 </div>
 </div>
@@ -3320,7 +3372,7 @@ gSPSetGeometryMode(pkt,s)
         </tr>
       </table>
 </div><div class="memdoc">
-<p>These versions are deprecated, please use g*SPLookAt. The two directions cannot be set independently anymore as they both fit within one memory word. (They could be set with moveword, but then the values would have to be within the command itself, not at a memory address.) This deprecated version has the X command set both (assuming l is the name / address of a LookAt struct) and has the Y command as a SP no-op. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000004">Deprecated</a></b></dt><dd></dd></dl>
+<p>These versions are deprecated, please use g*SPLookAt. The two directions cannot be set independently anymore as they both fit within one memory word. (They could be set with moveword, but then the values would have to be within the command itself, not at a memory address.) This deprecated version has the X command set both (assuming l is the name / address of a LookAt struct) and has the Y command as a SP no-op. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000006">Deprecated</a></b></dt><dd></dd></dl>
 
 </div>
 </div>
@@ -3342,7 +3394,7 @@ gSPSetGeometryMode(pkt,s)
         </tr>
       </table>
 </div><div class="memdoc">
-<p>These versions are deprecated, please use g*SPLookAt. The two directions cannot be set independently anymore as they both fit within one memory word. (They could be set with moveword, but then the values would have to be within the command itself, not at a memory address.) This deprecated version has the X command set both (assuming l is the name / address of a LookAt struct) and has the Y command as a SP no-op. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000004">Deprecated</a></b></dt><dd></dd></dl>
+<p>These versions are deprecated, please use g*SPLookAt. The two directions cannot be set independently anymore as they both fit within one memory word. (They could be set with moveword, but then the values would have to be within the command itself, not at a memory address.) This deprecated version has the X command set both (assuming l is the name / address of a LookAt struct) and has the Y command as a SP no-op. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000006">Deprecated</a></b></dt><dd></dd></dl>
 
 </div>
 </div>
@@ -3521,8 +3573,51 @@ Performance</h1>
 <div class="line">                    _SHIFTL((vtx) * 2,    0, 16));  \</div>
 <div class="line">    _g-&gt;words.w1 = (<span class="keywordtype">unsigned</span> int)(val);             \</div>
 <div class="line">})</div>
-</div><!-- fragment --><p>Insert values into Vertices</p>
-<p>vtx = vertex number 0-55 where = which element of point to modify (byte offset into vertex) num = new value (32 bit) </p>
+</div><!-- fragment -->
+<p>You can use this macro to modify certain sections of a vertex after it has been sent to the RSP (by the gSPVertex macro). </p>
+<p>This is an advanced macro. You need a good understanding of how vertices work in the RSP microcode before you use this macro (refer to gSPVertex).</p>
+<p>You can use this macro to modify certain sections of a vertex after it has been sent to the RSP (by the gSPVertex macro). This is useful for vertices that are shared between two or more triangles that must have different properties when associated with one triangle versus the other triangle.</p>
+<p>For example, you might have two adjacent triangles that both need smooth-shaded color, but one is smooth-shaded red-to-yellow and the other is smooth-shaded green-to-cyan. In this case, the vertex that is shared by both triangles is sent with red/yellow color by using the gSPVertex macro. The first triangle is drawn. Then, the gSPModifyVertex macro is used to change the color to green/cyan, and the second triangle is drawn.</p>
+<p>The primary use of the gSPModifyVertex macro is to modify the texture coordinate of a vertex so that a vertex that is shared by two triangles with different textures and different texture coordinate spaces can contain the texture coordinate for the first texture and then be modified to contain the texture coordinate for the second texture.</p>
+<p>It is faster to use the gSPModifyVertex macro than to send a new vertex macro with a different but similar vertex because no transformations or lighting are done to the vertex when you use the gSPModifyVertex macro.</p>
+<p>The where argument specifies which part of the vertex is to be modified. It can hold one of the following values:</p><ul>
+<li><a class="el" href="#ac8752a0103acc58beebadbd52c5694dc">G_MWO_POINT_RGBA</a> -   changes the color of the vertex. The val parameter is interpreted as 4 bytes: red (high byte), green, blue, and alpha (low byte).   </li>
+<li><a class="el" href="#afb84e8da2787a5cf8ca385335a850d5c">G_MWO_POINT_ST</a> -   changes the S and T values (texture coordinates of the vertex). The high 16 bits of val specify the S coordinate, and the low 16 bits specify the T coordinate. Each coordinate is an S10.5 number.   </li>
+<li><a class="el" href="#ae6de43c88b8f3a2f32a17c5e3a94ede9">G_MWO_POINT_XYSCREEN</a> -   change the screen coordinates of the vertex. The high 16 bits of val specify the X coordinate and the low 16 bits specify the Y coordinate. Both coordinates are S13.2 numbers with 0,0 being the upper-left of the screen, positive X going right, and positive Y going down.   </li>
+<li><a class="el" href="#a39681fea3ef91be9ce5d51b87eb93fbb">G_MWO_POINT_ZSCREEN</a> -   changes the screen Z coordinate of the vertex. The entire 32-bit val is taken as the new screen Z value. It is a 16.16 number in the range 0x00000000 to 0x03ff0000.   </li>
+</ul>
+<dl class="section note"><dt>Note</dt><dd>Lighting is not performed after a gSPModifyVertex macro, so modifying the color of the vertex with <a class="el" href="#ac8752a0103acc58beebadbd52c5694dc">G_MWO_POINT_RGBA</a> is just that - modifying the actual color that will be output. It is not a modification of normal values. This means it cannot be used to update vertex normals for lighting.</dd></dl>
+<p>The S and T coordinates supplied in the gSPModifyVertex macro are never multiplied by the texture scale (from the gSPTexture macro), so you must pre-scale them before sending them. For example, if you want a texture scale of 1/2 (0x8000), make the S and T values sent with the gSPModifyVertex macro half the value of the equivalent values used with the gSPVertex macro.</p>
+<h1><a class="anchor" id="autotoc_md3"></a>
+Example</h1>
+<p>To share a vertex between two triangles with different textures and texture coordinates, use this code: </p><div class="fragment"><div class="line"><span class="comment">// load vertex by gSPVertex</span></div>
+<div class="line"><a class="code hl_define" href="#aa10b6a6fa88381b34eb4325034230024">gSPVertex</a>(...);</div>
+<div class="line"><span class="comment">// load texture of triangle 1</span></div>
+<div class="line">gDPLoadTextureBlock(...);</div>
+<div class="line"> </div>
+<div class="line"><span class="comment">// draw triangle 1 using vertex #3</span></div>
+<div class="line"><a class="code hl_define" href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a>(glistp++, 1,2,3,0);</div>
+<div class="line"> </div>
+<div class="line"><span class="comment">// change a value of vertex 3 to S=3.0 and T=2.5</span></div>
+<div class="line"><a class="code hl_define" href="#abc12c0642acde2394639e9f9e247dde9">gSPModifyVertex</a>(glistp++, 3, <a class="code hl_define" href="#afb84e8da2787a5cf8ca385335a850d5c">G_MWO_POINT_ST</a>, 0x00600050);</div>
+<div class="line"> </div>
+<div class="line"><span class="comment">// load texture of triangle 2</span></div>
+<div class="line">gDPLoadTextureBlock(...);</div>
+<div class="line"> </div>
+<div class="line"><span class="comment">// draw triangle 2 using vertex #3</span></div>
+<div class="line"><a class="code hl_define" href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a>(glistp++, 1,2,3,0);</div>
+<div class="ttc" id="agbi_8h_html_aa10b6a6fa88381b34eb4325034230024"><div class="ttname"><a href="#aa10b6a6fa88381b34eb4325034230024">gSPVertex</a></div><div class="ttdeci">#define gSPVertex(pkt, v, n, v0)</div><div class="ttdoc">macro which loads an internal vertex buffer in the RSP with points that are used by gSP1Triangle macr...</div><div class="ttdef"><b>Definition</b> gbi.h:2205</div></div>
+<div class="ttc" id="agbi_8h_html_abc12c0642acde2394639e9f9e247dde9"><div class="ttname"><a href="#abc12c0642acde2394639e9f9e247dde9">gSPModifyVertex</a></div><div class="ttdeci">#define gSPModifyVertex(pkt, vtx, where, val)</div><div class="ttdoc">You can use this macro to modify certain sections of a vertex after it has been sent to the RSP (by t...</div><div class="ttdef"><b>Definition</b> gbi.h:3077</div></div>
+<div class="ttc" id="agbi_8h_html_afb84e8da2787a5cf8ca385335a850d5c"><div class="ttname"><a href="#afb84e8da2787a5cf8ca385335a850d5c">G_MWO_POINT_ST</a></div><div class="ttdeci">#define G_MWO_POINT_ST</div><div class="ttdoc">changes the S and T values (texture coordinates of the vertex). The high 16 bits of val specify the S...</div><div class="ttdef"><b>Definition</b> gbi.h:289</div></div>
+<div class="ttc" id="agbi_8h_html_afe0d779cf45ef43bbffd47bbaea0e390"><div class="ttname"><a href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a></div><div class="ttdeci">#define gSP1Triangle(pkt, v0, v1, v2, flag)</div><div class="ttdef"><b>Definition</b> gbi.h:2544</div></div>
+</div><!-- fragment --><dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramname">vtx</td><td>specifies which of the RSP's vertices (0-55) to modify </td></tr>
+    <tr><td class="paramname">where</td><td>specifies which part of the vertex to modify (<a class="el" href="#ac8752a0103acc58beebadbd52c5694dc">G_MWO_POINT_RGBA</a>, <a class="el" href="#afb84e8da2787a5cf8ca385335a850d5c">G_MWO_POINT_ST</a>, <a class="el" href="#ae6de43c88b8f3a2f32a17c5e3a94ede9">G_MWO_POINT_XYSCREEN</a> or <a class="el" href="#a39681fea3ef91be9ce5d51b87eb93fbb">G_MWO_POINT_ZSCREEN</a>) </td></tr>
+    <tr><td class="paramname">val</td><td>is the new value for the part of the vertex to be modified (a 32 bit integer number) </td></tr>
+  </table>
+  </dd>
+</dl>
 
 </div>
 </div>
@@ -3948,8 +4043,24 @@ Performance</h1>
 <div class="line">                    _SHIFTL((v0) + (n),  1, 7));    \</div>
 <div class="line">    _g-&gt;words.w1 = (<span class="keywordtype">unsigned</span> int)(v);               \</div>
 <div class="line">})</div>
-</div><!-- fragment --><pre class="fragment">  +--------+----+---+---+----+------+-+
-</pre><p> G_VTX | cmd:8 |0000| n:8 |0000|v0+n:7|0| +-+&mdash;+&ndash;+-&mdash;+&mdash;+&mdash;+-&mdash;+---&mdash;+-+ | |seg| address | +-+&mdash;+--------------------------&mdash;+ </p>
+</div><!-- fragment -->
+<p>macro which loads an internal vertex buffer in the RSP with points that are used by <a class="el" href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a> macros to generate polygons at the end display list. </p>
+<p>It loads an internal vertex buffer in the RSP with points that are used by <a class="el" href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a> macros to generate polygons. This vertex cache can hold up to 56 vertices, and the vertex loading can begin at any entry (index) within the cache. The vertex coordinates (x,y,z) are encoded in signed 2's complement, 16-bit integers. The texture coordinates (s,t) are encoded in S10.5 format. A vertex either has a color or a normal (for shading). These values are 8-bit values. The colors and alphas are treated as 8-bit unsigned values (0-255), but the normals are treated as 8-bit signed values (-128 to 127). Therefore, the appropriate member of the union to use (.v. or .n.) depends on whether you are using colors or normals.</p>
+<p>Normal coordinates range from -1.0 to 1.0. A value of -1.0 is represented as -128, and a value of 1.0 is represented as 128, but because the maximum positive value of a signed byte is 127, a value of 1.0 can't really be represented. Therefore, 0.992 is the maximum representable positive value, which is good enough for this purpose.</p>
+<p>The flag value is used for the packed normals feature to store normals with octahedral encoding.</p>
+<p>The coordinates (x,y,z) are transformed using the current 4x4 projection and model view matrices, and (s,t) are transformed using the scale defined by gSPTexture.</p>
+<h1><a class="anchor" id="autotoc_md2"></a>
+Example</h1>
+<p>To load vertex cache entry 2,3,4, use this code: </p><div class="fragment"><div class="line"><a class="code hl_define" href="#aa10b6a6fa88381b34eb4325034230024">gSPVertex</a>(glistp++, v, 3, 2);</div>
+</div><!-- fragment --><dl class="section note"><dt>Note</dt><dd>Because the RSP geometry transformation engine uses a vertex list with triangle list architecture, it is quite powerful. A simple one-triangle macro retains least performance compared to <a class="el" href="#aee80adda08faf28c431e1eff5a1e0506">gSP2Triangles</a> or the new 5 tris commands in EX3 (<a class="el" href="#aabcbc5ce71956855291dc22646dec21f">gSPTriStrip</a>, <a class="el" href="#a6425176902ef66d72ec08772309a82e9">gSPTriFan</a>).</dd></dl>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramname">v</td><td>is the pointer to the vertex list (segment address) </td></tr>
+    <tr><td class="paramname">n</td><td>is the number of vertices </td></tr>
+    <tr><td class="paramname">v0</td><td>is the load vertex by index vo(0~55) in vertex buffer </td></tr>
+  </table>
+  </dd>
+</dl>
 
 </div>
 </div>
@@ -4393,8 +4504,8 @@ Performance</h1>
 </div><div class="memdoc">
 
 <p>Clipping Macros.    </p>
-<dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000002">Deprecated</a></b></dt><dd></dd></dl>
-<dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000001">Deprecated</a></b></dt><dd>encodes SP no-ops it is not possible to change the clip ratio from 2 in F3DEX3. </dd></dl>
+<dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000004">Deprecated</a></b></dt><dd></dd></dl>
+<dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000003">Deprecated</a></b></dt><dd>encodes SP no-ops it is not possible to change the clip ratio from 2 in F3DEX3. </dd></dl>
 
 </div>
 </div>
@@ -4602,7 +4713,7 @@ Performance</h1>
 </div><div class="memdoc">
 
 <p>Load new MVP matrix directly. </p>
-<p>This is no longer supported as there is no MVP matrix in F3DEX3. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000003">Deprecated</a></b></dt><dd></dd></dl>
+<p>This is no longer supported as there is no MVP matrix in F3DEX3. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000005">Deprecated</a></b></dt><dd></dd></dl>
 
 </div>
 </div>
@@ -4855,7 +4966,7 @@ gSPSetGeometryMode(pkt,s)
         </tr>
       </table>
 </div><div class="memdoc">
-<p>These versions are deprecated, please use g*SPLookAt. The two directions cannot be set independently anymore as they both fit within one memory word. (They could be set with moveword, but then the values would have to be within the command itself, not at a memory address.) This deprecated version has the X command set both (assuming l is the name / address of a LookAt struct) and has the Y command as a SP no-op. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000004">Deprecated</a></b></dt><dd></dd></dl>
+<p>These versions are deprecated, please use g*SPLookAt. The two directions cannot be set independently anymore as they both fit within one memory word. (They could be set with moveword, but then the values would have to be within the command itself, not at a memory address.) This deprecated version has the X command set both (assuming l is the name / address of a LookAt struct) and has the Y command as a SP no-op. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000006">Deprecated</a></b></dt><dd></dd></dl>
 
 </div>
 </div>
@@ -4873,7 +4984,7 @@ gSPSetGeometryMode(pkt,s)
         </tr>
       </table>
 </div><div class="memdoc">
-<p>These versions are deprecated, please use g*SPLookAt. The two directions cannot be set independently anymore as they both fit within one memory word. (They could be set with moveword, but then the values would have to be within the command itself, not at a memory address.) This deprecated version has the X command set both (assuming l is the name / address of a LookAt struct) and has the Y command as a SP no-op. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000004">Deprecated</a></b></dt><dd></dd></dl>
+<p>These versions are deprecated, please use g*SPLookAt. The two directions cannot be set independently anymore as they both fit within one memory word. (They could be set with moveword, but then the values would have to be within the command itself, not at a memory address.) This deprecated version has the X command set both (assuming l is the name / address of a LookAt struct) and has the Y command as a SP no-op. </p><dl class="deprecated"><dt><b><a class="el" href="deprecated.html#_deprecated000006">Deprecated</a></b></dt><dd></dd></dl>
 
 </div>
 </div>
@@ -5033,8 +5144,47 @@ Performance</h1>
 <div class="line">    _SHIFTL((vtx) * 2,    0, 16)),          \</div>
 <div class="line">    (<span class="keywordtype">unsigned</span> <span class="keywordtype">int</span>)(val)                     \</div>
 <div class="line">}</div>
-</div><!-- fragment --><p>Insert values into Vertices</p>
-<p>vtx = vertex number 0-55 where = which element of point to modify (byte offset into vertex) num = new value (32 bit)    </p>
+</div><!-- fragment -->
+<p>You can use this macro to modify certain sections of a vertex after it has been sent to the RSP (by the gSPVertex macro). </p>
+<p>This is an advanced macro. You need a good understanding of how vertices work in the RSP microcode before you use this macro (refer to gSPVertex).</p>
+<p>You can use this macro to modify certain sections of a vertex after it has been sent to the RSP (by the gSPVertex macro). This is useful for vertices that are shared between two or more triangles that must have different properties when associated with one triangle versus the other triangle.</p>
+<p>For example, you might have two adjacent triangles that both need smooth-shaded color, but one is smooth-shaded red-to-yellow and the other is smooth-shaded green-to-cyan. In this case, the vertex that is shared by both triangles is sent with red/yellow color by using the gSPVertex macro. The first triangle is drawn. Then, the gSPModifyVertex macro is used to change the color to green/cyan, and the second triangle is drawn.</p>
+<p>The primary use of the gSPModifyVertex macro is to modify the texture coordinate of a vertex so that a vertex that is shared by two triangles with different textures and different texture coordinate spaces can contain the texture coordinate for the first texture and then be modified to contain the texture coordinate for the second texture.</p>
+<p>It is faster to use the gSPModifyVertex macro than to send a new vertex macro with a different but similar vertex because no transformations or lighting are done to the vertex when you use the gSPModifyVertex macro.</p>
+<p>The where argument specifies which part of the vertex is to be modified. It can hold one of the following values:</p><ul>
+<li><a class="el" href="#ac8752a0103acc58beebadbd52c5694dc">G_MWO_POINT_RGBA</a> -   changes the color of the vertex. The val parameter is interpreted as 4 bytes: red (high byte), green, blue, and alpha (low byte).   </li>
+<li><a class="el" href="#afb84e8da2787a5cf8ca385335a850d5c">G_MWO_POINT_ST</a> -   changes the S and T values (texture coordinates of the vertex). The high 16 bits of val specify the S coordinate, and the low 16 bits specify the T coordinate. Each coordinate is an S10.5 number.   </li>
+<li><a class="el" href="#ae6de43c88b8f3a2f32a17c5e3a94ede9">G_MWO_POINT_XYSCREEN</a> -   change the screen coordinates of the vertex. The high 16 bits of val specify the X coordinate and the low 16 bits specify the Y coordinate. Both coordinates are S13.2 numbers with 0,0 being the upper-left of the screen, positive X going right, and positive Y going down.   </li>
+<li><a class="el" href="#a39681fea3ef91be9ce5d51b87eb93fbb">G_MWO_POINT_ZSCREEN</a> -   changes the screen Z coordinate of the vertex. The entire 32-bit val is taken as the new screen Z value. It is a 16.16 number in the range 0x00000000 to 0x03ff0000.   </li>
+</ul>
+<dl class="section note"><dt>Note</dt><dd>Lighting is not performed after a gSPModifyVertex macro, so modifying the color of the vertex with <a class="el" href="#ac8752a0103acc58beebadbd52c5694dc">G_MWO_POINT_RGBA</a> is just that - modifying the actual color that will be output. It is not a modification of normal values. This means it cannot be used to update vertex normals for lighting.</dd></dl>
+<p>The S and T coordinates supplied in the gSPModifyVertex macro are never multiplied by the texture scale (from the gSPTexture macro), so you must pre-scale them before sending them. For example, if you want a texture scale of 1/2 (0x8000), make the S and T values sent with the gSPModifyVertex macro half the value of the equivalent values used with the gSPVertex macro.</p>
+<h1><a class="anchor" id="autotoc_md3"></a>
+Example</h1>
+<p>To share a vertex between two triangles with different textures and texture coordinates, use this code: </p><div class="fragment"><div class="line"><span class="comment">// load vertex by gSPVertex</span></div>
+<div class="line"><a class="code hl_define" href="#aa10b6a6fa88381b34eb4325034230024">gSPVertex</a>(...);</div>
+<div class="line"><span class="comment">// load texture of triangle 1</span></div>
+<div class="line">gDPLoadTextureBlock(...);</div>
+<div class="line"> </div>
+<div class="line"><span class="comment">// draw triangle 1 using vertex #3</span></div>
+<div class="line"><a class="code hl_define" href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a>(glistp++, 1,2,3,0);</div>
+<div class="line"> </div>
+<div class="line"><span class="comment">// change a value of vertex 3 to S=3.0 and T=2.5</span></div>
+<div class="line"><a class="code hl_define" href="#abc12c0642acde2394639e9f9e247dde9">gSPModifyVertex</a>(glistp++, 3, <a class="code hl_define" href="#afb84e8da2787a5cf8ca385335a850d5c">G_MWO_POINT_ST</a>, 0x00600050);</div>
+<div class="line"> </div>
+<div class="line"><span class="comment">// load texture of triangle 2</span></div>
+<div class="line">gDPLoadTextureBlock(...);</div>
+<div class="line"> </div>
+<div class="line"><span class="comment">// draw triangle 2 using vertex #3</span></div>
+<div class="line"><a class="code hl_define" href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a>(glistp++, 1,2,3,0);</div>
+</div><!-- fragment --><dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramname">vtx</td><td>specifies which of the RSP's vertices (0-55) to modify </td></tr>
+    <tr><td class="paramname">where</td><td>specifies which part of the vertex to modify (<a class="el" href="#ac8752a0103acc58beebadbd52c5694dc">G_MWO_POINT_RGBA</a>, <a class="el" href="#afb84e8da2787a5cf8ca385335a850d5c">G_MWO_POINT_ST</a>, <a class="el" href="#ae6de43c88b8f3a2f32a17c5e3a94ede9">G_MWO_POINT_XYSCREEN</a> or <a class="el" href="#a39681fea3ef91be9ce5d51b87eb93fbb">G_MWO_POINT_ZSCREEN</a>) </td></tr>
+    <tr><td class="paramname">val</td><td>is the new value for the part of the vertex to be modified (a 32 bit integer number)    </td></tr>
+  </table>
+  </dd>
+</dl>
 
 </div>
 </div>
@@ -5187,7 +5337,7 @@ Performance</h1>
 </div><div class="memdoc">
 <b>Value:</b><div class="fragment"><div class="line">    <a class="code hl_define" href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a>(n), \</div>
 <div class="line">    gsDma2p(G_MOVEMEM, &amp;(name), (n) * 0x10 + 8, G_MV_LIGHT, 0x10)</div>
-<div class="ttc" id="agbi_8h_html_a05cbbc5a54641419bc1258390f3d6710"><div class="ttname"><a href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a></div><div class="ttdeci">#define gsSPNumLights(n)</div><div class="ttdef"><b>Definition</b> gbi.h:3175</div></div>
+<div class="ttc" id="agbi_8h_html_a05cbbc5a54641419bc1258390f3d6710"><div class="ttname"><a href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a></div><div class="ttdeci">#define gsSPNumLights(n)</div><div class="ttdef"><b>Definition</b> gbi.h:3257</div></div>
 </div><!-- fragment --><p>Set all your scene's lights (directional/point + ambient) with one memory transaction. n is the number of directional / point lights, from 0 to 9. There is also always an ambient light. name should be the NAME of a Lights struct (NOT A POINTER) filled in with all the lighting data. You can use the gdSPDef* macros to fill in the struct or just do it manually. Example: Lights2 myLights; // 2 dir/pos + 1 ambient <code> gSPSetLights(POLY_OPA_DISP++, 2, myLights);</code></p>
 <p><code>If you need to use a pointer, e.g. if the number of lights is variable at runtime: Light *lights = memory_allocate((numLights + 1) * sizeof(Light)); lights[0].p.pos = ...; lights[1].l.dir = ...; ... lights[numLights].l.col = ambient_color(); gSPSetLights(POLY_OPA_DISP++, numLights, *lights); // &lt;- NOTE DEREFERENCE</code></p>
 <p><code>If you're wondering why this macro takes a name / dereference instead of a pointer, it's for backwards compatibility.    </code></p>
@@ -5404,8 +5554,24 @@ Performance</h1>
 <div class="line">    _SHIFTL((v0) + (n),  1, 7)),    \</div>
 <div class="line">    (<span class="keywordtype">unsigned</span> <span class="keywordtype">int</span>)(v)               \</div>
 <div class="line">}</div>
-</div><!-- fragment --><pre class="fragment">  +--------+----+---+---+----+------+-+
-</pre><p> G_VTX | cmd:8 |0000| n:8 |0000|v0+n:7|0| +-+&mdash;+&ndash;+-&mdash;+&mdash;+&mdash;+-&mdash;+---&mdash;+-+ | |seg| address | +-+&mdash;+--------------------------&mdash;+    </p>
+</div><!-- fragment -->
+<p>macro which loads an internal vertex buffer in the RSP with points that are used by gSP1Triangle macros to generate polygons in a static display list. </p>
+<p>It loads an internal vertex buffer in the RSP with points that are used by <a class="el" href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a> macros to generate polygons. This vertex cache can hold up to 56 vertices, and the vertex loading can begin at any entry (index) within the cache. The vertex coordinates (x,y,z) are encoded in signed 2's complement, 16-bit integers. The texture coordinates (s,t) are encoded in S10.5 format. A vertex either has a color or a normal (for shading). These values are 8-bit values. The colors and alphas are treated as 8-bit unsigned values (0-255), but the normals are treated as 8-bit signed values (-128 to 127). Therefore, the appropriate member of the union to use (.v. or .n.) depends on whether you are using colors or normals.</p>
+<p>Normal coordinates range from -1.0 to 1.0. A value of -1.0 is represented as -128, and a value of 1.0 is represented as 128, but because the maximum positive value of a signed byte is 127, a value of 1.0 can't really be represented. Therefore, 0.992 is the maximum representable positive value, which is good enough for this purpose.</p>
+<p>The flag value is used for the packed normals feature to store normals with octahedral encoding.</p>
+<p>The coordinates (x,y,z) are transformed using the current 4x4 projection and model view matrices, and (s,t) are transformed using the scale defined by gSPTexture.</p>
+<h1><a class="anchor" id="autotoc_md2"></a>
+Example</h1>
+<p>To load vertex cache entry 2,3,4, use this code: </p><div class="fragment"><div class="line"><a class="code hl_define" href="#aa10b6a6fa88381b34eb4325034230024">gSPVertex</a>(glistp++, v, 3, 2);</div>
+</div><!-- fragment --><dl class="section note"><dt>Note</dt><dd>Because the RSP geometry transformation engine uses a vertex list with triangle list architecture, it is quite powerful. A simple one-triangle macro retains least performance compared to <a class="el" href="#aee80adda08faf28c431e1eff5a1e0506">gSP2Triangles</a> or the new 5 tris commands in EX3 (<a class="el" href="#aabcbc5ce71956855291dc22646dec21f">gSPTriStrip</a>, <a class="el" href="#a6425176902ef66d72ec08772309a82e9">gSPTriFan</a>).</dd></dl>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramname">v</td><td>is the pointer to the vertex list (segment address) </td></tr>
+    <tr><td class="paramname">n</td><td>is the number of vertices </td></tr>
+    <tr><td class="paramname">v0</td><td>is the load vertex by index vo(0~55) in vertex buffer    </td></tr>
+  </table>
+  </dd>
+</dl>
 
 </div>
 </div>

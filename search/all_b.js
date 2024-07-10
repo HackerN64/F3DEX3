@@ -1,9 +1,6 @@
 var searchData=
 [
-  ['legacy_20vertex_20pipeline_20lvp_0',['Legacy Vertex Pipeline (LVP)',['../microcode.html#autotoc_md16',1,'']]],
-  ['light_5ft_1',['Light_t',['../structLight__t.html',1,'']]],
-  ['lighting_2',['Lighting',['../porting.html#autotoc_md34',1,'Recommended Changes (Lighting)'],['../porting.html#autotoc_md33',1,'Recommended Changes (Non-Lighting)']]],
-  ['list_3',['Deprecated List',['../deprecated.html',1,'']]],
-  ['list_20compatibility_4',['Binary Display List Compatibility',['../compatibility.html#autotoc_md13',1,'']]],
-  ['lvp_5',['Legacy Vertex Pipeline (LVP)',['../microcode.html#autotoc_md16',1,'']]]
+  ['kc_0',['kc',['../structPointLight__t.html#ab255bb43d89660ac7d537e25f1c398a7',1,'PointLight_t']]],
+  ['kl_1',['kl',['../structPointLight__t.html#afb81cad34fb9184ee16c2420bce5658d',1,'PointLight_t']]],
+  ['kq_2',['kq',['../structPointLight__t.html#a22b3fcef6c929db804c2624e2ff99001',1,'PointLight_t']]]
 ];
