@@ -134,7 +134,6 @@ of warnings if you use -Wpedantic. */
 #define G_TEXTURE_ENABLE        0x00000000  /* actually 2, but controlled by SPTexture */
 #define G_SHADE                 0x00000004
 #define G_AMBOCCLUSION          0x00000040
-#define G_ATTROFFSET_Z_ENABLE   0x00000080
 #define G_ATTROFFSET_ST_ENABLE  0x00000100
 #define G_CULL_NEITHER          0x00000000
 #define G_CULL_FRONT            0x00000200
@@ -308,10 +307,9 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_MWO_FRESNEL_OFFSET     0x0E
 #define G_MWO_ATTR_OFFSET_S      0x10
 #define G_MWO_ATTR_OFFSET_T      0x12
-#define G_MWO_ATTR_OFFSET_Z      0x14
-#define G_MWO_ALPHA_COMPARE_CULL 0x16
-#define G_MWO_NORMALS_MODE       0x18
-#define G_MWO_LAST_MAT_DL_ADDR   0x1A
+#define G_MWO_ALPHA_COMPARE_CULL 0x14
+#define G_MWO_NORMALS_MODE       0x16
+#define G_MWO_LAST_MAT_DL_ADDR   0x18
 
 /*
  * RDP command argument defines
@@ -504,40 +502,6 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 /* typical CC cycle 1 modes, usually followed by other cycle 2 modes */
 #define	G_CC_TRILERP                TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0, TEXEL1, TEXEL0, LOD_FRACTION, TEXEL0
 #define	G_CC_INTERFERENCE           TEXEL0, 0, TEXEL1, 0, TEXEL0, 0, TEXEL1, 0
-
-/*
- *  One-cycle color convert operation
- */
-#define	G_CC_1CYUV2RGB              TEXEL0, K4, K5, TEXEL0, 0, 0, 0, SHADE
-
-/*
- *  NOTE: YUV2RGB expects TF step1 color conversion to occur in 2nd clock.
- * Therefore, CC looks for step1 results in TEXEL1
- */
-#define	G_CC_YUV2RGB                TEXEL1, K4, K5, TEXEL1, 0, 0, 0, 0
-
-/* typical CC cycle 2 modes */
-#define	G_CC_PASS2                  0, 0, 0, COMBINED, 0, 0, 0, COMBINED
-#define	G_CC_MODULATEI2             COMBINED, 0, SHADE, 0, 0, 0, 0, SHADE
-#define	G_CC_MODULATEIA2            COMBINED, 0, SHADE, 0, COMBINED, 0, SHADE, 0
-#define	G_CC_MODULATERGB2           G_CC_MODULATEI2
-#define	G_CC_MODULATERGBA2          G_CC_MODULATEIA2
-#define	G_CC_MODULATEI_PRIM2        COMBINED, 0, PRIMITIVE, 0, 0, 0, 0, PRIMITIVE
-#define	G_CC_MODULATEIA_PRIM2       COMBINED, 0, PRIMITIVE, 0, COMBINED, 0, PRIMITIVE, 0
-#define	G_CC_MODULATERGB_PRIM2      G_CC_MODULATEI_PRIM2
-#define	G_CC_MODULATERGBA_PRIM2     G_CC_MODULATEIA_PRIM2
-#define	G_CC_DECALRGB2              0, 0, 0, COMBINED, 0, 0, 0, SHADE
-/*
- * ?
-#define	G_CC_DECALRGBA2		        COMBINED, SHADE, COMBINED_ALPHA, SHADE, 0, 0, 0, SHADE
-*/
-#define	G_CC_BLENDI2                ENVIRONMENT, SHADE, COMBINED, SHADE, 0, 0, 0, SHADE
-#define	G_CC_BLENDIA2               ENVIRONMENT, SHADE, COMBINED, SHADE, COMBINED, 0, SHADE, 0
-#define	G_CC_CHROMA_KEY2            TEXEL0, CENTER, SCALE, 0, 0, 0, 0, 0
-#define G_CC_HILITERGB2             ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, SHADE
-#define G_CC_HILITERGBA2            ENVIRONMENT, COMBINED, TEXEL0, COMBINED, ENVIRONMENT, COMBINED, TEXEL0, COMBINED
-#define G_CC_HILITERGBDECALA2       ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, TEXEL0
-#define G_CC_HILITERGBPASSA2        ENVIRONMENT, COMBINED, TEXEL0, COMBINED, 0, 0, 0, COMBINED
 
 
 /*
@@ -2840,16 +2804,11 @@ _DW({                                         \
 
 /**
  * Attribute offsets
- * These are added to ST or Z values after vertices are loaded and transformed.
- * They are all s16s.
- * For ST, the addition is after the multiplication for ST scale in SPTexture.
- * For Z, this simply adds to the Z offset from the viewport.
- * Whether each feature is enabled or disabled at a given time is determined
- * by the G_ATTROFFSET_ST_ENABLE and G_ATTROFFSET_Z_ENABLE bits respectively in
- * the geometry mode.
- * Normally you would use ST offsets for UV scrolling, and you would use a Z
- * offset of -2 (which it is set to by default) to fix decal mode. For the
- * latter, enable the Z offset and set the Z mode to opaque.
+ * These are added to ST values after vertices are loaded and transformed.
+ * The values are s16s. The addition is after the multiplication for ST scale in
+ * SPTexture. Whether it is enabled or disabled at a given time is determined
+ * by the G_ATTROFFSET_ST_ENABLE bit in the geometry mode. Normally you would
+ * use ST offsets for UV scrolling.
  */
 #define gSPAttrOffsetST(pkt, s, t) \
     gMoveWd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_S, \
@@ -2860,16 +2819,7 @@ _DW({                                         \
 #define gsSPAttrOffsetST(s, t) \
     gsMoveWd(G_MW_FX, G_MWO_ATTR_OFFSET_S, \
         (_SHIFTL((s), 16, 16) | _SHIFTL((t), 0, 16)))
-/**
- * @copydetails gSPAttrOffsetST
- */
-#define gSPAttrOffsetZ(pkt, z) \
-    gMoveHalfwd(pkt, G_MW_FX, G_MWO_ATTR_OFFSET_Z, z)
-/**
- * @copydetails gSPAttrOffsetST
- */
-#define gsSPAttrOffsetZ(z) \
-    gsMoveHalfwd(G_MW_FX, G_MWO_ATTR_OFFSET_Z, z)
+
     
 /**
  * Alpha compare culling. Optimization for cel shading, could also be used for

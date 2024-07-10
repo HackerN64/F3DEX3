@@ -8,7 +8,6 @@ G_ZBUFFER               equ 0x00000001
 //G_TEXTURE_ENABLE      equ 0x00000002
 G_SHADE                 equ 0x00000004
 G_AMBOCCLUSION          equ 0x00000040
-G_ATTROFFSET_Z_ENABLE   equ 0x00000080
 G_ATTROFFSET_ST_ENABLE  equ 0x00000100
 // Bits 9 and 10 (0x0600) determine front/backface culling.
 G_CULL_NEITHER          equ 0x00000000
@@ -107,6 +106,8 @@ G_MV_LIGHT    equ 0x0A
 G_NORMALSMODE_FAST equ 0x00
 G_NORMALSMODE_AUTO equ 0x01
 G_NORMALSMODE_MANUAL equ 0x02
+
+ZMODE_DEC equ 0x0C00  // from othermode low; the value is the mask
 
 G_MAX_LIGHTS equ 9 // 9 directional / point lights, plus ambient light (and lookat)
 lightSize equ 0x10

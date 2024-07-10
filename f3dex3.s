@@ -439,8 +439,6 @@ fresnelOffset:
 attrOffsetST:
     .dh 0x0100
     .dh 0xFF00
-attrOffsetZ:
-    .dh 0xFFFE
     
 alphaCompareCullMode:
     .db 0x00 // 0 = disabled, 1 = cull if all < thresh, -1 = cull if all >= thresh
@@ -904,7 +902,7 @@ tempVpPkNorm equ 0x50
     li      $3, tempMemRounded // Input 1 = temp mem (loaded mtx)
     jal     while_wait_dma_busy
      move   $2, $6 // Input 0 = output
-    // Followed immedately by instantiate_mtx_multiply. These need to be broken
+    // Followed immediately by instantiate_mtx_multiply. These need to be broken
     // up so we can insert the global mtx_multiply label between them.
 .endmacro
 .macro instantiate_mtx_multiply
@@ -1365,25 +1363,18 @@ vtx_setup_constants:
 .if !CFG_NO_OCCLUSION_PLANE
     vge     $v29, $v31, $v31[2h] // Set VCC to 00110011
 .endif
-    lsv     $v21[0], (attrOffsetZ - altBase)(altBaseReg) // Z offset
+    ldv     sVPO[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
 .if !CFG_NO_OCCLUSION_PLANE
     vmrg    sOPMs, vOne, $v31[1] // Signs of sOPMs are --++--++
 .endif
-    ldv     sVPO[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
     ldv     sVPO[8], (viewport + 8)($zero)
     lw      $10, (geometryModeLabel)($zero)
     ldv     sVPS[0], (viewport)($zero)            // Load vscale duplicated in 0-3 and 4-7
+    ldv     sVPS[8], (viewport)($zero)
 .if !CFG_NO_OCCLUSION_PLANE
     vmudh   sOPMs, sOPMs, $v31[5] // sOPMs is 0xC000, 0xC000, 0x4000, 0x4000, repeat
 .endif
-    ldv     sVPS[8], (viewport)($zero)
-    vne     $v29, $v31, $v31[2h]                  // VCC = 11011101
-    andi    $11, $10, G_ATTROFFSET_Z_ENABLE
-    vadd    $v21, sVPO, $v21[0]                   // Add Z offset to all terms (care about 2, 6)
-    beqz    $11, @@skipz                          // Skip if Z offset disabled
-     llv    $v23[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
-    vmrg    sVPO, sVPO, $v21                      // Move Z + Z offset into elems 2, 6
-@@skipz:
+    llv     $v23[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
     vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
     lqv     $v30, (fxParams - altBase)(altBaseReg) // Parameters for vtx and lighting
     vmudh   $v20, sVPS, $v31[1]                   // -1; -vscale
@@ -2460,16 +2451,24 @@ tV1AtFF equ $v10
     beqz    $6, check_rdp_buffer_full // see below
      veq    $v29, $v31, $v31[1q] // Set VCC to 01010101
     vmudn   tDaDyF, tDaDyF, $v30[7] // 0x0020
+    lw      $11, otherMode1
     vmadh   tDaDyI, tDaDyI, $v30[7] // 0x0020
+    li      $2, ZMODE_DEC
     vmudl   $v29,  tV1AtFF, $v30[7] // 0x0020
     vmadn   tV1AtF, tV1AtF, $v30[7] // 0x0020
     vmadh   tV1AtI, tV1AtI, $v30[7] // 0x0020
-    vmrg    tDaDyF, tDaDyF, tDaDyI[1q] // Move int elems 3, 5, 7 to result 2, 4, 6
+    and     $11, $11, $2  // Mask to Z mode
+    vmrg    $v4, tDaDyF, tDaDyI[1q] // Move int elems 3, 5, 7 to result 2, 4, 6
     ssv     tV1AtF[14], -0x0E(rdpCmdBufPtr)
+    vch     tDaDyI, tDaDyI, $v31[1] // -1 TODO
     ssv     tV1AtI[14], -0x10(rdpCmdBufPtr)
-    slv     tDaDyF[4],  -0x0C(rdpCmdBufPtr) // DaDx i/f
-    j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
-     sdv    tDaDyF[8],  -0x08(rdpCmdBufPtr) // DaDe i/f, DaDy i/f
+    vcl     tDaDyF, tDaDyF, $v31[2] // 0 TODO
+    slv     $v4[4],  -0x0C(rdpCmdBufPtr) // DaDx i/f
+    bne     $11, $2, check_rdp_buffer_full  // If not decal, return to $ra, which is next cmd, second tri in TRI2, or middle of clipping
+     sdv    $v4[8],  -0x08(rdpCmdBufPtr) // DaDe i/f, DaDy i/f
+    ssv     tDaDyF[14], -0x02(rdpCmdBufPtr) // Decal clamped DaDy f
+    j       check_rdp_buffer_full
+     ssv    tDaDyI[14], -0x04(rdpCmdBufPtr) // Decal clamped DaDy i
 
 .if CFG_PROFILING_B
 tri_culled_by_occlusion_plane:
