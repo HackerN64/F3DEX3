@@ -1518,12 +1518,11 @@ vtx_after_calc_mit:
 
     ASSUMPTIONS / FIX THE ABOVE:
     inputVtxPos = actual first input vtx
-    outputVtxPos = 2 below first output vtx b/c going to increment it before use
-    secondVtxPos = temp mem; need some space before it too
+    outputVtxPos = **1** below first output vtx b/c going to increment it by 2
+        before use, but we want it pointing to the normally SECOND output vtx
+    secondVtxPos = temp mem
     $19 = temp mem, then == outputVtxPos
 
-    ldv     vPairPosI[0], (VTX_IN_OB + 0 * inputVtxSize)(inputVtxPos) // Pos of 1st vector for next iteration
-    ldv     vPairPosI[8], (VTX_IN_OB + 1 * inputVtxSize)(inputVtxPos) // Pos of 2nd vector on next iteration
     srl     $7, $7, 5  // 8 if G_FOG is set, 0 otherwise
 
 vertices_store:
@@ -1546,16 +1545,15 @@ vertices_store:
     vrcpl   XV5[3], XV21[3]
     slv     XV26[2],  (VTX_SCR_Z      )($19)
     vrcph   XV4[3], XV2[7]
-    addi    outputVtxPos, outputVtxPos, 2*vtxSize
+    addi    outputVtxPos, outputVtxPos, 2*vtxSize // Points to SECOND output vtx
     vrcpl   XV5[7], XV21[7]
-    move    secondVtxPos, outputVtxPos // On last iter, both are same vtx...
+    sra     $11, $1, 31        // All 1s if on last iter
     vrcph   XV4[7], $v31[2] // 0
-    bltz    $1, @@skipsecond
-     vch    $v29, vPairTPosI, vPairTPosI[3h] // Clip screen high
-    addi    secondVtxPos, outputVtxPos, vtxSize // ...otherwise, second vtx is next vtx
- @@skipsecond:
+    andi    $11, $11, vtxSize  // vtxSize if on last iter, else normally 0
+    vch     $v29, vPairTPosI, vPairTPosI[3h] // Clip screen high
+    sub     secondVtxPos, outputVtxPos, $11 // First output vtx on last iter, else second
     vcl     $v29, vPairTPosF, vPairTPosF[3h] // Clip screen low
-    move    $19, outputVtxPos          // Copy of outputVtxPos so part of loop above works
+    addi    $19, outputVtxPos, -vtxSize  // First output vtx always
     vmudl   $v29, XV21, XV5
     cfc2    $10, $vcc                   // Screen clip results
     vmadm   $v29, XV2, XV5
