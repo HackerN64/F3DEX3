@@ -4,15 +4,15 @@
 
 Vertex pipeline cycles per **vertex pair** in steady state (lower is better).
 Hand-counted timings taking into account all pipeline stalls and all dual-issue
-conditions except for instruction alignment.
+conditions. Instruction alignment is only taken into account for LVP_NOC.
 
 | Microcode      | No Lighting | First Dir Lt | Total for 1 Dir Lt | Extra Dir Lts |
 |----------------|-------------|--------------|--------------------|---------------|
 | F3DEX3         | 98          | 103          | 201                | 29            |
 | F3DEX3_NOC     | 79          | 103          | 182                | 29            |
 | F3DEX3_LVP     | 81          | 15           | 96                 | 7             |
-| F3DEX3_LVP_NOC | 62          | 15           | 77                 | 7             |
-| F3DEX2         | 54          | 19           | 73                 | 3 then 12     |
+| F3DEX3_LVP_NOC | 54          | 17           | 71                 | 7, 7, 7, 7, ...   |
+| F3DEX2         | 54          | 19           | 73                 | 3, 12, 3, 12, ... |
 
 Vertex processing time as reported by the performance counter in the `PA`
 configuration.
@@ -26,7 +26,7 @@ configuration.
 | F3DEX3         | 7.64ms  | 3.13ms  | 2.37ms  |
 | F3DEX3_NOC     | 7.07ms  | 2.89ms  | 2.14ms  |
 | F3DEX3_LVP     | 4.57ms  | 1.77ms  | 1.67ms  |
-| F3DEX3_LVP_NOC | 3.96ms  | 1.52ms  | 1.41ms  |
+| F3DEX3_LVP_NOC | Outdated  | | |
 | F3DEX2         | No*     | No*     | No*     |
 | Vertex count   | 3664    | 1608    | 1608    |
 
