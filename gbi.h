@@ -4,7 +4,7 @@
  * 
  */
 
-#include "mbi.h"
+#include "ultra64/mbi.h"
 
 #ifndef F3DEX3_H
 #define F3DEX3_H
