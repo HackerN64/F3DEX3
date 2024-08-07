@@ -1530,27 +1530,36 @@ vtx_after_calc_mit:
     ldv     vVP2F[8], (vpMatrix  + 0x30)($zero)
 .endif
 vtx_after_matrix_load:
+.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
+    andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
+    srl     $7, $7, 5  // 8 if G_FOG is set, 0 otherwise
+    li      $19, clipTempVerts    // Temp mem we can freely overwrite replaces outputVtxPos
+    jal     while_wait_dma_busy   // Wait for vertex load to finish
+     move   secondVtxPos, $19     // for first pre-loop, same for secondVtxPos
     andi    $11, $5, G_LIGHTING >> 8
-    beqz    $11, @@skip_lighting          
+    beqz    $11, @@skip_lighting
+     li     $ra, vtx_loop_no_lighting
+    //li      $ra, lt_vtx_pair
+@@skip_lighting:
+    ldv     vPairPosI[0], (VTX_IN_OB + 0 * inputVtxSize)(inputVtxPos) // 1st vec pos
+    ldv     vPairPosI[8], (VTX_IN_OB + 1 * inputVtxSize)(inputVtxPos) // 2nd vec pos
+    llv     sTCL[8],      (VTX_IN_CN + 0 * inputVtxSize)(inputVtxPos) // RGBA in 4:5
+    llv     sTCL[12],     (VTX_IN_CN + 1 * inputVtxSize)(inputVtxPos) // RGBA in 6:7
+    llv     vPairST[0],   (VTX_IN_TC + 0 * inputVtxSize)(inputVtxPos) // ST in 0:1
+    j       vtx_store_loop_entry
+     llv    vPairST[8],   (VTX_IN_TC + 1 * inputVtxSize)(inputVtxPos) // ST in 4:5
+.else
+    andi    $11, $5, G_LIGHTING >> 8
+    beqz    $11, @@skip_lighting
      li     $16, vtx_return_from_lighting  // This is clipFlags, but not modified
     //li      $16, lt_vtx_pair               // during vtx_store
 @@skip_lighting:
     andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
-.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
-    srl     $7, $7, 5  // 8 if G_FOG is set, 0 otherwise
-.endif
     jal     while_wait_dma_busy   // Wait for vertex load to finish
      li     $19, clipTempVerts    // Temp mem we can freely overwrite replaces outputVtxPos
-.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
-    ldv     vPairPosI[0], (VTX_IN_OB + 0 * inputVtxSize)(inputVtxPos) // 1st vec pos
-    ldv     vPairPosI[8], (VTX_IN_OB + 1 * inputVtxSize)(inputVtxPos) // 2nd vec pos
-    llv     sTCL[8],      (VTX_IN_TC + 0 * inputVtxSize)(inputVtxPos) // RGBA in 4:5
-    llv     sTCL[12],     (VTX_IN_TC + 1 * inputVtxSize)(inputVtxPos) // RGBA in 6:7
-    llv     vPairST[0],   (VTX_IN_TC + 0 * inputVtxSize)(inputVtxPos) // ST in 0:1
-    llv     vPairST[8],   (VTX_IN_TC + 1 * inputVtxSize)(inputVtxPos) // ST in 4:5
-.endif
     j       vtx_store_loop_entry
      move   secondVtxPos, $19     // for first pre-loop, same for secondVtxPos
+.endif
 
 .if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
 
