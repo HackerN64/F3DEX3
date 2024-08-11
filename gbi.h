@@ -4,7 +4,7 @@
  * 
  */
 
-#include "mbi.h"
+#include "ultra64/mbi.h"
 
 #ifndef F3DEX3_H
 #define F3DEX3_H
@@ -1367,7 +1367,7 @@ typedef struct {
         {                                           \
             {                                       \
                 gDefLight(r1, g1, b1, x1, y1, z1),  \
-            }                                       \
+            },                                      \
             gDefAmbient(ar, ag, ab),                \
         }
 
@@ -1378,7 +1378,7 @@ typedef struct {
             {                                       \
                 gDefLight(r1, g1, b1, x1, y1, z1),  \
                 gDefLight(r2, g2, b2, x2, y2, z2),  \
-            }                                       \
+            },                                      \
             gDefAmbient(ar, ag, ab),                \
         }
 
@@ -1391,7 +1391,7 @@ typedef struct {
                 gDefLight(r1, g1, b1, x1, y1, z1),  \
                 gDefLight(r2, g2, b2, x2, y2, z2),  \
                 gDefLight(r3, g3, b3, x3, y3, z3),  \
-            }                                       \
+            },                                      \
             gDefAmbient(ar, ag, ab),                \
         }
 
@@ -1406,7 +1406,7 @@ typedef struct {
                 gDefLight(r2, g2, b2, x2, y2, z2),  \
                 gDefLight(r3, g3, b3, x3, y3, z3),  \
                 gDefLight(r4, g4, b4, x4, y4, z4),  \
-            }                                       \
+            },                                      \
             gDefAmbient(ar, ag, ab),                \
         }
 
@@ -1414,7 +1414,7 @@ typedef struct {
                        r1, g1, b1, x1, y1, z1,      \
                        r2, g2, b2, x2, y2, z2,      \
                        r3, g3, b3, x3, y3, z3,      \
-                       r4, g4, b4, x4, y4, z4)      \
+                       r4, g4, b4, x4, y4, z4,      \
                        r5, g5, b5, x5, y5, z5)      \
         {                                           \
             {                                       \
@@ -1423,7 +1423,7 @@ typedef struct {
                 gDefLight(r3, g3, b3, x3, y3, z3),  \
                 gDefLight(r4, g4, b4, x4, y4, z4),  \
                 gDefLight(r5, g5, b5, x5, y5, z5),  \
-            }                                       \
+            },                                      \
             gDefAmbient(ar, ag, ab),                \
         }
 
@@ -1442,7 +1442,7 @@ typedef struct {
                 gDefLight(r4, g4, b4, x4, y4, z4),  \
                 gDefLight(r5, g5, b5, x5, y5, z5),  \
                 gDefLight(r6, g6, b6, x6, y6, z6),  \
-            }                                       \
+            },                                      \
             gDefAmbient(ar, ag, ab),                \
         }
 
@@ -1452,7 +1452,7 @@ typedef struct {
                        r3, g3, b3, x3, y3, z3,      \
                        r4, g4, b4, x4, y4, z4,      \
                        r5, g5, b5, x5, y5, z5,      \
-                       r6, g6, b6, x6, y6, z6)      \
+                       r6, g6, b6, x6, y6, z6,      \
                        r7, g7, b7, x7, y7, z7)      \
         {                                           \
             {                                       \
@@ -1463,7 +1463,7 @@ typedef struct {
                 gDefLight(r5, g5, b5, x5, y5, z5),  \
                 gDefLight(r6, g6, b6, x6, y6, z6),  \
                 gDefLight(r7, g7, b7, x7, y7, z7),  \
-            }                                       \
+            },                                      \
             gDefAmbient(ar, ag, ab),                \
         }
 
@@ -1473,8 +1473,8 @@ typedef struct {
                        r3, g3, b3, x3, y3, z3,      \
                        r4, g4, b4, x4, y4, z4,      \
                        r5, g5, b5, x5, y5, z5,      \
-                       r6, g6, b6, x6, y6, z6)      \
-                       r7, g7, b7, x7, y7, z7)      \
+                       r6, g6, b6, x6, y6, z6,      \
+                       r7, g7, b7, x7, y7, z7,      \
                        r8, g8, b8, x8, y8, z8)      \
         {                                           \
             {                                       \
@@ -1486,7 +1486,7 @@ typedef struct {
                 gDefLight(r6, g6, b6, x6, y6, z6),  \
                 gDefLight(r7, g7, b7, x7, y7, z7),  \
                 gDefLight(r8, g8, b8, x8, y8, z8),  \
-            }                                       \
+            },                                      \
             gDefAmbient(ar, ag, ab),                \
         }
 
@@ -1496,9 +1496,9 @@ typedef struct {
                        r3, g3, b3, x3, y3, z3,      \
                        r4, g4, b4, x4, y4, z4,      \
                        r5, g5, b5, x5, y5, z5,      \
-                       r6, g6, b6, x6, y6, z6)      \
-                       r7, g7, b7, x7, y7, z7)      \
-                       r8, g8, b8, x8, y8, z8)      \
+                       r6, g6, b6, x6, y6, z6,      \
+                       r7, g7, b7, x7, y7, z7,      \
+                       r8, g8, b8, x8, y8, z8,      \
                        r9, g9, b9, x9, y9, z9)      \
         {                                           \
             {                                       \
@@ -1511,7 +1511,7 @@ typedef struct {
                 gDefLight(r7, g7, b7, x7, y7, z7),  \
                 gDefLight(r8, g8, b8, x8, y8, z8),  \
                 gDefLight(r9, g9, b9, x9, y9, z9),  \
-            }                                       \
+            },                                      \
             gDefAmbient(ar, ag, ab),                \
         }
 
@@ -1533,7 +1533,7 @@ typedef struct {
         {                                                           \
             {                                                       \
                 gDefPointLight(r1, g1, b1, x1, y1, z1, c1, l1, q1), \
-            }                                                       \
+            },                                                      \
             gDefAmbient(ar, ag, ab),                                \
         }
 
@@ -1544,20 +1544,20 @@ typedef struct {
             {                                                       \
                 gDefPointLight(r1, g1, b1, x1, y1, z1, c1, l1, q1), \
                 gDefPointLight(r2, g2, b2, x2, y2, z2, c2, l2, q2), \
-            }                                                       \
+            },                                                      \
             gDefAmbient(ar, ag, ab),                                \
         }
 
 #define gdSPDefPointLights3(ar, ag, ab,                             \
                             r1, g1, b1, x1, y1, z1, c1, l1, q1,     \
-                            r2, g2, b2, x2, y2, z2, c2, l2, q2)     \
+                            r2, g2, b2, x2, y2, z2, c2, l2, q2,     \
                             r3, g3, b3, x3, y3, z3, c3, l3, q3)     \
         {                                                           \
             {                                                       \
                 gDefPointLight(r1, g1, b1, x1, y1, z1, c1, l1, q1), \
                 gDefPointLight(r2, g2, b2, x2, y2, z2, c2, l2, q2), \
                 gDefPointLight(r3, g3, b3, x3, y3, z3, c3, l3, q3), \
-            }                                                       \
+            },                                                      \
             gDefAmbient(ar, ag, ab),                                \
         }
 
@@ -1572,7 +1572,7 @@ typedef struct {
                 gDefPointLight(r2, g2, b2, x2, y2, z2, c2, l2, q2), \
                 gDefPointLight(r3, g3, b3, x3, y3, z3, c3, l3, q3), \
                 gDefPointLight(r4, g4, b4, x4, y4, z4, c4, l4, q4), \
-            }                                                       \
+            },                                                      \
             gDefAmbient(ar, ag, ab),                                \
         }
 
@@ -1580,7 +1580,7 @@ typedef struct {
                             r1, g1, b1, x1, y1, z1, c1, l1, q1,     \
                             r2, g2, b2, x2, y2, z2, c2, l2, q2,     \
                             r3, g3, b3, x3, y3, z3, c3, l3, q3,     \
-                            r4, g4, b4, x4, y4, z4, c4, l4, q4)     \
+                            r4, g4, b4, x4, y4, z4, c4, l4, q4,     \
                             r5, g5, b5, x5, y5, z5, c5, l5, q5)     \
         {                                                           \
             {                                                       \
@@ -1589,7 +1589,7 @@ typedef struct {
                 gDefPointLight(r3, g3, b3, x3, y3, z3, c3, l3, q3), \
                 gDefPointLight(r4, g4, b4, x4, y4, z4, c4, l4, q4), \
                 gDefPointLight(r5, g5, b5, x5, y5, z5, c5, l5, q5), \
-            }                                                       \
+            },                                                      \
             gDefAmbient(ar, ag, ab),                                \
         }
 
@@ -1597,8 +1597,8 @@ typedef struct {
                             r1, g1, b1, x1, y1, z1, c1, l1, q1,     \
                             r2, g2, b2, x2, y2, z2, c2, l2, q2,     \
                             r3, g3, b3, x3, y3, z3, c3, l3, q3,     \
-                            r4, g4, b4, x4, y4, z4, c4, l4, q4)     \
-                            r5, g5, b5, x5, y5, z5, c5, l5, q5)     \
+                            r4, g4, b4, x4, y4, z4, c4, l4, q4,     \
+                            r5, g5, b5, x5, y5, z5, c5, l5, q5,     \
                             r6, g6, b6, x6, y6, z6, c6, l6, q6)     \
         {                                                           \
             {                                                       \
@@ -1608,7 +1608,7 @@ typedef struct {
                 gDefPointLight(r4, g4, b4, x4, y4, z4, c4, l4, q4), \
                 gDefPointLight(r5, g5, b5, x5, y5, z5, c5, l5, q5), \
                 gDefPointLight(r6, g6, b6, x6, y6, z6, c6, l6, q6), \
-            }                                                       \
+            },                                                      \
             gDefAmbient(ar, ag, ab),                                \
         }
 
@@ -1618,7 +1618,7 @@ typedef struct {
                             r3, g3, b3, x3, y3, z3, c3, l3, q3,     \
                             r4, g4, b4, x4, y4, z4, c4, l4, q4,     \
                             r5, g5, b5, x5, y5, z5, c5, l5, q5,     \
-                            r6, g6, b6, x6, y6, z6, c6, l6, q6)     \
+                            r6, g6, b6, x6, y6, z6, c6, l6, q6,     \
                             r7, g7, b7, x7, y7, z7, c7, l7, q7)     \
         {                                                           \
             {                                                       \
@@ -1629,7 +1629,7 @@ typedef struct {
                 gDefPointLight(r5, g5, b5, x5, y5, z5, c5, l5, q5), \
                 gDefPointLight(r6, g6, b6, x6, y6, z6, c6, l6, q6), \
                 gDefPointLight(r7, g7, b7, x7, y7, z7, c7, l7, q7), \
-            }                                                       \
+            },                                                      \
             gDefAmbient(ar, ag, ab),                                \
         }
 
@@ -1639,8 +1639,8 @@ typedef struct {
                             r3, g3, b3, x3, y3, z3, c3, l3, q3,     \
                             r4, g4, b4, x4, y4, z4, c4, l4, q4,     \
                             r5, g5, b5, x5, y5, z5, c5, l5, q5,     \
-                            r6, g6, b6, x6, y6, z6, c6, l6, q6)     \
-                            r7, g7, b7, x7, y7, z7, c7, l7, q7)     \
+                            r6, g6, b6, x6, y6, z6, c6, l6, q6,     \
+                            r7, g7, b7, x7, y7, z7, c7, l7, q7,     \
                             r8, g8, b8, x8, y8, z8, c8, l8, q8)     \
         {                                                           \
             {                                                       \
@@ -1652,7 +1652,7 @@ typedef struct {
                 gDefPointLight(r6, g6, b6, x6, y6, z6, c6, l6, q6), \
                 gDefPointLight(r7, g7, b7, x7, y7, z7, c7, l7, q7), \
                 gDefPointLight(r8, g8, b8, x8, y8, z8, c8, l8, q8), \
-            }                                                       \
+            },                                                      \
             gDefAmbient(ar, ag, ab),                                \
         }
 
@@ -1662,9 +1662,9 @@ typedef struct {
                             r3, g3, b3, x3, y3, z3, c3, l3, q3,     \
                             r4, g4, b4, x4, y4, z4, c4, l4, q4,     \
                             r5, g5, b5, x5, y5, z5, c5, l5, q5,     \
-                            r6, g6, b6, x6, y6, z6, c6, l6, q6)     \
-                            r7, g7, b7, x7, y7, z7, c7, l7, q7)     \
-                            r8, g8, b8, x8, y8, z8, c8, l8, q8)     \
+                            r6, g6, b6, x6, y6, z6, c6, l6, q6,     \
+                            r7, g7, b7, x7, y7, z7, c7, l7, q7,     \
+                            r8, g8, b8, x8, y8, z8, c8, l8, q8,     \
                             r9, g9, b9, x9, y9, z9, c9, l9, q9)     \
         {                                                           \
             {                                                       \
@@ -1677,7 +1677,7 @@ typedef struct {
                 gDefPointLight(r7, g7, b7, x7, y7, z7, c7, l7, q7), \
                 gDefPointLight(r8, g8, b8, x8, y8, z8, c8, l8, q8), \
                 gDefPointLight(r9, g9, b9, x9, y9, z9, c9, l9, q9), \
-            }                                                       \
+            },                                                      \
             gDefAmbient(ar, ag, ab),                                \
         }
 
