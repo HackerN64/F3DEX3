@@ -11,7 +11,7 @@ conditions. Instruction alignment is only taken into account for LVP_NOC.
 | F3DEX3         | 98          | 103          | 201                | 29            |
 | F3DEX3_NOC     | 79          | 103          | 182                | 29            |
 | F3DEX3_LVP     | 81          | 15           | 96                 | 7             |
-| F3DEX3_LVP_NOC | 54          | 17           | 71                 | 7, 7, 7, 7, ...   |
+| F3DEX3_LVP_NOC | 54          | 16           | 70                 | 7, 7, 7, 7, ...   |
 | F3DEX2         | 54          | 19           | 73                 | 3, 12, 3, 12, ... |
 
 Vertex processing time as reported by the performance counter in the `PA`
