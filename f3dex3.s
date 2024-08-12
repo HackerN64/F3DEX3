@@ -915,19 +915,15 @@ sOPMs equ $v24 // Just another temp register
 sOSC equ $v21
 .endif
 
-.if CFG_LEGACY_VTX_PIPE
-.if CFG_NO_OCCLUSION_PLANE
+.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE
 ltLookAt equ vCCC
-.else
+.elseif CFG_LEGACY_VTX_PIPE
 ltLookAt equ $v18
+.else
+ltLookAt equ $v29
 .endif
 vLookat0 equ vPairLt
 vLookat1 equ vAAA
-.else
-ltLookAt equ $v29
-vLookat0 equ $v29
-vLookat1 equ $v29
-.endif
 
 // Temp storage after rdpCmdBufEndP1. There is 0xA8 of space here which will
 // always be free during vtx load or clipping.
@@ -2233,16 +2229,33 @@ clip_skipxy:
     bgez    $11, clip_done                // If so, give up
      vrcph  $v3[3], $v31[2]               // 0; get int result of reciprocal
     vabs    $v29, $v29, $v31[3]           // 2; v29 = +/- 2 based on sum positive (incl. zero) or negative
+    lhu     $5, geometryModeLabel + 1     // Load middle 2 bytes of geom mode, incl fog setting
     vmudn   $v2, $v2, $v29[3]             // multiply reciprocal by +/- 2
+    sh      outputVtxPos, (clipPoly)(clipPolyWrite) // Write pointer to generated vertex to polygon
     vmadh   $v3, $v3, $v29[3]
+    lhu     $11, VTX_CLIP($3)             // Load clip flags for off screen vert
     veq     $v3, $v3, $v31[2]             // 0; if reciprocal high is 0
+    andi    $7, $5, G_FOG >> 8            // Nonzero if fog enabled
     vmrg    $v2, $v2, $v31[1]             // keep reciprocal low, otherwise set to -1
+    addi    clipPolyWrite, clipPolyWrite, 2  // Increment write ptr
     vmudl   $v29, vClDiffF, $v2[3]        // sum frac * reciprocal, discard
+    andi    $11, $11, ~CLIP_VTX_USED      // Clear used flag from off screen vert
     vmadm   vClDiffI, vClDiffI, $v2[3]    // sum int * reciprocal, frac out
+    li      $1, -1                        // $1 < 0 triggers last vtx loop iter
     vmadn   vClDiffF, $v31, $v31[2]       // 0; get int out
+    sh      $11, VTX_CLIP($3)             // Store modified clip flags for off screen vert
     vrcph   $v24[3], vClDiffI[3]          // reciprocal again (discard result)
+.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
+    addi    outputVtxPos, outputVtxPos, -vtxSize // Inc'd by 2, must point to second vtx
+.endif
     vrcpl   $v23[3], vClDiffF[3]          // frac part
+.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
+    srl     $7, $7, 5                     // 8 if G_FOG is set, 0 otherwise
+.endif
     vrcph   $v24[3], $v31[2]              // 0; int part
+.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
+    li      $ra, clip_after_vtx_store + 0x8000
+.endif
     vmudl   $v29, $v23, vClDiffF          // self * own reciprocal? frac*frac discard
     vmadm   $v29, $v24, vClDiffF          // self * own reciprocal? int*frac discard
     vmadn   vClDiffF, $v23, vClDiffI      // self * own reciprocal? frac out
@@ -2268,45 +2281,42 @@ clip_skipxy:
     llv     vPairST[0], VTX_TC_VEC($19)   // Vtx on screen, ST
     vmadn   vClDiffF, $v31, $v31[2]       // End of computing vClDiff = vClBase / vClDiff
     vlt     vClDiffI, vClDiffI, vOne[0]   // If integer part of factor less than 1,
+.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
+    addi    $19, rdpCmdBufEndP1, vtxSize  // Fog writes up to one vtx behind
+.endif
     vmrg    vClDiffF, vClDiffF, $v31[1]   // keep frac part of factor, else set to 0xFFFF (max val)
+.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
+    move    secondVtxPos, $19             // Old last vtx regs = temp mem
+.endif
     vsubc   $v29, vClDiffF, vOne[0]       // frac part - 1 for carry
     vge     vClDiffI, vClDiffI, $v31[2]   // 0; If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
     vmrg    vClFade1, vClDiffF, vOne[0]   // keep frac part of factor, else set to 1 (min val)
     vmudn   vClFade2, vClFade1, $v31[1]   // signed x * -1 = 0xFFFF - unsigned x! v2[3] is fade factor for on screen vert
-    lhu     $5, geometryModeLabel + 1     // Load middle 2 bytes of geom mode, incl fog setting
     // Fade between attributes for on screen and off screen vert
     // Colors are now in $v23 and vPairRGBA, ST now in $v24 and vPairST.
     vmudm   $v29, $v23, vClFade1[3]       //   Fade factor for off screen vert * off screen vert color and TC
-    lhu     $11, VTX_CLIP($3)             // Load clip flags for off screen vert
     vmadm   vPairRGBA, vPairRGBA, vClFade2[3]  // + Fade factor for on  screen vert * on  screen vert color
-    li      $1, -1                        // $1 < 0 triggers secondVtxPos = outputVtxPos
     vmudm   $v29, $v24, vClFade1[3]       //   Fade factor for off screen vert * off screen vert TC
-    andi    $7, $5, G_FOG >> 8            // Nonzero if fog enabled
+.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
+    vmadm   sSTS, vPairST, vClFade2[3]    // Put output ST in sSTS; don't want to scale twice in clipping
+.else
     vmadm   vPairST, vPairST, vClFade2[3] // + Fade factor for on  screen vert * on  screen vert TC
-    andi    $11, $11, ~CLIP_VTX_USED      // Clear used flag from off screen vert
+.endif
     vmudl   $v29, $v6, vClFade1[3]        //   Fade factor for off screen vert * off screen vert pos frac
-    sh      outputVtxPos, (clipPoly)(clipPolyWrite) // Write pointer to generated vertex to polygon
     vmadm   $v29, $v7, vClFade1[3]        // + Fade factor for off screen vert * off screen vert pos int
-    addi    clipPolyWrite, clipPolyWrite, 2  // Increment write ptr
     vmadl   $v29, $v4, vClFade2[3]        // + Fade factor for on screen vert * on screen vert pos frac
-    sh      $11, VTX_CLIP($3)             // Store modified clip flags for off screen vert
     vmadm   vPairTPosI, $v5, vClFade2[3]  // + Fade factor for on screen vert * on screen vert pos int
 .if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
-    addi    outputVtxPos, outputVtxPos, -vtxSize // Inc'd by 2, must point to second vtx
-    vmadn   vPairTPosF, $v31, $v31[2]     // 0; load resulting frac pos
-    addi    $19, rdpCmdBufEndP1, vtxSize  // Fog writes up to one vtx behind
-    move    secondVtxPos, $19             // Old last vtx regs = temp mem
-    srl     $7, $7, 5                     // 8 if G_FOG is set, 0 otherwise
     j       vtx_store_for_clip
-     li     $ra, clip_after_vtx_store + 0x8000
 .else
-    jal     vtx_store_for_clip            // Write new vertex
-     vmadn  vPairTPosF, $v31, $v31[2]     // 0; load resulting frac pos
+    jal     vtx_store_for_clip
 .endif
+     vmadn  vPairTPosF, $v31, $v31[2]     // 0; load resulting frac pos
 .if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
 clip_after_vtx_store:
     ori     $10, $10, CLIP_VTX_USED       // Mark generated vtx as used
-    sh      $10, (VTX_CLIP)($19)          // Store generated vertex flags
+    slv     sSTS[0], (VTX_TC_VEC   )($19) // Store not-twice-scaled ST
+    sh      $10,     (VTX_CLIP     )($19) // Store generated vertex flags
 .endif
 clip_nextedge:
     bnez    clipFlags, clip_edgelooptop   // Discard V2 if it was off screen (whether inserted vtx or not)
@@ -3281,8 +3291,8 @@ lt_post:
 .else
     beqz    $17, vtx_early_return_from_lighting
      vne    $v29, $v31, $v31[3h]           // Set VCC to 11101110
+    vmrg    vPairRGBA, vPairLt, vPairRGBA  // RGB = light, A = vtx alpha
 .endif
-
 // Texgen uses vLookat0:1 = vPairLt and VAAA, vCCC:vDDD, and of course vPairST.
     vmulf   $v29, vPairNrml, ltLookAt[0] // Normals X elems 0, 4 * lookat 0 X
     vmacf   $v29, $v14, ltLookAt[1]      // Normals Y elems 0, 4 * lookat 0 Y
@@ -3290,9 +3300,6 @@ lt_post:
     vmulf   $v29, vPairNrml, ltLookAt[4] // Normals X elems 0, 4 * lookat 1 X
     vmacf   $v29, $v14, ltLookAt[5]      // Normals Y elems 0, 4 * lookat 1 Y
     vmacf   vLookat1, $v15, ltLookAt[6]  // Normals Z elems 0, 4 * lookat 1 Z
-.if !CFG_NO_OCCLUSION_PLANE
-    vmrg    vPairRGBA, vPairLt, vPairRGBA  // RGB = light, A = vtx alpha
-.endif
     // Continue to rest of texgen shared by both versions.
 
 .endif // CFG_LEGACY_VTX_PIPE
