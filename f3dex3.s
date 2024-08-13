@@ -1163,38 +1163,38 @@ tri_end:
 G_SPNOOP_handler:
 run_next_DL_command:
      mfc0   $1, SP_STATUS                               // load the status word into register $1
+    lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // load the command word into cmd_w0
     beqz    inputBufferPos, displaylist_dma             // load more DL commands if none are left
      andi   $1, $1, SP_STATUS_SIG0                      // check if the task should yield
-    lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // load the command word into cmd_w0
+    sra     $7, cmd_w0, 24                              // extract DL command byte from command word
+    lbu     $11, (cmdMiniTable)($7)                     // Load mini table entry
     bnez    $1, load_overlay_0_and_enter                // load and execute overlay 0 if yielding; $1 > 0
-     sra    $7, cmd_w0, 24                              // extract DL command byte from command word
-    lw      cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
-    addi    inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
+     lw     cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // load the next DL word into cmd_w1_dram
+    sll     $11, $11, 2                                 // Convert to a number of instructions
 .if CFG_PROFILING_C
-    mfc0    $11, DPC_STATUS
-    andi    $11, $11, DPC_STATUS_GCLK_ALIVE             // Sample whether GCLK is active now
-    sll     $11, $11, 16 - 3                            // move from bit 3 to bit 16
-    add     perfCounterB, perfCounterB, $11             // Add to the perf counter
+    mfc0    $10, DPC_STATUS
+    andi    $10, $10, DPC_STATUS_GCLK_ALIVE             // Sample whether GCLK is active now
+    sll     $10, $10, 16 - 3                            // move from bit 3 to bit 16
+    add     perfCounterB, perfCounterB, $10             // Add to the perf counter
 .endif
 .if CFG_PROFILING_A
-    mfc0    $11, DPC_CLOCK
+    mfc0    $10, DPC_CLOCK
 .endif
 .if COUNTER_B_LOWER_CMD_COUNT
     addi    perfCounterB, perfCounterB, 1               // Count commands
 .endif
 .if CFG_PROFILING_A
     move    $4, perfCounterC                            // Save initial FIFO stall time
-    sw      $11, startCounterTime
+    sw      $10, startCounterTime
 .endif
+    jr      $11                                         // Jump to handler
+     addi   inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
     // $1 must remain zero
     // $7 must retain the command byte for load_mtx and overlay 4 stuff
     // $11 must contain the handler called for several handlers
-    lbu     $11, (cmdMiniTable)($7)                     // Load mini table entry
-    sll     $11, $11, 2                                 // Convert to a number of instructions
-    jr      $11                                         // Jump to handler
-     // Delay slot must not affect $1, $7, $11
+
 G_DL_handler:
-     sll    $2, cmd_w0, 15                  // Shifts the push/nopush value to the sign bit
+    sll     $2, cmd_w0, 15                  // Shifts the push/nopush value to the sign bit
 branch_dl:
     lbu     $1, displayListStackLength      // Get the DL stack length
     jal     segmented_to_physical
