@@ -1153,16 +1153,19 @@ wait_for_dma_and_run_next_command:
 G_POPMTX_end:
 G_MOVEMEM_end:
     jal     while_wait_dma_busy                         // wait for the DMA read to finish
+.if !CFG_PROFILING_A
+vertex_end:
+.endif
+     lqv    $v30, (v30Value)($zero)                     // Restore value overwritten in vtx_store
+.if !CFG_PROFILING_A
+tri_end:
+.endif
 .if ENABLE_PROFILING
 G_LIGHTTORDP_handler:
 .endif
-.if !CFG_PROFILING_A
-vertex_end:
-tri_end:
-.endif
 G_SPNOOP_handler:
 run_next_DL_command:
-     mfc0   $1, SP_STATUS                               // load the status word into register $1
+    mfc0    $1, SP_STATUS                               // load the status word into register $1
     lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // load the command word into cmd_w0
     beqz    inputBufferPos, displaylist_dma             // load more DL commands if none are left
      andi   $1, $1, SP_STATUS_SIG0                      // check if the task should yield
@@ -1221,9 +1224,8 @@ vtx_addrs_from_cmd:
 vtx_indices_to_addr:
     // Input and output in $v27
     // Also out elem 3 -> $10, elem 7 -> $3 because these are used more than once
-    lqv     $v30, (v30Value)($zero)
-    vmudl   $v29, $v27, $v30[1]   // Multiply vtx indices times length
-    vmadn   $v27, vOne, $v30[0]   // Add address of vertex buffer
+    vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
+    vmadl   $v27, $v27, $v30[1]   // Plus vtx indices times length
     sb      $zero, materialCullMode // This covers all tri cmds, vtx, modify vtx, branchZ, cull
     mfc2    $10, $v27[6]
     jr      $11
@@ -1261,6 +1263,7 @@ G_TRI1_handler:
     sw      cmd_w0, 4(rdpCmdBufPtr)      // Put first tri indices in temp memory
 tri_main:
     lpv     $v27[0], 0(rdpCmdBufPtr)     // Load tri indexes to elems 5, 6, 7
+    lqv     $v30, (v30Value)($zero)
     j       vtx_indices_to_addr          // elem 7 -> $3; rest in $v27
      li     $11, tri_return_from_addrs
 
@@ -2374,6 +2377,7 @@ ovl234_end:
 .if CFG_PROFILING_A
 vertex_end:
     li      $ra, 0                           // Flag for coming from vtx
+    lqv     $v30, (v30Value)($zero)          // Restore value overwritten in vtx_store
 tri_end:
     mfc0    $11, DPC_CLOCK
     lw      $10, startCounterTime
@@ -2393,17 +2397,17 @@ tri_fan_store:
      sb     $11, 5(rdpCmdBufPtr)         // Store vtx 1
 
 tri_return_from_addrs:
-    mfc2    $1, $v27[10]
-    vcopy   $v4, $v27                    // Need vtx 2 addr in $v4 elem 6
 .if !ENABLE_PROFILING
     addi    perfCounterB, perfCounterB, 0x4000  // Increment number of tris requested
 .endif
+    mfc2    $1, $v27[10]
+    vcopy   $v4, $v27                    // Need vtx 2 addr in $v4 elem 6
     mfc2    $2, $v27[12]
+    li      clipPolySelect, -1    // Normal tri drawing mode (check clip masks)
 .if !ENABLE_PROFILING
     move    $4, $1                // Save original vertex 1 addr (pre-shuffle) for flat shading
 .endif
-    li      clipPolySelect, -1    // Normal tri drawing mode (check clip masks)
-    sh      $ra, tempTriRA        // If end up clipping, where to go after
+    sh      $ra, tempTriRA        // For tri cmds; where to go after clipping
 tri_noinit:
     // ra is next cmd, second tri in TRI2, or middle of clipping
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
