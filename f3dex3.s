@@ -669,6 +669,7 @@ rdpCmdBuffer2EndPlus1Word:
 inputBuffer:
     .skip INPUT_BUFFER_LEN
 inputBufferEnd:
+inputBufferEndSgn equ -(0x1000 - inputBufferEnd) // Underflow DMEM address
 
 .if . != 0xFC0
     .error "DMEM organization incorrect"
@@ -1220,17 +1221,18 @@ G_MODIFYVTX_handler:
 vtx_addrs_from_cmd:
     // Treat eight bytes of last command each as vertex indices << 1
     // inputBufferEnd is close enough to the end of DMEM to fit in signed offset
-    lpv     $v27[0], (-(0x1000 - (inputBufferEnd - 0x08)))(inputBufferPos)
+    lpv     $v27[0], (inputBufferEndSgn - 8)(inputBufferPos)
 vtx_indices_to_addr:
     // Input and output in $v27
     // Also out elem 3 -> $10, elem 7 -> $3 because these are used more than once
     vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
     vmadl   $v27, $v27, $v30[1]   // Plus vtx indices times length
-    sb      $zero, materialCullMode // This covers all tri cmds, vtx, modify vtx, branchZ, cull
+    sb      $zero, materialCullMode // This covers vtx, modify vtx, branchZ, cull
     mfc2    $10, $v27[6]
     jr      $11
      mfc2   $3, $v27[14]
 
+/* TODO
 G_TRISTRIP_handler:
     j       tri_strip_fan_start
      li     $ra, tri_strip_fan_loop
@@ -1254,18 +1256,42 @@ tri_strip_fan_loop:
     j       tri_main
      sb     $10, 7(rdpCmdBufPtr)         // Store vtx 2 to spot for 3
 
+     
+G_TRIFAN_handler:
+    li      $1, 0x8000 // $ra negative = flag for G_TRIFAN
+G_TRISTRIP_handler:
+    addi    $ra, $1, tri_strip_fan_loop // otherwise $1 == 0
+    addi    cmd_w0, inputBufferPos, inputBufferEnd - 12 // Start pointing so elems 5-7 are tris 1-3
+tri_strip_fan_loop:
+    lb      $3, (7)(cmd_w0) // Load signed index of last of 3 tris
+    bgez    $ra, @@skip_copy_1 // Skip if G_TRISTRIP
+     lbu    $1, (-7)(inputBufferPops) // Load tri 1 index
+    sb      $1, (5)(cmd_w0) // Store as first tri of the three current tris
+@@skip_copy_1:
+    bltz    $3, tri_end // If third tri index is negative, exit
+     addi   $11, inputBufferPos, inputBufferEnd - 7 // Off end of command
+    beq     $11, cmd_w0, tri_end         // If off end of command, exit
+     lpv    $v27[0], (0)(cmd_w0) // Load the three tris to elems 5-7
+    bltz    $ra, tri_main // Draw if G_TRIFAN
+     addi   cmd_w0, cmd_w0, 1 // Increment
+    andi    $11, cmd_w0, 1 // If even, this is the 1st/3rd/5th tri
+    beqz    $11, tri_main // in that case draw directly
+     sll    $3, $3, 8 // Move tri 3 index into bits 15:8
+    vmov    $v27[7], $v27[6] // Move tri 2 to tri 3
+    j       tri_main
+     mtc2   $3, $v27[12] // Move tri 3 to tri 2
+    
+
+*/
+
 G_TRI2_handler:
 G_QUAD_handler:
     jal     tri_main                     // Send second tri; return here for first tri
-     sw     cmd_w1_dram, 4(rdpCmdBufPtr) // Put second tri indices in temp memory
+     lpv    $v27[0], (inputBufferEndSgn - 8)(inputBufferPos) // Second tri idxs elems 5, 6, 7
 G_TRI1_handler:
-    li      $ra, tri_end                 // After done with this tri, exit tri processing
-    sw      cmd_w0, 4(rdpCmdBufPtr)      // Put first tri indices in temp memory
-tri_main:
-    lpv     $v27[0], 0(rdpCmdBufPtr)     // Load tri indexes to elems 5, 6, 7
-    lqv     $v30, (v30Value)($zero)
-    j       vtx_indices_to_addr          // elem 7 -> $3; rest in $v27
-     li     $11, tri_return_from_addrs
+    lpv     $v27[4], (inputBufferEndSgn - 8)(inputBufferPos) // First tri idxs elems 5, 6, 7
+    j       tri_main
+     li     $ra, tri_end                 // After done with this tri, exit tri processing
 
 G_VTX_handler:
     lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // $1 = size in bytes = vtx count * 0x10
@@ -2391,71 +2417,79 @@ tri_end:
      add    perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
 .endif
 
-tri_fan_store:
-    lb      $11, (inputBufferEnd - 7)(inputBufferPos) // Load vtx 1
-    j       tri_main
-     sb     $11, 5(rdpCmdBufPtr)         // Store vtx 1
-
-tri_return_from_addrs:
+tri_main:
+    vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
+    // nop
+    vmadl   $v27, $v27, $v30[1]   // Plus vtx indices times length
+    // nop
+    vmadl   $v4, $v31, $v31[2]    // 0; vtx 2 addr in $v4 elem 6
+    li      clipPolySelect, -1    // Normal tri drawing mode (check clip masks)
+    // vnop
+    sb      $zero, materialCullMode // This covers all tri cmds
+    // vnop
+    sh      $ra, tempTriRA        // For tri cmds; where to go after clipping
+    mfc2    $1, $v27[10]
+    mfc2    $2, $v27[12]
 .if !ENABLE_PROFILING
     addi    perfCounterB, perfCounterB, 0x4000  // Increment number of tris requested
-.endif
-    mfc2    $1, $v27[10]
-    vcopy   $v4, $v27                    // Need vtx 2 addr in $v4 elem 6
-    mfc2    $2, $v27[12]
-    li      clipPolySelect, -1    // Normal tri drawing mode (check clip masks)
-.if !ENABLE_PROFILING
     move    $4, $1                // Save original vertex 1 addr (pre-shuffle) for flat shading
 .endif
-    sh      $ra, tempTriRA        // For tri cmds; where to go after clipping
-tri_noinit:
-    // ra is next cmd, second tri in TRI2, or middle of clipping
+    vmov    $v6[6], $v27[5]         // elem 6 of v6 = vertex 1 addr
+    mfc2    $3, $v27[14]
+tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
+    vmov    $v8[6], $v27[7]         // elem 6 of v8 = vertex 3 addr
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
     vclr    vZero
     llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
-    vmov    $v6[6], $v27[5]         // elem 6 of v6 = vertex 1 addr
+    // vnop
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
+    // vnop
     lhu     $5, VTX_CLIP($1)
-    vmov    $v8[6], $v27[7]         // elem 6 of v8 = vertex 3 addr
-    lhu     $7, VTX_CLIP($2)
     vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
-    lhu     $8, VTX_CLIP($3)
+    lhu     $7, VTX_CLIP($2)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
-    lw      $6, geometryModeLabel // Load full geometry mode word
-    vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
-    and     $9, $5, $7
+    lhu     $8, VTX_CLIP($3)
     vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
-    and     $9, $9, $8 // $9 = all clip bits which are true for all three verts
+    andi    $11, $5, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
+    vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
+    and     $11, $11, $7
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
-    andi    $11, $9, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
+    and     $11, $11, $8
     vmrg    $v14, $v6, $v4    // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     bnez    $11, return_routine // Then the whole tri is offscreen, cull
-     or     $5, $5, $7
+     or     $10, $5, $7
     vmudh   $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
-    or      $5, $5, $8        // $5 = all clip bits which are true for any verts
-    vmadh   $v29, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
-    andi    $5, $5, CLIP_SCAL_NPXY | CLIP_CAMPLANE // Does tri cross scaled bounds or cam plane?
-    vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
-    sra     $11, clipPolySelect, 31 // All 1s if negative, meaning clipping allowed
+    or      $10, $10, $8        // $10 = all clip bits which are true for any verts
+    vmadh   $v26, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
+    bgez    clipPolySelect, @@skip_clip_check // Negative if clipping is allowed
+     andi   $10, $10, CLIP_SCAL_NPXY | CLIP_CAMPLANE // Does tri cross scaled bounds or cam plane?
+    bnez    $10, ovl234_clipping_entrypoint // Facing info and occlusion may be garbage if need to clip
+@@skip_clip_check:
+     vge    $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
     vmrg    $v10, $v6, $v4    // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
-    and     $5, $5, $11       // Clear this if clipping not allowed
+    mfc2    $9, $v26[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
-    bnez    $5, ovl234_clipping_entrypoint // Facing info and occlusion may be garbage if need to clip
-     mfc2   $8, $v29[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
+    lw      $6, geometryModeLabel // Load full geometry mode word
     vmrg    $v4, $v14, $v8    // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
-    andi    $9, $9, CLIP_OCCLUDED
+    and     $5, $5, $7
     vmrg    $v14, $v8, $v14   // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
-    bnez    $9, tri_culled_by_occlusion_plane // Cull if all verts occluded
-     srl    $11, $8, 31       // = 0 if x prod positive (back facing), 1 if x prod negative (front facing)
+    srl     $11, $9, 31       // = 0 if x prod positive (back facing), 1 if x prod negative (front facing)
     vlt     $v6, $v6, $v2     // v6 (thrown out), VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
-    beqz    $8, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
-     addi   $11, $11, 21      // = 21 if back facing, 22 if front facing
-    vmudh   $v3, vOne, $v31[5]   // 0x4000; some rounding factor
+    addi    $11, $11, 21      // = 21 if back facing, 22 if front facing
+    vmrg    $v2, $v4, $v10    // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     sllv    $11, $6, $11      // Sign bit = bit 10 of geom mode if back facing, bit 9 if front facing
-    vmrg    $v2, $v4, $v10   // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
+    vmrg    $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
     bltz    $11, return_routine // Cull if bit is set (culled based on facing)
-     vmrg   $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
-    vmudn   $v4, $v14, $v31[5] // 0x4000
+     vmudn  $v4, $v14, $v31[5] // 0x4000
+    vmudh   $v3, vOne, $v31[5] // 0x4000; some rounding factor
+    mfc2    $1, $v14[12]      // $v14 = lowest Y value = highest on screen (x, y, addr)
+    vsub    $v6, $v2, $v14
+    mfc2    $2, $v2[12]       // $v2 = mid vertex (x, y, addr)
+    vsub    $v8, $v10, $v14
+    beqz    $9, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
+     vsub   $v11, $v14, $v2
+    vsub    $v12, $v14, $v10  // VH - VL (negative) 
+    mfc2    $3, $v10[12]      // $v10 = highest Y value = lowest on screen (x, y, addr)
 tV1AtF equ $v5
 tV2AtF equ $v7
 tV3AtF equ $v9
@@ -2463,16 +2497,12 @@ tV1AtI equ $v18
 tV2AtI equ $v19
 tV3AtI equ $v21
     vnxor   tV1AtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
-    mfc2    $1, $v14[12]      // $v14 = lowest Y value = highest on screen (x, y, addr)
-    vsub    $v6, $v2, $v14
+    and     $5, $5, $8
     vnxor   tV2AtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
-    mfc2    $2, $v2[12]       // $v2 = mid vertex (x, y, addr)
-    vsub    $v8, $v10, $v14
+    andi    $5, $5, CLIP_OCCLUDED
     vnxor   tV3AtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
-    mfc2    $3, $v10[12]      // $v10 = highest Y value = lowest on screen (x, y, addr)
-    vsub    $v11, $v14, $v2
-    vsub    $v12, $v14, $v10  // VH - VL (negative)
-    llv     $v13[0], VTX_INV_W_VEC($1)
+    bnez    $5, tri_culled_by_occlusion_plane // Cull if all verts occluded
+     llv    $v13[0], VTX_INV_W_VEC($1)
     vsub    $v15, $v10, $v2
     llv     $v13[8], VTX_INV_W_VEC($2)
     vmudh   $v29, $v6, $v8[0]
