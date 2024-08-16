@@ -1230,33 +1230,8 @@ vtx_indices_to_addr:
     sb      $zero, materialCullMode // This covers vtx, modify vtx, branchZ, cull
     mfc2    $10, $v27[6]
     jr      $11
-     mfc2   $3, $v27[14]
+     mfc2   $3, $v27[14] // TODO some cleanup of this
 
-/* TODO
-G_TRISTRIP_handler:
-    j       tri_strip_fan_start
-     li     $ra, tri_strip_fan_loop
-G_TRIFAN_handler:
-    li      $ra, tri_strip_fan_loop + 0x8000 // Negative = flag for G_TRIFAN
-tri_strip_fan_start:
-    addi    cmd_w0, inputBufferPos, inputBufferEnd - 8 // Start pointing to cmd byte
-tri_strip_fan_loop:
-    lw      cmd_w1_dram, 0(cmd_w0)       // Load tri indices to lower 3 bytes of word
-    addi    $11, inputBufferPos, inputBufferEnd - 3 // Off end of command
-    beq     $11, cmd_w0, tri_end         // If off end of command, exit
-     sll    $10, cmd_w1_dram, 24         // Put sign bit of vtx 3 in sign bit
-    bltz    $10, tri_end                 // If negative, exit
-     sw     cmd_w1_dram, 4(rdpCmdBufPtr) // Store non-shuffled indices
-    bltz    $ra, tri_fan_store           // Finish handling G_TRIFAN
-     addi   cmd_w0, cmd_w0, 1            // Increment
-    andi    $11, cmd_w0, 1               // If odd, this is the 1st/3rd/5th tri
-    bnez    $11, tri_main                // Draw as is
-     srl    $10, cmd_w1_dram, 8          // Move vtx 2 to LSBs
-    sb      cmd_w1_dram, 6(rdpCmdBufPtr) // Store vtx 3 to spot for 2
-    j       tri_main
-     sb     $10, 7(rdpCmdBufPtr)         // Store vtx 2 to spot for 3
-
-     
 G_TRIFAN_handler:
     li      $1, 0x8000 // $ra negative = flag for G_TRIFAN
 G_TRISTRIP_handler:
@@ -1265,7 +1240,7 @@ G_TRISTRIP_handler:
 tri_strip_fan_loop:
     lb      $3, (7)(cmd_w0) // Load signed index of last of 3 tris
     bgez    $ra, @@skip_copy_1 // Skip if G_TRISTRIP
-     lbu    $1, (-7)(inputBufferPops) // Load tri 1 index
+     lbu    $1, (-7)(inputBufferPos) // Load tri 1 index
     sb      $1, (5)(cmd_w0) // Store as first tri of the three current tris
 @@skip_copy_1:
     bltz    $3, tri_end // If third tri index is negative, exit
@@ -1281,9 +1256,6 @@ tri_strip_fan_loop:
     j       tri_main
      mtc2   $3, $v27[12] // Move tri 3 to tri 2
     
-
-*/
-
 G_TRI2_handler:
 G_QUAD_handler:
     jal     tri_main                     // Send second tri; return here for first tri
@@ -2382,14 +2354,15 @@ clip_draw_tris_loop:
     lhu     $1, (clipPoly - 6)(clipPolySelect)
     lhu     $2, (clipPoly - 4)(clipPolySelect)
     lhu     $3, (clipPoly - 2)(clipPolyWrite)
-    mtc2    $1, $v27[10]              // Addresses go in vector regs too
+    mtc2    $1, $v6[12]              // Addresses go in vector regs too
     mtc2    $2, $v4[12]
     jal     tri_noinit
-     mtc2   $3, $v27[14]
+     mtc2   $3, $v8[12]
     bne     clipPolyWrite, clipPolySelect, clip_draw_tris_loop
      addi   clipPolySelect, clipPolySelect, 2
 clip_done:
     lh      $ra, tempTriRA
+    lqv     $v30, (v30Value)($zero) // Need this repeated here in case we exited early
     jr      $ra
      li     clipPolySelect, -1  // Back to normal tri drawing mode (check clip masks)
 
@@ -2436,8 +2409,8 @@ tri_main:
 .endif
     vmov    $v6[6], $v27[5]         // elem 6 of v6 = vertex 1 addr
     mfc2    $3, $v27[14]
-tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vmov    $v8[6], $v27[7]         // elem 6 of v8 = vertex 3 addr
+tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
     vclr    vZero
     llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
