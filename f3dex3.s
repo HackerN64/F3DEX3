@@ -2347,6 +2347,7 @@ clip_nextcond:
      addi   clipMaskIdx, clipMaskIdx, -1
     
 clip_draw_tris:
+    vclr    vZero // TODO may not need this
     lqv     $v30, (v30Value)($zero)
 // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
 // Draws verts in pattern like 0-1-4, 1-2-4, 2-3-4
@@ -2356,15 +2357,17 @@ clip_draw_tris_loop:
     lhu     $3, (clipPoly - 2)(clipPolyWrite)
     mtc2    $1, $v6[12]              // Addresses go in vector regs too
     mtc2    $2, $v4[12]
+    lw      $6, geometryModeLabel // Load full geometry mode word
+    sll     $20, $6, 21           // Bit 10 in the sign bit, for facing cull
+    li      $24, 0                // Init clipping flags for tri draw--no repeat clipping
     jal     tri_noinit
      mtc2   $3, $v8[12]
     bne     clipPolyWrite, clipPolySelect, clip_draw_tris_loop
      addi   clipPolySelect, clipPolySelect, 2
 clip_done:
     lh      $ra, tempTriRA
-    lqv     $v30, (v30Value)($zero) // Need this repeated here in case we exited early
     jr      $ra
-     li     clipPolySelect, -1  // Back to normal tri drawing mode (check clip masks)
+     lqv    $v30, (v30Value)($zero) // Need this repeated here in case we exited early
 
 ovl3_end:
 .align 8
@@ -2390,15 +2393,22 @@ tri_end:
      add    perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
 .endif
 
+tV1AtF equ $v5
+tV2AtF equ $v7
+tV3AtF equ $v9
+tV1AtI equ $v18
+tV2AtI equ $v19
+tV3AtI equ $v21
+
 tri_main:
     vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
-    // nop
+    lw      $6, geometryModeLabel // Load full geometry mode word
     vmadl   $v27, $v27, $v30[1]   // Plus vtx indices times length
-    // nop
-    vmadl   $v4, $v31, $v31[2]    // 0; vtx 2 addr in $v4 elem 6
-    li      clipPolySelect, -1    // Normal tri drawing mode (check clip masks)
-    // vnop
     sb      $zero, materialCullMode // This covers all tri cmds
+    vmadl   $v4, $v31, $v31[2]    // 0; vtx 2 addr in $v4 elem 6
+    li      $24, CLIP_SCAL_NPXY | CLIP_CAMPLANE // Normal tri draw, check clipping
+    vclr    vZero
+    sll     $20, $6, 21           // Bit 10 in the sign bit, for facing cull
     // vnop
     sh      $ra, tempTriRA        // For tri cmds; where to go after clipping
     mfc2    $1, $v27[10]
@@ -2412,11 +2422,11 @@ tri_main:
     vmov    $v8[6], $v27[7]         // elem 6 of v8 = vertex 3 addr
 tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
-    vclr    vZero
+    vnxor   tV1AtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
     llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
-    // vnop
+    vnxor   tV2AtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
-    // vnop
+    vnxor   tV3AtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
     lhu     $5, VTX_CLIP($1)
     vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
     lhu     $7, VTX_CLIP($2)
@@ -2430,72 +2440,64 @@ tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     and     $11, $11, $8
     vmrg    $v14, $v6, $v4    // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     bnez    $11, return_routine // Then the whole tri is offscreen, cull
-     or     $10, $5, $7
-    vmudh   $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
-    or      $10, $10, $8        // $10 = all clip bits which are true for any verts
+     // 24 cycles
+     vmudh  $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
     vmadh   $v26, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
-    bgez    clipPolySelect, @@skip_clip_check // Negative if clipping is allowed
-     andi   $10, $10, CLIP_SCAL_NPXY | CLIP_CAMPLANE // Does tri cross scaled bounds or cam plane?
-    bnez    $10, ovl234_clipping_entrypoint // Facing info and occlusion may be garbage if need to clip
-@@skip_clip_check:
-     vge    $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
+    or      $10, $5, $7
+    vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
+    or      $10, $10, $8        // $10 = all clip bits which are true for any verts
     vmrg    $v10, $v6, $v4    // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
-    mfc2    $9, $v26[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
+    and     $10, $10, $24     // If clipping is enabled, check clip flags
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
-    lw      $6, geometryModeLabel // Load full geometry mode word
+    bnez    $10, ovl234_clipping_entrypoint // Facing info and occlusion may be garbage if need to clip
+     mfc2   $9, $v26[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    $v4, $v14, $v8    // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     and     $5, $5, $7
     vmrg    $v14, $v8, $v14   // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
+    and     $5, $5, $8
+    vlt     $v29, $v6, $v2    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
     srl     $11, $9, 31       // = 0 if x prod positive (back facing), 1 if x prod negative (front facing)
-    vlt     $v6, $v6, $v2     // v6 (thrown out), VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
-    addi    $11, $11, 21      // = 21 if back facing, 22 if front facing
-    vmrg    $v2, $v4, $v10    // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
-    sllv    $11, $6, $11      // Sign bit = bit 10 of geom mode if back facing, bit 9 if front facing
-    vmrg    $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
-    bltz    $11, return_routine // Cull if bit is set (culled based on facing)
-     vmudn  $v4, $v14, $v31[5] // 0x4000
     vmudh   $v3, vOne, $v31[5] // 0x4000; some rounding factor
-    mfc2    $1, $v14[12]      // $v14 = lowest Y value = highest on screen (x, y, addr)
+    sllv    $11, $20, $11     // Sign bit = bit 10 of geom mode if back facing, bit 9 if front facing
+    vmrg    $v2, $v4, $v10    // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
+    bltz    $11, return_routine // Cull if bit is set (culled based on facing)
+     // 35 cycles
+     vmrg   $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
+    vmudn   $v4, $v14, $v31[5] // 0x4000
+    beqz    $9, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
+     // 37 cycles
+     mfc2   $1, $v14[12]      // $v14 = lowest Y value = highest on screen (x, y, addr)
     vsub    $v6, $v2, $v14
     mfc2    $2, $v2[12]       // $v2 = mid vertex (x, y, addr)
     vsub    $v8, $v10, $v14
-    beqz    $9, return_routine  // If cross product is 0, tri is degenerate (zero area), cull.
-     vsub   $v11, $v14, $v2
-    vsub    $v12, $v14, $v10  // VH - VL (negative) 
+.if !ENABLE_PROFILING
+    sll     $11, $6, 10                 // Moves the value of G_SHADING_SMOOTH into the sign bit
+.endif
+    vsub    $v11, $v14, $v2
+    andi    $6, $6, (G_SHADE | G_ZBUFFER)
+    vsub    $v12, $v14, $v10  // VH - VL (negative)
     mfc2    $3, $v10[12]      // $v10 = highest Y value = lowest on screen (x, y, addr)
-tV1AtF equ $v5
-tV2AtF equ $v7
-tV3AtF equ $v9
-tV1AtI equ $v18
-tV2AtI equ $v19
-tV3AtI equ $v21
-    vnxor   tV1AtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
-    and     $5, $5, $8
-    vnxor   tV2AtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
-    andi    $5, $5, CLIP_OCCLUDED
-    vnxor   tV3AtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
-    bnez    $5, tri_culled_by_occlusion_plane // Cull if all verts occluded
-     llv    $v13[0], VTX_INV_W_VEC($1)
     vsub    $v15, $v10, $v2
-    llv     $v13[8], VTX_INV_W_VEC($2)
+.if !CFG_NO_OCCLUSION_PLANE
+    andi    $5, $5, CLIP_OCCLUDED
+    bnez    $5, tri_culled_by_occlusion_plane // Cull if all verts occluded
+.endif
     vmudh   $v29, $v6, $v8[0]
-    llv     $v13[12], VTX_INV_W_VEC($3)
+    llv     $v13[0], VTX_INV_W_VEC($1)
     vmadh   $v29, $v8, $v11[0]
     lpv     tV1AtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vreadacc $v17, ACC_UPPER
     lpv     tV2AtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
     vreadacc $v16, ACC_MIDDLE
     lpv     tV3AtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
-    vmov    $v15[2], $v6[0]
+    vrcp    $v20[0], $v15[1]
 .if !ENABLE_PROFILING
     lpv     $v25[0], VTX_COLOR_VEC($4)  // Load RGB from vertex 4 (flat shading vtx)
 .endif
-    vrcp    $v20[0], $v15[1]
-.if !ENABLE_PROFILING
-    sll     $11, $6, 10                 // Moves the value of G_SHADING_SMOOTH into the sign bit
-.endif
+    vmov    $v15[2], $v6[0]
+    llv     $v13[8], VTX_INV_W_VEC($2)
     vrcph   $v22[0], $v17[1]
-    andi    $6, $6, (G_SHADE | G_ZBUFFER)
+    llv     $v13[12], VTX_INV_W_VEC($3)
     vrcpl   $v23[1], $v16[1]
 .if !ENABLE_PROFILING
     bltz    $11, tri_skip_flat_shading  // Branch if G_SHADING_SMOOTH is set
@@ -2508,6 +2510,7 @@ tV3AtI equ $v21
     vmrg    tV3AtI, $v25, tV3AtI        // RGB from $4, alpha from $3
 tri_skip_flat_shading:
 .endif
+    // 53 cycles
     vrcp    $v20[2], $v6[1]
     lb      $20, (alphaCompareCullMode)($zero)
     vrcph   $v22[2], $v6[1]
@@ -2540,6 +2543,7 @@ tri_skip_flat_shading:
     xor     $24, $24, $20 // invert sign bit if other cond. Sign bit set -> cull
     bltz    $24, return_routine // if max < thresh or if min >= thresh.
 tri_skip_alpha_compare_cull:
+    // 65 cycles
      vmadm  $v22, $v22, $v30[7] // 0x0020
     sub     $11, $5, $8
     vmadn   $v20, $v31, $v31[2] // 0
@@ -2569,6 +2573,7 @@ tri_skip_alpha_compare_cull:
     vmadh   $v17, $v24, $v17
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
     vand    $v22, $v20, $v30[5] // 0xFFF8
+    // nop
     vcr     $v15, $v15, $v30[3] // 0x0100
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
     vmudh   $v29, vOne, $v30[6] // 0x0010
@@ -2586,6 +2591,7 @@ tri_skip_alpha_compare_cull:
     vmadn   $v2, $v22, $v26[1]
     beqz    $9, tri_skip_tex // If textures are not enabled, skip texture coefficient calculation
      vmadh  $v3, $v15, $v26[1]
+     // 89 cycles
     vrcph   $v29[0], $v27[0]
     vrcpl   $v10[0], $v27[1]
     vmudh   $v14, vOne, $v13[1q]
@@ -2740,6 +2746,13 @@ tri_culled_by_occlusion_plane:
      addi   perfCounterB, perfCounterB, 0x4000
 .endif
 
+// This routine is used to return via conditional branch
+.if !CFG_PROFILING_B
+tri_culled_by_occlusion_plane:
+.endif
+return_routine:
+    jr      $ra
+     nop
 
 load_overlay_0_and_enter:
     li      postOvlRA, 0x1000                        // Sets up return address
@@ -2810,12 +2823,9 @@ while_wait_dma_busy:
     bnez    $11, @@while_dma_busy // Loop until DMA_BUSY is cleared
      mfc0   $11, SP_DMA_BUSY      // Update DMA_BUSY value
 .endif
-// This routine is used to return via conditional branch
-.if !CFG_PROFILING_B
-tri_culled_by_occlusion_plane:
-.endif
-return_routine:
+old_return_routine:
     jr      $ra
+     // Has mfc0 in branch delay slot, causes a stall if first instr after ret is load
 
 .if !CFG_PROFILING_C
 dma_read_write:
