@@ -2,17 +2,30 @@
 
 # Performance Results
 
-Vertex pipeline cycles per **vertex pair** in steady state (lower is better).
-Hand-counted timings taking into account all pipeline stalls and all dual-issue
-conditions. Instruction alignment is only taken into account for LVP_NOC.
+Cycle counts; lower is better. These are hand-counted timings taking into
+account all pipeline stalls and all dual-issue conditions. Instruction alignment
+is sometimes taken into account, otherwise assumed to be optimal.
 
-| Microcode      | No Lighting | First Dir Lt | Total for 1 Dir Lt | Extra Dir Lts |
-|----------------|-------------|--------------|--------------------|---------------|
-| F3DEX3         | 98          | 103          | 201                | 29            |
-| F3DEX3_NOC     | 79          | 103          | 182                | 29            |
-| F3DEX3_LVP     | 81          | 15           | 96                 | 7             |
-| F3DEX3_LVP_NOC | 54          | 16           | 70                 | 7, 7, 7, 7, ...   |
-| F3DEX2         | 54          | 19           | 73                 | 3, 12, 3, 12, ... |
+Vertex / lighting numbers assume no special features (texgen, packed normals,
+etc.) Tri numbers assume texture, shade, and Z. Empty cells are "not measured
+yet".
+
+|                       | F3DEX2 | F3DEX3_LVP_NOC | F3DEX3_LVP | F3DEX3_NOC | F3DEX3 |
+|-----------------------|--------|----------------|------------|------------|--------|
+| Vtx pair, no lighting | 54     | 54             | 81         | 79         | 98     |
+| Vtx pair, 0 dir lts   | Can't  |                |            |            |        |
+| Vtx pair, 1 dir lt    | 73     | 70             | 96         | 182        | 201    |
+| Vtx pair, 2 dir lts   | 76     | 77             | 103        | 211        | 230    |
+| Vtx pair, 3 dir lts   | 88     | 84             | 110        | 240        | 259    |
+| Vtx pair, 4 dir lts   | 91     | 91             | 117        | 269        | 288    |
+| Vtx pair, 5 dir lts   | 103    | 98             | 124        | 298        | 317    |
+| Vtx pair, 6 dir lts   | 106    | 105            | 131        | 327        | 346    |
+| Vtx pair, 7 dir lts   | 118    | 112            | 138        | 356        | 375    |
+| Vtx pair, 8 dir lts   | Can't  | 119            | 145        | 385        | 404    |
+| Vtx pair, 9 dir lts   | Can't  | 126            | 152        | 414        | 433    |
+
+
+
 
 Vertex processing time as reported by the performance counter in the `PA`
 configuration.

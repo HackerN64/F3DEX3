@@ -2400,6 +2400,10 @@ tV1AtI equ $v18
 tV2AtI equ $v19
 tV3AtI equ $v21
 
+.if (. & 4)
+.warning "tri_main not aligned"
+.endif
+
 tri_main:
     vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
     lw      $6, geometryModeLabel // Load full geometry mode word
@@ -2543,7 +2547,7 @@ tri_skip_flat_shading:
     xor     $24, $24, $20 // invert sign bit if other cond. Sign bit set -> cull
     bltz    $24, return_routine // if max < thresh or if min >= thresh.
 tri_skip_alpha_compare_cull:
-    // 65 cycles
+    // 64 cycles
      vmadm  $v22, $v22, $v30[7] // 0x0020
     sub     $11, $5, $8
     vmadn   $v20, $v31, $v31[2] // 0
@@ -2591,7 +2595,7 @@ tri_skip_alpha_compare_cull:
     vmadn   $v2, $v22, $v26[1]
     beqz    $9, tri_skip_tex // If textures are not enabled, skip texture coefficient calculation
      vmadh  $v3, $v15, $v26[1]
-     // 89 cycles
+     // 88 cycles
     vrcph   $v29[0], $v27[0]
     vrcpl   $v10[0], $v27[1]
     vmudh   $v14, vOne, $v13[1q]
@@ -2621,6 +2625,7 @@ tri_skip_alpha_compare_cull:
     ldv     tV1AtF[8], 0x0028(rdpCmdBufPtr) // 8
     vmrg    tV3AtF, tV3AtF, $v13 // Merge S, T, W into elems 4-6
 tri_skip_tex:
+    // 109 cycles
     vmudl   $v29, $v16, $v23
     lsv     tV1AtF[14], VTX_SCR_Z_FRAC($1)
     vmadm   $v29, $v17, $v23
@@ -2680,12 +2685,13 @@ tDaDyI equ $v7
     vmadn   tDaDxF, tDaDxF, $v24[1]
     sll     $11, $6, 4              // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
     vmadh   tDaDxI, tDaDxI, $v24[1]
-    add     rdpCmdBufPtr, rdpCmdBufPtr, $11  // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
+    move    $10, rdpCmdBufPtr       // Write Z here
     vmudl   $v29, tDaDyF, $v23[1]
+    add     rdpCmdBufPtr, rdpCmdBufPtr, $11  // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
+    vmadm   $v29, tDaDyI, $v23[1]
 .if !ENABLE_PROFILING
     addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
 .endif
-    vmadm   $v29, tDaDyI, $v23[1]
     vmadn   tDaDyF, tDaDyF, $v24[1]
     sdv     tDaDxF[0], 0x0018($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
     vmadh   tDaDyI, tDaDyI, $v24[1]
@@ -2717,28 +2723,43 @@ tDaDeI equ $v9
 tV1AtFF equ $v10
     // All values start in element 7. "a", attribute, is Z. Need
     // tV1AtI, tV1AtF, tDaDxI, tDaDxF, tDaDeI, tDaDeF, tDaDyI, tDaDyF
-    vmov    tDaDyF[5], tDaDeF[7]    // DaDy already in elem 7; DaDe to elem 5
-    sdv     tV1AtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
-    vmov    tDaDyI[5], tDaDeI[7]
-    sdv     tV1AtI[0], 0x0000($2)   // Store RGBA shade color (integer)
-    vmov    tDaDyF[3], tDaDxF[7]    // DaDx to elem 3
-    sdv     tV1AtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
-    vmov    tDaDyI[3], tDaDxI[7]
-    sdv     tV1AtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
     vmudn   tV1AtFF, tDaDeF, $v4[1] // Super-frac (frac * frac) part; assumes v4 factor >= 0
-    beqz    $6, check_rdp_buffer_full // see below
-     veq    $v29, $v31, $v31[1q] // Set VCC to 01010101
+.if CFG_NO_OCCLUSION_PLANE || CFG_LEGACY_VTX_PIPE
+    beqz    $6, no_z_buffer
+.endif
+     vmudn  tDaDeF, tDaDeF, $v30[7] // 0x0020
+    vmadh   tDaDeI, tDaDeI, $v30[7] // 0x0020
+    sdv     tV1AtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
+    vmudn   tDaDxF, tDaDxF, $v30[7] // 0x0020
+    sdv     tV1AtI[0], 0x0000($2)   // Store RGBA shade color (integer)
+    vmadh   tDaDxI, tDaDxI, $v30[7] // 0x0020
+    sdv     tV1AtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
     vmudn   tDaDyF, tDaDyF, $v30[7] // 0x0020
+    sdv     tV1AtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
     vmadh   tDaDyI, tDaDyI, $v30[7] // 0x0020
+    ssv     tDaDeF[14], 0x0A($10)
     vmudl   $v29,  tV1AtFF, $v30[7] // 0x0020
+    ssv     tDaDeI[14], 0x08($10)
     vmadn   tV1AtF, tV1AtF, $v30[7] // 0x0020
+    ssv     tDaDxF[14], 0x06($10)
     vmadh   tV1AtI, tV1AtI, $v30[7] // 0x0020
-    vmrg    tDaDyF, tDaDyF, tDaDyI[1q] // Move int elems 3, 5, 7 to result 2, 4, 6
-    ssv     tV1AtF[14], -0x0E(rdpCmdBufPtr)
-    ssv     tV1AtI[14], -0x10(rdpCmdBufPtr)
-    slv     tDaDyF[4],  -0x0C(rdpCmdBufPtr) // DaDx i/f
+    ssv     tDaDxI[14], 0x04($10)
+    ssv     tDaDyF[14], 0x0E($10)
+    ssv     tDaDyI[14], 0x0C($10)
+    ssv     tV1AtF[14], 0x02($10)
     j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
-     sdv    tDaDyF[8],  -0x08(rdpCmdBufPtr) // DaDe i/f, DaDy i/f
+     ssv    tV1AtI[14], 0x00($10)
+     // 162 cycles
+
+.if CFG_NO_OCCLUSION_PLANE || CFG_LEGACY_VTX_PIPE
+    // If we have room for the extra instructions. Z disabled is rare.
+no_z_buffer:
+    sdv     tV1AtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
+    sdv     tV1AtI[0], 0x0000($2)   // Store RGBA shade color (integer)
+    sdv     tV1AtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
+    j       check_rdp_buffer_full
+     sdv    tV1AtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
+.endif
 
 .if CFG_PROFILING_B
 tri_culled_by_occlusion_plane:
