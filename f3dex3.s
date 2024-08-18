@@ -2454,6 +2454,7 @@ tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     and     $10, $10, $24     // If clipping is enabled, check clip flags
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
     bnez    $10, ovl234_clipping_entrypoint // Facing info and occlusion may be garbage if need to clip
+     // 29 cycles
      mfc2   $9, $v26[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    $v4, $v14, $v8    // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     and     $5, $5, $7
@@ -2484,9 +2485,11 @@ tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vsub    $v15, $v10, $v2
 .if !CFG_NO_OCCLUSION_PLANE
     andi    $5, $5, CLIP_OCCLUDED
-    bnez    $5, tri_culled_by_occlusion_plane // Cull if all verts occluded
 .endif
     vmudh   $v29, $v6, $v8[0]
+.if !CFG_NO_OCCLUSION_PLANE
+    bnez    $5, tri_culled_by_occlusion_plane // Cull if all verts occluded
+.endif
     llv     $v13[0], VTX_INV_W_VEC($1)
     vmadh   $v29, $v8, $v11[0]
     lpv     tV1AtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
@@ -2699,6 +2702,7 @@ tDaDyI equ $v7
 // DaDe = DaDx * factor
 tDaDeF equ $v8
 tDaDeI equ $v9
+    // 137 cycles
     vmadl   $v29, tDaDxF, $v20[3]
     sdv     tDaDxF[8], 0x0018($1)   // Store DsDx, DtDx, DwDx texture coefficients (fractional)
     vmadm   $v29, tDaDxI, $v20[3]
@@ -2752,7 +2756,8 @@ tV1AtFF equ $v10
      // 162 cycles
 
 .if CFG_NO_OCCLUSION_PLANE || CFG_LEGACY_VTX_PIPE
-    // If we have room for the extra instructions. Z disabled is rare.
+    // If we have room for the extra instructions. Z disabled is rare, so the
+    // extra 8 cycles of finishing the dummy Z write above isn't too much of a problem.
 no_z_buffer:
     sdv     tV1AtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
     sdv     tV1AtI[0], 0x0000($2)   // Store RGBA shade color (integer)
