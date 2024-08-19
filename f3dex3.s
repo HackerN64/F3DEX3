@@ -3299,10 +3299,11 @@ lt_vtx_pair:
     vmacf   vAAA, $v15, $v13[6] // Normals Z elems 0, 4 * first light dir
 .if CFG_NO_OCCLUSION_PLANE // New LVP_NOC
     or      $10, $10, $11          // Combine results for first vertex
+    vmulf   vPairRGBA, vPairNrml, $v31[5] // 0x4000; right shift vtx alpha from lpv
 .else
     // nop
-.endif
     // vnop
+.endif
     beq     $3, altBaseReg, lt_post
 .if CFG_NO_OCCLUSION_PLANE // New LVP_NOC
      addi   $1, $1, -2*inputVtxSize         // Decrement vertex count by 2
