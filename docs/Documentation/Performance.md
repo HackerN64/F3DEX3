@@ -4,7 +4,20 @@
 
 The base version of F3DEX3 was created for RDP bound games like OoT, where new
 visual effects are desired and increasing the RSP time a bit does not affect the
-overall performance. F3DEX3_LVP_NOC was created 
+overall performance. If your game is RSP bound, using the base version of F3DEX3
+will make it slower.
+
+Conversely, F3DEX3_LVP_NOC was created with the goal of matching the RSP
+performance of F3DEX2 on all critical paths in the microcode: command dispatch,
+vertex processing, and triangle processing. Then, the RDP and memory traffic
+performance improvements of F3DEX3--56 vertex buffer, auto-batched rendering,
+etc.--should improve performance from there. This means that F3DEX3_LVP_NOC can
+improve performance regardless of whether your game is RSP bound or RDP bound.
+
+Note that F3DEX3_LVP_NOC is still slightly slower than F3DEX2 for various other
+tasks--for example, the one-time setup when loading vertices, outside the loop
+over vertices, is a little slower.
+
 
 # Performance Results
 
