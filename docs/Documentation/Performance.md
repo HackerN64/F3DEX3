@@ -43,15 +43,15 @@ profiling configuration. Empty cells are "not measured yet".
 | Vtx pair, 7 dir lts        | 118    | 112            | 138        | 356        | 375    |
 | Vtx pair, 8 dir lts        | Can't  | 119            | 145        | 385        | 404    |
 | Vtx pair, 9 dir lts        | Can't  | 126            | 152        | 414        | 433    |
-| Command dispatch           | 12     | 12                                             ||||
-| Only/2nd tri to offscreen  | 27     | 29                                             ||||
-| 1st tri to offscreen       | 28     | 29                                             ||||
-| Only/2nd tri to clip       | 32     | 31                                             ||||
-| 1st tri to clip            | 33     | 31                                             ||||
-| Only/2nd tri to backface   | 38     | 40                                             ||||
-| 1st tri to backface        | 39     | 40                                             ||||
-| Only/2nd tri to degenerate | 42     | 42                                             ||||
-| 1st tri to degenerate      | 43     | 42                                             ||||
+| Command dispatch           | 12     | 12             | 12         | 12         | 12     |
+| Only/2nd tri to offscreen  | 27     | 29             | 29         | 29         | 29     |
+| 1st tri to offscreen       | 28     | 29             | 29         | 29         | 29     |
+| Only/2nd tri to clip       | 32     | 31             | 31         | 31         | 31     |
+| 1st tri to clip            | 33     | 31             | 31         | 31         | 31     |
+| Only/2nd tri to backface   | 38     | 40             | 40         | 40         | 40     |
+| 1st tri to backface        | 39     | 40             | 40         | 40         | 40     |
+| Only/2nd tri to degenerate | 42     | 42             | 42         | 42         | 42     |
+| 1st tri to degenerate      | 43     | 42             | 42         | 42         | 42     |
 | Only/2nd tri to occluded   | Can't  | Can't          | 49         | Can't      | 49     |
 | 1st tri to occluded        | Can't  | Can't          | 49         | Can't      | 49     |
 | Only/2nd tri to draw       | 172    | 170            | 171        | 170        | 171    |
