@@ -104,22 +104,42 @@ $(function(){initNavTree('performance.html',''); initResizable(true); });
 </div><!--header-->
 <div class="contents">
 <div class="textblock"><h1><a class="anchor" id="autotoc_md32"></a>
+Philosophy</h1>
+<p>The base version of F3DEX3 was created for RDP bound games like OoT, where new visual effects are desired and increasing the RSP time a bit does not affect the overall performance. If your game is RSP bound, using the base version of F3DEX3 will make it slower.</p>
+<p>Conversely, F3DEX3_LVP_NOC was created with the goal of matching the RSP performance of F3DEX2 on all critical paths in the microcode: command dispatch, vertex processing, and triangle processing. Then, the RDP and memory traffic performance improvements of F3DEX3&ndash;56 vertex buffer, auto-batched rendering, etc.&ndash;should improve performance from there. This means that F3DEX3_LVP_NOC can improve performance regardless of whether your game is RSP bound or RDP bound.</p>
+<p>Note that F3DEX3_LVP_NOC is still slightly slower than F3DEX2 for various other tasks&ndash;for example, the one-time setup when loading vertices, outside the loop over vertices, is a little slower.</p>
+<h1><a class="anchor" id="autotoc_md33"></a>
 Performance Results</h1>
-<p>Vertex pipeline cycles per <b>vertex pair</b> in steady state (lower is better). Hand-counted timings taking into account all pipeline stalls and all dual-issue conditions except for instruction alignment.</p>
+<p>These are cycle counts for all the critical paths in the microcode. Lower is better. The timings are hand-counted taking into account all pipeline stalls and all dual-issue conditions. Instruction alignment is sometimes taken into account, otherwise assumed to be optimal.</p>
+<p>Vertex / lighting numbers assume no special features (texgen, packed normals, etc.) <a class="el" href="structTri.html">Tri</a> numbers assume texture, shade, and Z. All numbers assume default profiling configuration. Empty cells are "not measured yet".</p>
 <table class="markdownTable">
 <tr class="markdownTableHead">
-<th class="markdownTableHeadNone">Microcode   </th><th class="markdownTableHeadNone">No Lighting   </th><th class="markdownTableHeadNone">First Dir Lt   </th><th class="markdownTableHeadNone">Total for 1 Dir Lt   </th><th class="markdownTableHeadNone">Extra Dir Lts    </th></tr>
+<th class="markdownTableHeadNone"></th><th class="markdownTableHeadNone">F3DEX2   </th><th class="markdownTableHeadNone">F3DEX3_LVP_NOC   </th><th class="markdownTableHeadNone">F3DEX3_LVP   </th><th class="markdownTableHeadNone">F3DEX3_NOC   </th><th class="markdownTableHeadNone">F3DEX3    </th></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">F3DEX3   </td><td class="markdownTableBodyNone">98   </td><td class="markdownTableBodyNone">103   </td><td class="markdownTableBodyNone">201   </td><td class="markdownTableBodyNone">29    </td></tr>
+<td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> pair, no lighting   </td><td class="markdownTableBodyNone">54   </td><td class="markdownTableBodyNone">54   </td><td class="markdownTableBodyNone">81   </td><td class="markdownTableBodyNone">79   </td><td class="markdownTableBodyNone">98    </td></tr>
 <tr class="markdownTableRowEven">
-<td class="markdownTableBodyNone">F3DEX3_NOC   </td><td class="markdownTableBodyNone">79   </td><td class="markdownTableBodyNone">103   </td><td class="markdownTableBodyNone">182   </td><td class="markdownTableBodyNone">29    </td></tr>
+<td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> pair, 0 dir lts   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">64   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">F3DEX3_LVP   </td><td class="markdownTableBodyNone">81   </td><td class="markdownTableBodyNone">15   </td><td class="markdownTableBodyNone">96   </td><td class="markdownTableBodyNone">7    </td></tr>
+<td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> pair, 1 dir lt   </td><td class="markdownTableBodyNone">73   </td><td class="markdownTableBodyNone">70   </td><td class="markdownTableBodyNone">96   </td><td class="markdownTableBodyNone">182   </td><td class="markdownTableBodyNone">201    </td></tr>
 <tr class="markdownTableRowEven">
-<td class="markdownTableBodyNone">F3DEX3_LVP_NOC   </td><td class="markdownTableBodyNone">62   </td><td class="markdownTableBodyNone">15   </td><td class="markdownTableBodyNone">77   </td><td class="markdownTableBodyNone">7    </td></tr>
+<td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> pair, 2 dir lts   </td><td class="markdownTableBodyNone">76   </td><td class="markdownTableBodyNone">77   </td><td class="markdownTableBodyNone">103   </td><td class="markdownTableBodyNone">211   </td><td class="markdownTableBodyNone">230    </td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">F3DEX2   </td><td class="markdownTableBodyNone">54   </td><td class="markdownTableBodyNone">19   </td><td class="markdownTableBodyNone">73   </td><td class="markdownTableBodyNone">3 then 12   </td></tr>
+<td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> pair, 3 dir lts   </td><td class="markdownTableBodyNone">88   </td><td class="markdownTableBodyNone">84   </td><td class="markdownTableBodyNone">110   </td><td class="markdownTableBodyNone">240   </td><td class="markdownTableBodyNone">259    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> pair, 4 dir lts   </td><td class="markdownTableBodyNone">91   </td><td class="markdownTableBodyNone">91   </td><td class="markdownTableBodyNone">117   </td><td class="markdownTableBodyNone">269   </td><td class="markdownTableBodyNone">288    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> pair, 5 dir lts   </td><td class="markdownTableBodyNone">103   </td><td class="markdownTableBodyNone">98   </td><td class="markdownTableBodyNone">124   </td><td class="markdownTableBodyNone">298   </td><td class="markdownTableBodyNone">317    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> pair, 6 dir lts   </td><td class="markdownTableBodyNone">106   </td><td class="markdownTableBodyNone">105   </td><td class="markdownTableBodyNone">131   </td><td class="markdownTableBodyNone">327   </td><td class="markdownTableBodyNone">346    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> pair, 7 dir lts   </td><td class="markdownTableBodyNone">118   </td><td class="markdownTableBodyNone">112   </td><td class="markdownTableBodyNone">138   </td><td class="markdownTableBodyNone">356   </td><td class="markdownTableBodyNone">375    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> pair, 8 dir lts   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">119   </td><td class="markdownTableBodyNone">145   </td><td class="markdownTableBodyNone">385   </td><td class="markdownTableBodyNone">404    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> pair, 9 dir lts   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">126   </td><td class="markdownTableBodyNone">152   </td><td class="markdownTableBodyNone">414   </td><td class="markdownTableBodyNone">433   </td></tr>
 </table>
+<p>| Command dispatch | 12 | 12 | | Only/2nd tri to offscreen | 27 | 29 | | 1st tri to offscreen | 28 | 29 | | Only/2nd tri to clip | 32 | 31 | | 1st tri to clip | 33 | 31 | | Only/2nd tri to backface | 38 | 40 | | 1st tri to backface | 39 | 40 | | Only/2nd tri to degenerate | 42 | 42 | | 1st tri to degenerate | 43 | 42 | | Only/2nd tri to occluded | Can't | Can't | 49 | Can't | 49 | | 1st tri to occluded | Can't | Can't | 49 | Can't | 49 | | Only/2nd tri to draw | 172 | 170 | 171 | 170 | 171 | | 1st tri to draw | 173 | 170 | 171 | 170 | 171 |</p>
+<p><a class="el" href="structTri.html">Tri</a> numbers are measured from the first cycle of the command handler inclusive, to the first cycle of whatever is after the return exclusive. This is in order to capture the extra mfc0 to mfc0 stall due to return_routine in F3DEX2.</p>
 <p>Vertex processing time as reported by the performance counter in the <code>PA</code> configuration.</p><ul>
 <li>Scene 1: Kakariko, adult day, from DMT entrance</li>
 <li>Scene 2: Custom empty scene with Suzanne monkey head with 1 dir light</li>
@@ -135,7 +155,7 @@ Performance Results</h1>
 <tr class="markdownTableRowOdd">
 <td class="markdownTableBodyNone">F3DEX3_LVP   </td><td class="markdownTableBodyNone">4.57ms   </td><td class="markdownTableBodyNone">1.77ms   </td><td class="markdownTableBodyNone">1.67ms    </td></tr>
 <tr class="markdownTableRowEven">
-<td class="markdownTableBodyNone">F3DEX3_LVP_NOC   </td><td class="markdownTableBodyNone">3.96ms   </td><td class="markdownTableBodyNone">1.52ms   </td><td class="markdownTableBodyNone">1.41ms    </td></tr>
+<td class="markdownTableBodyNone">F3DEX3_LVP_NOC   </td><td class="markdownTableBodyNone">Outdated   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
 <tr class="markdownTableRowOdd">
 <td class="markdownTableBodyNone">F3DEX2   </td><td class="markdownTableBodyNone">No*   </td><td class="markdownTableBodyNone">No*   </td><td class="markdownTableBodyNone">No*    </td></tr>
 <tr class="markdownTableRowEven">

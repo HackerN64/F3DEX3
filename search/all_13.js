@@ -8,7 +8,7 @@ var searchData=
   ['the_20tradeoffs_20for_20all_20these_20new_20features_5',['What are the tradeoffs for all these new features?',['../design-tradeoffs.html#autotoc_md22',1,'']]],
   ['these_20new_20features_6',['What are the tradeoffs for all these new features?',['../design-tradeoffs.html#autotoc_md22',1,'']]],
   ['time_7',['Vertex Processing RSP Time',['../design-tradeoffs.html#autotoc_md23',1,'']]],
-  ['to_20f3dex3_8',['to F3DEX3',['../porting.html',1,'Porting Your Romhack Codebase to F3DEX3'],['../porting.html#autotoc_md33',1,'Porting Your Romhack Codebase to F3DEX3']]],
+  ['to_20f3dex3_8',['to F3DEX3',['../porting.html',1,'Porting Your Romhack Codebase to F3DEX3'],['../porting.html#autotoc_md34',1,'Porting Your Romhack Codebase to F3DEX3']]],
   ['to_20the_20clipping_20minimal_20scanlines_20algorithm_9',['to the clipping minimal scanlines algorithm',['../minimal-scanlines.html',1,'What happened to the clipping minimal scanlines algorithm?'],['../minimal-scanlines.html#autotoc_md31',1,'What happened to the clipping minimal scanlines algorithm?']]],
   ['tradeoffs_10',['Design Tradeoffs',['../design-tradeoffs.html',1,'md_docs_2documentation']]],
   ['tradeoffs_20for_20all_20these_20new_20features_11',['What are the tradeoffs for all these new features?',['../design-tradeoffs.html#autotoc_md22',1,'']]],

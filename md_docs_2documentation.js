@@ -31,14 +31,15 @@ var md_docs_2documentation =
       [ "What happened to the clipping minimal scanlines algorithm?", "minimal-scanlines.html#autotoc_md31", null ]
     ] ],
     [ "Performance Results", "performance.html", [
-      [ "Performance Results", "performance.html#autotoc_md32", null ]
+      [ "Philosophy", "performance.html#autotoc_md32", null ],
+      [ "Performance Results", "performance.html#autotoc_md33", null ]
     ] ],
     [ "Porting Your Romhack Codebase to F3DEX3", "porting.html", [
-      [ "Porting Your Romhack Codebase to F3DEX3", "porting.html#autotoc_md33", [
-        [ "Required Changes", "porting.html#autotoc_md34", null ],
-        [ "Recommended Changes (Non-Lighting)", "porting.html#autotoc_md35", null ],
-        [ "Recommended Changes (Lighting)", "porting.html#autotoc_md36", null ],
-        [ "Changes Required for New Features", "porting.html#autotoc_md37", null ]
+      [ "Porting Your Romhack Codebase to F3DEX3", "porting.html#autotoc_md34", [
+        [ "Required Changes", "porting.html#autotoc_md35", null ],
+        [ "Recommended Changes (Non-Lighting)", "porting.html#autotoc_md36", null ],
+        [ "Recommended Changes (Lighting)", "porting.html#autotoc_md37", null ],
+        [ "Changes Required for New Features", "porting.html#autotoc_md38", null ]
       ] ]
     ] ]
 ];
