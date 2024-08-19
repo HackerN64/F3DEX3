@@ -2625,7 +2625,7 @@ _DW({                                                        \
      _SHIFTL((v5)*2, 16, 8) |                                \
      _SHIFTL((v6)*2,  8, 8) |                                \
      _SHIFTL((v7)*2,  0, 8))                                 \
-})
+}
 /**
  * 5 Triangles in strip arrangement. Draws the following tris:
  * v1-v2-v3, v3-v2-v4, v3-v4-v5, v5-v4-v6, v5-v6-v7
