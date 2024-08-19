@@ -1240,7 +1240,7 @@ G_TRISTRIP_handler:
 tri_strip_fan_loop:
     lb      $3, (7)(cmd_w0) // Load signed index of last of 3 tris
     bgez    $ra, @@skip_copy_1 // Skip if G_TRISTRIP
-     lbu    $1, (-7)(inputBufferPos) // Load tri 1 index
+     lbu    $1, (inputBufferEnd - 7)(inputBufferPos) // Load tri 1 index
     sb      $1, (5)(cmd_w0) // Store as first tri of the three current tris
 @@skip_copy_1:
     bltz    $3, tri_end // If third tri index is negative, exit
@@ -1249,8 +1249,8 @@ tri_strip_fan_loop:
      lpv    $v27[0], (0)(cmd_w0) // Load the three tris to elems 5-7
     bltz    $ra, tri_main // Draw if G_TRIFAN
      addi   cmd_w0, cmd_w0, 1 // Increment
-    andi    $11, cmd_w0, 1 // If even, this is the 1st/3rd/5th tri
-    beqz    $11, tri_main // in that case draw directly
+    andi    $11, cmd_w0, 1 // If odd after increment, this is the 1st/3rd/5th tri
+    bnez    $11, tri_main // in that case draw directly
      sll    $3, $3, 8 // Move tri 3 index into bits 15:8
     vmov    $v27[7], $v27[6] // Move tri 2 to tri 3
     j       tri_main
