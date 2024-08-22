@@ -27,8 +27,9 @@ all dual-issue conditions. Instruction alignment is sometimes taken into
 account, otherwise assumed to be optimal.
 
 Vertex / lighting numbers assume no special features (texgen, packed normals,
-etc.) Tri numbers assume texture, shade, and Z. All numbers assume default
-profiling configuration. Empty cells are "not measured yet".
+etc.) Tri numbers assume texture, shade, and Z, and not flushing the buffer.
+All numbers assume default profiling configuration. Empty cells are "not
+measured yet".
 
 |                            | F3DEX2 | F3DEX3_LVP_NOC | F3DEX3_LVP | F3DEX3_NOC | F3DEX3 |
 |----------------------------|--------|----------------|------------|------------|--------|
@@ -44,6 +45,7 @@ profiling configuration. Empty cells are "not measured yet".
 | Vtx pair, 8 dir lts        | Can't  | 119            | 145        | 385        | 404    |
 | Vtx pair, 9 dir lts        | Can't  | 126            | 152        | 414        | 433    |
 | Command dispatch           | 12     | 12             | 12         | 12         | 12     |
+| Small RDP command          | 14     | 5              | 5          | 5          | 5      |
 | Only/2nd tri to offscreen  | 27     | 29             | 29         | 29         | 29     |
 | 1st tri to offscreen       | 28     | 29             | 29         | 29         | 29     |
 | Only/2nd tri to clip       | 32     | 31             | 31         | 31         | 31     |
@@ -54,13 +56,13 @@ profiling configuration. Empty cells are "not measured yet".
 | 1st tri to degenerate      | 43     | 42             | 42         | 42         | 42     |
 | Only/2nd tri to occluded   | Can't  | Can't          | 49         | Can't      | 49     |
 | 1st tri to occluded        | Can't  | Can't          | 49         | Can't      | 49     |
-| Only/2nd tri to draw       | 172    | 170            | 171        | 170        | 171    |
-| 1st tri to draw            | 173    | 170            | 171        | 170        | 171    |
+| Only/2nd tri to draw       | 172    | 166            | 167        | 166        | 167    |
+| 1st tri to draw            | 173    | 166            | 167        | 166        | 167    |
 
 
 Tri numbers are measured from the first cycle of the command handler inclusive,
-to the first cycle of whatever is after the return exclusive. This is in order
-to capture the extra mfc0 to mfc0 stall due to return_routine in F3DEX2.
+to the first cycle of whatever is after $ra exclusive. This is in order
+to capture the extra latency and stalls in F3DEX2.
 
 
 Vertex processing time as reported by the performance counter in the `PA`

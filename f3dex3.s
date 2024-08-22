@@ -1153,11 +1153,33 @@ displaylist_dma:
 wait_for_dma_and_run_next_command:
 G_POPMTX_end:
 G_MOVEMEM_end:
-    jal     while_wait_dma_busy                         // wait for the DMA read to finish
-.if !CFG_PROFILING_A
+    j       while_wait_dma_busy                         // wait for the DMA read to finish
+     li     $ra, run_next_DL_command
+
+.if !CFG_LEGACY_VTX_PIPE
+G_DMA_IO_handler:
+G_BRANCH_WZ_handler:
+G_MEMSET_handler:
+    j       ovl234_ovl4_entrypoint          // Delay slot is harmless
+.endif
+load_cmds_handler:
+     lb     $3, materialCullMode
+    bltz    $3, run_next_DL_command  // If cull mode is < 0, in mat second time, skip the load
+G_RDP_handler:
+     sw     cmd_w1_dram, 4(rdpCmdBufPtr)     // Add the second word of the command to the RDP command buffer
+G_SYNC_handler:
+.if CFG_PROFILING_C
+    addi    perfCounterC, perfCounterC, 0x4000 // Increment small RDP command count
+.endif
+    sw      cmd_w0, 0(rdpCmdBufPtr)          // Add the command word to the RDP command buffer
+    addi    rdpCmdBufPtr, rdpCmdBufPtr, 8    // Increment the next RDP command pointer by 2 words
+check_rdp_buffer_full_and_run_next_cmd:
+    sub     $8, rdpCmdBufPtr, rdpCmdBufEndP1
+    bgezal  $8, flush_rdp_buffer
+     // $1 on next instr survives flush_rdp_buffer
+.if CFG_NO_OCCLUSION_PLANE && CFG_LEGACY_VTX_PIPE && !CFG_PROFILING_A
 vertex_end:
 .endif
-     lqv    $v30, (v30Value)($zero)                     // Restore value overwritten in vtx_store
 .if !CFG_PROFILING_A
 tri_end:
 .endif
@@ -1166,7 +1188,7 @@ G_LIGHTTORDP_handler:
 .endif
 G_SPNOOP_handler:
 run_next_DL_command:
-    mfc0    $1, SP_STATUS                               // load the status word into register $1
+     mfc0   $1, SP_STATUS                               // load the status word into register $1
     lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // load the command word into cmd_w0
     beqz    inputBufferPos, displaylist_dma             // load more DL commands if none are left
      andi   $1, $1, SP_STATUS_SIG0                      // check if the task should yield
@@ -1265,19 +1287,6 @@ G_TRI1_handler:
     j       tri_main
      li     $ra, tri_end                 // After done with this tri, exit tri processing
 
-G_VTX_handler:
-    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // $1 = size in bytes = vtx count * 0x10
-    lhu     $5, geometryModeLabel + 1          // Load middle 2 bytes of geom mode
-    srl     $2, cmd_w0, 11                     // n << 1
-    sub     $2, cmd_w0, $2                     // v0 << 1
-    sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
-.if COUNTER_A_UPPER_VERTEX_COUNT
-    sll     $11, $1, 12                        // Vtx count * 0x10000
-    add     perfCounterA, perfCounterA, $11    // Add to vertex count
-.endif
-    j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3 = $10
-     li     $11, vtx_return_from_addrs
-
 .if !ENABLE_PROFILING
 G_LIGHTTORDP_handler:
     lbu     $11, numLightsxSize          // Ambient light
@@ -1315,84 +1324,22 @@ G_BRANCH_WZ_handler:
 G_MEMSET_handler:
     instantiate_memset
 
-.else
-G_DMA_IO_handler:
-G_BRANCH_WZ_handler:
-G_MEMSET_handler:
-    j       ovl234_ovl4_entrypoint          // Delay slot is harmless
 .endif
-load_cmds_handler:
-     lb     $3, materialCullMode
-    bltz    $3, run_next_DL_command  // If cull mode is < 0, in mat second time, skip the load
-G_RDP_handler:
-     sw     cmd_w1_dram, 4(rdpCmdBufPtr)     // Add the second word of the command to the RDP command buffer
-G_SYNC_handler:
-.if CFG_PROFILING_C
-    addi    perfCounterC, perfCounterC, 0x4000 // Increment small RDP command count
-.endif
-    sw      cmd_w0, 0(rdpCmdBufPtr)          // Add the command word to the RDP command buffer
-    addi    rdpCmdBufPtr, rdpCmdBufPtr, 8    // Increment the next RDP command pointer by 2 words
-check_rdp_buffer_full_and_run_next_cmd:
-    li      $ra, run_next_DL_command         // Set up running the next DL command as the return address
-check_rdp_buffer_full:
-     sub    $11, rdpCmdBufPtr, rdpCmdBufEndP1
-    bltz    $11, return_routine              // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
-flush_rdp_buffer:
-     mfc0   $10, SP_DMA_BUSY                 // Check if any DMA is in flight
-    lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
-    addi    dmaLen, $11, RDP_CMD_BUFSIZE + 8 // dmaLen = size of DMEM buffer to copy
-.if CFG_PROFILING_C
-    // This is a wait for DMA busy loop, but written inline to avoid overwriting ra.
-    addi    perfCounterD, perfCounterD, 10   // 6 instr + 2 between end load and mfc + 0 taken branch overlaps with last + 2 between mfc and load
-.endif
-    bnez    $10, flush_rdp_buffer            // Wait until no DMAs are active
-     lw     $10, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
-    mtc0    cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
-    add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
-    sub     $10, $10, $11                    // $10 = FIFO end addr - future pointer
-    bgez    $10, @@has_room                  // Branch if we can fit this
-@@await_rdp_dblbuf_avail:
-     mfc0   $11, DPC_STATUS                  // Read RDP status
-    andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
-    bnez    $11, @@await_rdp_dblbuf_avail    // Wait until double buffered start/end available
-.if COUNTER_C_FIFO_FULL
-     addi   perfCounterC, perfCounterC, 7    // 4 instr + 2 after mfc + 1 taken branch
-.endif
-     lw     cmd_w1_dram, OSTask + OSTask_output_buff // Start of FIFO
-@@await_past_first_instr:
-    mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
-    beq     $11, cmd_w1_dram, @@await_past_first_instr // Wait until RDP moved past start
-.if COUNTER_C_FIFO_FULL
-     addi   perfCounterC, perfCounterC, 6    // 3 instr + 2 after mfc + 1 taken branch
-.else
-     nop
-.endif
-    // Start was previously the start of the FIFO, unless this is the first buffer,
-    // in which case it was the end of the FIFO. Normally, when the RDP gets to end, if we
-    // have a new end value waiting (END_VALID), it'll load end but leave current. By
-    // setting start here, it will also load current with start.
-    mtc0    cmd_w1_dram, DPC_START           // Set RDP start to start of FIFO
-@@keep_waiting:
-.if COUNTER_C_FIFO_FULL
-    // This is here so we only count it when stalling below or on FIFO end codepath
-    addi    perfCounterC, perfCounterC, 10   // 7 instr + 2 after mfc + 1 taken branch
-.endif
-@@has_room:
-    mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
-    sub     $11, $11, cmd_w1_dram            // Current - current end (rdpFifoPos or start)
-    blez    $11, @@copy_buffer               // Current is behind or at current end, can do copy
-     sub    $11, $11, dmaLen                 // If amount current is ahead of current end
-    blez    $11, @@keep_waiting              // is <= size of buffer to copy, keep waiting
-@@copy_buffer:
-     add    $11, cmd_w1_dram, dmaLen         // New end is current end + buffer size
-    sw      $11, rdpFifoPos
-    // Set up the DMA from DMEM to the RDP fifo in RDRAM
-    addi    dmaLen, dmaLen, -1                                  // subtract 1 from the length
-    addi    dmemAddr, rdpCmdBufEndP1, -(0x2000 | (RDP_CMD_BUFSIZE + 8)) // The 0x2000 is meaningless, negative means write
-    xori    rdpCmdBufEndP1, rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word ^ rdpCmdBuffer2EndPlus1Word // Swap between the two RDP command buffers
-    j       dma_read_write
-     addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
 
+G_VTX_handler:
+    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // $1 = size in bytes = vtx count * 0x10
+    lhu     $5, geometryModeLabel + 1          // Load middle 2 bytes of geom mode
+    srl     $2, cmd_w0, 11                     // n << 1
+    sub     $2, cmd_w0, $2                     // v0 << 1
+    sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
+.if COUNTER_A_UPPER_VERTEX_COUNT
+    sll     $11, $1, 12                        // Vtx count * 0x10000
+    add     perfCounterA, perfCounterA, $11    // Add to vertex count
+.endif
+    j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3 = $10
+     li     $11, vtx_return_from_addrs
+
+.warning "TODO improve vertex address setup"
 
 vtx_return_from_addrs:
     andi    $10, $10, 0xFFF8                   // Round down end addr to DMA word; one input vtx still fits in one internal vtx
@@ -1730,8 +1677,9 @@ vtx_epilogue:
     ssv     sKPF[12], (VTX_SCR_Z_FRAC )(secondVtxPos)
     bltz    $ra, clip_after_vtx_store
      slv    sKPF[2],  (VTX_SCR_Z      )($19)
+    sh      $10,      (VTX_CLIP       )($19) // Store first vertex flags
     j       vertex_end
-     sh     $10,      (VTX_CLIP       )($19) // Store first vertex flags
+     lqv    $v30, (v30Value)($zero)    // Restore value overwritten in vtx_store
 
 .else // end of new LVP_NOC
 
@@ -2088,6 +2036,31 @@ skip_return_to_lt_or_loop:
 
 .endif // New LVP_NOC
 
+.if !CFG_PROFILING_A && (!CFG_NO_OCCLUSION_PLANE || !CFG_LEGACY_VTX_PIPE)
+vertex_end:
+    j      run_next_DL_command
+     lqv   $v30, (v30Value)($zero)           // Restore value overwritten in vtx_store
+.endif
+
+.if CFG_PROFILING_A
+vertex_end:
+    li      $ra, 0                           // Flag for coming from vtx
+.if !CFG_NO_OCCLUSION_PLANE || !CFG_LEGACY_VTX_PIPE
+    lqv     $v30, (v30Value)($zero)          // Restore value overwritten in vtx_store
+.endif
+tri_end:
+    mfc0    $11, DPC_CLOCK
+    lw      $10, startCounterTime
+    sub     $11, $11, $10
+    beqz    $ra, run_next_DL_command         // $ra != 0 if from tri cmds
+     add    perfCounterA, perfCounterA, $11  // Add to vert cycles perf counter
+    sub     perfCounterA, perfCounterA, $11  // From tris, undo add to vert perf counter
+    sub     $10, perfCounterC, $4            // How long we stalled for RDP FIFO during this cmd
+    sub     $11, $11, $10                    // Subtract that from the tri cycles
+    j       run_next_DL_command
+     add    perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
+.endif
+
 .if CFG_LEGACY_VTX_PIPE || CFG_NO_OCCLUSION_PLANE
 G_MTX_end:
     instantiate_mtx_end_begin
@@ -2376,33 +2349,12 @@ ovl3_padded_end:
 .orga max(max(ovl2_padded_end - ovl2_start, ovl4_padded_end - ovl4_start) + orga(ovl3_start), orga())
 ovl234_end:
 
-.if CFG_PROFILING_A
-vertex_end:
-    li      $ra, 0                           // Flag for coming from vtx
-    lqv     $v30, (v30Value)($zero)          // Restore value overwritten in vtx_store
-tri_end:
-    mfc0    $11, DPC_CLOCK
-    lw      $10, startCounterTime
-    sub     $11, $11, $10
-    beqz    $ra, run_next_DL_command         // $ra != 0 if from tri cmds
-     add    perfCounterA, perfCounterA, $11  // Add to vert cycles perf counter
-    sub     perfCounterA, perfCounterA, $11  // From tris, undo add to vert perf counter
-    sub     $10, perfCounterC, $4            // How long we stalled for RDP FIFO during this cmd
-    sub     $11, $11, $10                    // Subtract that from the tri cycles
-    j       run_next_DL_command
-     add    perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
-.endif
-
 tV1AtF equ $v5
 tV2AtF equ $v7
 tV3AtF equ $v9
 tV1AtI equ $v18
 tV2AtI equ $v19
 tV3AtI equ $v21
-
-.if (. & 4)
-.warning "tri_main not aligned"
-.endif
 
 tri_main:
     vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
@@ -2629,6 +2581,9 @@ tri_skip_alpha_compare_cull:
     vmrg    tV3AtF, tV3AtF, $v13 // Merge S, T, W into elems 4-6
 tri_skip_tex:
     // 109 cycles
+.if !ENABLE_PROFILING
+    addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
+.endif
     vmudl   $v29, $v16, $v23
     lsv     tV1AtF[14], VTX_SCR_Z_FRAC($1)
     vmadm   $v29, $v17, $v23
@@ -2692,9 +2647,7 @@ tDaDyI equ $v7
     vmudl   $v29, tDaDyF, $v23[1]
     add     rdpCmdBufPtr, rdpCmdBufPtr, $11  // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
     vmadm   $v29, tDaDyI, $v23[1]
-.if !ENABLE_PROFILING
-    addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
-.endif
+    sub     $8, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
     vmadn   tDaDyF, tDaDyF, $v24[1]
     sdv     tDaDxF[0], 0x0018($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
     vmadh   tDaDyI, tDaDyI, $v24[1]
@@ -2751,9 +2704,65 @@ tV1AtFF equ $v10
     ssv     tDaDyF[14], 0x0E($10)
     ssv     tDaDyI[14], 0x0C($10)
     ssv     tV1AtF[14], 0x02($10)
-    j       check_rdp_buffer_full   // eventually returns to $ra, which is next cmd, second tri in TRI2, or middle of clipping
-     ssv    tV1AtI[14], 0x00($10)
+tri_end_check_rdp_buffer_full:
+    bltz    $8, return_routine      // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
+     ssv    tV1AtI[14], 0x00($10)   // If returning from no-Z, this is okay b/c $10 is at end
      // 162 cycles
+flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
+    mfc0    $10, SP_DMA_BUSY                 // Check if any DMA is in flight
+    lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
+    addi    dmaLen, $8, RDP_CMD_BUFSIZE + 8  // dmaLen = size of DMEM buffer to copy
+.if CFG_PROFILING_C
+    // This is a wait for DMA busy loop, but written inline to avoid overwriting ra.
+    addi    perfCounterD, perfCounterD, 10   // 6 instr + 2 between end load and mfc + 0 taken branch overlaps with last + 2 between mfc and load
+.endif
+    bnez    $10, flush_rdp_buffer            // Wait until no DMAs are active
+     lw     $10, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
+    mtc0    cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
+    add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
+    sub     $10, $10, $11                    // $10 = FIFO end addr - future pointer
+    bgez    $10, @@has_room                  // Branch if we can fit this
+@@await_rdp_dblbuf_avail:
+     mfc0   $11, DPC_STATUS                  // Read RDP status
+    andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
+    bnez    $11, @@await_rdp_dblbuf_avail    // Wait until double buffered start/end available
+.if COUNTER_C_FIFO_FULL
+     addi   perfCounterC, perfCounterC, 7    // 4 instr + 2 after mfc + 1 taken branch
+.endif
+     lw     cmd_w1_dram, OSTask + OSTask_output_buff // Start of FIFO
+@@await_past_first_instr:
+    mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
+    beq     $11, cmd_w1_dram, @@await_past_first_instr // Wait until RDP moved past start
+.if COUNTER_C_FIFO_FULL
+     addi   perfCounterC, perfCounterC, 6    // 3 instr + 2 after mfc + 1 taken branch
+.else
+     nop
+.endif
+    // Start was previously the start of the FIFO, unless this is the first buffer,
+    // in which case it was the end of the FIFO. Normally, when the RDP gets to end, if we
+    // have a new end value waiting (END_VALID), it'll load end but leave current. By
+    // setting start here, it will also load current with start.
+    mtc0    cmd_w1_dram, DPC_START           // Set RDP start to start of FIFO
+@@keep_waiting:
+.if COUNTER_C_FIFO_FULL
+    // This is here so we only count it when stalling below or on FIFO end codepath
+    addi    perfCounterC, perfCounterC, 10   // 7 instr + 2 after mfc + 1 taken branch
+.endif
+@@has_room:
+    mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
+    sub     $11, $11, cmd_w1_dram            // Current - current end (rdpFifoPos or start)
+    blez    $11, @@copy_buffer               // Current is behind or at current end, can do copy
+     sub    $11, $11, dmaLen                 // If amount current is ahead of current end
+    blez    $11, @@keep_waiting              // is <= size of buffer to copy, keep waiting
+@@copy_buffer:
+     add    $11, cmd_w1_dram, dmaLen         // New end is current end + buffer size
+    sw      $11, rdpFifoPos
+    // Set up the DMA from DMEM to the RDP fifo in RDRAM
+    addi    dmaLen, dmaLen, -1                                  // subtract 1 from the length
+    addi    dmemAddr, rdpCmdBufEndP1, -(0x2000 | (RDP_CMD_BUFSIZE + 8)) // The 0x2000 is meaningless, negative means write
+    xori    rdpCmdBufEndP1, rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word ^ rdpCmdBuffer2EndPlus1Word // Swap between the two RDP command buffers
+    j       dma_read_write
+     addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
 
 .if CFG_NO_OCCLUSION_PLANE || CFG_LEGACY_VTX_PIPE
     // If we have room for the extra instructions. Z disabled is rare, so the
@@ -2762,7 +2771,7 @@ no_z_buffer:
     sdv     tV1AtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
     sdv     tV1AtI[0], 0x0000($2)   // Store RGBA shade color (integer)
     sdv     tV1AtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
-    j       check_rdp_buffer_full
+    j       tri_end_check_rdp_buffer_full
      sdv    tV1AtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
 .endif
 
@@ -2779,6 +2788,8 @@ tri_culled_by_occlusion_plane:
 return_routine:
     jr      $ra
      nop
+
+.warning "TODO move the empty space to here"
 
 load_overlay_0_and_enter:
     li      postOvlRA, 0x1000                        // Sets up return address
@@ -2881,8 +2892,8 @@ dma_write:
 // The action here is controlled by $1. If yielding, $1 > 0. If this was
 // G_LOAD_UCODE, $1 == 0. If we got to the end of the parent DL, $1 < 0.
 ovl0_start:
-    sub     $11, rdpCmdBufPtr, rdpCmdBufEndP1
-    addi    $10, $11, (RDP_CMD_BUFSIZE + 8) - 1 // Does the current buffer contain anything?
+    sub     $8, rdpCmdBufPtr, rdpCmdBufEndP1
+    addi    $10, $8, (RDP_CMD_BUFSIZE + 8) - 1 // Does the current buffer contain anything?
     bgezal  $10, flush_rdp_buffer   // - 1 because there is no bgtzal instruction
      add    taskDataPtr, taskDataPtr, inputBufferPos // inputBufferPos <= 0; taskDataPtr was where in the DL after the current chunk loaded
     jal     while_wait_dma_busy     // Wait for possible RDP flush to finish
