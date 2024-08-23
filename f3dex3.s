@@ -319,14 +319,14 @@ v31Value:
     .dh 0x7F00 // used in fog, normals unpacking
     .dh 0x7FFF // used often
 
-// constants for register $v30; only used in tri write and vtx_indices_to_addr
+// constants for register $v30
 .if (. & 15) != 0
     .error "Wrong alignment for v30value"
 .endif
 // Only one VCC pattern used:
 // vge xxx, $v30, $v30[7] = 11110001 in tri write
 v30Value:
-    .dh vertexBuffer // this and next used in vtx_indices_to_addr
+    .dh vertexBuffer // for converting vertex index to address
     .dh vtxSize << 7 // 0x1300; it's not 0x2600 because vertex indices are *2
     .dh 0x1000 // used once in tri write, some multiplier
     .dh 0x0100 // used several times in tri write
@@ -987,9 +987,8 @@ tempVpPkNorm equ 0x50
 .endmacro
 
 .macro instantiate_branch_wz
-    j       vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $10
-     li     $11, @@return_from_addrs
-@@return_from_addrs:
+    jal     vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $10
+     nop
 .if CFG_G_BRANCH_W                      // G_BRANCH_W/G_BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
     lh      $10, VTX_W_INT($10)         // read the w coordinate of the vertex (f3dzex)
 .else
@@ -1239,21 +1238,18 @@ G_LOAD_UCODE_handler:
     j       load_overlay_0_and_enter         // Delay slot is harmless
 G_MODIFYVTX_handler:
     // Command byte 3 = vtx being modified; its addr -> $10
-     li     $11, do_moveword  // Moveword adds cmd_w0 to $10 for final addr
+     li     $ra, do_moveword  // Moveword adds cmd_w0 to $10 for final addr
     lbu     cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx
 vtx_addrs_from_cmd:
     // Treat eight bytes of last command each as vertex indices << 1
     // inputBufferEnd is close enough to the end of DMEM to fit in signed offset
     lpv     $v27[0], (inputBufferEndSgn - 8)(inputBufferPos)
-vtx_indices_to_addr:
-    // Input and output in $v27
     // Also out elem 3 -> $10, elem 7 -> $3 because these are used more than once
     vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
     vmadl   $v27, $v27, $v30[1]   // Plus vtx indices times length
-    sb      $zero, materialCullMode // This covers vtx, modify vtx, branchZ, cull
-    mfc2    $10, $v27[6]
-    jr      $11
-     mfc2   $3, $v27[14] // TODO some cleanup of this
+    sb      $zero, materialCullMode // This covers modify vtx, branchZ, cull
+    jr      $ra
+     mfc2   $10, $v27[6]
 
 G_TRIFAN_handler:
     li      $1, 0x8000 // $ra negative = flag for G_TRIFAN
@@ -1328,27 +1324,26 @@ G_MEMSET_handler:
 .endif
 
 G_VTX_handler:
-    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // $1 = size in bytes = vtx count * 0x10
-    lhu     $5, geometryModeLabel + 1          // Load middle 2 bytes of geom mode
     srl     $2, cmd_w0, 11                     // n << 1
-    sub     $2, cmd_w0, $2                     // v0 << 1
-    sb      $2, (inputBufferEnd - 0x06)(inputBufferPos) // Store v0 << 1 as byte 2
+    sub     $2, cmd_w0, $2                     // = v0 << 1
+    vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
+    sb      $2, (inputBufferEnd - 8)(inputBufferPos) // Store v0 << 1 as byte 0
+    lpv     $v27[0], (inputBufferEndSgn - 8)(inputBufferPos) // (v0 + n) << 1 is byte 3
+    sb      $zero, materialCullMode            // This covers vtx
+    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // $1 = size in bytes = vtx count * 0x10
+    jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
+     vmadl  $v27, $v27, $v30[1]   // Plus vtx indices times length
+    mfc2    $10, $v27[6]
+    addi    dmaLen, $1, -1                     // DMA length is always offset by -1
+    lhu     $5, geometryModeLabel + 1          // Load middle 2 bytes of geom mode
+    andi    $10, $10, 0xFFF8                   // Round down end addr to DMA word; one input vtx still fits in one internal vtx
+    jal     dma_read_write
+     sub    dmemAddr, $10, $1                  // Start addr = end addr - size
+    mfc2    outputVtxPos, $v27[0]              // Address of start
 .if COUNTER_A_UPPER_VERTEX_COUNT
     sll     $11, $1, 12                        // Vtx count * 0x10000
     add     perfCounterA, perfCounterA, $11    // Add to vertex count
 .endif
-    j       vtx_addrs_from_cmd                 // v0 << 1 is elem 2, (v0 + n) << 1 is elem 3 = $10
-     li     $11, vtx_return_from_addrs
-
-.warning "TODO improve vertex address setup"
-
-vtx_return_from_addrs:
-    andi    $10, $10, 0xFFF8                   // Round down end addr to DMA word; one input vtx still fits in one internal vtx
-    mfc2    outputVtxPos, $v27[4]              // Address of start in vtxSize units
-    jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
-     sub    dmemAddr, $10, $1                  // Start addr = end addr - size
-    jal     dma_read_write
-     addi   dmaLen, $1, -1                     // DMA length is always offset by -1
     li      $ra, 0                             // Flag to not return to clipping
 vtx_setup_constants:
     // Computes modified viewport scale and offset including fog info, and stores
@@ -2790,7 +2785,20 @@ return_routine:
     jr      $ra
      nop
 
-.warning "TODO move the empty space to here"
+.if CFG_PROFILING_B
+loadOverlayInstrs equ 13
+.elseif CFG_PROFILING_C
+loadOverlayInstrs equ 24
+.else
+loadOverlayInstrs equ 12
+.endif
+endFreeImemAddr equ (0x1FC8 - (4 * loadOverlayInstrs))
+startFreeImem:
+.if . > endFreeImemAddr
+    .error "Out of IMEM space"
+.endif
+.org endFreeImemAddr
+endFreeImem:
 
 load_overlay_0_and_enter:
     li      postOvlRA, 0x1000                        // Sets up return address
@@ -2838,15 +2846,13 @@ dma_read_write:
     bnez    $11, dma_read_write
      addi   perfCounterD, perfCounterD, 6  // 3 instr + 2 after mfc + 1 taken branch
     j       dma_read_write_not_full
-     // Padding nops or $11 load in delay slot are harmless.
+     // $11 load in delay slot is harmless.
 .endif
 
-totalImemUseUpTo1FC8:
-
-.if . > 0x1FC8
-    .error "Out of IMEM space"
+.if . != 0x1FC8
+    // This has to be at this address for boot and S2DEX compatibility
+    .error "Error in organization of end of IMEM"
 .endif
-.org 0x1FC8
 
 // The code from here to the end is shared with S2DEX, so great care is needed for changes.
 while_wait_dma_busy:
@@ -3101,9 +3107,7 @@ segmented_to_physical:
      add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
 G_CULLDL_handler:
-    j       vtx_addrs_from_cmd              // Load start vtx addr in $10, end vtx in $3
-     li     $11, culldl_return_from_addrs
-culldl_return_from_addrs:
+    jal     vtx_addrs_from_cmd              // Load start vtx addr in $10
     /*
     CLIP_OCCLUDED can't be included here because: Suppose the list consists of N-1
     verts which are behind the occlusion plane, and 1 vert which is behind the camera
@@ -3113,7 +3117,8 @@ culldl_return_from_addrs:
     the occlusion plane if the vert is behind the camera, because this only matters for
     G_CULLDL and not for tris.
     */
-    li      $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE)
+     li     $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE)
+    mfc2    $3, $v27[14]                    // End vertex
     lhu     $11, VTX_CLIP($10)
 culldl_loop:
     and     $1, $1, $11
