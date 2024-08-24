@@ -2529,18 +2529,21 @@ tri_skip_alpha_compare_cull:
     vmadh   $v17, $v17, $v30[4] // -16
     ssv     $v14[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vmudn   $v29, $v3, $v14[0]
-    andi    $10, $5, 0x0080 // Extract the left major flag from $5
+    lw      $20, otherMode1
     vmadl   $v29, $v22, $v4[1]
-    or      $10, $10, $7 // Combine the left major flag with the level and tile from the texture settings
+    andi    $10, $5, 0x0080 // Extract the left major flag from $5
     vmadm   $v29, $v15, $v4[1]
-    sb      $10, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
+    or      $10, $10, $7 // Combine the left major flag with the level and tile from the texture settings
     vmadn   $v2, $v22, $v26[1]
-    beqz    $9, tri_skip_tex // If textures are not enabled, skip texture coefficient calculation
-     vmadh  $v3, $v15, $v26[1]
-     // 88 cycles
+    sb      $10, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
+    vmadh   $v3, $v15, $v26[1]
+    andi    $20, ZMODE_DEC
     vrcph   $v29[0], $v27[0]
+    addi    $20, $20, -ZMODE_DEC
     vrcpl   $v10[0], $v27[1]
-    vmudh   $v14, vOne, $v13[1q]
+    beqz    $9, tri_skip_tex // If textures are not enabled, skip texture coefficient calculation
+     vmudh  $v14, vOne, $v13[1q]
+     // 91 cycles
     vrcph   $v27[0], $v31[2]     // 0
     vmudh   $v22, vOne, $v31[7]  // 0x7FFF
     vmudm   $v29, $v13, $v10[0]
@@ -2567,10 +2570,10 @@ tri_skip_alpha_compare_cull:
     ldv     tV1AtF[8], 0x0028(rdpCmdBufPtr) // 8
     vmrg    tV3AtF, tV3AtF, $v13 // Merge S, T, W into elems 4-6
 tri_skip_tex:
-    // 109 cycles
 .if !ENABLE_PROFILING
     addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
 .endif
+    // 109 cycles
     vmudl   $v29, $v16, $v23
     lsv     tV1AtF[14], VTX_SCR_Z_FRAC($1)
     vmadm   $v29, $v17, $v23
@@ -2664,32 +2667,31 @@ tDaDeI equ $v9
     sdv     tDaDeF[8], 0x0030($1)   // Store DsDe, DtDe, DwDe texture coefficients (fractional)
     vmadh   tV1AtI, tDaDeI, $v26[1]
     sdv     tDaDeI[8], 0x0020($1)   // Store DsDe, DtDe, DwDe texture coefficients (integer)
-tV1AtFF equ $v10
     // All values start in element 7. "a", attribute, is Z. Need
     // tV1AtI, tV1AtF, tDaDxI, tDaDxF, tDaDeI, tDaDeF, tDaDyI, tDaDyF
-    vmudn   tV1AtFF, tDaDeF, $v4[1] // Super-frac (frac * frac) part; assumes v4 factor >= 0
-.if CFG_NO_OCCLUSION_PLANE || CFG_LEGACY_VTX_PIPE
-    beqz    $6, no_z_buffer
-.endif
-     vmudn  tDaDeF, tDaDeF, $v30[7] // 0x0020
-    vmadh   tDaDeI, tDaDeI, $v30[7] // 0x0020
-    sdv     tV1AtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
-    vmudn   tDaDxF, tDaDxF, $v30[7] // 0x0020
-    sdv     tV1AtI[0], 0x0000($2)   // Store RGBA shade color (integer)
-    vmadh   tDaDxI, tDaDxI, $v30[7] // 0x0020
-    sdv     tV1AtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
     vmudn   tDaDyF, tDaDyF, $v30[7] // 0x0020
+    beqz    $20, tri_decal_fix_z
+     vmadh  tDaDyI, tDaDyI, $v30[7] // 0x0020
+tri_return_from_decal_fix_z:
+tV1AtFF equ $v10
+    vmudn   tV1AtFF, tDaDeF, $v4[1] // Super-frac (frac * frac) part; assumes v4 factor >= 0
+    sdv     tV1AtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
+    vmudn   tDaDeF, tDaDeF, $v30[7] // 0x0020
+    sdv     tV1AtI[0], 0x0000($2)   // Store RGBA shade color (integer)
+    vmadh   tDaDeI, tDaDeI, $v30[7] // 0x0020
+    sdv     tV1AtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
+    vmudn   tDaDxF, tDaDxF, $v30[7] // 0x0020
     sdv     tV1AtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
-    vmadh   tDaDyI, tDaDyI, $v30[7] // 0x0020
-    ssv     tDaDeF[14], 0x0A($10)
-    vmudl   $v29,  tV1AtFF, $v30[7] // 0x0020
-    ssv     tDaDeI[14], 0x08($10)
-    vmadn   tV1AtF, tV1AtF, $v30[7] // 0x0020
-    ssv     tDaDxF[14], 0x06($10)
-    vmadh   tV1AtI, tV1AtI, $v30[7] // 0x0020
-    ssv     tDaDxI[14], 0x04($10)
+    vmadh   tDaDxI, tDaDxI, $v30[7] // 0x0020
     ssv     tDaDyF[14], 0x0E($10)
+    vmudl   $v29,  tV1AtFF, $v30[7] // 0x0020
     ssv     tDaDyI[14], 0x0C($10)
+    vmadn   tV1AtF, tV1AtF, $v30[7] // 0x0020
+    ssv     tDaDeF[14], 0x0A($10)
+    vmadh   tV1AtI, tV1AtI, $v30[7] // 0x0020
+    ssv     tDaDeI[14], 0x08($10)
+    ssv     tDaDxF[14], 0x06($10)
+    ssv     tDaDxI[14], 0x04($10)
     ssv     tV1AtF[14], 0x02($10)
 tri_end_check_rdp_buffer_full:
     bltz    $8, return_routine      // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
@@ -2751,16 +2753,11 @@ flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
     j       dma_read_write
      addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
 
-.if CFG_NO_OCCLUSION_PLANE || CFG_LEGACY_VTX_PIPE
-    // If we have room for the extra instructions. Z disabled is rare, so the
-    // extra 8 cycles of finishing the dummy Z write above isn't too much of a problem.
-no_z_buffer:
-    sdv     tV1AtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
-    sdv     tV1AtI[0], 0x0000($2)   // Store RGBA shade color (integer)
-    sdv     tV1AtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
-    j       tri_end_check_rdp_buffer_full
-     sdv    tV1AtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
-.endif
+tri_decal_fix_z:
+    //vch     tDaDyI, tDaDyI, $v31[1] // -1 TODO
+    //vcl     tDaDyF, tDaDyF, $v31[2] // 0 TODO
+    j       tri_return_from_decal_fix_z
+     nop // TODO
 
 .if CFG_PROFILING_B
 tri_culled_by_occlusion_plane:
@@ -3895,12 +3892,3 @@ ovl4_end:
 ovl4_padded_end:
 
 .close // CODE_FILE
-
-lw      $11, otherMode1
-li      $2, ZMODE_DEC
-and     $11, $11, $2  // Mask to Z mode
-bne     $11, $2, TODO
-vch     tDaDyI, tDaDyI, $v31[1] // -1 TODO
-vcl     tDaDyF, tDaDyF, $v31[2] // 0 TODO
-ssv     tDaDyF[14], -0x02(rdpCmdBufPtr) // Decal clamped DaDy f
-ssv     tDaDyI[14], -0x04(rdpCmdBufPtr) // Decal clamped DaDy i
