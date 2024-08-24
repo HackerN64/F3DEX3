@@ -74,8 +74,8 @@ However, it retains all other F3DEX3 features:
 - All features not related to vertex/lighting: auto-batched rendering, packed 5
   triangles commands, hints system, etc.
 
-The performance of F3DEX3 vertex processing with both LVP and NOC is almost the
-same as that of F3DEX2; see the Performance Results section below.
+The performance of F3DEX3 vertex processing with both LVP and NOC is nearly
+identical that of F3DEX2; see the Performance page.
 
 ## Profiling
 

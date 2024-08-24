@@ -25,9 +25,9 @@ for dir in dirs:
                 dmemAvail = addr
             elif sym == "rdpCmdBuffer1":
                 dmemAvail = addr - dmemAvail
-            elif sym == "totalImemUseUpTo1FC8":
+            elif sym == "startFreeImem":
                 imemAvail = addr
-            elif sym == "while_wait_dma_busy":
+            elif sym == "endFreeImem":
                 imemAvail = addr - imemAvail
         if dmemAvail == None or imemAvail == None:
             raise RuntimeError("Failed to extract addresses from sym file for " + ucodename)
