@@ -2754,10 +2754,25 @@ flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
      addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
 
 tri_decal_fix_z:
-    //vch     tDaDyI, tDaDyI, $v31[1] // -1 TODO
-    //vcl     tDaDyF, tDaDyF, $v31[2] // 0 TODO
+    /*
+    vrsqh   $v29[0], tV1AtI[7]
+    vrsql   $v26[0], tV1AtF[7]
+    vrsqh   $v25[0], $v31[2] // 0
+    vmudn   $v29, $v26, $v31[0] // -4
+    vmadh   $v25, $v25, $v31[0] // -4
+    */
+    /*
+    vrcph   $v29[0], tV1AtI[7]
+    vrcpl   $v25[0], tV1AtF[7]
+    vmudh   $v25, $v25, $v31[1] // -1
+    */
+    mfc2    $20, tV1AtI[7] // Z int part; maybe 0000 to 03FF
+    li      $11, 0xFE00
+    srl     $20, $20, 7 // Now 00 to 07
+    srav    $11, $11, $20 // 00 -> FF00 = -512; 07 -> FFFE = -4
+    mtc2    $11, $v25[0]
     j       tri_return_from_decal_fix_z
-     nop // TODO
+     vcr    tDaDyI, tDaDyI, $v25[0]
 
 .if CFG_PROFILING_B
 tri_culled_by_occlusion_plane:
