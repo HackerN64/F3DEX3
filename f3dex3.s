@@ -462,17 +462,14 @@ clipCondShifts:
     .db CLIP_SCAL_NX_SHIFT
     .db CLIP_SCAL_PX_SHIFT
 
-// "Forward declaration" of temporary matrix in clipTempVerts scratch space, aligned to 16 bytes
-tempMemRounded equ ((clipTempVerts + 15) & ~15)
-
 // Movemem table
 movememTable:
-    .dh tempMemRounded    // G_MTX multiply temp matrix (model)
-    .dh mMatrix           // G_MV_MMTX
-    .dh tempMemRounded    // G_MTX multiply temp matrix (projection)
-    .dh vpMatrix          // G_MV_PMTX
-    .dh viewport          // G_MV_VIEWPORT
-    .dh cameraWorldPos    // G_MV_LIGHT
+    .dh tempMatrix      // G_MTX multiply temp matrix (model)
+    .dh mMatrix         // G_MV_MMTX
+    .dh tempMatrix      // G_MTX multiply temp matrix (projection)
+    .dh vpMatrix        // G_MV_PMTX
+    .dh viewport        // G_MV_VIEWPORT
+    .dh cameraWorldPos  // G_MV_LIGHT
 
 // moveword table
 movewordTable:
@@ -560,7 +557,6 @@ miniTableEntry G_TRIFAN_handler
 miniTableEntry G_LIGHTTORDP_handler
 miniTableEntry G_RELSEGMENT_handler
 
-    .align 2 // for everything following
 
 // The maximum number of generated vertices in a clip polygon. In reality, this
 // is equal to MAX_CLIP_POLY_VERTS, but for testing we can change them separately.
@@ -595,54 +591,58 @@ MAX_CLIP_GEN_VERTS equ 7
 // tris) if this occurs. Because this is caused by extreme/degenerate cases like
 // the camera exactly on a tri, not drawing anything is an okay result.
 MAX_CLIP_POLY_VERTS equ 7
-clipPoly:
-    .skip (MAX_CLIP_POLY_VERTS+1) * 2   // 3   5   7 + term 0
-clipPoly2:                              //  \ / \ / \
-    .skip (MAX_CLIP_POLY_VERTS+1) * 2   //   4   6   7 + term 0
+CLIP_POLY_SIZE_BYTES equ (MAX_CLIP_POLY_VERTS+1) * 2
+CLIP_TEMP_VERTS_SIZE_BYTES equ (MAX_CLIP_GEN_VERTS * vtxSize)
 
-// Vertex buffer in RSP internal format
-vertexBuffer:
-    .skip (G_MAX_VERTS * vtxSize)
-
-.if . > yieldDataFooter
-    // OS_YIELD_DATA_SIZE (0xC00) bytes of DMEM are saved. The last data in that is
-    // the footer, which contains four perf counters, taskDataPtr, and ucode.
-    // So, any data starting from the address of this footer will be clobbered,
-    // so the vertex buffer and other data which needs to be save across yield
-    // can't extend here. (The input buffer will be reloaded from the next
-    // command in the source DL.)
-    .error "Important things in DMEM will not be saved at yield!"
-.endif
-
-// Space for temporary verts for clipping code
-// tempMemRounded defined above = this rounded up to 16 bytes, for temp mtx etc.
-clipTempVerts:
-    .skip MAX_CLIP_GEN_VERTS * vtxSize
-clipTempVertsEnd:
-
-.if (. - tempMemRounded) < 0x40
-    .error "Not enough space for temp matrix!"
-.endif
-
-memsetBufferStart equ ((vertexBuffer + 0xF) & 0xFF0)
-memsetBufferEnd equ (clipTempVertsEnd & 0xFF0)
-memsetBufferSize equ (memsetBufferEnd - memsetBufferStart)
+VERTEX_BUFFER_SIZE_BYTES equ (G_MAX_VERTS * vtxSize)
 
 RDP_CMD_BUFSIZE equ 0xB0
 RDP_CMD_BUFSIZE_EXCESS equ 0xB0 // Maximum size of an RDP triangle command
 RDP_CMD_BUFSIZE_TOTAL equ (RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS)
+
 INPUT_BUFFER_CMDS equ 21
-INPUT_BUFFER_LEN equ (INPUT_BUFFER_CMDS * 8)
-END_VARIABLE_LEN_DMEM equ (0xFC0 - INPUT_BUFFER_LEN - (2 * RDP_CMD_BUFSIZE_TOTAL))
+INPUT_BUFFER_SIZE_BYTES equ (INPUT_BUFFER_CMDS * 8)
 
-endVariableDmemUse:
+END_VARIABLE_LEN_DMEM equ (0xFC0 - INPUT_BUFFER_SIZE_BYTES - (2 * RDP_CMD_BUFSIZE_TOTAL) - (2 * CLIP_POLY_SIZE_BYTES) - CLIP_TEMP_VERTS_SIZE_BYTES - VERTEX_BUFFER_SIZE_BYTES)
 
-.if . > END_VARIABLE_LEN_DMEM
-    .error "Out of DMEM space"
+startFreeDmem:
+.org END_VARIABLE_LEN_DMEM
+endFreeDmem:
+
+// Main vertex buffer in RSP internal format
+vertexBuffer:
+    .skip VERTEX_BUFFER_SIZE_BYTES
+    
+// Space for temporary verts for clipping code, and reused for other things
+clipTempVerts:
+
+// Round up to 0x10
+.org ((clipTempVerts + 0xF) & 0xFF0)
+// Vertex addresses, to avoid a multiply-add for each vertex index lookup
+vertexTable:
+    .skip (G_MAX_VERTS * 2) // halfword for each vertex; EX2 has an extra end addr but this is not needed
+    
+.if . > yieldDataFooter
+    // Need to fit everything through vertex buffer in yield buffer, would like
+    // to also fit vertexTable to avoid recompute after yield
+    .error "Too much being stored in yieldable DMEM"
 .endif
 
-.org END_VARIABLE_LEN_DMEM
+tempMatrix:
+    .skip 0x40
 
+.if . > (clipTempVerts + CLIP_TEMP_VERTS_SIZE_BYTES)
+    .error "Too much in clipTempVerts"
+.endif
+.org (clipTempVerts + CLIP_TEMP_VERTS_SIZE_BYTES)
+clipTempVertsEnd:
+
+clipPoly:
+    .skip CLIP_POLY_SIZE_BYTES  // 3   5   7 + term 0
+clipPoly2:                      //  \ / \ / \
+    .skip CLIP_POLY_SIZE_BYTES  //   4   6   7 + term 0
+
+    
 // First RDP Command Buffer
 rdpCmdBuffer1:
     .skip RDP_CMD_BUFSIZE
@@ -667,7 +667,7 @@ rdpCmdBuffer2EndPlus1Word:
 
 // Input buffer. After RDP cmd buffers so it can be vector addressed from end.
 inputBuffer:
-    .skip INPUT_BUFFER_LEN
+    .skip INPUT_BUFFER_SIZE_BYTES
 inputBufferEnd:
 inputBufferEndSgn equ -(0x1000 - inputBufferEnd) // Underflow DMEM address
 
@@ -688,6 +688,13 @@ fourthQWMVP equ -(0x1000 - (OSTask + OSTask_type))
 startCounterTime equ (OSTask + OSTask_ucode_size)
 // These two words are used by boot, but not by F3DEX3 or S2DEX.
 xfrmLookatDirs equ -(0x1000 - (OSTask + OSTask_ucode_data)) // and OSTask_ucode_data_size
+
+
+memsetBufferStart equ ((vertexBuffer + 0xF) & 0xFF0)
+memsetBufferMaxEnd equ (rdpCmdBuffer1 & 0xFF0)
+memsetBufferMaxSize equ (memsetBufferMaxEnd - memsetBufferStart)
+memsetBufferSize equ (memsetBufferMaxSize > 0x800 ? 0x800 : memsetBufferMaxSize)
+
 
 .close // DATA_FILE
 
@@ -931,9 +938,10 @@ vLookat1 equ vAAA
 tempViewportScale equ 0x00
 tempViewportOffset equ 0x10
 tempOccPlusMinus equ 0x20
-tempXfrmSingle equ 0x30
-tempVpRGBA equ 0x40
-tempVpPkNorm equ 0x50
+tempVpRGBA equ 0x30
+tempVpPkNorm equ 0x40
+tempXfrmSingle equ 0x50
+tempPrevVtxGarbage equ 0x50 // Up to 2 * 0x26 = 0x4C used -> to 0x9C
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -945,7 +953,7 @@ tempVpPkNorm equ 0x50
 .macro instantiate_mtx_end_begin
 // Multiplies the temp loaded matrix into the M or VP matrix
     lhu     $6, (movememTable + G_MV_MMTX)($1) // Output; $1 holds 0 for M or 4 for VP.
-    li      $3, tempMemRounded // Input 1 = temp mem (loaded mtx)
+    li      $3, tempMatrix // Input 1 = temp mem (loaded mtx)
     jal     while_wait_dma_busy
      move   $2, $6 // Input 0 = output
     // Followed immedately by instantiate_mtx_multiply. These need to be broken
@@ -1020,7 +1028,7 @@ tempVpPkNorm equ 0x50
     li      $3, memsetBufferStart + 0x10 // Last qword set is memsetBufferStart
     jal     @@clamp_to_memset_buffer
      vmudh  $v2, vOne, $v2[1]           // Move element 1 (lower bytes) to all
-    addi    $2, $2, memsetBufferStart   // First qword set is one below memsetBufferEnd
+    addi    $2, $2, memsetBufferStart   // First qword set is one below end
 @@pre_loop:
     sqv     $v2, (-0x10)($2)
     bne     $2, $3, @@pre_loop
@@ -1139,8 +1147,8 @@ ovl01_end:
 displaylist_dma_with_count:
     andi    inputBufferPos, cmd_w0, 0x00F8             // Byte 3, how many cmds to drop from load (max 0xA0)
 displaylist_dma:
-    // Load INPUT_BUFFER_LEN - inputBufferPos cmds (inputBufferPos >= 0, mult of 8)
-    addi    inputBufferPos, inputBufferPos, -INPUT_BUFFER_LEN // inputBufferPos = - num cmds
+    // Load INPUT_BUFFER_SIZE_BYTES - inputBufferPos cmds (inputBufferPos >= 0, mult of 8)
+    addi    inputBufferPos, inputBufferPos, -INPUT_BUFFER_SIZE_BYTES // inputBufferPos = - num cmds
 .if CFG_PROFILING_A
     sll     $11, inputBufferPos, 16 - 3                // Divide by 8 for num cmds to load, then move to upper 16
     sub     perfCounterB, perfCounterB, $11            // Negative so subtract
@@ -1492,7 +1500,7 @@ vtx_after_matrix_load:
 .if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
     andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
     srl     $7, $7, 5  // 8 if G_FOG is set, 0 otherwise
-    li      $19, clipTempVerts + vtxSize  // Temp mem; fog writes up to vtxSize before
+    addi    $19, rdpCmdBufEndP1, vtxSize  // Temp mem; fog writes up to vtxSize before
     jal     while_wait_dma_busy   // Wait for vertex load to finish
      move   secondVtxPos, $19     // for first pre-loop, same for secondVtxPos
     andi    $11, $5, G_LIGHTING >> 8
@@ -1515,7 +1523,7 @@ vtx_after_matrix_load:
 @@skip_lighting:
     andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
     jal     while_wait_dma_busy   // Wait for vertex load to finish
-     li     $19, clipTempVerts    // Temp mem we can freely overwrite replaces outputVtxPos
+     addi   $19, rdpCmdBufEndP1, tempPrevVtxGarbage  // Temp mem we can freely overwrite replaces outputVtxPos
     j       vtx_store_loop_entry
      move   secondVtxPos, $19     // for first pre-loop, same for secondVtxPos
 .endif
@@ -2134,7 +2142,7 @@ clip_edgelooptop: // Loop over edges connecting verts, possibly subdivide the ed
     beq     $11, clipFlags, clip_nextedge  // Both set or both clear = both off screen or both on screen, no subdivision
      move   clipFlags, $11                     // clipFlags = masked V2's flags
     // Going to subdivide this edge. Find available temp vertex slot.
-    li      outputVtxPos, clipTempVerts + MAX_CLIP_GEN_VERTS * vtxSize
+    li      outputVtxPos, clipTempVertsEnd
 clip_find_unused_loop:
     lhu     $11, (VTX_CLIP - vtxSize)(outputVtxPos)
     addi    $10, outputVtxPos, -clipTempVerts  // This is within the loop rather than before b/c delay after lhu
