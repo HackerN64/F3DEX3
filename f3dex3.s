@@ -620,7 +620,7 @@ clipTempVerts:
 .org ((clipTempVerts + 0xF) & 0xFF0)
 // Vertex addresses, to avoid a multiply-add for each vertex index lookup
 vertexTable:
-    .skip (G_MAX_VERTS * 2) // halfword for each vertex; EX2 has an extra end addr but this is not needed
+    .skip ((G_MAX_VERTS + 8) * 2) // halfword for each vertex; need 1 extra end addr, easier to write 8 extra
     
 .if . > yieldDataFooter
     // Need to fit everything through vertex buffer in yield buffer, would like
@@ -995,8 +995,7 @@ tempPrevVtxGarbage equ 0x50 // Up to 2 * 0x26 = 0x4C used -> to 0x9C
 .endmacro
 
 .macro instantiate_branch_wz
-    jal     vtx_addrs_from_cmd          // byte 3 = vtx being tested; addr -> $10
-     nop
+    lhu     $10, (vertexTable)(cmd_w0)  // Vertex addr from byte 3
 .if CFG_G_BRANCH_W                      // G_BRANCH_W/G_BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
     lh      $10, VTX_W_INT($10)         // read the w coordinate of the vertex (f3dzex)
 .else
@@ -1125,7 +1124,8 @@ continue_from_os_task:
     lw      perfCounterB, mITMatrix + YDF_OFFSET_PERFCOUNTERB
     lw      perfCounterC, mITMatrix + YDF_OFFSET_PERFCOUNTERC
     lw      perfCounterD, mITMatrix + YDF_OFFSET_PERFCOUNTERD
-    lw      taskDataPtr, OSTask + OSTask_data_ptr
+    jal     fill_vertex_table
+     lw     taskDataPtr, OSTask + OSTask_data_ptr
 finish_setup:
 .if CFG_PROFILING_C
     mfc0    $11, DPC_CLOCK
@@ -1245,19 +1245,9 @@ call_ret_common:
 G_LOAD_UCODE_handler:
     j       load_overlay_0_and_enter         // Delay slot is harmless
 G_MODIFYVTX_handler:
-    // Command byte 3 = vtx being modified; its addr -> $10
-     li     $ra, do_moveword  // Moveword adds cmd_w0 to $10 for final addr
-    lbu     cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx
-vtx_addrs_from_cmd:
-    // Treat eight bytes of last command each as vertex indices << 1
-    // inputBufferEnd is close enough to the end of DMEM to fit in signed offset
-    lpv     $v27[0], (inputBufferEndSgn - 8)(inputBufferPos)
-    // Also out elem 3 -> $10, elem 7 -> $3 because these are used more than once
-    vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
-    vmadl   $v27, $v27, $v30[1]   // Plus vtx indices times length
-    sb      $zero, materialCullMode // This covers modify vtx, branchZ, cull
-    jr      $ra
-     mfc2   $10, $v27[6]
+     lhu    $10, (vertexTable)(cmd_w0)       // Byte 3 = vtx being modified
+    j       do_moveword  // Moveword adds cmd_w0 to $10 for final addr
+     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx, bit 15 clear
 
 G_TRIFAN_handler:
     li      $1, 0x8000 // $ra negative = flag for G_TRIFAN
@@ -1332,27 +1322,25 @@ G_MEMSET_handler:
 .endif
 
 G_VTX_handler:
+    lhu     dmemAddr, (vertexTable)(cmd_w0)    // (v0 + n) end address; up to 56 inclusive
+    jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
+     lhu    $1, (inputBufferEnd - 0x07)(inputBufferPos) // $1 = size in bytes = vtx count * 0x10
+    andi    dmemAddr, dmemAddr, 0xFFF8         // Round down end addr to DMA word; one input vtx still fits in one internal vtx
+    sub     dmemAddr, dmemAddr, $1             // Start addr = end addr - size
+    addi    dmaLen, $1, -1                     // DMA length is always offset by -1
+    j       dma_read_write
+     li     $ra, 0x8000 | vtx_after_dma        // Negative = flag to not to return to clipping in vtx_setup_constants
+
+vtx_after_dma:
+    lhu     $5, geometryModeLabel + 1          // Load middle 2 bytes of geom mode
     srl     $2, cmd_w0, 11                     // n << 1
     sub     $2, cmd_w0, $2                     // = v0 << 1
-    vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
-    sb      $2, (inputBufferEnd - 8)(inputBufferPos) // Store v0 << 1 as byte 0
-    lpv     $v27[0], (inputBufferEndSgn - 8)(inputBufferPos) // (v0 + n) << 1 is byte 3
+    lhu     outputVtxPos, (vertexTable)($2)    // Address of start
     sb      $zero, materialCullMode            // This covers vtx
-    lhu     $1, (inputBufferEnd - 0x07)(inputBufferPos) // $1 = size in bytes = vtx count * 0x10
-    jal     segmented_to_physical              // Convert address in cmd_w1_dram to physical
-     vmadl  $v27, $v27, $v30[1]   // Plus vtx indices times length
-    mfc2    $10, $v27[6]
-    addi    dmaLen, $1, -1                     // DMA length is always offset by -1
-    lhu     $5, geometryModeLabel + 1          // Load middle 2 bytes of geom mode
-    andi    $10, $10, 0xFFF8                   // Round down end addr to DMA word; one input vtx still fits in one internal vtx
-    jal     dma_read_write
-     sub    dmemAddr, $10, $1                  // Start addr = end addr - size
-    mfc2    outputVtxPos, $v27[0]              // Address of start
 .if COUNTER_A_UPPER_VERTEX_COUNT
     sll     $11, $1, 12                        // Vtx count * 0x10000
     add     perfCounterA, perfCounterA, $11    // Add to vertex count
 .endif
-    li      $ra, 0                             // Flag to not return to clipping
 vtx_setup_constants:
     // Computes modified viewport scale and offset including fog info, and stores
     // these to temp memory in the RDP buffer. This is only used during vertex write
@@ -1407,7 +1395,7 @@ vtx_setup_constants:
 .endif
     vmov    sVPS[1], $v20[1]                      // Negate vscale[1] because RDP top = y=0
 .if CFG_LEGACY_VTX_PIPE
-    bnez    $ra, clip_after_constants             // Return to clipping if from there
+    bgtz    $ra, clip_after_constants             // Return to clipping if from there
 .endif
      vmov   sVPS[5], $v20[1]                      // Same for second half
 vtx_matrix_load:
@@ -1451,7 +1439,7 @@ vtx_after_lt_setup:
      sqv    sVPO, (tempViewportOffset)(rdpCmdBufEndP1) // Store viewport offset
     vmrg    $v30, $v30, $v31[2]                   // 0; zero AO values
 @@skipzeroao:
-    bnez    $ra, clip_after_constants             // Return to clipping if from there
+    bgtz    $ra, clip_after_constants             // Return to clipping if from there
      sqv    sVPS, (tempViewportScale)(rdpCmdBufEndP1) // Store viewport scale
     lqv     vM0I,     (mMatrix + 0x00)($zero)  // Load M matrix
     lqv     vM2I,     (mMatrix + 0x10)($zero)
@@ -2342,9 +2330,31 @@ clip_draw_tris_loop:
     bne     clipPolyWrite, clipPolySelect, clip_draw_tris_loop
      addi   clipPolySelect, clipPolySelect, 2
 clip_done:
+    lqv     $v30, (v30Value)($zero) // Need this repeated here in case we exited early
     lh      $ra, tempTriRA
+
+fill_vertex_table:
+    // Create bytes 00-07
+    li      $1, 7
+@@loop1:
+    sb      $1, (vertexTable)($1)
+    bgtz    $1, @@loop1
+     addi   $1, $1, -1
+    // Load to vu and multiply by 2 to get vertex indexes. It would be more cycles
+    // to change the loop above to count by 2s than the stalls here.
+    li      $2, vertexTable
+    lpv     $v3[0], (0)($2)
+    li      $3, vertexTable + ((G_MAX_VERTS + 8) * 2) // Need 0-56 inclusive, so do 0-63
+    vmudh   $v3, $v3, $v31[3] // 2; now 0x0000, 0x0200, ..., 0x0E00
+@@loop2:
+    vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
+    vmadl   $v4, $v3, $v30[1]     // Plus vtx indices times length
+    vadd    $v3, $v3, $v30[2]     // 0x1000; increment by 8 verts = 16
+    addi    $2, $2, 0x10
+    bne     $2, $3, @@loop2
+     sqv    $v4[0], (-0x10)($2)
     jr      $ra
-     lqv    $v30, (v30Value)($zero) // Need this repeated here in case we exited early
+     nop
 
 ovl3_end:
 .align 8
@@ -3115,7 +3125,8 @@ segmented_to_physical:
      add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
 G_CULLDL_handler:
-    jal     vtx_addrs_from_cmd              // Load start vtx addr in $10
+    lhu     $10, (vertexTable)(cmd_w0)      // Start vtx addr
+    lhu     $3, (vertexTable)(cmd_w1_dram)  // End vertex
     /*
     CLIP_OCCLUDED can't be included here because: Suppose the list consists of N-1
     verts which are behind the occlusion plane, and 1 vert which is behind the camera
@@ -3125,8 +3136,7 @@ G_CULLDL_handler:
     the occlusion plane if the vert is behind the camera, because this only matters for
     G_CULLDL and not for tris.
     */
-     li     $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE)
-    mfc2    $3, $v27[14]                    // End vertex
+    li      $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE)
     lhu     $11, VTX_CLIP($10)
 culldl_loop:
     and     $1, $1, $11

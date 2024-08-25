@@ -2974,7 +2974,8 @@ _DW({                                         \
  * 
  * Internally, a material is defined to start with any set image command, and
  * end on any of the following: call, branch, return, vertex, all tri commands,
- * modify vertex, branch Z/W, or cull. The physical address of the display list
+ * tex/fill rectangles, and successes on cull or branch w/z (which are usually
+ * preceded by vertex loads anyway). The physical address of the display list
  * --not the address of the image--is stored when a material is started. If a
  * material starts and its physical address is the same as the stored last start
  * address, i.e. we're executing the same material display list as the last
