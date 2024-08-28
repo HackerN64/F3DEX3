@@ -2139,9 +2139,23 @@ vtx_setup_constants:
     vmov    sVPS[1], $v20[1]                      // Negate vscale[1] because RDP top = y=0
 .if CFG_LEGACY_VTX_PIPE
     bgtz    $ra, clip_after_constants             // Return to clipping if from there
-.endif
      vmov   sVPS[5], $v20[1]                      // Same for second half
-vtx_matrix_load:
+.else
+    vmov    sVPS[5], $v20[1]                      // Same for second half
+    bnez    $11, @@skipzeroao                     // Continue if AO disabled
+     sqv    sVPO, (tempViewportOffset)(rdpCmdBufEndP1) // Store viewport offset
+    vmrg    $v30, $v30, $v31[2]                   // 0; zero AO values
+@@skipzeroao:
+    bgtz    $ra, clip_after_constants             // Return to clipping if from there
+     sqv    sVPS, (tempViewportScale)(rdpCmdBufEndP1) // Store viewport scale
+.endif
+
+vtx_after_setup_constants:
+    andi    $8, $5, G_LIGHTING >> 8        // Temp to be reused below, is secondVtxPos
+    beqz    $8, @@skip_lighting
+     li     $16, vtx_loop_no_lighting      // This is clipFlags, but not modified
+    li      $16, lt_vtx_pair               // during vtx_store
+@@skip_lighting:
 .if CFG_LEGACY_VTX_PIPE
     bnez    $7, skip_vtx_mvp
      li     $2, vpMatrix
@@ -2152,8 +2166,7 @@ vtx_after_mtx_multiply:
     sqv     $v5[0], (fourthQWMVP +    0)($zero)
     sb      $10, mITValid  // $10 is nonzero from mtx_multiply, in fact 0x18
 skip_vtx_mvp:
-    andi    $11, $5, G_LIGHTING >> 8
-    bnez    $11, ovl234_lighting_entrypoint     // Lighting setup, incl. transform
+    bnez    $8, ovl234_lighting_entrypoint      // Lighting setup, incl. transform
      sb     $zero, materialCullMode             // Vtx ends material
 vtx_after_lt_setup:
     lqv     vM0I,     (mITMatrix + 0x00)($zero)  // Load MVP matrix
@@ -2178,12 +2191,6 @@ vtx_after_lt_setup:
     ldv     vM0F[8],  (mITMatrix + 0x20)($zero)
     ldv     vM2F[8],  (fourthQWMVP +  0)($zero)
 .else
-    bnez    $11, @@skipzeroao                     // Continue if AO disabled
-     sqv    sVPO, (tempViewportOffset)(rdpCmdBufEndP1) // Store viewport offset
-    vmrg    $v30, $v30, $v31[2]                   // 0; zero AO values
-@@skipzeroao:
-    bgtz    $ra, clip_after_constants             // Return to clipping if from there
-     sqv    sVPS, (tempViewportScale)(rdpCmdBufEndP1) // Store viewport scale
     sb      $zero, materialCullMode            // Vtx ends material
     lqv     vM0I,     (mMatrix + 0x00)($zero)  // Load M matrix
     lqv     vM2I,     (mMatrix + 0x10)($zero)
@@ -2227,18 +2234,12 @@ vtx_after_calc_mit:
     ldv     vVP0F[8], (vpMatrix  + 0x20)($zero)
     ldv     vVP2F[8], (vpMatrix  + 0x30)($zero)
 .endif
-vtx_after_matrix_load:
-.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
     andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
+.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
     srl     $7, $7, 5  // 8 if G_FOG is set, 0 otherwise
     addi    $19, rdpCmdBufEndP1, vtxSize  // Temp mem; fog writes up to vtxSize before
     jal     while_wait_dma_busy   // Wait for vertex load to finish
      move   secondVtxPos, $19     // for first pre-loop, same for secondVtxPos
-    andi    $11, $5, G_LIGHTING >> 8 // Must be after the DMA wait b/c modifies $ra
-    beqz    $11, @@skip_lighting
-     li     $ra, vtx_loop_no_lighting
-    li      $ra, lt_vtx_pair
-@@skip_lighting:
     ldv     vPairPosI[0], (VTX_IN_OB + 0 * inputVtxSize)(inputVtxPos) // 1st vec pos
     ldv     vPairPosI[8], (VTX_IN_OB + 1 * inputVtxSize)(inputVtxPos) // 2nd vec pos
     llv     sTCL[8],      (VTX_IN_CN + 0 * inputVtxSize)(inputVtxPos) // RGBA in 4:5
@@ -2247,12 +2248,6 @@ vtx_after_matrix_load:
     j       vtx_store_loop_entry
      llv    vPairST[8],   (VTX_IN_TC + 1 * inputVtxSize)(inputVtxPos) // ST in 4:5
 .else
-    andi    $11, $5, G_LIGHTING >> 8
-    beqz    $11, @@skip_lighting
-     li     $16, vtx_return_from_lighting  // This is clipFlags, but not modified
-    li      $16, lt_vtx_pair               // during vtx_store
-@@skip_lighting:
-    andi    $7, $5, G_FOG >> 8    // Nonzero if fog enabled
     jal     while_wait_dma_busy   // Wait for vertex load to finish
      addi   $19, rdpCmdBufEndP1, tempPrevVtxGarbage  // Temp mem we can freely overwrite replaces outputVtxPos
     j       vtx_store_loop_entry
@@ -2393,7 +2388,7 @@ vtx_store_loop_entry:
     vmadn   $v29, vM0F, vPairPosI[0h]
     sdv     sTCL[8],      (tempVpRGBA)(rdpCmdBufEndP1) // Vtx 0 and 1 RGBA in order
     vmadh   $v29, vM0I, vPairPosI[0h]
-    jr      $ra
+    jr      $16                    // lt_vtx_pair or vtx_loop_no_lighting
      vmadn  $v29, vM1F, vPairPosI[1h]
     
 vtx_epilogue:
@@ -2410,7 +2405,7 @@ vtx_epilogue:
     ssv     sCLZ[12], (VTX_SCR_Z      )(secondVtxPos)
     slv     sKPI[0],  (VTX_SCR_VEC    )($19)
     ssv     sKPF[12], (VTX_SCR_Z_FRAC )(secondVtxPos)
-    bltz    $ra, clip_after_vtx_store
+    bltz    $ra, clip_after_vtx_store  // $ra - from clipping or + from while_wait_dma_busy
      slv    sKPF[2],  (VTX_SCR_Z      )($19)
     sh      $10,      (VTX_CLIP       )($19) // Store first vertex flags
     j       vertex_end
@@ -2422,6 +2417,7 @@ vtx_epilogue:
 vtx_early_return_from_lighting:
     vmrg    vPairRGBA, vPairLt, vPairRGBA  // RGB = light, A = vtx alpha
 .endif
+vtx_loop_no_lighting:
 vtx_return_from_lighting:
     li      $ra, vertex_end
 .if CFG_LEGACY_VTX_PIPE
