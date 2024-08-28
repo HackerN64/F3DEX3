@@ -33,6 +33,9 @@ measured yet".
 
 |                            | F3DEX2 | F3DEX3_LVP_NOC | F3DEX3_LVP | F3DEX3_NOC | F3DEX3 |
 |----------------------------|--------|----------------|------------|------------|--------|
+| Command dispatch           | 12     | 12             | 12         | 12         | 12     |
+| Small RDP command          | 14     | 5              | 5          | 5          | 5      |
+| Vtx before DMA start       | 16     | 17             | 17         | 17         | 17     |
 | Vtx pair, no lighting      | 54     | 54             | 81         | 79         | 98     |
 | Vtx pair, 0 dir lts        | Can't  | 64             |            |            |        |
 | Vtx pair, 1 dir lt         | 73     | 70             | 96         | 182        | 201    |
@@ -44,20 +47,18 @@ measured yet".
 | Vtx pair, 7 dir lts        | 118    | 112            | 138        | 356        | 375    |
 | Vtx pair, 8 dir lts        | Can't  | 119            | 145        | 385        | 404    |
 | Vtx pair, 9 dir lts        | Can't  | 126            | 152        | 414        | 433    |
-| Command dispatch           | 12     | 12             | 12         | 12         | 12     |
-| Small RDP command          | 14     | 5              | 5          | 5          | 5      |
-| Only/2nd tri to offscreen  | 27     | 29             | 29         | 29         | 29     |
-| 1st tri to offscreen       | 28     | 29             | 29         | 29         | 29     |
+| Only/2nd tri to offscreen  | 27     | 26             | 26         | 26         | 26     |
+| 1st tri to offscreen       | 28     | 27             | 27         | 27         | 27     |
 | Only/2nd tri to clip       | 32     | 31             | 31         | 31         | 31     |
-| 1st tri to clip            | 33     | 31             | 31         | 31         | 31     |
-| Only/2nd tri to backface   | 38     | 40             | 40         | 40         | 40     |
-| 1st tri to backface        | 39     | 40             | 40         | 40         | 40     |
-| Only/2nd tri to degenerate | 42     | 42             | 42         | 42         | 42     |
-| 1st tri to degenerate      | 43     | 42             | 42         | 42         | 42     |
+| 1st tri to clip            | 33     | 32             | 32         | 32         | 32     |
+| Only/2nd tri to backface   | 38     | 38             | 38         | 38         | 38     |
+| 1st tri to backface        | 39     | 39             | 39         | 39         | 39     |
+| Only/2nd tri to degenerate | 42     | 40             | 40         | 40         | 40     |
+| 1st tri to degenerate      | 43     | 41             | 41         | 41         | 41     |
 | Only/2nd tri to occluded   | Can't  | Can't          | 49         | Can't      | 49     |
-| 1st tri to occluded        | Can't  | Can't          | 49         | Can't      | 49     |
-| Only/2nd tri to draw       | 172    | 166            | 167        | 166        | 167    |
-| 1st tri to draw            | 173    | 166            | 167        | 166        | 167    |
+| 1st tri to occluded        | Can't  | Can't          | 50         | Can't      | 50     |
+| Only/2nd tri to draw       | 172    | 165            | 168        | 165        | 168    |
+| 1st tri to draw            | 173    | 165            | 168        | 165        | 168    |
 
 
 Tri numbers are measured from the first cycle of the command handler inclusive,
