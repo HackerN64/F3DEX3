@@ -3220,42 +3220,56 @@ xfrm_dir_lights:
     // Transform directional lights' direction by M transpose.
     // First, load M transpose. Can use any regs except $v8-$v12, $v28-$v31.
     // This algorithm clobbers all of $v0-$v7 and $v16-$v23 with the transposes.
-    // The F3DEX2 implementation takes 18 instructions and about 11 cycles.
-    // This implementation is 16 instructions and about 10 cycles. However, since
-    // this code is in an overlay and is not run per vertex, that doesn't really
-    // matter and it's really just an excuse to use the rare ltv instructions.
+    // The F3DEX2 implementation takes 18 instructions and 11 cycles.
+    // This implementation is 23 instructions and 17 cycles, including the scalar
+    // setup for below. But this version loads M transpose to both halves of
+    // each vector so we can process two lights at a time, which matters because
+    // there's always at least 3 lights (technically 2 for EX3)--the lookat
+    // directions. So a few extra cycles here to save at least one light loop
+    // iteration is worth it. This implementation is mainly just an excuse to
+    // use the rare ltv and swv instructions.
     // Memory at mMatrix contains, in shorts within qwords, for the elements we care about:
     // A B C - D E F - (X int, Y int)
     // G H I - - - - - (Z int, W int)
     // M N O - P Q R - (X frac, Y frac)
     // S T U - - - - - (Z frac, W frac)
     // First, make $v0-$v7 contain this, and same for $v16-$v23 frac parts.
-    // $v0 A - G - - - - -   $v16 M - S - - - - -
-    // $v1 - B - H - - - -   $v17 - N - T - - - -
-    // $v2 - - C - I - - -   $v18 - - O - U - - -
+    // $v0 A - G - A - G -   $v16 M - S - M - S -
+    // $v1 - B - H - B - H   $v17 - N - T - N - T
+    // $v2 I - C - I - C -   $v18 U - O - U - O -
     // $v3 - - - - - - - -   $v19 - - - - - - - -
-    // $v4 - - - - D - - -   $v20 - - - - P - - -
-    // $v5 - - - - - E - -   $v21 - - - - - Q - -
-    // $v6 - - - - - - F -   $v22 - - - - - - R -
+    // $v4 D - - - D - - -   $v20 P - - - P - - -
+    // $v5 - E - - - E - -   $v21 - Q - - - Q - -
+    // $v6 - - F - - - F -   $v22 - - R - - - R -
     // $v7 - - - - - - - -   $v23 - - - - - - - -
-    ltv     $v0[0],   (mMatrix + 0x00)($zero)
-    ltv     $v0[12],  (mMatrix + 0x10)($zero)
+    ltv     $v0[0],   (mMatrix + 0x00)($zero) // A to $v0[0] etc.
+    ltv     $v0[12],  (mMatrix + 0x10)($zero) // G to $v0[2] etc.
+    ltv     $v0[8],   (mMatrix + 0x00)($zero) // A to $v0[4] etc.
+    ltv     $v0[4],   (mMatrix + 0x10)($zero) // G to $v0[6] etc.
     ltv     $v16[0],  (mMatrix + 0x20)($zero)
     ltv     $v16[12], (mMatrix + 0x30)($zero)
+    ltv     $v16[8],  (mMatrix + 0x20)($zero)
+    ltv     $v16[4],  (mMatrix + 0x30)($zero)
+    veq     $v29, $v31, $v31[0q] // Set VCC to 10101010
+    vmudh   $v1, vOne, $v1[1q]                // B - H - B - H -
+    lsv     $v18[6],  (mMatrix + 0x2C)($zero) // U - O(R)U - O -
+    vmrg    $v0, $v0, $v4[0q]                 // A D G - A D G -
+    lsv     $v18[14], (mMatrix + 0x2C)($zero) // U - O R U - O(R)
+    vmrg    $v2, $v2, $v6[0q]                 // I - C F I - C F
     move    curLight, $3
-    lsv     $v0[2],   (mMatrix + 0x08)($zero) // Place D into $v0 element 1
-    vmudh   $v1, vOne, $v1[1q]                // Shift $v1 left one element (B, H)
-    lsv     $v2[0],   (mMatrix + 0x04)($zero) // Place C into $v2 element 0
-    vmov    $v1[1], $v5[5]                    // Move E into $v1 element 1
-    lsv     $v2[4],   (mMatrix + 0x14)($zero) // Place I into $v2 element 2
-    vmov    $v2[1], $v6[6]                    // Move F into $v2 element 2
-    lsv     $v16[2],  (mMatrix + 0x28)($zero) // Place P into $v16 element 1
-    vmudh   $v17, vOne, $v17[1q]              // Shift $v17 left one element (N, T)
-    lsv     $v18[0],  (mMatrix + 0x24)($zero) // Place O into $v18 element 0
-    vmov    $v17[1], $v21[5]                  // Move Q into $v17 element 1
-    lsv     $v18[4],  (mMatrix + 0x34)($zero) // Place U into $v18 element 2
-    vmov    $v18[1], $v22[6]                  // Move R into $v18 element 1
-    // Resulting matrix (M transpose) in $v0:$v2 int, $v16:$v18 frac.
+    vmudh   $v17, vOne, $v17[1q]              // N - T - N - T -
+    // nop
+    vmrg    $v1, $v1, $v5                     // B E H - B E H -
+    // nop
+    vmrg    $v16, $v16, $v20[0q]              // M P S - M P S -
+    swv     $v18[4], (tempXfrmSingle)(rdpCmdBufEndP1) // Stores O R U - O R U -
+    // vnop
+    lqv     $v18,    (tempXfrmSingle)(rdpCmdBufEndP1)
+    vmrg    $v17, $v17, $v21                  // N Q T - N Q T -
+    swv     $v2[4],  (tempXfrmSingle)(rdpCmdBufEndP1) // Stores C F I - C F I -
+    // vnop
+    lqv     $v2,     (tempXfrmSingle)(rdpCmdBufEndP1)
+    
 xfrm_light_loop:
     beq     curLight, altBaseReg, xfrm_light_post
      lpv    $v3,  (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 0 dir in elems 0-2
