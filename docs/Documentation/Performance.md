@@ -7,24 +7,21 @@ visual effects are desired and increasing the RSP time a bit does not affect the
 overall performance. If your game is RSP bound, using the base version of F3DEX3
 will make it slower.
 
-Conversely, F3DEX3_LVP_NOC was created with the goal of matching the RSP
-performance of F3DEX2 on all critical paths in the microcode: command dispatch,
-vertex processing, and triangle processing. Then, the RDP and memory traffic
-performance improvements of F3DEX3--56 vertex buffer, auto-batched rendering,
-etc.--should improve performance from there. This means that F3DEX3_LVP_NOC can
-improve performance regardless of whether your game is RSP bound or RDP bound.
-
-Note that F3DEX3_LVP_NOC is still slightly slower than F3DEX2 for various other
-tasks--for example, the one-time setup when loading vertices, outside the loop
-over vertices, is a little slower.
+Conversely, F3DEX3_LVP_NOC matches or beats the RSP performance of F3DEX2 on all
+critical paths in the microcode, including command dispatch, vertex processing,
+and triangle processing. Then, the RDP and memory traffic performance
+improvements of F3DEX3--56 vertex buffer, auto-batched rendering, etc.--should
+further improve performance from there. This means that switching from F3DEX2 to
+F3DEX3_LVP_NOC should always improve performance regardless of whether your game
+is RSP bound or RDP bound.
 
 
 # Performance Results
 
-These are cycle counts for all the critical paths in the microcode. Lower is
+These are cycle counts for many key paths in the microcode. Lower numbers are
 better. The timings are hand-counted taking into account all pipeline stalls and
-all dual-issue conditions. Instruction alignment is sometimes taken into
-account, otherwise assumed to be optimal.
+all dual-issue conditions. Instruction alignment after branches is sometimes
+taken into account, otherwise assumed to be optimal.
 
 Vertex / lighting numbers assume no special features (texgen, packed normals,
 etc.) Tri numbers assume texture, shade, and Z, and not flushing the buffer.
@@ -47,6 +44,16 @@ measured yet".
 | Vtx pair, 7 dir lts        | 118    | 112            | 138        | 356        | 375    |
 | Vtx pair, 8 dir lts        | Can't  | 119            | 145        | 385        | 404    |
 | Vtx pair, 9 dir lts        | Can't  | 126            | 152        | 414        | 433    |
+| Light dir xfrm, 0 dir lts  | Can't  | 95             | 95         | None       | None   |
+| Light dir xfrm, 1 dir lt   | 141    | 95             | 95         | None       | None   |
+| Light dir xfrm, 2 dir lts  | 180    | 96             | 96         | None       | None   |
+| Light dir xfrm, 3 dir lts  | 219    | 121            | 121        | None       | None   |
+| Light dir xfrm, 4 dir lts  | 258    | 122            | 122        | None       | None   |
+| Light dir xfrm, 5 dir lts  | 297    | 147            | 147        | None       | None   |
+| Light dir xfrm, 6 dir lts  | 336    | 148            | 148        | None       | None   |
+| Light dir xfrm, 7 dir lts  | 375    | 173            | 173        | None       | None   |
+| Light dir xfrm, 8 dir lts  | Can't  | 174            | 174        | None       | None   |
+| Light dir xfrm, 9 dir lts  | Can't  | 199            | 199        | None       | None   |
 | Only/2nd tri to offscreen  | 27     | 26             | 26         | 26         | 26     |
 | 1st tri to offscreen       | 28     | 27             | 27         | 27         | 27     |
 | Only/2nd tri to clip       | 32     | 31             | 31         | 31         | 31     |
@@ -75,12 +82,12 @@ configuration.
 
 | Microcode      | Scene 1 | Scene 2 | Scene 3 |
 |----------------|---------|---------|---------|
-| F3DEX3         | 7.64ms  | 3.13ms  | 2.37ms  |
-| F3DEX3_NOC     | 7.07ms  | 2.89ms  | 2.14ms  |
-| F3DEX3_LVP     | 4.57ms  | 1.77ms  | 1.67ms  |
-| F3DEX3_LVP_NOC | Outdated  | | |
-| F3DEX2         | No*     | No*     | No*     |
-| Vertex count   | 3664    | 1608    | 1608    |
+| F3DEX3         | 7.41ms  | 2.99ms  | 2.22ms  |
+| F3DEX3_NOC     | 6.85ms  | 2.75ms  | 1.98ms  |
+| F3DEX3_LVP     | 4.12ms  | 1.59ms  | 1.48ms  |
+| F3DEX3_LVP_NOC | 3.34ms  | 1.27ms  | 1.16ms  |
+| F3DEX2         | Can't*  | Can't*  | Can't*  |
+| Vertex count   | 3557    | 1548    | 1548    |
 
 *F3DEX2 does not contain performance counters, so the portion of the RSP time
 taken for vertex processing cannot be measured.
