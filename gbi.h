@@ -1,8 +1,15 @@
 /**
  * @file gbi.h
  * @brief Modded GBI for use with F3DEX3 custom microcode
- * 
  */
+
+/* List of options; the documentation for each is where it is used below. */
+/* #define REQUIRE_SEMICOLONS_AFTER_GBI_COMMANDS */ /* recommended */
+/* #define NO_SYNCS_IN_TEXTURE_LOADS */ /* see documentation */
+/* #define F3DEX2_SEGMENTS */ /* see documentation */
+/* #define DISABLE_AA */ /* developer taste */
+/* #define RISKY_RDP_SYNCS */ /* see documentation */
+/* #define KAZE_GBI_HACKS */ /* not recommended unless you are Kaze */
 
 #include "ultra64/mbi.h"
 
@@ -625,6 +632,20 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_ZS_PIXEL          (0 << G_MDSFT_ZSRCSEL)
 #define G_ZS_PRIM           (1 << G_MDSFT_ZSRCSEL)
 
+#ifdef DISABLE_AA
+/* Disables antialiasing in all preset rendermodes, saving RDP time. Note that
+this does NOT disable antialiasing in manually written rendermodes, e.g.
+exported from fast64 with advanced options enabled. We can't redefine the real
+IM_RD because IM_RD is needed for transparency also, and we can't distinguish
+between a manually written rendermode using IM_RD for transparency and one using
+it for antialiasing. */
+#define AA_DEF 0
+#define RD_DEF 0
+#else
+#define AA_DEF AA_EN
+#define RD_DEF IM_RD
+#endif
+
 /* G_SETOTHERMODE_L gSetRenderMode */
 #define AA_EN           0x0008
 #define Z_CMP           0x0010
@@ -642,7 +663,7 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define CVG_X_ALPHA     0x1000
 #define ALPHA_CVG_SEL   0x2000
 #define FORCE_BL        0x4000
-#define TEX_EDGE        0x0000  /* used to be 0x8000 */
+#define TEX_EDGE        0x0000  /* not in HW V2; is 0x8000 in older HW */
 
 #define G_BL_CLR_IN     0
 #define G_BL_CLR_MEM    1
@@ -662,148 +683,150 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
     (m1a) << 28 | (m1b) << 24 | (m2a) << 20 | (m2b) << 16
 
 #define RM_AA_ZB_OPA_SURF(clk)                                  \
-    AA_EN | Z_CMP | Z_UPD | IM_RD | CVG_DST_CLAMP |             \
+    AA_DEF | Z_CMP | Z_UPD | RD_DEF | CVG_DST_CLAMP |           \
     ZMODE_OPA | ALPHA_CVG_SEL |                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_RA_ZB_OPA_SURF(clk)                                  \
-    AA_EN | Z_CMP | Z_UPD | CVG_DST_CLAMP |                     \
+    AA_DEF | Z_CMP | Z_UPD | CVG_DST_CLAMP |                    \
     ZMODE_OPA | ALPHA_CVG_SEL |                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_AA_ZB_XLU_SURF(clk)                                  \
-    AA_EN | Z_CMP | IM_RD | CVG_DST_WRAP | CLR_ON_CVG |         \
+    AA_DEF | Z_CMP | IM_RD | CVG_DST_WRAP | CLR_ON_CVG |        \
     FORCE_BL | ZMODE_XLU |                                      \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_ZB_OPA_DECAL(clk)                                 \
-    AA_EN | Z_CMP | IM_RD | CVG_DST_WRAP | ALPHA_CVG_SEL |      \
+    AA_DEF | Z_CMP | RD_DEF | CVG_DST_WRAP | ALPHA_CVG_SEL |    \
     ZMODE_DEC |                                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_RA_ZB_OPA_DECAL(clk)                                 \
-    AA_EN | Z_CMP | CVG_DST_WRAP | ALPHA_CVG_SEL |              \
+    AA_DEF | Z_CMP | CVG_DST_WRAP | ALPHA_CVG_SEL |             \
     ZMODE_DEC |                                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_AA_ZB_XLU_DECAL(clk)                                 \
-    AA_EN | Z_CMP | IM_RD | CVG_DST_WRAP | CLR_ON_CVG |         \
+    AA_DEF | Z_CMP | IM_RD | CVG_DST_WRAP | CLR_ON_CVG |        \
     FORCE_BL | ZMODE_DEC |                                      \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_ZB_OPA_INTER(clk)                                 \
-    AA_EN | Z_CMP | Z_UPD | IM_RD | CVG_DST_CLAMP |             \
+    AA_DEF | Z_CMP | Z_UPD | RD_DEF | CVG_DST_CLAMP |           \
     ALPHA_CVG_SEL | ZMODE_INTER |                               \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_RA_ZB_OPA_INTER(clk)                                 \
-    AA_EN | Z_CMP | Z_UPD | CVG_DST_CLAMP |                     \
+    AA_DEF | Z_CMP | Z_UPD | CVG_DST_CLAMP |                    \
     ALPHA_CVG_SEL | ZMODE_INTER |                               \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_AA_ZB_XLU_INTER(clk)                                 \
-    AA_EN | Z_CMP | IM_RD | CVG_DST_WRAP | CLR_ON_CVG |         \
+    AA_DEF | Z_CMP | IM_RD | CVG_DST_WRAP | CLR_ON_CVG |        \
     FORCE_BL | ZMODE_INTER |                                    \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_ZB_XLU_LINE(clk)                                  \
-    AA_EN | Z_CMP | IM_RD | CVG_DST_CLAMP | CVG_X_ALPHA |       \
+    AA_DEF | Z_CMP | IM_RD | CVG_DST_CLAMP | CVG_X_ALPHA |      \
     ALPHA_CVG_SEL | FORCE_BL | ZMODE_XLU |                      \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_ZB_DEC_LINE(clk)                                  \
-    AA_EN | Z_CMP | IM_RD | CVG_DST_SAVE | CVG_X_ALPHA |        \
+    AA_DEF | Z_CMP | IM_RD | CVG_DST_SAVE | CVG_X_ALPHA |       \
     ALPHA_CVG_SEL | FORCE_BL | ZMODE_DEC |                      \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
+/* Note that this uses AA_EN not AA_DEF */
 #define RM_AA_ZB_TEX_EDGE(clk)                                  \
-    AA_EN | Z_CMP | Z_UPD | IM_RD | CVG_DST_CLAMP |             \
+    AA_EN | Z_CMP | Z_UPD | RD_DEF | CVG_DST_CLAMP |            \
     CVG_X_ALPHA | ALPHA_CVG_SEL | ZMODE_OPA | TEX_EDGE |        \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_AA_ZB_TEX_INTER(clk)                                 \
-    AA_EN | Z_CMP | Z_UPD | IM_RD | CVG_DST_CLAMP |             \
+    AA_DEF | Z_CMP | Z_UPD | RD_DEF | CVG_DST_CLAMP |           \
     CVG_X_ALPHA | ALPHA_CVG_SEL | ZMODE_INTER | TEX_EDGE |      \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_AA_ZB_SUB_SURF(clk)                                  \
-    AA_EN | Z_CMP | Z_UPD | IM_RD | CVG_DST_FULL |              \
+    AA_DEF | Z_CMP | Z_UPD | IM_RD | CVG_DST_FULL |             \
     ZMODE_OPA | ALPHA_CVG_SEL |                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_AA_ZB_PCL_SURF(clk)                                  \
-    AA_EN | Z_CMP | Z_UPD | IM_RD | CVG_DST_CLAMP |             \
+    AA_DEF | Z_CMP | Z_UPD | IM_RD | CVG_DST_CLAMP |            \
     ZMODE_OPA | G_AC_DITHER |                                   \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_ZB_OPA_TERR(clk)                                  \
-    AA_EN | Z_CMP | Z_UPD | IM_RD | CVG_DST_CLAMP |             \
+    AA_DEF | Z_CMP | Z_UPD | RD_DEF | CVG_DST_CLAMP |           \
     ZMODE_OPA | ALPHA_CVG_SEL |                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_ZB_TEX_TERR(clk)                                  \
-    AA_EN | Z_CMP | Z_UPD | IM_RD | CVG_DST_CLAMP |             \
+    AA_DEF | Z_CMP | Z_UPD | RD_DEF | CVG_DST_CLAMP |           \
     CVG_X_ALPHA | ALPHA_CVG_SEL | ZMODE_OPA | TEX_EDGE |        \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_ZB_SUB_TERR(clk)                                  \
-    AA_EN | Z_CMP | Z_UPD | IM_RD | CVG_DST_FULL |              \
+    AA_DEF | Z_CMP | Z_UPD | IM_RD | CVG_DST_FULL |             \
     ZMODE_OPA | ALPHA_CVG_SEL |                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 
 #define RM_AA_OPA_SURF(clk)                                     \
-    AA_EN | IM_RD | CVG_DST_CLAMP |                             \
+    AA_DEF | RD_DEF | CVG_DST_CLAMP |                           \
     ZMODE_OPA | ALPHA_CVG_SEL |                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_RA_OPA_SURF(clk)                                     \
-    AA_EN | CVG_DST_CLAMP |                                     \
+    AA_DEF | CVG_DST_CLAMP |                                    \
     ZMODE_OPA | ALPHA_CVG_SEL |                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_AA_XLU_SURF(clk)                                     \
-    AA_EN | IM_RD | CVG_DST_WRAP | CLR_ON_CVG | FORCE_BL |      \
+    AA_DEF | IM_RD | CVG_DST_WRAP | CLR_ON_CVG | FORCE_BL |     \
     ZMODE_OPA |                                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_XLU_LINE(clk)                                     \
-    AA_EN | IM_RD | CVG_DST_CLAMP | CVG_X_ALPHA |               \
+    AA_DEF | IM_RD | CVG_DST_CLAMP | CVG_X_ALPHA |              \
     ALPHA_CVG_SEL | FORCE_BL | ZMODE_OPA |                      \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_DEC_LINE(clk)                                     \
-    AA_EN | IM_RD | CVG_DST_FULL | CVG_X_ALPHA |                \
+    AA_DEF | IM_RD | CVG_DST_FULL | CVG_X_ALPHA |               \
     ALPHA_CVG_SEL | FORCE_BL | ZMODE_OPA |                      \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
+/* Note that this uses AA_EN not AA_DEF */
 #define RM_AA_TEX_EDGE(clk)                                     \
-    AA_EN | IM_RD | CVG_DST_CLAMP |                             \
+    AA_EN | RD_DEF | CVG_DST_CLAMP |                            \
     CVG_X_ALPHA | ALPHA_CVG_SEL | ZMODE_OPA | TEX_EDGE |        \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_AA_SUB_SURF(clk)                                     \
-    AA_EN | IM_RD | CVG_DST_FULL |                              \
+    AA_DEF | IM_RD | CVG_DST_FULL |                             \
     ZMODE_OPA | ALPHA_CVG_SEL |                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM)
 
 #define RM_AA_PCL_SURF(clk)                                     \
-    AA_EN | IM_RD | CVG_DST_CLAMP |                             \
+    AA_DEF | IM_RD | CVG_DST_CLAMP |                            \
     ZMODE_OPA | G_AC_DITHER |                                   \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_OPA_TERR(clk)                                     \
-    AA_EN | IM_RD | CVG_DST_CLAMP |                             \
+    AA_DEF | RD_DEF | CVG_DST_CLAMP |                           \
     ZMODE_OPA | ALPHA_CVG_SEL |                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_TEX_TERR(clk)                                     \
-    AA_EN | IM_RD | CVG_DST_CLAMP |                             \
+    AA_DEF | RD_DEF | CVG_DST_CLAMP |                           \
     CVG_X_ALPHA | ALPHA_CVG_SEL | ZMODE_OPA | TEX_EDGE |        \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
 #define RM_AA_SUB_TERR(clk)                                     \
-    AA_EN | IM_RD | CVG_DST_FULL |                              \
+    AA_DEF | IM_RD | CVG_DST_FULL |                             \
     ZMODE_OPA | ALPHA_CVG_SEL |                                 \
     GBL_c##clk(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_1MA)
 
@@ -2624,11 +2647,22 @@ _DW({                                                        \
 /*
  * Moveword commands
  */
-/* not strictly a moveword command anymore */
+#ifdef F3DEX2_SEGMENTS
+/* Use F3DEX2 style segment setup binary encoding. F3DEX3 supports both the
+F3DEX2 encoding and the F3DEX3 encoding, but the former does not have the
+relative segment resolution behavior. */
+#define gSPSegment(pkt, segment, base)              \
+    gMoveWd(pkt, G_MW_SEGMENT, (segment) * 4, (base))
+#define gsSPSegment(segment, base)                  \
+    gsMoveWd(    G_MW_SEGMENT, (segment) * 4, (base))
+#else
+/* F3DEX3 style segment setup, which resolves segment addresses relative to
+other segments. */
 #define gSPSegment(pkt, segment, base)              \
     gDma1p((pkt), G_RELSEGMENT, (base), ((segment) * 4) & 0xFFF, G_MW_SEGMENT)
 #define gsSPSegment(segment, base)                  \
     gsDma1p(      G_RELSEGMENT, (base), ((segment) * 4) & 0xFFF, G_MW_SEGMENT)
+#endif
 
 #define gSPPerspNormalize(pkt, s)   gMoveHalfwd(pkt, G_MW_FX, G_MWO_PERSPNORM, (s))
 #define gsSPPerspNormalize(s)       gsMoveHalfwd(    G_MW_FX, G_MWO_PERSPNORM, (s))
@@ -2924,7 +2958,8 @@ _DW({                                         \
  * 
  * Internally, a material is defined to start with any set image command, and
  * end on any of the following: call, branch, return, vertex, all tri commands,
- * modify vertex, branch Z/W, or cull. The physical address of the display list
+ * tex/fill rectangles, and successes on cull or branch w/z (which are usually
+ * preceded by vertex loads anyway). The physical address of the display list
  * --not the address of the image--is stored when a material is started. If a
  * material starts and its physical address is the same as the stored last start
  * address, i.e. we're executing the same material display list as the last
@@ -3326,7 +3361,11 @@ _DW({ \
 #define  gSPSetLights0(pkt, name)  gSPSetLights(pkt, 0, name)
 #define gsSPSetLights0(name)      gsSPSetLights(     0, name)
 #define  gSPSetLights1(pkt, name)  gSPSetLights(pkt, 1, name)
+#ifdef KAZE_GBI_HACKS
+#define gsSPSetLights1(name)      gsSPNoOp()
+#else
 #define gsSPSetLights1(name)      gsSPSetLights(     1, name)
+#endif
 #define  gSPSetLights2(pkt, name)  gSPSetLights(pkt, 2, name)
 #define gsSPSetLights2(name)      gsSPSetLights(     2, name)
 #define  gSPSetLights3(pkt, name)  gSPSetLights(pkt, 3, name)
@@ -3639,11 +3678,11 @@ _DW({                                                       \
  * Fri May 26 13:45:55 PDT 1995
  * @deprecated
  */
-#define gDPSetBlendMask(pkt, mask)  gDPNoOp(pkt)
+#define gDPSetBlendMask(pkt, mask)  gSPNoOp(pkt)
 /**
  * @copydetails gDPSetBlendMask
  */
-#define gsDPSetBlendMask(mask)      gsDPNoOp()
+#define gsDPSetBlendMask(mask)      gsSPNoOp()
 
 #define gDPSetAlphaCompare(pkt, type)   \
     gSPSetOtherMode(pkt, G_SETOTHERMODE_L, G_MDSFT_ALPHACOMPARE, 2, type)
@@ -3815,9 +3854,14 @@ _DW({                                   \
 
 #define gDPSetEnvColor(pkt, r, g, b, a) \
             DPRGBColor(pkt, G_SETENVCOLOR,   r, g, b, a)
-
+            
+#ifdef KAZE_GBI_HACKS
+#define gsDPSetEnvColor(r, g, b, a) \
+            gsSPNoOp()
+#else
 #define gsDPSetEnvColor(r, g, b, a) \
             sDPRGBColor(    G_SETENVCOLOR,   r, g, b, a)
+#endif
 
 #define gDPSetBlendColor(pkt, r, g, b, a) \
             DPRGBColor(pkt, G_SETBLENDCOLOR, r, g, b, a)
@@ -5358,17 +5402,28 @@ _DW({                                                                           
 #define gDPWord(pkt, wordhi, wordlo)                    \
 _DW({                                                   \
     Gfx *_g = (Gfx *)(pkt);                             \
-                                                        \
     gImmp1(pkt, G_RDPHALF_1, (unsigned int)(wordhi));   \
     gImmp1(pkt, G_RDPHALF_2, (unsigned int)(wordlo));   \
 })
+
+#ifdef RISKY_RDP_SYNCS
+/*
+ * The community has found that in nearly all instances, a tile sync is
+ * sufficient where a pipe sync is normally used--between rendering something
+ * and changing critical RDP settings. However, we are not 100% sure this is
+ * true for all obscure settings, so it is risky.
+*/
+#define G_USEASPIPESYNC G_RDPTILESYNC
+#else
+#define G_USEASPIPESYNC G_RDPPIPESYNC
+#endif
 
 #define gDPFullSync(pkt)        gDPNoParam(pkt, G_RDPFULLSYNC)
 #define gsDPFullSync()          gsDPNoParam(    G_RDPFULLSYNC)
 #define gDPTileSync(pkt)        gDPNoParam(pkt, G_RDPTILESYNC)
 #define gsDPTileSync()          gsDPNoParam(    G_RDPTILESYNC)
-#define gDPPipeSync(pkt)        gDPNoParam(pkt, G_RDPPIPESYNC)
-#define gsDPPipeSync()          gsDPNoParam(    G_RDPPIPESYNC)
+#define gDPPipeSync(pkt)        gDPNoParam(pkt, G_USEASPIPESYNC)
+#define gsDPPipeSync()          gsDPNoParam(    G_USEASPIPESYNC)
 #define gDPLoadSync(pkt)        gDPNoParam(pkt, G_RDPLOADSYNC)
 #define gsDPLoadSync()          gsDPNoParam(    G_RDPLOADSYNC)
 #define gDPNoOp(pkt)            gDPNoParam(pkt, G_NOOP)

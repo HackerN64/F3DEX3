@@ -21,9 +21,9 @@ for dir in dirs:
                 continue
             addr = int(toks[0], 16)
             sym = toks[1]
-            if sym == "endVariableDmemUse":
+            if sym == "startFreeDmem":
                 dmemAvail = addr
-            elif sym == "rdpCmdBuffer1":
+            elif sym == "endFreeDmem":
                 dmemAvail = addr - dmemAvail
             elif sym == "startFreeImem":
                 imemAvail = addr
