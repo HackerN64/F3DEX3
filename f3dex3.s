@@ -1319,12 +1319,16 @@ tri_strip_fan_loop:
     j       tri_main
      sb     $10, 7(rdpCmdBufPtr)         // Store vtx 2 to spot for 3
 
-tV1AtF equ $v5
-tV2AtF equ $v7
-tV3AtF equ $v9
-tV1AtI equ $v18
-tV2AtI equ $v19
-tV3AtI equ $v21
+// H = highest on screen = lowest Y value; then M = mid, L = low
+tHAtF equ $v5
+tMAtF equ $v7
+tLAtF equ $v9
+tHAtI equ $v18
+tMAtI equ $v19
+tLAtI equ $v21
+tHPos equ $v14
+tMPos equ $v2
+tLPos equ $v10
 
 G_TRI2_handler:
 G_QUAD_handler:
@@ -1350,13 +1354,13 @@ tri_main:
     move    $4, $1                // Save original vertex 1 addr (pre-shuffle) for flat shading
 .endif
 tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
-    vnxor   tV1AtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
+    vnxor   tHAtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
-    vnxor   tV2AtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
+    vnxor   tMAtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
     llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
     vmov    $v6[6], $v27[5]         // elem 6 of v6 = vertex 1 addr
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
-    vnxor   tV3AtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
+    vnxor   tLAtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
     lhu     $5, VTX_CLIP($1)
     vmov    $v8[6], $v27[7]         // elem 6 of v8 = vertex 3 addr
     lhu     $7, VTX_CLIP($2)
@@ -1372,109 +1376,121 @@ tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
     bnez    $11, return_and_end_mat // Then the whole tri is offscreen, cull
      // 22 cycles
-     vmrg   $v14, $v6, $v4    // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
+     vmrg   tHPos, $v6, $v4   // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     vmudh   $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
     lhu     $24, activeClipPlanes
     vmadh   $v26, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
     lw      $6, geometryModeLabel // Load full geometry mode word
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
     or      $10, $5, $7
-    vmrg    $v10, $v6, $v4    // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
+    vmrg    tLPos, $v6, $v4   // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
     or      $10, $10, $8      // $10 = all clip bits which are true for any verts
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
     and     $10, $10, $24     // If clipping is enabled, check clip flags
-    vmrg    $v4, $v14, $v8    // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
+    vmrg    $v4, tHPos, $v8   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     mfc2    $9, $v26[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
-    vmrg    $v14, $v8, $v14   // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
+    vmrg    tHPos, $v8, tHPos // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
     bnez    $10, ovl234_clipping_entrypoint // Facing info and occlusion may be garbage if need to clip
      // 30 cycles
-     sll    $20, $6, 21           // Bit 10 in the sign bit, for facing cull
+     sll    $20, $6, 21       // Bit 10 in the sign bit, for facing cull
     vlt     $v29, $v6, $v2    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
     srl     $11, $9, 31       // = 0 if x prod positive (back facing), 1 if x prod negative (front facing)
     vmudh   $v3, vOne, $v31[5] // 0x4000; some rounding factor
     sllv    $11, $20, $11     // Sign bit = bit 10 of geom mode if back facing, bit 9 if front facing
-    vmrg    $v2, $v4, $v10    // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
+    vmrg    tMPos, $v4, tLPos // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     bltz    $11, return_and_end_mat // Cull if bit is set (culled based on facing)
      // 34 cycles
-     vmrg   $v10, $v10, $v4   // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
-    vmudn   $v4, $v14, $v31[5] // 0x4000
+     vmrg   tLPos, tLPos, $v4 // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
+tSubPxHF equ $v4
+tSubPxHI equ $v26
+    vmudn   tSubPxHF, tHPos, $v31[5] // 0x4000
     beqz    $9, return_and_end_mat  // If cross product is 0, tri is degenerate (zero area), cull.
      // 36 cycles
-     mfc2   $1, $v14[12]      // $v14 = lowest Y value = highest on screen (x, y, addr)
-    vsub    $v6, $v2, $v14
-    mfc2    $2, $v2[12]       // $v2 = mid vertex (x, y, addr)
-    vsub    $v8, $v10, $v14
+     mfc2   $1, tHPos[12]     // tHPos = lowest Y value = highest on screen (x, y, addr)
+tPosMmH equ $v6
+tPosLmH equ $v8
+tPosHmM equ $v11
+tPosHmL equ $v12
+tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
+tPosCatF equ $v25
+    vsub    tPosMmH, tMPos, tHPos
+    mfc2    $2, tMPos[12]     // tMPos = mid vertex (x, y, addr)
+    vsub    tPosLmH, tLPos, tHPos
 .if !ENABLE_PROFILING
-    sll     $11, $6, 10                 // Moves the value of G_SHADING_SMOOTH into the sign bit
+    sll     $11, $6, 10       // Moves the value of G_SHADING_SMOOTH into the sign bit
 .endif
-    vsub    $v11, $v14, $v2
+    vsub    tPosHmM, tHPos, tMPos
     andi    $6, $6, (G_SHADE | G_ZBUFFER)
-    vsub    $v12, $v14, $v10  // VH - VL (negative)
-    mfc2    $3, $v10[12]      // $v10 = highest Y value = lowest on screen (x, y, addr)
-    vsub    $v15, $v10, $v2
+    vsub    tPosHmL, tHPos, tLPos
+    mfc2    $3, tLPos[12]     // tLPos = highest Y value = lowest on screen (x, y, addr)
+    vsub    tPosCatI, tLPos, tMPos
 .if !CFG_NO_OCCLUSION_PLANE
     and     $5, $5, $7
     and     $5, $5, $8
     andi    $5, $5, CLIP_OCCLUDED
 .endif
-    vmudh   $v29, $v6, $v8[0]
+tXPF equ $v16 // Triangle cross product
+tXPI equ $v17
+tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
+tXPRcpI equ $v24
+    vmudh   $v29, tPosMmH, tPosLmH[0]
 .if !CFG_NO_OCCLUSION_PLANE
     bnez    $5, tri_culled_by_occlusion_plane // Cull if all verts occluded
 .endif
     llv     $v13[0], VTX_INV_W_VEC($1)
-    vmadh   $v29, $v8, $v11[0]
-    lpv     tV1AtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
-    vreadacc $v17, ACC_UPPER
-    lpv     tV2AtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
-    vreadacc $v16, ACC_MIDDLE
-    lpv     tV3AtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
-    vrcp    $v20[0], $v15[1]
+    vmadh   $v29, tPosLmH, tPosHmM[0]
+    lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
+    vreadacc tXPI, ACC_UPPER
+    lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
+    vreadacc tXPF, ACC_MIDDLE
+    lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
+    vrcp    $v20[0], tPosCatI[1]
 .if !ENABLE_PROFILING
     lpv     $v25[0], VTX_COLOR_VEC($4)  // Load RGB from vertex 4 (flat shading vtx)
 .endif
-    vmov    $v15[2], $v6[0]
+    vmov    tPosCatI[2], tPosMmH[0]
     llv     $v13[8], VTX_INV_W_VEC($2)
-    vrcph   $v22[0], $v17[1]
+    vrcph   $v22[0], tXPI[1]
     llv     $v13[12], VTX_INV_W_VEC($3)
-    vrcpl   $v23[1], $v16[1]
+    vrcpl   tXPRcpF[1], tXPF[1]
 .if !ENABLE_PROFILING
     bltz    $11, tri_skip_flat_shading  // Branch if G_SHADING_SMOOTH is set
 .endif
-     vrcph  $v24[1], $v31[2]            // 0
+     vrcph  tXPRcpI[1], $v31[2]            // 0
 .if !ENABLE_PROFILING
     vlt     $v29, $v31, $v31[3]         // Set vcc to 11100000
-    vmrg    tV1AtI, $v25, tV1AtI        // RGB from $4, alpha from $1
-    vmrg    tV2AtI, $v25, tV2AtI        // RGB from $4, alpha from $2
-    vmrg    tV3AtI, $v25, tV3AtI        // RGB from $4, alpha from $3
+    vmrg    tHAtI, $v25, tHAtI        // RGB from $4, alpha from $1
+    vmrg    tMAtI, $v25, tMAtI        // RGB from $4, alpha from $2
+    vmrg    tLAtI, $v25, tLAtI        // RGB from $4, alpha from $3
 tri_skip_flat_shading:
 .endif
     // 52 cycles
-    vrcp    $v20[2], $v6[1]
+    vrcp    $v20[2], tPosMmH[1]
     lb      $20, (alphaCompareCullMode)($zero)
-    vrcph   $v22[2], $v6[1]
+    vrcph   $v22[2], tPosMmH[1]
     lw      $5, VTX_INV_W_VEC($1)
-    vrcp    $v20[3], $v8[1]
+    vrcp    $v20[3], tPosLmH[1]
     lw      $7, VTX_INV_W_VEC($2)
-    vrcph   $v22[3], $v8[1]
+    vrcph   $v22[3], tPosLmH[1]
     lw      $8, VTX_INV_W_VEC($3)
-    vmudl   tV1AtI, tV1AtI, $v30[3] // 0x0100; vertex color 1 >>= 8
+    vmudl   tHAtI, tHAtI, $v30[3] // 0x0100; vertex color 1 >>= 8
     lbu     $9, textureSettings1 + 3
-    vmudl   tV2AtI, tV2AtI, $v30[3] // 0x0100; vertex color 2 >>= 8
+    vmudl   tMAtI, tMAtI, $v30[3] // 0x0100; vertex color 2 >>= 8
     sub     $11, $5, $7
-    vmudl   tV3AtI, tV3AtI, $v30[3] // 0x0100; vertex color 3 >>= 8
+    vmudl   tLAtI, tLAtI, $v30[3] // 0x0100; vertex color 3 >>= 8
     sra     $10, $11, 31
-    vmov    $v15[3], $v8[0]
+    vmov    tPosCatI[3], tPosLmH[0]
     and     $11, $11, $10
     vmudl   $v29, $v20, $v30[7] // 0x0020
     beqz    $20, tri_skip_alpha_compare_cull
      sub    $5, $5, $11
     // Alpha compare culling
-    vge     $v26, tV1AtI, tV2AtI
+    vge     $v26, tHAtI, tMAtI
     lbu     $19, alphaCompareCullThresh
-    vlt     $v27, tV1AtI, tV2AtI
+    vlt     $v27, tHAtI, tMAtI
     bgtz    $20, @@skip1
-     vge    $v26, $v26, tV3AtI // If alphaCompareCullMode > 0, $v26 = max of 3 verts
-    vlt     $v26, $v27, tV3AtI // else if < 0, $v26 = min of 3 verts
+     vge    $v26, $v26, tLAtI // If alphaCompareCullMode > 0, $v26 = max of 3 verts
+    vlt     $v26, $v27, tLAtI // else if < 0, $v26 = min of 3 verts
 @@skip1: // $v26 elem 3 has max or min alpha value
     mfc2    $24, $v26[6]
     sub     $24, $24, $19 // sign bit set if (max/min) < thresh
@@ -1486,49 +1502,49 @@ tri_skip_alpha_compare_cull:
     sub     $11, $5, $8  // Four instr: $5 = max($5, $8)
     vmadn   $v20, $v31, $v31[2] // 0
     sra     $10, $11, 31
-    vmudm   $v25, $v15, $v30[2] // 0x1000
+    vmudm   tPosCatF, tPosCatI, $v30[2] // 0x1000
     and     $11, $11, $10
-    vmadn   $v15, $v31, $v31[2] // 0
+    vmadn   tPosCatI, $v31, $v31[2] // 0
     sub     $5, $5, $11
-    vsubc   $v4, vZero, $v4
+    vsubc   tSubPxHF, vZero, tSubPxHF
     sw      $5, 0x0010(rdpCmdBufPtr)
-    vsub    $v26, vZero, vZero
+    vsub    tSubPxHI, vZero, vZero
     llv     $v27[0], 0x0010(rdpCmdBufPtr)
-    vmudm   $v29, $v25, $v20
-    mfc2    $5, $v17[1]
-    vmadl   $v29, $v15, $v20
+    vmudm   $v29, tPosCatF, $v20
+    mfc2    $5, tXPI[1]
+    vmadl   $v29, tPosCatI, $v20
     lbu     $7, textureSettings1 + 2
-    vmadn   $v20, $v15, $v22
-    lsv     tV2AtI[14], VTX_SCR_Z($2)
-    vmadh   $v15, $v25, $v22
-    lsv     tV3AtI[14], VTX_SCR_Z($3)
-    vmudl   $v29, $v23, $v16
-    lsv     tV2AtF[14], VTX_SCR_Z_FRAC($2)
-    vmadm   $v29, $v24, $v16
-    lsv     tV3AtF[14], VTX_SCR_Z_FRAC($3)
-    vmadn   $v16, $v23, $v17
+    vmadn   $v20, tPosCatI, $v22
+    lsv     tMAtI[14], VTX_SCR_Z($2)
+    vmadh   tPosCatI, tPosCatF, $v22
+    lsv     tLAtI[14], VTX_SCR_Z($3)
+    vmudl   $v29, tXPRcpF, tXPF
+    lsv     tMAtF[14], VTX_SCR_Z_FRAC($2)
+    vmadm   $v29, tXPRcpI, tXPF
+    lsv     tLAtF[14], VTX_SCR_Z_FRAC($3)
+    vmadn   tXPF, tXPRcpF, tXPI
     ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
-    vmadh   $v17, $v24, $v17
+    vmadh   tXPI, tXPRcpI, tXPI
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
     vand    $v22, $v20, $v30[5] // 0xFFF8
     // nop
-    vcr     $v15, $v15, $v30[3] // 0x0100
+    vcr     tPosCatI, tPosCatI, $v30[3] // 0x0100
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
-    vmudh   $v29, vOne, $v30[6] // 0x0010
-    ssv     $v10[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
-    vmadn   $v16, $v16, $v30[4] // -16
+    vmudh   $v29, vOne, $v30[6] // 16
+    ssv     tLPos[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
+    vmadn   tXPF, tXPF, $v30[4] // -16
     ssv     $v2[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
-    vmadh   $v17, $v17, $v30[4] // -16
-    ssv     $v14[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
-    vmudn   $v29, $v3, $v14[0]
+    vmadh   tXPI, tXPI, $v30[4] // -16
+    ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
+    vmudn   $v29, $v3, tHPos[0]
     lw      $20, otherMode1
-    vmadl   $v29, $v22, $v4[1]
+    vmadl   $v29, $v22, tSubPxHF[1]
     andi    $10, $5, 0x0080 // Extract the left major flag from $5
-    vmadm   $v29, $v15, $v4[1]
+    vmadm   $v29, tPosCatI, tSubPxHF[1]
     or      $10, $10, $7 // Combine the left major flag with the level and tile from the texture settings
-    vmadn   $v2, $v22, $v26[1]
+    vmadn   $v2, $v22, tSubPxHI[1]
     sb      $10, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
-    vmadh   $v3, $v15, $v26[1]
+    vmadh   $v3, tPosCatI, tSubPxHI[1]
     sb      $zero, materialCullMode // This covers tri write out
     vrcph   $v29[0], $v27[0]
     andi    $20, ZMODE_DEC
@@ -1554,85 +1570,85 @@ tri_skip_alpha_compare_cull:
     vmadh   $v10, $v10, $v13[6]  // acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
     vmadn   $v13, $v31, $v31[2]  // 0; v13 = lo(clamp(acc))
     sdv     $v22[0], 0x0020(rdpCmdBufPtr)
-    vmrg    tV2AtI, tV2AtI, $v22 // Merge S, T, W into elems 4-6
+    vmrg    tMAtI, tMAtI, $v22 // Merge S, T, W into elems 4-6
     sdv     $v25[0], 0x0028(rdpCmdBufPtr) // 8
-    vmrg    tV2AtF, tV2AtF, $v25 // Merge S, T, W into elems 4-6
-    ldv     tV1AtI[8], 0x0020(rdpCmdBufPtr) // 8
-    vmrg    tV3AtI, tV3AtI, $v10 // Merge S, T, W into elems 4-6
-    ldv     tV1AtF[8], 0x0028(rdpCmdBufPtr) // 8
-    vmrg    tV3AtF, tV3AtF, $v13 // Merge S, T, W into elems 4-6
+    vmrg    tMAtF, tMAtF, $v25 // Merge S, T, W into elems 4-6
+    ldv     tHAtI[8], 0x0020(rdpCmdBufPtr) // 8
+    vmrg    tLAtI, tLAtI, $v10 // Merge S, T, W into elems 4-6
+    ldv     tHAtF[8], 0x0028(rdpCmdBufPtr) // 8
+    vmrg    tLAtF, tLAtF, $v13 // Merge S, T, W into elems 4-6
 tri_skip_tex:
 .if !ENABLE_PROFILING
     addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
 .endif
     // 108 cycles
-    vmudl   $v29, $v16, $v23
-    lsv     tV1AtF[14], VTX_SCR_Z_FRAC($1)
-    vmadm   $v29, $v17, $v23
-    lsv     tV1AtI[14], VTX_SCR_Z($1)
-    vmadn   $v23, $v16, $v24
+    vmudl   $v29, tXPF, tXPRcpF
+    lsv     tHAtF[14], VTX_SCR_Z_FRAC($1)
+    vmadm   $v29, tXPI, tXPRcpF
+    lsv     tHAtI[14], VTX_SCR_Z($1)
+    vmadn   tXPRcpF, tXPF, tXPRcpI
     lh      $1, VTX_SCR_VEC($2)
-    vmadh   $v24, $v17, $v24
+    vmadh   tXPRcpI, tXPI, tXPRcpI
     addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
 // tV*At* contains R, G, B, A, S, T, W, Z. tD31* = vtx 3 - vtx 1, tD21* = vtx 2 - vtx 1
-tD31F equ $v10
-tD31I equ $v9
-tD21F equ $v13
-tD21I equ $v7
-    vsubc   tD31F, tV3AtF, tV1AtF
+tAtLmHF equ $v10
+tAtLmHI equ $v9
+tAtMmHF equ $v13
+tAtMmHI equ $v7
+    vsubc   tAtLmHF, tLAtF, tHAtF
     andi    $3, $6, G_SHADE
-    vsub    tD31I, tV3AtI, tV1AtI
+    vsub    tAtLmHI, tLAtI, tHAtI
     sll     $1, $1, 14
-    vsubc   tD21F, tV2AtF, tV1AtF
+    vsubc   tAtMmHF, tMAtF, tHAtF
     sw      $1, 0x0008(rdpCmdBufPtr)         // Store XL edge coefficient
-    vsub    tD21I, tV2AtI, tV1AtI
+    vsub    tAtMmHI, tMAtI, tHAtI
     ssv     $v3[6], 0x0010(rdpCmdBufPtr)     // Store XH edge coefficient (integer part)
 // DaDx = (v3 - v1) * factor + (v2 - v1) * factor
 tDaDxF equ $v2
 tDaDxI equ $v3
-    vmudn   $v29, tD31F, $v6[1]
+    vmudn   $v29, tAtLmHF, tPosMmH[1]
     ssv     $v2[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
-    vmadh   $v29, tD31I, $v6[1]
+    vmadh   $v29, tAtLmHI, tPosMmH[1]
     ssv     $v3[4], 0x0018(rdpCmdBufPtr)     // Store XM edge coefficient (integer part)
-    vmadn   $v29, tD21F, $v12[1]
+    vmadn   $v29, tAtMmHF, tPosHmL[1]
     ssv     $v2[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
-    vmadh   $v29, tD21I, $v12[1]
-    ssv     $v15[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
+    vmadh   $v29, tAtMmHI, tPosHmL[1]
+    ssv     tPosCatI[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
     vreadacc tDaDxF, ACC_MIDDLE
     ssv     $v20[0], 0x000E(rdpCmdBufPtr)    // Store DxLDy edge coefficient (fractional part)
     vreadacc tDaDxI, ACC_UPPER
-    ssv     $v15[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
+    ssv     tPosCatI[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
 // DaDy = (v2 - v1) * factor + (v3 - v1) * factor
 tDaDyF equ $v6
 tDaDyI equ $v7
-    vmudn   $v29, tD21F, $v8[0]
+    vmudn   $v29, tAtMmHF, tPosLmH[0]
     ssv     $v20[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
-    vmadh   $v29, tD21I, $v8[0]
-    ssv     $v15[4], 0x001C(rdpCmdBufPtr)    // Store DxMDy edge coefficient (integer part)
-    vmadn   $v29, tD31F, $v11[0]
+    vmadh   $v29, tAtMmHI, tPosLmH[0]
+    ssv     tPosCatI[4], 0x001C(rdpCmdBufPtr)    // Store DxMDy edge coefficient (integer part)
+    vmadn   $v29, tAtLmHF, tPosHmM[0]
     ssv     $v20[4], 0x001E(rdpCmdBufPtr)    // Store DxMDy edge coefficient (fractional part)
-    vmadh   $v29, tD31I, $v11[0]
+    vmadh   $v29, tAtLmHI, tPosHmM[0]
     sll     $11, $3, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
     vreadacc tDaDyF, ACC_MIDDLE
     add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
     vreadacc tDaDyI, ACC_UPPER
     sll     $11, $9, 5              // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
 // DaDx, DaDy *= more factors
-    vmudl   $v29, tDaDxF, $v23[1]
+    vmudl   $v29, tDaDxF, tXPRcpF[1]
     add     rdpCmdBufPtr, $1, $11   // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
-    vmadm   $v29, tDaDxI, $v23[1]
+    vmadm   $v29, tDaDxI, tXPRcpF[1]
     andi    $6, $6, G_ZBUFFER       // Get the value of G_ZBUFFER from the current geometry mode
-    vmadn   tDaDxF, tDaDxF, $v24[1]
+    vmadn   tDaDxF, tDaDxF, tXPRcpI[1]
     sll     $11, $6, 4              // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
-    vmadh   tDaDxI, tDaDxI, $v24[1]
+    vmadh   tDaDxI, tDaDxI, tXPRcpI[1]
     move    $10, rdpCmdBufPtr       // Write Z here
-    vmudl   $v29, tDaDyF, $v23[1]
+    vmudl   $v29, tDaDyF, tXPRcpF[1]
     add     rdpCmdBufPtr, rdpCmdBufPtr, $11  // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
-    vmadm   $v29, tDaDyI, $v23[1]
+    vmadm   $v29, tDaDyI, tXPRcpF[1]
     sub     $8, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
-    vmadn   tDaDyF, tDaDyF, $v24[1]
+    vmadn   tDaDyF, tDaDyF, tXPRcpI[1]
     sdv     tDaDxF[0], 0x0018($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
-    vmadh   tDaDyI, tDaDyI, $v24[1]
+    vmadh   tDaDyI, tDaDyI, tXPRcpI[1]
     sdv     tDaDxI[0], 0x0008($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (integer)
 // DaDe = DaDx * factor
 tDaDeF equ $v8
@@ -1642,52 +1658,52 @@ tDaDeI equ $v9
     sdv     tDaDxF[8], 0x0018($1)   // Store DsDx, DtDx, DwDx texture coefficients (fractional)
     vmadm   $v29, tDaDxI, $v20[3]
     sdv     tDaDxI[8], 0x0008($1)   // Store DsDx, DtDx, DwDx texture coefficients (integer)
-    vmadn   tDaDeF, tDaDxF, $v15[3]
+    vmadn   tDaDeF, tDaDxF, tPosCatI[3]
     sdv     tDaDyF[0], 0x0038($2)   // Store DrDy, DgDy, DbDy, DaDy shade coefficients (fractional)
-    vmadh   tDaDeI, tDaDxI, $v15[3]
+    vmadh   tDaDeI, tDaDxI, tPosCatI[3]
     sdv     tDaDyI[0], 0x0028($2)   // Store DrDy, DgDy, DbDy, DaDy shade coefficients (integer)
 // Base value += DaDe * factor
-    vmudn   $v29, tV1AtF, vOne[0]
+    vmudn   $v29, tHAtF, vOne[0]
     sdv     tDaDyF[8], 0x0038($1)   // Store DsDy, DtDy, DwDy texture coefficients (fractional)
-    vmadh   $v29, tV1AtI, vOne[0]
+    vmadh   $v29, tHAtI, vOne[0]
     sdv     tDaDyI[8], 0x0028($1)   // Store DsDy, DtDy, DwDy texture coefficients (integer)
-    vmadl   $v29, tDaDeF, $v4[1]
+    vmadl   $v29, tDaDeF, tSubPxHF[1]
     sdv     tDaDeF[0], 0x0030($2)   // Store DrDe, DgDe, DbDe, DaDe shade coefficients (fractional)
-    vmadm   $v29, tDaDeI, $v4[1]
+    vmadm   $v29, tDaDeI, tSubPxHF[1]
     sdv     tDaDeI[0], 0x0020($2)   // Store DrDe, DgDe, DbDe, DaDe shade coefficients (integer)
-    vmadn   tV1AtF, tDaDeF, $v26[1]
+    vmadn   tHAtF, tDaDeF, tSubPxHI[1]
     sdv     tDaDeF[8], 0x0030($1)   // Store DsDe, DtDe, DwDe texture coefficients (fractional)
-    vmadh   tV1AtI, tDaDeI, $v26[1]
+    vmadh   tHAtI, tDaDeI, tSubPxHI[1]
     sdv     tDaDeI[8], 0x0020($1)   // Store DsDe, DtDe, DwDe texture coefficients (integer)
     // All values start in element 7. "a", attribute, is Z. Need
-    // tV1AtI, tV1AtF, tDaDxI, tDaDxF, tDaDeI, tDaDeF, tDaDyI, tDaDyF
+    // tHAtI, tHAtF, tDaDxI, tDaDxF, tDaDeI, tDaDeF, tDaDyI, tDaDyF
     vmudn   tDaDyF, tDaDyF, $v30[7] // 0x0020
     beqz    $20, tri_decal_fix_z
      vmadh  tDaDyI, tDaDyI, $v30[7] // 0x0020
 tri_return_from_decal_fix_z:
-tV1AtFF equ $v10
-    vmudn   tV1AtFF, tDaDeF, $v4[1] // Super-frac (frac * frac) part; assumes v4 factor >= 0
-    sdv     tV1AtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
+tHAtFF equ $v10
+    vmudn   tHAtFF, tDaDeF, tSubPxHF[1] // Super-frac (frac * frac) part; assumes v4 factor >= 0
+    sdv     tHAtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
     vmudn   tDaDeF, tDaDeF, $v30[7] // 0x0020
-    sdv     tV1AtI[0], 0x0000($2)   // Store RGBA shade color (integer)
+    sdv     tHAtI[0], 0x0000($2)   // Store RGBA shade color (integer)
     vmadh   tDaDeI, tDaDeI, $v30[7] // 0x0020
-    sdv     tV1AtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
+    sdv     tHAtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
     vmudn   tDaDxF, tDaDxF, $v30[7] // 0x0020
-    sdv     tV1AtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
+    sdv     tHAtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
     vmadh   tDaDxI, tDaDxI, $v30[7] // 0x0020
     ssv     tDaDyF[14], 0x0E($10)
-    vmudl   $v29,  tV1AtFF, $v30[7] // 0x0020
+    vmudl   $v29,  tHAtFF, $v30[7] // 0x0020
     ssv     tDaDyI[14], 0x0C($10)
-    vmadn   tV1AtF, tV1AtF, $v30[7] // 0x0020
+    vmadn   tHAtF, tHAtF, $v30[7] // 0x0020
     ssv     tDaDeF[14], 0x0A($10)
-    vmadh   tV1AtI, tV1AtI, $v30[7] // 0x0020
+    vmadh   tHAtI, tHAtI, $v30[7] // 0x0020
     ssv     tDaDeI[14], 0x08($10)
     ssv     tDaDxF[14], 0x06($10)
     ssv     tDaDxI[14], 0x04($10)
-    ssv     tV1AtF[14], 0x02($10)
+    ssv     tHAtF[14], 0x02($10)
 tri_end_check_rdp_buffer_full:
     bltz    $8, return_and_end_mat      // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
-     ssv    tV1AtI[14], 0x00($10)   // If returning from no-Z, this is okay b/c $10 is at end
+     ssv    tHAtI[14], 0x00($10)   // If returning from no-Z, this is okay b/c $10 is at end
      // 161 cycles
 flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
     mfc0    $10, SP_DMA_BUSY                 // Check if any DMA is in flight
@@ -1746,8 +1762,8 @@ flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
      addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
 
 tri_decal_fix_z:
-    // Valid range of tV1AtI = 0 to 3FF, but most of the scene is large values
-    vmudm   $v25, tV1AtI, $v31[5] // 0x4000; right shift 2; now 0 to FF
+    // Valid range of tHAtI = 0 to 3FF, but most of the scene is large values
+    vmudm   $v25, tHAtI, $v31[5] // 0x4000; right shift 2; now 0 to FF
     vsub    $v25, $v25, $v30[3] // 0x0100; (0 to FF) - 100 = -100 to -1
     j       tri_return_from_decal_fix_z
      vcr    tDaDyI, tDaDyI, $v25[7]
