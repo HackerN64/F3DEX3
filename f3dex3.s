@@ -1720,7 +1720,7 @@ tDaDeI equ $v9
     // All values start in element 7. "a", attribute, is Z. Need
     // tHAtI, tHAtF, tDaDxI, tDaDxF, tDaDeI, tDaDeF, tDaDyI, tDaDyF
     vmudn   tDaDyF, tDaDyF, $v30[7] // 0x0020
-    beqz    $20, tri_decal_fix_z
+    //beqz    $20, tri_decal_fix_z
      vmadh  tDaDyI, tDaDyI, $v30[7] // 0x0020
 tri_return_from_decal_fix_z:
 tHAtFF equ $v10
@@ -1743,9 +1743,10 @@ tHAtFF equ $v10
     ssv     tDaDxF[14], 0x06($10)
     ssv     tDaDxI[14], 0x04($10)
     ssv     tHAtF[14], 0x02($10)
-tri_end_check_rdp_buffer_full:
-    bltz    $8, return_and_end_mat      // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
+    beqz    $20, print_decal_tri
      ssv    tHAtI[14], 0x00($10)   // If returning from no-Z, this is okay b/c $10 is at end
+after_print_decal_tri:
+     bltz    $8, return_and_end_mat      // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
      // 160 cycles
 flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
     mfc0    $10, SP_DMA_BUSY                 // Check if any DMA is in flight
@@ -1803,12 +1804,24 @@ flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
     j       dma_read_write
      addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
 
+/*
 tri_decal_fix_z:
     // Valid range of tHAtI = 0 to 3FF, but most of the scene is large values
+    .dw 0x00000836
     vmudm   $v25, tHAtI, $v31[5] // 0x4000; right shift 2; now 0 to FF
     vsub    $v25, $v25, $v30[3] // 0x0100; (0 to FF) - 100 = -100 to -1
+    .dw 0x000008B6
     j       tri_return_from_decal_fix_z
      vcr    tDaDyI, tDaDyI, $v25[7]
+*/
+
+print_decal_tri:
+    lqv     $v29[0], 0($10)
+    .dw 0x00000836
+    vmudh   $v29, $v29, vOne
+    .dw 0x000008B6
+    j       after_print_decal_tri
+     nop
 
 tri_culled_by_occlusion_plane:
 .if CFG_PROFILING_B
