@@ -11,9 +11,9 @@ default: F3DEX3_BrZ F3DEX3_BrW
 # List of all compile-time options supported by the microcode source.
 ALL_OPTIONS := \
   CFG_G_BRANCH_W \
-  CFG_DEBUG_NORMALS \
   CFG_NO_OCCLUSION_PLANE \
   CFG_LEGACY_VTX_PIPE \
+  CFG_EXTRA_PRECISION \
   CFG_PROFILING_A \
   CFG_PROFILING_B \
   CFG_PROFILING_C
@@ -139,42 +139,42 @@ define rule_builder_final
   $$(eval $$(call ucode_rule))
 endef
 
-define rule_builder_dbgn
-  NAME_FINAL := $(NAME_DBGN)
-  OPTIONS_FINAL := $(OPTIONS_DBGN)
+define rule_builder_prof
+  NAME_FINAL := $(NAME_PROF)
+  OPTIONS_FINAL := $(OPTIONS_PROF)
   $$(eval $$(call rule_builder_final))
   
-  NAME_FINAL := $(NAME_DBGN)_dbgN
-  OPTIONS_FINAL := $(OPTIONS_DBGN) CFG_DEBUG_NORMALS
+  NAME_FINAL := $(NAME_PROF)_PA
+  OPTIONS_FINAL := $(OPTIONS_PROF) CFG_PROFILING_A
+  $$(eval $$(call rule_builder_final))
+  
+  NAME_FINAL := $(NAME_PROF)_PB
+  OPTIONS_FINAL := $(OPTIONS_PROF) CFG_PROFILING_B
+  $$(eval $$(call rule_builder_final))
+  
+  NAME_FINAL := $(NAME_PROF)_PC
+  OPTIONS_FINAL := $(OPTIONS_PROF) CFG_PROFILING_C
   $$(eval $$(call rule_builder_final))
 endef
 
-define rule_builder_prof
-  NAME_DBGN := $(NAME_PROF)
-  OPTIONS_DBGN := $(OPTIONS_PROF)
-  $$(eval $$(call rule_builder_dbgn))
+define rule_builder_xp
+  NAME_PROF := $(NAME_XP)
+  OPTIONS_PROF := $(OPTIONS_XP)
+  $$(eval $$(call rule_builder_prof))
   
-  NAME_DBGN := $(NAME_PROF)_PA
-  OPTIONS_DBGN := $(OPTIONS_PROF) CFG_PROFILING_A
-  $$(eval $$(call rule_builder_dbgn))
-  
-  NAME_DBGN := $(NAME_PROF)_PB
-  OPTIONS_DBGN := $(OPTIONS_PROF) CFG_PROFILING_B
-  $$(eval $$(call rule_builder_dbgn))
-  
-  NAME_DBGN := $(NAME_PROF)_PC
-  OPTIONS_DBGN := $(OPTIONS_PROF) CFG_PROFILING_C
-  $$(eval $$(call rule_builder_dbgn))
+  NAME_PROF := $(NAME_XP)_XP
+  OPTIONS_PROF := $(OPTIONS_XP) CFG_EXTRA_PRECISION
+  $$(eval $$(call rule_builder_prof))
 endef
 
 define rule_builder_noc
-  NAME_PROF := $(NAME_NOC)
-  OPTIONS_PROF := $(OPTIONS_NOC)
-  $$(eval $$(call rule_builder_prof))
+  NAME_XP := $(NAME_NOC)
+  OPTIONS_XP := $(OPTIONS_NOC)
+  $$(eval $$(call rule_builder_xp))
   
-  NAME_PROF := $(NAME_NOC)_NOC
-  OPTIONS_PROF := $(OPTIONS_NOC) CFG_NO_OCCLUSION_PLANE
-  $$(eval $$(call rule_builder_prof))
+  NAME_XP := $(NAME_NOC)_NOC
+  OPTIONS_XP := $(OPTIONS_NOC) CFG_NO_OCCLUSION_PLANE
+  $$(eval $$(call rule_builder_xp))
 endef
 
 define rule_builder_lvp

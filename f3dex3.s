@@ -1335,7 +1335,6 @@ tPosLmH equ $v8
 tPosHmM equ $v11
 tPosHmL equ $v12 // not computed directly in CFG_EXTRA_PRECISION
 
-CFG_EXTRA_PRECISION equ 0
 .if CFG_EXTRA_PRECISION
 tNRPosFactor equ $v31[4] // 4
 tNRNegFactor equ $v31[0] // -4
@@ -3534,6 +3533,7 @@ lt_after_xfrm_normals:
     jal     lt_normalize
      luv    vPairLt, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
     // Set up ambient occlusion: light *= (factor * (alpha - 1) + 1)
+CFG_DEBUG_NORMALS equ 0 // Can manually enable here
 .if CFG_DEBUG_NORMALS
 .warning "Debug normals visualization is enabled"
     vmudh   $v29, vOne, $v31[5] // 0x4000; middle gray

@@ -107,7 +107,17 @@ SM64), or `BrW` if the microcode is replacing F3DZEX (i.e. OoT or MM). This
 controls whether `SPBranchLessZ*` uses the vertex's W coordinate or screen Z
 coordinate.
 
+## Extra Precision (`XP`)
+
+This configuration attempts to reproduce F3DEX(1) numerical behavior for Z
+buffer coefficients, potentially improving Z fighting in some cases of decals or
+opaque surfaces intended to behave like decals.
+
 ## Debug Normals (`dbgN`)
+
+Debug Normals has been moved out of the Makefile as it is not a microcode
+version intended to be shipped. It can still be enabled by changing
+`CFG_DEBUG_NORMALS equ 0` to `1` in the microcode.
 
 To help debug lighting issues when integrating F3DEX3 into your romhack, this
 feature causes the vertex colors of any material with lighting enabled to be set
