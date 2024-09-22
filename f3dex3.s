@@ -310,6 +310,7 @@ endSharedDMEM:
 .endif
 v31Value:
 // v31 must go from lowest to highest (signed) values for vcc patterns.
+// CFG_EXTRA_PRECISION also relies on the fact that $v31[0h] is -4,-4,-4,-4, 4, 4, 4, 4.
     .dh -4     // used in clipping, vtx write for Newton-Raphson reciprocal
     .dh -1     // used often
     .dh 0      // used often
@@ -1329,14 +1330,26 @@ tLAtI equ $v21
 tHPos equ $v14
 tMPos equ $v2
 tLPos equ $v10
+tPosMmH equ $v6
+tPosLmH equ $v8
+tPosHmM equ $v11
+tPosHmL equ $v12 // not computed directly in CFG_EXTRA_PRECISION
 
 CFG_EXTRA_PRECISION equ 0
 .if CFG_EXTRA_PRECISION
 tNRPosFactor equ $v31[4] // 4
 tNRNegFactor equ $v31[0] // -4
+tMmHYFactor equ tPosLmH[4] // MmHY * 4
+tHmLYFactor equ tPosLmH[1] // LmHY * -4
+tLmHXFactor equ tPosLmH[5] // LmHX * 4
+tHmMXFactor equ tPosLmH[6] // HmMX * 4
 .else
 tNRPosFactor equ $v30[6] // 16
 tNRNegFactor equ $v30[4] // -16
+tMmHYFactor equ tPosMmH[1]
+tHmLYFactor equ tPosHmL[1]
+tLmHXFactor equ tPosLmH[0]
+tHmMXFactor equ tPosHmM[0]
 .endif
 
 G_TRI2_handler:
@@ -1416,10 +1429,6 @@ tSubPxHI equ $v26
     beqz    $9, return_and_end_mat  // If cross product is 0, tri is degenerate (zero area), cull.
      // 36 cycles
      mfc2   $1, tHPos[12]     // tHPos = lowest Y value = highest on screen (x, y, addr)
-tPosMmH equ $v6
-tPosLmH equ $v8
-tPosHmM equ $v11
-tPosHmL equ $v12
 tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
 tPosCatF equ $v25
     vsub    tPosMmH, tMPos, tHPos
@@ -1560,20 +1569,41 @@ tri_skip_alpha_compare_cull:
     vrcph   $v27[0], $v31[2]     // 0
     sb      $zero, materialCullMode // This covers tri write out
     vmudh   $v22, vOne, $v31[7]  // 0x7FFF
+.if CFG_EXTRA_PRECISION
+    ssv     tPosMmH[2], 0x0030(rdpCmdBufPtr) // MmHY -> first short (temp mem)
+.else
     andi    $20, ZMODE_DEC
+.endif
     vmudm   $v29, $v13, $v10[0]
     llv     $v22[0], VTX_TC_VEC($1)
     vmadl   $v29, $v14, $v10[0]
+.if CFG_EXTRA_PRECISION
+    ssv     tPosLmH[0], 0x0032(rdpCmdBufPtr) // LmHX -> second short (temp mem)
+.else
     addi    $20, $20, -ZMODE_DEC
+.endif
     vmadn   $v14, $v14, $v27[0]
     llv     $v22[8], VTX_TC_VEC($2)
     vmadh   $v13, $v13, $v27[0]
+.if CFG_EXTRA_PRECISION
+    ssv     tPosHmM[0], 0x0034(rdpCmdBufPtr) // HmMX -> third short (temp mem)
+.else
     beqz    $9, tri_skip_tex // If textures are not enabled, skip texture coefficient calculation
+.endif
      vmudh  $v10, vOne, $v31[7]  // 0x7FFF
+.if CFG_EXTRA_PRECISION
+    andi    $20, ZMODE_DEC
+.endif
     vge     $v29, $v30, $v30[7]  // Set VCC to 11110001; select RGBA___Z or ____STW_
     llv     $v10[8], VTX_TC_VEC($3)
     vmudm   $v29, $v22, $v14[0h]
+.if CFG_EXTRA_PRECISION
+    addi    $20, $20, -ZMODE_DEC
+.endif
     vmadh   $v22, $v22, $v13[0h]
+.if CFG_EXTRA_PRECISION
+    ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
+.endif
     vmadn   $v25, $v31, $v31[2]  // 0
     vmudm   $v29, $v10, $v14[6]  // acc = (v10 * v14[6]); v29 = mid(clamp(acc))
     vmadh   $v10, $v10, $v13[6]  // acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
@@ -1599,7 +1629,11 @@ tri_skip_tex:
     lh      $1, VTX_SCR_VEC($2)
     vmadh   tXPRcpI, tXPI, tXPRcpI
     addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
-    vmudh   tPosHmL, tPosLmH, $v31[1] // -1; TODO
+.if CFG_EXTRA_PRECISION
+    vmudh   tPosLmH, tPosLmH, $v31[0h] // e1 LmHY * -4 = 4*HmLY; e456 MmHY,LmHX,HmMX *= 4
+.else
+    vmudh   tPosHmL, tPosLmH, $v31[1]
+.endif
 tAtLmHF equ $v10
 tAtLmHI equ $v9
 tAtMmHF equ $v13
@@ -1615,13 +1649,13 @@ tAtMmHI equ $v7
 // DaDx = (v3 - v1) * factor + (v2 - v1) * factor
 tDaDxF equ $v2
 tDaDxI equ $v3
-    vmudn   $v29, tAtLmHF, tPosMmH[1]
+    vmudn   $v29, tAtLmHF, tMmHYFactor
     ssv     $v2[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
-    vmadh   $v29, tAtLmHI, tPosMmH[1]
+    vmadh   $v29, tAtLmHI, tMmHYFactor
     ssv     $v3[4], 0x0018(rdpCmdBufPtr)     // Store XM edge coefficient (integer part)
-    vmadn   $v29, tAtMmHF, tPosHmL[1]
+    vmadn   $v29, tAtMmHF, tHmLYFactor
     ssv     $v2[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
-    vmadh   $v29, tAtMmHI, tPosHmL[1]
+    vmadh   $v29, tAtMmHI, tHmLYFactor
     ssv     tPosCatI[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
     vreadacc tDaDxF, ACC_MIDDLE
     ssv     $v20[0], 0x000E(rdpCmdBufPtr)    // Store DxLDy edge coefficient (fractional part)
@@ -1630,13 +1664,13 @@ tDaDxI equ $v3
 // DaDy = (v2 - v1) * factor + (v3 - v1) * factor
 tDaDyF equ $v6
 tDaDyI equ $v7
-    vmudn   $v29, tAtMmHF, tPosLmH[0]
+    vmudn   $v29, tAtMmHF, tLmHXFactor
     ssv     $v20[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
-    vmadh   $v29, tAtMmHI, tPosLmH[0]
+    vmadh   $v29, tAtMmHI, tLmHXFactor
     ssv     tPosCatI[4], 0x001C(rdpCmdBufPtr)    // Store DxMDy edge coefficient (integer part)
-    vmadn   $v29, tAtLmHF, tPosHmM[0]
+    vmadn   $v29, tAtLmHF, tHmMXFactor
     ssv     $v20[4], 0x001E(rdpCmdBufPtr)    // Store DxMDy edge coefficient (fractional part)
-    vmadh   $v29, tAtLmHI, tPosHmM[0]
+    vmadh   $v29, tAtLmHI, tHmMXFactor
     sll     $11, $3, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
     vreadacc tDaDyF, ACC_MIDDLE
     add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
