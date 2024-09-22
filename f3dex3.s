@@ -1330,6 +1330,15 @@ tHPos equ $v14
 tMPos equ $v2
 tLPos equ $v10
 
+CFG_EXTRA_PRECISION equ 0
+.if CFG_EXTRA_PRECISION
+tNRPosFactor equ $v31[4] // 4
+tNRNegFactor equ $v31[0] // -4
+.else
+tNRPosFactor equ $v30[6] // 16
+tNRNegFactor equ $v30[4] // -16
+.endif
+
 G_TRI2_handler:
 G_QUAD_handler:
     jal     tri_main                     // Send second tri; return here for first tri
@@ -1421,9 +1430,9 @@ tPosCatF equ $v25
 .endif
     vsub    tPosHmM, tHPos, tMPos
     andi    $6, $6, (G_SHADE | G_ZBUFFER)
-    vsub    tPosHmL, tHPos, tLPos
-    mfc2    $3, tLPos[12]     // tLPos = highest Y value = lowest on screen (x, y, addr)
     vsub    tPosCatI, tLPos, tMPos
+    mfc2    $3, tLPos[12]     // tLPos = highest Y value = lowest on screen (x, y, addr)
+    vmov    tPosCatI[2], tPosMmH[0]
 .if !CFG_NO_OCCLUSION_PLANE
     and     $5, $5, $7
     and     $5, $5, $8
@@ -1448,7 +1457,7 @@ tXPRcpI equ $v24
 .if !ENABLE_PROFILING
     lpv     $v25[0], VTX_COLOR_VEC($4)  // Load RGB from vertex 4 (flat shading vtx)
 .endif
-    vmov    tPosCatI[2], tPosMmH[0]
+    vmov    tPosCatI[3], tPosLmH[0]
     llv     $v13[8], VTX_INV_W_VEC($2)
     vrcph   $v22[0], tXPI[1]
     llv     $v13[12], VTX_INV_W_VEC($3)
@@ -1476,14 +1485,14 @@ tri_skip_flat_shading:
     vmudl   tHAtI, tHAtI, $v30[3] // 0x0100; vertex color 1 >>= 8
     lbu     $9, textureSettings1 + 3
     vmudl   tMAtI, tMAtI, $v30[3] // 0x0100; vertex color 2 >>= 8
-    sub     $11, $5, $7
+    sub     $11, $5, $7  // Four instr: $5 = max($5, $7)
     vmudl   tLAtI, tLAtI, $v30[3] // 0x0100; vertex color 3 >>= 8
     sra     $10, $11, 31
-    vmov    tPosCatI[3], tPosLmH[0]
-    and     $11, $11, $10
     vmudl   $v29, $v20, $v30[7] // 0x0020
+    // no nop if tri_skip_flip_facing was unaligned
+    vmadm   $v22, $v22, $v30[7] // 0x0020
     beqz    $20, tri_skip_alpha_compare_cull
-     sub    $5, $5, $11
+     vmadn  $v20, $v31, $v31[2] // 0
     // Alpha compare culling
     vge     $v26, tHAtI, tMAtI
     lbu     $19, alphaCompareCullThresh
@@ -1498,69 +1507,69 @@ tri_skip_flat_shading:
     bltz    $24, return_and_end_mat // if max < thresh or if min >= thresh.
 tri_skip_alpha_compare_cull:
     // 63 cycles
-     vmadm  $v22, $v22, $v30[7] // 0x0020
-    sub     $11, $5, $8  // Four instr: $5 = max($5, $8)
-    vmadn   $v20, $v31, $v31[2] // 0
-    sra     $10, $11, 31
     vmudm   tPosCatF, tPosCatI, $v30[2] // 0x1000
-    and     $11, $11, $10
+    // no nop if tri_skip_alpha_compare_cull was unaligned
     vmadn   tPosCatI, $v31, $v31[2] // 0
-    sub     $5, $5, $11
+    and     $11, $11, $10
     vsubc   tSubPxHF, vZero, tSubPxHF
-    sw      $5, 0x0010(rdpCmdBufPtr)
+    sub     $5, $5, $11
     vsub    tSubPxHI, vZero, vZero
-    llv     $v27[0], 0x0010(rdpCmdBufPtr)
+    sub     $11, $5, $8  // Four instr: $5 = max($5, $8)
     vmudm   $v29, tPosCatF, $v20
-    mfc2    $5, tXPI[1]
+    sra     $10, $11, 31
     vmadl   $v29, tPosCatI, $v20
-    lbu     $7, textureSettings1 + 2
+    and     $11, $11, $10
     vmadn   $v20, tPosCatI, $v22
-    lsv     tMAtI[14], VTX_SCR_Z($2)
+    sub     $5, $5, $11
     vmadh   tPosCatI, tPosCatF, $v22
-    lsv     tLAtI[14], VTX_SCR_Z($3)
+    sw      $5, 0x0010(rdpCmdBufPtr)
     vmudl   $v29, tXPRcpF, tXPF
-    lsv     tMAtF[14], VTX_SCR_Z_FRAC($2)
+    llv     $v27[0], 0x0010(rdpCmdBufPtr)
     vmadm   $v29, tXPRcpI, tXPF
-    lsv     tLAtF[14], VTX_SCR_Z_FRAC($3)
+    mfc2    $5, tXPI[1]
     vmadn   tXPF, tXPRcpF, tXPI
-    ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
+    lbu     $7, textureSettings1 + 2
     vmadh   tXPI, tXPRcpI, tXPI
-    or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
+    lsv     tMAtI[14], VTX_SCR_Z($2)
     vand    $v22, $v20, $v30[5] // 0xFFF8
-    // nop
+    lsv     tLAtI[14], VTX_SCR_Z($3)
     vcr     tPosCatI, tPosCatI, $v30[3] // 0x0100
-    sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
-    vmudh   $v29, vOne, $v30[6] // 16
-    ssv     tLPos[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
-    vmadn   tXPF, tXPF, $v30[4] // -16
-    ssv     $v2[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
-    vmadh   tXPI, tXPI, $v30[4] // -16
-    ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
+    lsv     tMAtF[14], VTX_SCR_Z_FRAC($2)
+    vmudh   $v29, vOne, tNRPosFactor // 16 or 4
+    lsv     tLAtF[14], VTX_SCR_Z_FRAC($3)
+    vmadn   tXPF, tXPF, tNRNegFactor // -16 or -4
+    ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
+    vmadh   tXPI, tXPI, tNRNegFactor // -16 or -4
+    or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
     vmudn   $v29, $v3, tHPos[0]
-    lw      $20, otherMode1
+    sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
     vmadl   $v29, $v22, tSubPxHF[1]
-    andi    $10, $5, 0x0080 // Extract the left major flag from $5
+    ssv     tLPos[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
     vmadm   $v29, tPosCatI, tSubPxHF[1]
-    or      $10, $10, $7 // Combine the left major flag with the level and tile from the texture settings
+    ssv     tMPos[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
     vmadn   $v2, $v22, tSubPxHI[1]
-    sb      $10, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
+    ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vmadh   $v3, tPosCatI, tSubPxHI[1]
-    sb      $zero, materialCullMode // This covers tri write out
+    lw      $20, otherMode1
     vrcph   $v29[0], $v27[0]
-    andi    $20, ZMODE_DEC
+    andi    $10, $5, 0x0080 // Extract the left major flag from $5
     vrcpl   $v10[0], $v27[1]
-    addi    $20, $20, -ZMODE_DEC
+    or      $10, $10, $7 // Combine the left major flag with the level and tile from the texture settings
     vmudh   $v14, vOne, $v13[1q]
-    beqz    $9, tri_skip_tex // If textures are not enabled, skip texture coefficient calculation
-     vrcph  $v27[0], $v31[2]     // 0
+    sb      $10, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
+    vrcph   $v27[0], $v31[2]     // 0
+    sb      $zero, materialCullMode // This covers tri write out
     vmudh   $v22, vOne, $v31[7]  // 0x7FFF
+    andi    $20, ZMODE_DEC
     vmudm   $v29, $v13, $v10[0]
-    vmadl   $v29, $v14, $v10[0]
     llv     $v22[0], VTX_TC_VEC($1)
+    vmadl   $v29, $v14, $v10[0]
+    addi    $20, $20, -ZMODE_DEC
     vmadn   $v14, $v14, $v27[0]
     llv     $v22[8], VTX_TC_VEC($2)
     vmadh   $v13, $v13, $v27[0]
-    vmudh   $v10, vOne, $v31[7]  // 0x7FFF
+    beqz    $9, tri_skip_tex // If textures are not enabled, skip texture coefficient calculation
+     vmudh  $v10, vOne, $v31[7]  // 0x7FFF
     vge     $v29, $v30, $v30[7]  // Set VCC to 11110001; select RGBA___Z or ____STW_
     llv     $v10[8], VTX_TC_VEC($3)
     vmudm   $v29, $v22, $v14[0h]
@@ -1581,16 +1590,16 @@ tri_skip_tex:
 .if !ENABLE_PROFILING
     addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
 .endif
-    // 108 cycles
+    // 106 cycles
     vmudl   $v29, tXPF, tXPRcpF
     lsv     tHAtF[14], VTX_SCR_Z_FRAC($1)
     vmadm   $v29, tXPI, tXPRcpF
-    lsv     tHAtI[14], VTX_SCR_Z($1)
+    lsv     tHAtI[14], VTX_SCR_Z($1) // contains R, G, B, A, S, T, W, Z
     vmadn   tXPRcpF, tXPF, tXPRcpI
     lh      $1, VTX_SCR_VEC($2)
     vmadh   tXPRcpI, tXPI, tXPRcpI
     addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
-// tV*At* contains R, G, B, A, S, T, W, Z. tD31* = vtx 3 - vtx 1, tD21* = vtx 2 - vtx 1
+    vmudh   tPosHmL, tPosLmH, $v31[1] // -1; TODO
 tAtLmHF equ $v10
 tAtLmHI equ $v9
 tAtMmHF equ $v13
@@ -1653,7 +1662,7 @@ tDaDyI equ $v7
 // DaDe = DaDx * factor
 tDaDeF equ $v8
 tDaDeI equ $v9
-    // 136 cycles
+    // 135 cycles
     vmadl   $v29, tDaDxF, $v20[3]
     sdv     tDaDxF[8], 0x0018($1)   // Store DsDx, DtDx, DwDx texture coefficients (fractional)
     vmadm   $v29, tDaDxI, $v20[3]
@@ -1704,7 +1713,7 @@ tHAtFF equ $v10
 tri_end_check_rdp_buffer_full:
     bltz    $8, return_and_end_mat      // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
      ssv    tHAtI[14], 0x00($10)   // If returning from no-Z, this is okay b/c $10 is at end
-     // 161 cycles
+     // 160 cycles
 flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
     mfc0    $10, SP_DMA_BUSY                 // Check if any DMA is in flight
     lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write

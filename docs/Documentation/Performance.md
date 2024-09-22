@@ -64,8 +64,8 @@ measured yet".
 | 1st tri to degenerate      | 43     | 41             | 41         | 41         | 41     |
 | Only/2nd tri to occluded   | Can't  | Can't          | 49         | Can't      | 49     |
 | 1st tri to occluded        | Can't  | Can't          | 50         | Can't      | 50     |
-| Only/2nd tri to draw       | 172    | 165            | 168        | 165        | 168    |
-| 1st tri to draw            | 173    | 165            | 168        | 165        | 168    |
+| Only/2nd tri to draw       | 172    | 164            | 167        | 164        | 167    |
+| 1st tri to draw            | 173    | 164            | 167        | 164        | 167    |
 
 
 Tri numbers are measured from the first cycle of the command handler inclusive,
