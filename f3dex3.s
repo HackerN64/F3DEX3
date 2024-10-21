@@ -1450,11 +1450,13 @@ tXPF equ $v16 // Triangle cross product
 tXPI equ $v17
 tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
 tXPRcpI equ $v24
+t1WI equ $v13 // elems 0, 4, 6
+t1WF equ $v14
     vmudh   $v29, tPosMmH, tPosLmH[0]
 .if !CFG_NO_OCCLUSION_PLANE
     bnez    $5, tri_culled_by_occlusion_plane // Cull if all verts occluded
 .endif
-    llv     $v13[0], VTX_INV_W_VEC($1)
+    llv     t1WI[0], VTX_INV_W_VEC($1)
     vmadh   $v29, tPosLmH, tPosHmM[0]
     lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vreadacc tXPI, ACC_UPPER
@@ -1466,9 +1468,9 @@ tXPRcpI equ $v24
     lpv     $v25[0], VTX_COLOR_VEC($4)  // Load RGB from vertex 4 (flat shading vtx)
 .endif
     vmov    tPosCatI[3], tPosLmH[0]
-    llv     $v13[8], VTX_INV_W_VEC($2)
+    llv     t1WI[8], VTX_INV_W_VEC($2)
     vrcph   $v22[0], tXPI[1]
-    llv     $v13[12], VTX_INV_W_VEC($3)
+    llv     t1WI[12], VTX_INV_W_VEC($3)
     vrcpl   tXPRcpF[1], tXPF[1]
 .if !ENABLE_PROFILING
     bltz    $11, tri_skip_flat_shading  // Branch if G_SHADING_SMOOTH is set
@@ -1485,7 +1487,7 @@ tri_skip_flat_shading:
     vrcp    $v20[2], tPosMmH[1]
     lb      $20, (alphaCompareCullMode)($zero)
     vrcph   $v22[2], tPosMmH[1]
-    lw      $5, VTX_INV_W_VEC($1)
+    lw      $5, VTX_INV_W_VEC($1) // $5, $7, $8 = 1/W for H, M, L
     vrcp    $v20[3], tPosLmH[1]
     lw      $7, VTX_INV_W_VEC($2)
     vrcph   $v22[3], tPosLmH[1]
@@ -1530,9 +1532,10 @@ tri_skip_alpha_compare_cull:
     vmadn   $v20, tPosCatI, $v22
     sub     $5, $5, $11
     vmadh   tPosCatI, tPosCatF, $v22
-    sw      $5, 0x0010(rdpCmdBufPtr)
+    sw      $5, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W to temp mem
     vmudl   $v29, tXPRcpF, tXPF
-    llv     $v27[0], 0x0010(rdpCmdBufPtr)
+tMx1W equ $v27
+    llv     tMx1W[0], 0x0010(rdpCmdBufPtr) // Load max of three verts' 1/W
     vmadm   $v29, tXPRcpI, tXPF
     mfc2    $5, tXPI[1]
     vmadn   tXPF, tXPRcpF, tXPI
@@ -1559,62 +1562,68 @@ tri_skip_alpha_compare_cull:
     ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vmadh   $v3, tPosCatI, tSubPxHI[1]
     lw      $20, otherMode1
-    vrcph   $v29[0], $v27[0]
+tMnWI equ $v27
+tMnWF equ $v10
+    vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
     andi    $10, $5, 0x0080 // Extract the left major flag from $5
-    vrcpl   $v10[0], $v27[1]
+    vrcpl   tMnWF[0], tMx1W[1]
     or      $10, $10, $7 // Combine the left major flag with the level and tile from the texture settings
-    vmudh   $v14, vOne, $v13[1q]
+    vmudh   t1WF, vOne, t1WI[1q]
     sb      $10, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
-    vrcph   $v27[0], $v31[2]     // 0
+    vrcph   tMnWI[0], $v31[2]     // 0
     sb      $zero, materialCullMode // This covers tri write out
-    vmudh   $v22, vOne, $v31[7]  // 0x7FFF
+tSTWHMI equ $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
+tSTWHMF equ $v25
+    vmudh   tSTWHMI, vOne, $v31[7]  // 0x7FFF
 .if CFG_EXTRA_PRECISION
     ssv     tPosMmH[2], 0x0030(rdpCmdBufPtr) // MmHY -> first short (temp mem)
 .else
     andi    $20, ZMODE_DEC
 .endif
-    vmudm   $v29, $v13, $v10[0]
-    llv     $v22[0], VTX_TC_VEC($1)
-    vmadl   $v29, $v14, $v10[0]
+    vmudm   $v29, t1WI, tMnWF[0] // 1/W each vtx * min W = 1 for one of the verts, < 1 for others
+    llv     tSTWHMI[0], VTX_TC_VEC($1)
+    vmadl   $v29, t1WF, tMnWF[0]
 .if CFG_EXTRA_PRECISION
     ssv     tPosLmH[0], 0x0032(rdpCmdBufPtr) // LmHX -> second short (temp mem)
 .else
     addi    $20, $20, -ZMODE_DEC
 .endif
-    vmadn   $v14, $v14, $v27[0]
-    llv     $v22[8], VTX_TC_VEC($2)
-    vmadh   $v13, $v13, $v27[0]
+    vmadn   t1WF, t1WF, tMnWI[0]
+    llv     tSTWHMI[8], VTX_TC_VEC($2)
+    vmadh   t1WI, t1WI, tMnWI[0]
 .if CFG_EXTRA_PRECISION
     ssv     tPosHmM[0], 0x0034(rdpCmdBufPtr) // HmMX -> third short (temp mem)
 .else
     beqz    $9, tri_skip_tex // If textures are not enabled, skip texture coefficient calculation
 .endif
-     vmudh  $v10, vOne, $v31[7]  // 0x7FFF
+tSTWLI equ $v10 // L = elems 4-6; init W = 7FFF
+tSTWLF equ $v13
+     vmudh  tSTWLI, vOne, $v31[7]  // 0x7FFF
 .if CFG_EXTRA_PRECISION
     andi    $20, ZMODE_DEC
 .endif
     vge     $v29, $v30, $v30[7]  // Set VCC to 11110001; select RGBA___Z or ____STW_
-    llv     $v10[8], VTX_TC_VEC($3)
-    vmudm   $v29, $v22, $v14[0h]
+    llv     tSTWLI[8], VTX_TC_VEC($3)
+    vmudm   $v29, tSTWHMI, t1WF[0h] // (S, T, 7FFF) * (1 or <1) for H and M
 .if CFG_EXTRA_PRECISION
     addi    $20, $20, -ZMODE_DEC
 .endif
-    vmadh   $v22, $v22, $v13[0h]
+    vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
 .if CFG_EXTRA_PRECISION
     ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
 .endif
-    vmadn   $v25, $v31, $v31[2]  // 0
-    vmudm   $v29, $v10, $v14[6]  // acc = (v10 * v14[6]); v29 = mid(clamp(acc))
-    vmadh   $v10, $v10, $v13[6]  // acc += (v10 * v13[6]) << 16; v10 = mid(clamp(acc))
-    vmadn   $v13, $v31, $v31[2]  // 0; v13 = lo(clamp(acc))
-    sdv     $v22[0], 0x0020(rdpCmdBufPtr)
-    vmrg    tMAtI, tMAtI, $v22 // Merge S, T, W into elems 4-6
-    sdv     $v25[0], 0x0028(rdpCmdBufPtr) // 8
-    vmrg    tMAtF, tMAtF, $v25 // Merge S, T, W into elems 4-6
-    ldv     tHAtI[8], 0x0020(rdpCmdBufPtr) // 8
-    vmrg    tLAtI, tLAtI, $v10 // Merge S, T, W into elems 4-6
-    ldv     tHAtF[8], 0x0028(rdpCmdBufPtr) // 8
-    vmrg    tLAtF, tLAtF, $v13 // Merge S, T, W into elems 4-6
+    vmadn   tSTWHMF, $v31, $v31[2]  // 0
+    vmudm   $v29, tSTWLI, t1WF[6]  // (S, T, 7FFF) * (1 or <1) for L
+    vmadh   tSTWLI, tSTWLI, t1WI[6]
+    vmadn   tSTWLF, $v31, $v31[2]  // 0
+    sdv     tSTWHMI[0], 0x0020(rdpCmdBufPtr) // Move S, T, W Hi Int to temp mem
+    vmrg    tMAtI, tMAtI, tSTWHMI // Merge S, T, W Mid into elems 4-6
+    sdv     tSTWHMF[0], 0x0028(rdpCmdBufPtr) // Move S, T, W Hi Frac to temp mem
+    vmrg    tMAtF, tMAtF, tSTWHMF // Merge S, T, W Mid into elems 4-6
+    ldv     tHAtI[8], 0x0020(rdpCmdBufPtr) // Move S, T, W Hi Int from temp mem
+    vmrg    tLAtI, tLAtI, tSTWLI // Merge S, T, W Low into elems 4-6
+    ldv     tHAtF[8], 0x0028(rdpCmdBufPtr) // Move S, T, W Hi Frac from temp mem
+    vmrg    tLAtF, tLAtF, tSTWLF // Merge S, T, W Low into elems 4-6
 tri_skip_tex:
 .if !ENABLE_PROFILING
     addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
