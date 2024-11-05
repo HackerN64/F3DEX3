@@ -13,6 +13,15 @@ through the docs folder).
 
 ## Features
 
+Compared to F3DEX2 or any other F3D family microcode, F3DEX3 is...
+- faster on the RDP
+- in `LVP_NOC` configuration (see docs), also faster on the RSP
+- more accurate
+- full of new visual features
+- measurable in performance
+
+all at the same time!
+
 ### New visual features
 
 - New geometry mode bit `G_PACKED_NORMALS` enables **simultaneous vertex colors

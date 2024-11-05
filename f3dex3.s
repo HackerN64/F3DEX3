@@ -310,7 +310,7 @@ endSharedDMEM:
 .endif
 v31Value:
 // v31 must go from lowest to highest (signed) values for vcc patterns.
-// CFG_EXTRA_PRECISION also relies on the fact that $v31[0h] is -4,-4,-4,-4, 4, 4, 4, 4.
+// Also relies on the fact that $v31[0h] is -4,-4,-4,-4, 4, 4, 4, 4.
     .dh -4     // used in clipping, vtx write for Newton-Raphson reciprocal
     .dh -1     // used often
     .dh 0      // used often
@@ -325,16 +325,16 @@ v31Value:
     .error "Wrong alignment for v30value"
 .endif
 // Only one VCC pattern used:
-// vge xxx, $v30, $v30[7] = 11110001 in tri write
+// vge xxx, $v30, $v30[3] = 11110001 in tri write
 v30Value:
-    .dh vertexBuffer // for converting vertex index to address
+    .dh vertexBuffer // currently 0x02DE; for converting vertex index to address
     .dh vtxSize << 7 // 0x1300; it's not 0x2600 because vertex indices are *2
     .dh 0x1000 // used once in tri write, some multiplier
     .dh 0x0100 // used several times in tri write
-    .dh -16    // used in tri write for Newton-Raphson reciprocal 
+    .dh 0x0020 // some edge write thing in tri write; formerly Z scale factor
     .dh 0xFFF8 // used once in tri write, mask away lower ST bits
-    .dh 0x0010 // used once in tri write for Newton-Raphson reciprocal
-    .dh 0x0020 // used in tri write, both signed and unsigned multipliers
+    .dh 0      // not used
+    .dh 0x0200 // decal fix factor
 
 /*
 Quick note on Newton-Raphson:
@@ -1333,23 +1333,6 @@ tLPos equ $v10
 tPosMmH equ $v6
 tPosLmH equ $v8
 tPosHmM equ $v11
-tPosHmL equ $v12 // not computed directly in CFG_EXTRA_PRECISION
-
-.if CFG_EXTRA_PRECISION
-tNRPosFactor equ $v31[4] // 4
-tNRNegFactor equ $v31[0] // -4
-tMmHYFactor equ tPosLmH[4] // MmHY * 4
-tHmLYFactor equ tPosLmH[1] // LmHY * -4
-tLmHXFactor equ tPosLmH[5] // LmHX * 4
-tHmMXFactor equ tPosLmH[6] // HmMX * 4
-.else
-tNRPosFactor equ $v30[6] // 16
-tNRNegFactor equ $v30[4] // -16
-tMmHYFactor equ tPosMmH[1]
-tHmLYFactor equ tPosHmL[1]
-tLmHXFactor equ tPosLmH[0]
-tHmMXFactor equ tPosHmM[0]
-.endif
 
 G_TRI2_handler:
 G_QUAD_handler:
@@ -1498,9 +1481,9 @@ tri_skip_flat_shading:
     sub     $11, $5, $7  // Four instr: $5 = max($5, $7)
     vmudl   tLAtI, tLAtI, $v30[3] // 0x0100; vertex color 3 >>= 8
     sra     $10, $11, 31
-    vmudl   $v29, $v20, $v30[7] // 0x0020
+    vmudl   $v29, $v20, $v30[4] // 0x0020
     // no nop if tri_skip_flip_facing was unaligned
-    vmadm   $v22, $v22, $v30[7] // 0x0020
+    vmadm   $v22, $v22, $v30[4] // 0x0020
     beqz    $20, tri_skip_alpha_compare_cull
      vmadn  $v20, $v31, $v31[2] // 0
     // Alpha compare culling
@@ -1546,11 +1529,11 @@ tMx1W equ $v27
     lsv     tLAtI[14], VTX_SCR_Z($3)
     vcr     tPosCatI, tPosCatI, $v30[3] // 0x0100
     lsv     tMAtF[14], VTX_SCR_Z_FRAC($2)
-    vmudh   $v29, vOne, tNRPosFactor // 16 or 4
+    vmudh   $v29, vOne, $v31[4] // 4
     lsv     tLAtF[14], VTX_SCR_Z_FRAC($3)
-    vmadn   tXPF, tXPF, tNRNegFactor // -16 or -4
+    vmadn   tXPF, tXPF, $v31[0] // -4
     ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
-    vmadh   tXPI, tXPI, tNRNegFactor // -16 or -4
+    vmadh   tXPI, tXPI, $v31[0] // -4
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
     vmudn   $v29, $v3, tHPos[0]
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
@@ -1575,43 +1558,25 @@ tMnWF equ $v10
 tSTWHMI equ $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
 tSTWHMF equ $v25
     vmudh   tSTWHMI, vOne, $v31[7]  // 0x7FFF
-.if CFG_EXTRA_PRECISION
     ssv     tPosMmH[2], 0x0030(rdpCmdBufPtr) // MmHY -> first short (temp mem)
-.else
-    andi    $20, ZMODE_DEC
-.endif
     vmudm   $v29, t1WI, tMnWF[0] // 1/W each vtx * min W = 1 for one of the verts, < 1 for others
     llv     tSTWHMI[0], VTX_TC_VEC($1)
     vmadl   $v29, t1WF, tMnWF[0]
-.if CFG_EXTRA_PRECISION
     ssv     tPosLmH[0], 0x0032(rdpCmdBufPtr) // LmHX -> second short (temp mem)
-.else
-    addi    $20, $20, -ZMODE_DEC
-.endif
     vmadn   t1WF, t1WF, tMnWI[0]
     llv     tSTWHMI[8], VTX_TC_VEC($2)
     vmadh   t1WI, t1WI, tMnWI[0]
-.if CFG_EXTRA_PRECISION
     ssv     tPosHmM[0], 0x0034(rdpCmdBufPtr) // HmMX -> third short (temp mem)
-.else
-    beqz    $9, tri_skip_tex // If textures are not enabled, skip texture coefficient calculation
-.endif
 tSTWLI equ $v10 // L = elems 4-6; init W = 7FFF
 tSTWLF equ $v13
-     vmudh  tSTWLI, vOne, $v31[7]  // 0x7FFF
-.if CFG_EXTRA_PRECISION
+    vmudh   tSTWLI, vOne, $v31[7]  // 0x7FFF
     andi    $20, ZMODE_DEC
-.endif
-    vge     $v29, $v30, $v30[7]  // Set VCC to 11110001; select RGBA___Z or ____STW_
+    vge     $v29, $v30, $v30[3]  // Set VCC to 11110001; select RGBA___Z or ____STW_
     llv     tSTWLI[8], VTX_TC_VEC($3)
     vmudm   $v29, tSTWHMI, t1WF[0h] // (S, T, 7FFF) * (1 or <1) for H and M
-.if CFG_EXTRA_PRECISION
     addi    $20, $20, -ZMODE_DEC
-.endif
     vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
-.if CFG_EXTRA_PRECISION
     ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
-.endif
     vmadn   tSTWHMF, $v31, $v31[2]  // 0
     vmudm   $v29, tSTWLI, t1WF[6]  // (S, T, 7FFF) * (1 or <1) for L
     vmadh   tSTWLI, tSTWLI, t1WI[6]
@@ -1624,7 +1589,6 @@ tSTWLF equ $v13
     vmrg    tLAtI, tLAtI, tSTWLI // Merge S, T, W Low into elems 4-6
     ldv     tHAtF[8], 0x0028(rdpCmdBufPtr) // Move S, T, W Hi Frac from temp mem
     vmrg    tLAtF, tLAtF, tSTWLF // Merge S, T, W Low into elems 4-6
-tri_skip_tex:
 .if !ENABLE_PROFILING
     addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
 .endif
@@ -1637,11 +1601,7 @@ tri_skip_tex:
     lh      $1, VTX_SCR_VEC($2)
     vmadh   tXPRcpI, tXPI, tXPRcpI
     addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
-.if CFG_EXTRA_PRECISION
     vmudh   tPosLmH, tPosLmH, $v31[0h] // e1 LmHY * -4 = 4*HmLY; e456 MmHY,LmHX,HmMX *= 4
-.else
-    vmudh   tPosHmL, tPosLmH, $v31[1]
-.endif
 tAtLmHF equ $v10
 tAtLmHI equ $v9
 tAtMmHF equ $v13
@@ -1657,13 +1617,13 @@ tAtMmHI equ $v7
 // DaDx = (v3 - v1) * factor + (v2 - v1) * factor
 tDaDxF equ $v2
 tDaDxI equ $v3
-    vmudn   $v29, tAtLmHF, tMmHYFactor
+    vmudn   $v29, tAtLmHF, tPosLmH[4] // MmHY * 4
     ssv     $v2[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
-    vmadh   $v29, tAtLmHI, tMmHYFactor
+    vmadh   $v29, tAtLmHI, tPosLmH[4] // MmHY * 4
     ssv     $v3[4], 0x0018(rdpCmdBufPtr)     // Store XM edge coefficient (integer part)
-    vmadn   $v29, tAtMmHF, tHmLYFactor
+    vmadn   $v29, tAtMmHF, tPosLmH[1] // LmHY * -4 = HmLY * 4
     ssv     $v2[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
-    vmadh   $v29, tAtMmHI, tHmLYFactor
+    vmadh   $v29, tAtMmHI, tPosLmH[1] // LmHY * -4 = HmLY * 4
     ssv     tPosCatI[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
     vreadacc tDaDxF, ACC_MIDDLE
     ssv     $v20[0], 0x000E(rdpCmdBufPtr)    // Store DxLDy edge coefficient (fractional part)
@@ -1672,13 +1632,13 @@ tDaDxI equ $v3
 // DaDy = (v2 - v1) * factor + (v3 - v1) * factor
 tDaDyF equ $v6
 tDaDyI equ $v7
-    vmudn   $v29, tAtMmHF, tLmHXFactor
+    vmudn   $v29, tAtMmHF, tPosLmH[5] // LmHX * 4
     ssv     $v20[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
-    vmadh   $v29, tAtMmHI, tLmHXFactor
+    vmadh   $v29, tAtMmHI, tPosLmH[5] // LmHX * 4
     ssv     tPosCatI[4], 0x001C(rdpCmdBufPtr)    // Store DxMDy edge coefficient (integer part)
-    vmadn   $v29, tAtLmHF, tHmMXFactor
+    vmadn   $v29, tAtLmHF, tPosLmH[6] // HmMX * 4
     ssv     $v20[4], 0x001E(rdpCmdBufPtr)    // Store DxMDy edge coefficient (fractional part)
-    vmadh   $v29, tAtLmHI, tHmMXFactor
+    vmadh   $v29, tAtLmHI, tPosLmH[6] // HmMX * 4
     sll     $11, $3, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
     vreadacc tDaDyF, ACC_MIDDLE
     add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
@@ -1728,34 +1688,24 @@ tDaDeI equ $v9
     sdv     tDaDeI[8], 0x0020($1)   // Store DsDe, DtDe, DwDe texture coefficients (integer)
     // All values start in element 7. "a", attribute, is Z. Need
     // tHAtI, tHAtF, tDaDxI, tDaDxF, tDaDeI, tDaDeF, tDaDyI, tDaDyF
-    vmudn   tDaDyF, tDaDyF, $v30[7] // 0x0020
+    // VCC is still 11110001
+    // 145 cycles
+    vmrg    tDaDyI, tDaDyF, tDaDyI[7] // Elems 6-7: DzDyI:F
     beqz    $20, tri_decal_fix_z
-     vmadh  tDaDyI, tDaDyI, $v30[7] // 0x0020
+     vmrg   tDaDxI, tDaDxF, tDaDxI[7] // Elems 6-7: DzDxI:F
 tri_return_from_decal_fix_z:
-tHAtFF equ $v10
-    vmudn   tHAtFF, tDaDeF, tSubPxHF[1] // Super-frac (frac * frac) part; assumes v4 factor >= 0
+    vmrg    tDaDeI, tDaDeF, tDaDeI[7] // Elems 6-7: DzDeI:F
     sdv     tHAtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
-    vmudn   tDaDeF, tDaDeF, $v30[7] // 0x0020
+    vmrg    $v10, tHAtF, tHAtI[7]  // Elems 6-7: ZI:F
     sdv     tHAtI[0], 0x0000($2)   // Store RGBA shade color (integer)
-    vmadh   tDaDeI, tDaDeI, $v30[7] // 0x0020
     sdv     tHAtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
-    vmudn   tDaDxF, tDaDxF, $v30[7] // 0x0020
     sdv     tHAtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
-    vmadh   tDaDxI, tDaDxI, $v30[7] // 0x0020
-    ssv     tDaDyF[14], 0x0E($10)
-    vmudl   $v29,  tHAtFF, $v30[7] // 0x0020
-    ssv     tDaDyI[14], 0x0C($10)
-    vmadn   tHAtF, tHAtF, $v30[7] // 0x0020
-    ssv     tDaDeF[14], 0x0A($10)
-    vmadh   tHAtI, tHAtI, $v30[7] // 0x0020
-    ssv     tDaDeI[14], 0x08($10)
-    ssv     tDaDxF[14], 0x06($10)
-    ssv     tDaDxI[14], 0x04($10)
-    ssv     tHAtF[14], 0x02($10)
-tri_end_check_rdp_buffer_full:
+    slv     tDaDyI[12], 0x0C($10)  // DzDyI:F
+    slv     tDaDxI[12], 0x04($10)  // DzDxI:F
+    slv     tDaDeI[12], 0x08($10)  // DzDeI:F
     bltz    $8, return_and_end_mat      // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
-     ssv    tHAtI[14], 0x00($10)   // If returning from no-Z, this is okay b/c $10 is at end
-     // 160 cycles
+     slv    $v10[12], 0x00($10)   // ZI:F
+     // 156 cycles
 flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
     mfc0    $10, SP_DMA_BUSY                 // Check if any DMA is in flight
     lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
@@ -1813,11 +1763,17 @@ flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
      addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
 
 tri_decal_fix_z:
-    // Valid range of tHAtI = 0 to 3FF, but most of the scene is large values
-    vmudm   $v25, tHAtI, $v31[5] // 0x4000; right shift 2; now 0 to FF
-    vsub    $v25, $v25, $v30[3] // 0x0100; (0 to FF) - 100 = -100 to -1
+    // Valid range of tHAtI = 0 to 7FFF, but most of the scene is large values
+    vmudm   $v25, tHAtI, $v30[7] // 0x0200; right shift 7; now 0 to FF
+    
+    //vsub    $v25, $v25, $v30[3] // 0x0100; (0 to FF) - 100 = -100 to -1
+    //vcr     tDaDyI, tDaDyI, $v25[7] // Clamp DzDyI (6) to <= -val or >= val; clobbers DzDyF (7)
+    
+    vsub    $v25, $v30, $v25[7] // Elem 3 = 100 - (0 to FF) = 100 to 1
+    vge     tDaDyI, tDaDyI, $v25[3] // Clamp to >= (100 to 1)
+    
     j       tri_return_from_decal_fix_z
-     vcr    tDaDyI, tDaDyI, $v25[7]
+     vge    $v29, $v30, $v30[3]  // Set VCC to 11110001 again
 
 tri_culled_by_occlusion_plane:
 .if CFG_PROFILING_B
@@ -2151,6 +2107,7 @@ vtx_setup_constants:
     // Computes modified viewport scale and offset including fog info, and stores
     // these to temp memory in the RDP buffer. This is only used during vertex write
     // and the first half of clipping, so that memory is not used then.
+    llv     $v23[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
 .if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE
     veq     $v29, $v31, $v31[3h] // VCC = 00010001
 .elseif !CFG_NO_OCCLUSION_PLANE
@@ -2164,42 +2121,31 @@ vtx_setup_constants:
     vmrg    sOPMs, vOne, $v31[1] // Signs of sOPMs are --++--++
 .endif
     ldv     sVPO[8], (viewport + 8)($zero)
-    lw      $10, (geometryModeLabel)($zero)
+    vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
     ldv     sVPS[0], (viewport)($zero)            // Load vscale duplicated in 0-3 and 4-7
     ldv     sVPS[8], (viewport)($zero)
+    lqv     $v30, (fxParams - altBase)(altBaseReg) // Parameters for vtx and lighting
 .if !CFG_NO_OCCLUSION_PLANE
     vmudh   sOPMs, sOPMs, $v31[5] // sOPMs is 0xC000, 0xC000, 0x4000, 0x4000, repeat
 .endif
-    llv     $v23[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
-    vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
-    lqv     $v30, (fxParams - altBase)(altBaseReg) // Parameters for vtx and lighting
-    vmudh   $v20, sVPS, $v31[1]                   // -1; -vscale
 .if CFG_LEGACY_VTX_PIPE
     lbu     $7, mITValid
-.else
-    andi    $11, $10, G_AMBOCCLUSION
-.endif
+    vmrg    sVPO, sVPO, $v23[1]                   // Put fog offset in elements 3,7 of vtrans
+    llv     sSTS[0], (textureSettings2)($zero)    // Texture ST scale in 0, 1
     vmrg    sVPS, sVPS, $v23[0]                   // Put fog multiplier in elements 3,7 of vscale
-.if !CFG_NO_OCCLUSION_PLANE && !CFG_LEGACY_VTX_PIPE
+    bgtz    $ra, clip_after_constants             // Return to clipping if from there
+     llv    sSTS[8], (textureSettings2)($zero)    // Texture ST scale in 4, 5
+.else
+    lw      $10, (geometryModeLabel)($zero)
+    vmrg    sVPO, sVPO, $v23[1]                   // Put fog offset in elements 3,7 of vtrans
+.if !CFG_NO_OCCLUSION_PLANE
     sqv     sOPMs, (tempOccPlusMinus)(rdpCmdBufEndP1) // Store occlusion plane -/+4000 constants
 .endif
-.if CFG_LEGACY_VTX_PIPE
-    llv     sSTS[0], (textureSettings2)($zero)    // Texture ST scale in 0, 1
-.endif
-    vmrg    sVPO, sVPO, $v23[1]                   // Put fog offset in elements 3,7 of vtrans
-.if CFG_LEGACY_VTX_PIPE
-    llv     sSTS[8], (textureSettings2)($zero)    // Texture ST scale in 4, 5
-.else
-    vge     $v29, $v31, $v31[3]                   // VCC = 00011111
-.endif
-    vmov    sVPS[1], $v20[1]                      // Negate vscale[1] because RDP top = y=0
-.if CFG_LEGACY_VTX_PIPE
-    bgtz    $ra, clip_after_constants             // Return to clipping if from there
-     vmov   sVPS[5], $v20[1]                      // Same for second half
-.else
-    vmov    sVPS[5], $v20[1]                      // Same for second half
+    andi    $11, $10, G_AMBOCCLUSION
+    vmrg    sVPS, sVPS, $v23[0]                   // Put fog multiplier in elements 3,7 of vscale
     bnez    $11, @@skipzeroao                     // Continue if AO disabled
      sqv    sVPO, (tempViewportOffset)(rdpCmdBufEndP1) // Store viewport offset
+    vge     $v29, $v31, $v31[3]                   // VCC = 00011111
     vmrg    $v30, $v30, $v31[2]                   // 0; zero AO values
 @@skipzeroao:
     bgtz    $ra, clip_after_constants             // Return to clipping if from there
