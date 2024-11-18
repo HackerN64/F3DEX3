@@ -1,7 +1,7 @@
 # Documentation
 - @subpage compatibility
-- @subpage microcode
+- @subpage configuration
 - @subpage design-tradeoffs
-- @subpage minimal-scanlines
+- @subpage removed
 - @subpage performance
 - @subpage porting

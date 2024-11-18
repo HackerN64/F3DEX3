@@ -7,6 +7,11 @@
 F3DEX3 is backwards compatible with F3DEX2 at the C GBI level for all features
 and commands except:
 
+- The viewport Y scale has been negated, and `G_MAXZ` has been renamed as its
+  value has changed. See the comment near `G_MAXZ` in the GBI.
+- For the same reason, in `BrZ` configuration, any Z threshold values in
+  `SPBranchLessZ*` which are hard-coded into display lists (not based on
+  `G_MAXZ`) must be multiplied by 0x20.
 - The `G_SPECIAL_*` command IDs have been removed. `G_SPECIAL_2` and
   `G_SPECIAL_3` were no-ops in F3DEX2, and `G_SPECIAL_1` was a trigger to
   recalculate the MVP matrix. There is no MVP matrix in F3DEX3 so this is

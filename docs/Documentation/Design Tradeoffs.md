@@ -82,12 +82,6 @@ It is recommended to use `G_NORMALS_MODE_FAST` (the default) for most things,
 and use `G_NORMALS_MODE_AUTO` only for objects while they currently have a
 nonuniform scale (e.g. Mario only while he is squashed).
 
-## Optimizing for RSP code size
-
-A number of optimizations in F3DEX2 which saved a few cycles but took several
-more instructions have been removed. Outside of vertex processing, these have a
-very small impact on overall RSP time and no impact on RDP time.
-
 ## Far clipping removal
 
 Far clipping is completely removed in F3DEX3. Far clipping is not intentionally
@@ -165,12 +159,11 @@ segment 0 must always be 0x00000000 so that this address resolves to e.g.
 
 In F3DEX2, the RSP time for drawing non-textured tris was significantly lower
 than for textured tris, by skipping a chunk of computation for the texture
-coefficients if they were disabled. In F3DEX3, little to no computation is
-skipped when textures are disabled, which means that the performance gain from
-disabling textures in F3DEX2 has been mostly eliminated. (RDP time savings from
-avoiding loading a texture are unaffected of course.) However, almost all
-materials use textures, and F3DEX3 is a little faster at drawing textured tris
-than F3DEX2, so this is still a benefit overall.
+coefficients if they were disabled. In F3DEX3, no computation is skipped when
+textures are disabled. However, almost all materials use textures, and F3DEX3 is
+a little faster at drawing textured tris than F3DEX2. Plus, DRAM access time RSP
+-> FIFO and FIFO -> RDP is still saved from not sending the coefficients, and
+RDP time savings from avoiding loading a texture are unaffected of course. 
 
 ## Obscure semantic differences from F3DEX2 that should never matter in practice
 

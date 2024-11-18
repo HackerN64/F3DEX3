@@ -13,7 +13,6 @@ ALL_OPTIONS := \
   CFG_G_BRANCH_W \
   CFG_NO_OCCLUSION_PLANE \
   CFG_LEGACY_VTX_PIPE \
-  CFG_EXTRA_PRECISION \
   CFG_PROFILING_A \
   CFG_PROFILING_B \
   CFG_PROFILING_C
@@ -157,24 +156,14 @@ define rule_builder_prof
   $$(eval $$(call rule_builder_final))
 endef
 
-define rule_builder_xp
-  NAME_PROF := $(NAME_XP)
-  OPTIONS_PROF := $(OPTIONS_XP)
-  $$(eval $$(call rule_builder_prof))
-  
-  NAME_PROF := $(NAME_XP)_XP
-  OPTIONS_PROF := $(OPTIONS_XP) CFG_EXTRA_PRECISION
-  $$(eval $$(call rule_builder_prof))
-endef
-
 define rule_builder_noc
-  NAME_XP := $(NAME_NOC)
-  OPTIONS_XP := $(OPTIONS_NOC)
-  $$(eval $$(call rule_builder_xp))
+  NAME_PROF := $(NAME_NOC)
+  OPTIONS_PROF := $(OPTIONS_NOC)
+  $$(eval $$(call rule_builder_prof))
   
-  NAME_XP := $(NAME_NOC)_NOC
-  OPTIONS_XP := $(OPTIONS_NOC) CFG_NO_OCCLUSION_PLANE
-  $$(eval $$(call rule_builder_xp))
+  NAME_PROF := $(NAME_NOC)_NOC
+  OPTIONS_PROF := $(OPTIONS_NOC) CFG_NO_OCCLUSION_PLANE
+  $$(eval $$(call rule_builder_prof))
 endef
 
 define rule_builder_lvp

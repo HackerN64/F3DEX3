@@ -37,13 +37,15 @@ similar for other games):
 
 Both OoT and SM64:
 
-- Remove uses of internal GBI features which have been removed in F3DEX3 (see @ref compatibility for full list). In OoT, the only changes
-  needed are:
+- Remove uses of internal GBI features which have been removed in F3DEX3 (see
+  @ref compatibility for full list). In OoT, the only changes needed are:
     - In `src/code/ucode_disas.c`, remove the switch statement cases for
       `G_LINE3D`, `G_MW_CLIP`, `G_MV_MATRIX`, `G_MVO_LOOKATX`, `G_MVO_LOOKATY`,
       and `G_MW_PERSPNORM`.
     - In `src/libultra/gu/lookathil.c`, remove the lines which set the `col`,
       `colc`, and `pad` fields.
+    - In each place `G_MAXZ` is used, a compiler error will be generated;
+      negate the Y scale in each related viewport and change to `G_NEW_MAXZ`.
 - Change your game engine lighting code to set the `type` (formerly `pad1`)
   field to 0 in the initialization of any directional light (`Light_t` and
   derived structs like `Light` or `Lightsn`). F3DEX3 ignores the state of the

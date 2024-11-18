@@ -15,10 +15,10 @@ through the docs folder).
 
 Compared to F3DEX2 or any other F3D family microcode, F3DEX3 is...
 - faster on the RDP
-- in `LVP_NOC` configuration (see docs), also faster on the RSP
+- in `LVP_NOC` configuration ([see docs](https://hackern64.github.io/F3DEX3/configuration.html)), [also faster on the RSP](https://hackern64.github.io/F3DEX3/performance.html)
 - more accurate
 - full of new visual features
-- measurable in performance
+- [measurable in performance](https://hackern64.github.io/F3DEX3/counters.html)
 
 all at the same time!
 
@@ -60,12 +60,9 @@ all at the same time!
   lights (including point) with different dynamic colors, whereas the vanilla
   system supports up to two directional lights and more than one dynamic color
   is difficult.
-- New geometry mode bits `G_ATTROFFSET_ST_ENABLE` and `G_ATTROFFSET_Z_ENABLE`
-  apply settable offsets to vertex ST (`SPAttrOffsetST`) and/or Z
-  (`SPAttrOffsetZ`) values. These offsets are applied after their respective
-  scales. For Z, this enables a method of drawing coplanar surfaces like decals
-  but **without the Z fighting** which can happen with the RDP's native decal
-  mode. For ST, this enables **UV scrolling** without CPU intervention.
+- New geometry mode bit `G_ATTROFFSET_ST_ENABLE` applies a settable offset to
+  vertex ST (`SPAttrOffsetST`) after the texture scale. This enables **UV
+  scrolling** without CPU intervention.
 
 ### Performance improvements
 
@@ -111,6 +108,13 @@ all at the same time!
 
 ### Miscellaneous
 
+- **Z-fighting of decals has been nearly eliminated**, with only a modest
+  increase in overdraw of very close occluding geometry. This is based on a
+  technique developed by SGI, neglected and removed by Nintendo, and re-added
+  by Rare; the F3DEX3 version improves upon it by choosing optimal parameters
+  and automatically enabling it for all decals with no code or DL changes. In
+  addition, the reduction in Z buffer precision from F3DEX(1) to F3DEX2 has been
+  reversed, and additional Z buffer precision beyond F3DEX(1) has been added.
 - **Point lighting** has been redesigned. The appearance when a light is close
   to an object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where
   a Z component was accidentally doubled in the point lighting calculations. The

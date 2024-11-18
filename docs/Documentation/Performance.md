@@ -7,16 +7,18 @@ visual effects are desired and increasing the RSP time a bit does not affect the
 overall performance. If your game is RSP bound, using the base version of F3DEX3
 will make it slower.
 
-Conversely, F3DEX3_LVP_NOC matches or beats the RSP performance of F3DEX2 on all
-critical paths in the microcode, including command dispatch, vertex processing,
-and triangle processing. Then, the RDP and memory traffic performance
-improvements of F3DEX3--56 vertex buffer, auto-batched rendering, etc.--should
-further improve performance from there. This means that switching from F3DEX2 to
-F3DEX3_LVP_NOC should always improve performance regardless of whether your game
-is RSP bound or RDP bound.
+Conversely, F3DEX3_LVP_NOC matches or beats the RSP performance of F3DEX2 on
+**all** critical paths in the microcode, including command dispatch, vertex
+processing, and triangle processing. Then, the RDP and memory traffic
+performance improvements of F3DEX3--56 vertex buffer, auto-batched rendering,
+etc.--should further improve performance from there. This means that switching
+from F3DEX2 to F3DEX3_LVP_NOC should always improve performance regardless of
+whether your game is RSP bound or RDP bound.
 
 
 # Performance Results
+
+## Cycle Counts
 
 These are cycle counts for many key paths in the microcode. Lower numbers are
 better. The timings are hand-counted taking into account all pipeline stalls and
@@ -72,6 +74,7 @@ Tri numbers are measured from the first cycle of the command handler inclusive,
 to the first cycle of whatever is after $ra exclusive. This is in order
 to capture the extra latency and stalls in F3DEX2.
 
+## Measurements
 
 Vertex processing time as reported by the performance counter in the `PA`
 configuration.

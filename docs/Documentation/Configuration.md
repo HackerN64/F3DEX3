@@ -1,4 +1,4 @@
-@page microcode Microcode Configuration
+@page configuration Microcode Configuration
 
 # Microcode Configuration
 
@@ -35,30 +35,29 @@ and otherwise use the base version.
 The primary tradeoff for all the new lighting features in F3DEX3 is increased
 RSP time for vertex processing. The base version of F3DEX3 takes about
 **2-2.5x** more RSP time for vertex processing than F3DEX2 (see Performance
-Results section below), assuming no lighting or directional lights only.
-However, under most circumstances, this does not affect the game's overall
-framerate:
-- This only applies to vertex processing, not triangle processing or other
-  miscellaneous microcode tasks. So the total RSP cycles spent doing useful work
-  during the frame is only modestly increased.
+Results section below), assuming no lighting or directional lights only. You
+should use the F3DEX3 performance counters (see below) to determine whether your
+game is usually RSP or RDP bound.
+
+If your game is usually RDP bound--like OoT--this generally will not affect the
+game's overall framerate, so you should stick with base F3DEX3:
+- The increased time only applies to vertex processing, not triangle processing
+  or other miscellaneous microcode tasks. So the total RSP cycles spent doing
+  useful work during the frame is only modestly increased.
 - The increase in time is only RSP cycles; there is no additional memory
   traffic, so the RDP time is not directly affected.
 - In scenes which are complex enough to fill the RSP->RDP FIFO in DRAM, the RSP
   usually spends a significant fraction of time waiting for the FIFO to not be
-  full (as revealed by the F3DEX3 performance counters, see below). In these
-  cases, slower vertex processing simply means less time spent waiting, and
-  little to no change in total RSP time.
+  full, as revealed by the performance counters. In these cases, slower vertex
+  processing simply means less time spent waiting, and little to no change in
+  total RSP time.
 - When the FIFO does not fill up, usually the RSP takes significantly less time
   during the frame compared to the RDP, so increased RSP time usually does not
   affect the overall framerate.
 
-As a result, you should always start with the base version of F3DEX3 in your
-romhack, and if the RSP never becomes the bottleneck, you can stick with that.
-
-However, if you have done extreme optimizations in your game to reduce RDP time
-(i.e. if you are Kaze Emanuar), it's possible for the RSP to sometimes become
-the bottleneck with F3DEX3's advanced vertex processing. As a result, the Legacy
-Vertex Pipeline (LVP) configuration has been introduced.
+However, for RSP bound or extremely optimized (Kaze Emanuar) games, base F3DEX3
+can become a bottleneck, so the Legacy Vertex Pipeline (LVP) configuration has
+been introduced.
 
 This configuration replaces F3DEX3's native vertex and lighting code with a
 faster version based on the same algorithms as F3DEX2. This removes:
@@ -70,12 +69,11 @@ faster version based on the same algorithms as F3DEX2. This removes:
 However, it retains all other F3DEX3 features:
 - 56 verts, 9 directional lights
 - Occlusion plane (optional with NOC configuration)
-- Z attribute offsets
 - All features not related to vertex/lighting: auto-batched rendering, packed 5
   triangles commands, hints system, etc.
 
-The performance of F3DEX3 vertex processing with both LVP and NOC is nearly
-identical that of F3DEX2; see the Performance page.
+With both LVP and NOC enabled, F3DEX3 is faster on the RSP than F3DEX2 (see
+@ref performance).
 
 ## Profiling
 
@@ -106,12 +104,6 @@ Use `BrZ` if the microcode is replacing F3DEX2 or an earlier F3D version (i.e.
 SM64), or `BrW` if the microcode is replacing F3DZEX (i.e. OoT or MM). This
 controls whether `SPBranchLessZ*` uses the vertex's W coordinate or screen Z
 coordinate.
-
-## Extra Precision (`XP`)
-
-This configuration attempts to reproduce F3DEX(1) numerical behavior for Z
-buffer coefficients, potentially improving Z fighting in some cases of decals or
-opaque surfaces intended to behave like decals.
 
 ## Debug Normals (`dbgN`)
 

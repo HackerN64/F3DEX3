@@ -1,6 +1,10 @@
-@page minimal-scanlines What happened to the clipping minimal scanlines algorithm?
+@page removed Removed Features
 
-# What happened to the clipping minimal scanlines algorithm?
+# Removed Features
+
+These features were present in earlier F3DEX3 versions, but have been removed.
+
+## Clipping minimal scanlines algorithm
 
 Earlier F3DEX3 versions included a modified algorithm for triangulating the
 polygon which was formed as the result of clipping. This algorithm broke up the
@@ -57,3 +61,11 @@ The best we can do, which is what all previous F3D family microcodes did and
 F3DEX3 does now, is to triangulate in a consistent way, based on the winding
 of the input triangles. The results are still wrong, but they're wrong the same
 way every frame, so there are no abrupt changes visible.
+
+## Z attribute offsets
+
+Earlier F3DEX3 versions included attribute offsets for vertex Z as well as ST.
+By setting this to -2 and drawing an opaque tri, the tri would appear like a
+decal, but with no Z-fighting. This has been removed and replaced with the decal
+fix, which is automatic and does not require any special setup in the display
+list.
