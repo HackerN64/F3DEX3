@@ -324,17 +324,31 @@ v31Value:
 .if (. & 15) != 0
     .error "Wrong alignment for v30value"
 .endif
-// Only one VCC pattern used:
-// vge xxx, $v30, $v30[3] = 11110001 in tri write
 v30Value:
+decalFixMult equ 0x0400
+decalFixOff equ (-(decalFixMult / 2))
     .dh vertexBuffer // currently 0x02DE; for converting vertex index to address
     .dh vtxSize << 7 // 0x1300; it's not 0x2600 because vertex indices are *2
-    .dh 0x1000 // used once in tri write, some multiplier
-    .dh 0x0100 // used several times in tri write
+    .dh 0x1000 // some multiplier in tri write, increment in vertex indices
+    .dh decalFixMult
     .dh 0x0020 // some edge write thing in tri write; formerly Z scale factor
     .dh 0xFFF8 // used once in tri write, mask away lower ST bits
-    .dh 0      // not used
-    .dh 0x0200 // decal fix factor
+    .dh decalFixOff // negative
+    .dh 0x0100 // used several times in tri write
+.macro set_vcc_11110001  // Only VCC pattern used with $v30
+    vge    $v29, $v30, $v30[7]
+.endmacro
+.if (vertexBuffer < 0x0100 || decalFixMult < 0x100)
+    .error "VCC pattern for $v30 corrupted"
+.endif
+v30_VB   equ $v30[0] // Vertex Buffer
+v30_VS   equ $v30[1] // Vertex Size
+v30_1000 equ $v30[2]
+v30_DM   equ $v30[3] // Decal Multiplier
+v30_0020 equ $v30[4]
+v30_FFF8 equ $v30[5]
+v30_DO   equ $v30[6] // Decal Offset
+v30_0100 equ $v30[7]
 
 /*
 Quick note on Newton-Raphson:
@@ -1348,9 +1362,9 @@ tri_main:
     lbu     $3, 7(rdpCmdBufPtr)
     vclr    vZero
     lhu     $1, (vertexTable)($1)
-    vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
+    vmudn   $v29, vOne, v30_VB    // Address of vertex buffer
     lhu     $2, (vertexTable)($2)
-    vmadl   $v27, $v27, $v30[1]   // Plus vtx indices times length
+    vmadl   $v27, $v27, v30_VS    // Plus vtx indices times length
     lhu     $3, (vertexTable)($3)
     vmadl   $v4, $v31, $v31[2]    // 0; vtx 2 addr in $v4 elem 6
 .if !ENABLE_PROFILING
@@ -1475,15 +1489,15 @@ tri_skip_flat_shading:
     lw      $7, VTX_INV_W_VEC($2)
     vrcph   $v22[3], tPosLmH[1]
     lw      $8, VTX_INV_W_VEC($3)
-    vmudl   tHAtI, tHAtI, $v30[3] // 0x0100; vertex color 1 >>= 8
+    vmudl   tHAtI, tHAtI, v30_0100 // vertex color 1 >>= 8
     lbu     $9, textureSettings1 + 3
-    vmudl   tMAtI, tMAtI, $v30[3] // 0x0100; vertex color 2 >>= 8
+    vmudl   tMAtI, tMAtI, v30_0100 // vertex color 2 >>= 8
     sub     $11, $5, $7  // Four instr: $5 = max($5, $7)
-    vmudl   tLAtI, tLAtI, $v30[3] // 0x0100; vertex color 3 >>= 8
+    vmudl   tLAtI, tLAtI, v30_0100 // vertex color 3 >>= 8
     sra     $10, $11, 31
-    vmudl   $v29, $v20, $v30[4] // 0x0020
+    vmudl   $v29, $v20, v30_0020
     // no nop if tri_skip_flip_facing was unaligned
-    vmadm   $v22, $v22, $v30[4] // 0x0020
+    vmadm   $v22, $v22, v30_0020
     beqz    $20, tri_skip_alpha_compare_cull
      vmadn  $v20, $v31, $v31[2] // 0
     // Alpha compare culling
@@ -1500,7 +1514,7 @@ tri_skip_flat_shading:
     bltz    $24, return_and_end_mat // if max < thresh or if min >= thresh.
 tri_skip_alpha_compare_cull:
     // 63 cycles
-    vmudm   tPosCatF, tPosCatI, $v30[2] // 0x1000
+    vmudm   tPosCatF, tPosCatI, v30_1000
     // no nop if tri_skip_alpha_compare_cull was unaligned
     vmadn   tPosCatI, $v31, $v31[2] // 0
     and     $11, $11, $10
@@ -1525,9 +1539,9 @@ tMx1W equ $v27
     lbu     $7, textureSettings1 + 2
     vmadh   tXPI, tXPRcpI, tXPI
     lsv     tMAtI[14], VTX_SCR_Z($2)
-    vand    $v22, $v20, $v30[5] // 0xFFF8
+    vand    $v22, $v20, v30_FFF8
     lsv     tLAtI[14], VTX_SCR_Z($3)
-    vcr     tPosCatI, tPosCatI, $v30[3] // 0x0100
+    vcr     tPosCatI, tPosCatI, v30_0100
     lsv     tMAtF[14], VTX_SCR_Z_FRAC($2)
     vmudh   $v29, vOne, $v31[4] // 4
     lsv     tLAtF[14], VTX_SCR_Z_FRAC($3)
@@ -1571,7 +1585,7 @@ tSTWLI equ $v10 // L = elems 4-6; init W = 7FFF
 tSTWLF equ $v13
     vmudh   tSTWLI, vOne, $v31[7]  // 0x7FFF
     andi    $20, ZMODE_DEC
-    vge     $v29, $v30, $v30[3]  // Set VCC to 11110001; select RGBA___Z or ____STW_
+    set_vcc_11110001                // select RGBA___Z or ____STW_
     llv     tSTWLI[8], VTX_TC_VEC($3)
     vmudm   $v29, tSTWHMI, t1WF[0h] // (S, T, 7FFF) * (1 or <1) for H and M
     addi    $20, $20, -ZMODE_DEC
@@ -1764,16 +1778,11 @@ flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
 
 tri_decal_fix_z:
     // Valid range of tHAtI = 0 to 7FFF, but most of the scene is large values
-    vmudm   $v25, tHAtI, $v30[7] // 0x0200; right shift 7; now 0 to FF
-    
-    //vsub    $v25, $v25, $v30[3] // 0x0100; (0 to FF) - 100 = -100 to -1
-    //vcr     tDaDyI, tDaDyI, $v25[7] // Clamp DzDyI (6) to <= -val or >= val; clobbers DzDyF (7)
-    
-    vsub    $v25, $v30, $v25[7] // Elem 3 = 100 - (0 to FF) = 100 to 1
-    vge     tDaDyI, tDaDyI, $v25[3] // Clamp to >= (100 to 1)
-    
+    vmudh   $v29, vOne, v30_DO  // accum all elems = -DM/2
+    vmadm   $v25, tHAtI, v30_DM // elem 7 = (0 to DM/2-1) - DM/2 = -DM/2 to -1
+    vcr     tDaDyI, tDaDyI, $v25[7] // Clamp DzDyI (6) to <= -val or >= val; clobbers DzDyF (7)
     j       tri_return_from_decal_fix_z
-     vge    $v29, $v30, $v30[3]  // Set VCC to 11110001 again
+     set_vcc_11110001 // Clobbered by vcr
 
 tri_culled_by_occlusion_plane:
 .if CFG_PROFILING_B
@@ -2077,9 +2086,9 @@ fill_vertex_table:
     li      $3, vertexTable + ((G_MAX_VERTS + 8) * 2) // Need 0-56 inclusive, so do 0-63
     vmudh   $v3, $v3, $v31[3] // 2; now 0x0000, 0x0200, ..., 0x0E00
 @@loop2:
-    vmudn   $v29, vOne, $v30[0]   // Address of vertex buffer
-    vmadl   $v4, $v3, $v30[1]     // Plus vtx indices times length
-    vadd    $v3, $v3, $v30[2]     // 0x1000; increment by 8 verts = 16
+    vmudn   $v29, vOne, v30_VB  // Address of vertex buffer
+    vmadl   $v4, $v3, v30_VS    // Plus vtx indices times length
+    vadd    $v3, $v3, v30_1000  // increment by 8 verts = 16
     addi    $2, $2, 0x10
     bne     $2, $3, @@loop2
      sqv    $v4[0], (-0x10)($2)
