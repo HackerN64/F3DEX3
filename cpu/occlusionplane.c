@@ -1,6 +1,7 @@
 /*
 This is a bit outdated but still generally okay. A full implementation is
-present in HackerOoT, see src/code/occlusionplanes.c and related files.
+present in HackerOoT, including the dynamic choice of occlusion plane, see
+src/code/occlusionplanes.c and related files.
 
 This is a working demo implementation of the occlusion plane, set up in an
 OoT scene render function. Here are some rough guidelines on how to properly

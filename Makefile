@@ -1,6 +1,5 @@
-# To build, run something like `make F3DEX3_BrZ` or
-# `make F3DEX3_BrW_LVP_NOC_PA_dbgN`. For an explanation of what all the suffixes
-# mean, see README.md.
+# To build, run something like `make F3DEX3_BrZ` or`make F3DEX3_BrW_LVP_NOC_PA`.
+# For an explanation of what all the suffixes mean, see README.md.
 
 MAKEFLAGS += --no-builtin-rules
 MAKEFLAGS += --no-builtin-variables
@@ -31,6 +30,22 @@ ifeq ($(PARENT_OUTPUT_DIR),.)
   # but here than to support only building here.
 endif
 
+# Find the N64 toolchain, for creating object files.
+ifneq (, $(shell which mips64-linux-gnu-as))
+  AS := mips64-linux-gnu-as
+else
+ifneq (, $(shell which mips64-ultra-elf-as))
+  AS := mips64-ultra-elf-as
+else
+ifneq (, $(shell which mips64-as))
+  AS := mips64-as
+else
+  $(warning Could not find N64 linker, not building object files)
+  AS := 
+endif
+endif
+endif
+
 NO_COL := \033[0m
 RED    := \033[0;31m
 GREEN  := \033[0;32m
@@ -51,6 +66,11 @@ endif
 ALL_UCODES :=
 ALL_UCODES_WITH_MD5S :=
 ALL_OUTPUT_DIRS :=
+
+ifneq (, $(AS))
+%.o: %.s
+	@$(AS) -march=vr4300 -mabi=32 -I . $< -o $@
+endif
 
 define reset_vars
   NAME := 
@@ -75,6 +95,8 @@ define ucode_rule
   DATA_FILE := $$(UCODE_OUTPUT_DIR)/$(NAME).data
   SYM_FILE  := $$(UCODE_OUTPUT_DIR)/$(NAME).sym
   TEMP_FILE := $$(UCODE_OUTPUT_DIR)/$(NAME).tmp.s
+  S_FILE    := $$(UCODE_OUTPUT_DIR)/gsp$(NAME).fifo.s
+  O_FILE    := $$(UCODE_OUTPUT_DIR)/gsp$(NAME).fifo.o
   ALL_UCODES += $(NAME)
   ifneq ($(MD5_CODE),)
    ALL_UCODES_WITH_MD5S += $(NAME)
@@ -96,6 +118,9 @@ define ucode_rule
   # Microcode target
   .PHONY: $(NAME)
   $(NAME): $$(CODE_FILE)
+  ifneq (, $(AS))
+  $(NAME): $$(O_FILE)
+  endif
   # Directory target variables, see below.
   $$(UCODE_OUTPUT_DIR): UCODE_OUTPUT_DIR:=$$(UCODE_OUTPUT_DIR)
   # Directory target recipe
@@ -117,6 +142,8 @@ define ucode_rule
   $$(CODE_FILE): ARMIPS_CMDLINE:=$$(ARMIPS_CMDLINE)
   $$(CODE_FILE): CODE_FILE:=$$(CODE_FILE)
   $$(CODE_FILE): DATA_FILE:=$$(DATA_FILE)
+  $$(S_FILE): S_FILE:=$$(S_FILE)
+  $$(S_FILE): NAME:=$$(NAME)
   # Target recipe
   $$(CODE_FILE): ./f3dex3.s ./rsp/* $(EXTRA_DEPS) | $$(UCODE_OUTPUT_DIR)
 	@printf "$(INFO)Building microcode: $(NAME): $(DESCRIPTION)$(NO_COL)\n"
@@ -124,6 +151,10 @@ define ucode_rule
   ifneq ($(MD5_CODE),)
 	@(printf "$(MD5_CODE) *$$(CODE_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) code matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) code differs$(NO_COL)\n"
 	@(printf "$(MD5_DATA) *$$(DATA_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) data matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) data differs$(NO_COL)\n"
+  endif
+  ifneq (, $(AS))
+  $$(S_FILE): $$(CODE_FILE)
+	@sed "s|XXX|$(NAME)|g" ./template.fifo.s > $$(S_FILE)
   endif
   $$(eval $$(call reset_vars))
 endef
