@@ -115,8 +115,8 @@ Data Fields</h2></td></tr>
 </table>
 <a name="details" id="details"></a><h2 class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>The viewport structure elements have 2 bits of fraction, necessary to accomodate the sub-pixel positioning scaling for the hardware. This can also be exploited to handle odd-sized viewports.</p>
-<p>Accounting for these fractional bits, using the default projection and viewing matrices, the viewport structure is initialized thusly: </p><pre class="fragment"> (SCREEN_WD/2)*4, (SCREEN_HT/2)*4, G_MAXZ, 0,
- (SCREEN_WD/2)*4, (SCREEN_HT/2)*4, 0, 0,
+<p>Accounting for these fractional bits, using the default projection and viewing matrices, the viewport structure is initialized thusly: </p><pre class="fragment"> (SCREEN_WD/2)*4, -(SCREEN_HT/2)*4, G_NEW_MAXZ/2, 0,
+ (SCREEN_WD/2)*4,  (SCREEN_HT/2)*4, G_NEW_MAXZ/2, 0,
 </pre> </div><h2 class="groupheader">Field Documentation</h2>
 <a id="a413b3bf379f48a1f039a9a7eb133a67b" name="a413b3bf379f48a1f039a9a7eb133a67b"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a413b3bf379f48a1f039a9a7eb133a67b">&#9670;&#160;</a></span>vtrans</h2>
@@ -129,7 +129,7 @@ Data Fields</h2></td></tr>
         </tr>
       </table>
 </div><div class="memdoc">
-<p>scale, 2 bits fraction </p>
+<p>scale, 2 bits fraction (X and Y only) </p>
 
 </div>
 </div>

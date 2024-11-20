@@ -5,7 +5,7 @@
 <meta http-equiv="X-UA-Compatible" content="IE=11"/>
 <meta name="generator" content="Doxygen 1.11.0"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>F3DEX3: What happened to the clipping minimal scanlines algorithm?</title>
+<title>F3DEX3: Removed Features</title>
 <link href="tabs.css" rel="stylesheet" type="text/css"/>
 <script type="text/javascript" src="jquery.js"></script>
 <script type="text/javascript" src="dynsections.js"></script>
@@ -74,7 +74,7 @@ $(function() {
 </div>
 <script type="text/javascript">
 /* @license magnet:?xt=urn:btih:d3d9a9a6595521f9666a5e94cc830dab83b65699&amp;dn=expat.txt MIT */
-$(function(){initNavTree('minimal-scanlines.html',''); initResizable(true); });
+$(function(){initNavTree('removed.html',''); initResizable(true); });
 /* @license-end */
 </script>
 <div id="doc-content">
@@ -100,11 +100,14 @@ $(function(){initNavTree('minimal-scanlines.html',''); initResizable(true); });
 </div>
 
 <div><div class="header">
-  <div class="headertitle"><div class="title">What happened to the clipping minimal scanlines algorithm?</div></div>
+  <div class="headertitle"><div class="title">Removed Features</div></div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><h1><a class="anchor" id="autotoc_md31"></a>
-What happened to the clipping minimal scanlines algorithm?</h1>
+<div class="textblock"><h1><a class="anchor" id="autotoc_md40"></a>
+Removed Features</h1>
+<p>These features were present in earlier F3DEX3 versions, but have been removed.</p>
+<h2><a class="anchor" id="autotoc_md41"></a>
+Clipping minimal scanlines algorithm</h2>
 <p>Earlier F3DEX3 versions included a modified algorithm for triangulating the polygon which was formed as the result of clipping. This algorithm broke up the polygon into triangles in such a way that the fewest scanlines were accessed multiple times, leading to maximum performance on the RDP. For example, if the polygon was a diamond shape, this algorithm would always cut it horizontally&ndash; leading to few or no scanlines being touched by both the top and bottom tris&ndash;as opposed to vertically, leading to all scanlines being touched by the left and right tris.</p>
 <p>In testing, this was able to save a few hundred microseconds at best in scenes with many large clipped tris. However, this feature has been removed, because it was found to cause undesirable visual artifacts. Other changes to clipping were experimented with in the past, and ultimately not included. These are not due to a bug or design issue with the microcode, but a fundamental limitation of the RDP: vertex colors are interpolated in screen space without perspective correction. In other words, the shade colors of ANY triangle not flat to the camera are slightly wrong, regardless of which microcode is in use. The same world space portion of the triangle will have a slightly different color depending on how the camera is rotated around it. The issues with clipping are a result of this.</p>
 <p>To show why this is an unavoidable issue on the N64, here is an example:</p>
@@ -118,7 +121,10 @@ Color interpolation example</div></div>
 <p>D: If this polygon is instead triangulated this way, the point in the middle of the polygon has color 96 (halfway between 192 and 0).</p>
 <p>Note that BOTH of these are wrong: the correct value for that pixel is 128, because all points on the horizontal midline of the original triangle are color 128. The N64 can't draw the correct triangle here&ndash;its colors would have to change nonlinearly along an edge.</p>
 <p>The problem with the clipping minimal scanlines algorithm is that it would switch between cases C and D here based on which diagonal had a larger Y component. In other words, if the camera moved slightly, the choice of triangulation might change, causing the middle of the polygon to visibly change color. This was visible on large scene triangles with lighting: as you walked around, the colors would have slight but abrupt changes, which look wrong/bad.</p>
-<p>The best we can do, which is what all previous F3D family microcodes did and F3DEX3 does now, is to triangulate in a consistent way, based on the winding of the input triangles. The results are still wrong, but they're wrong the same way every frame, so there are no abrupt changes visible. </p>
+<p>The best we can do, which is what all previous F3D family microcodes did and F3DEX3 does now, is to triangulate in a consistent way, based on the winding of the input triangles. The results are still wrong, but they're wrong the same way every frame, so there are no abrupt changes visible.</p>
+<h2><a class="anchor" id="autotoc_md42"></a>
+Z attribute offsets</h2>
+<p>Earlier F3DEX3 versions included attribute offsets for vertex Z as well as ST. By setting this to -2 and drawing an opaque tri, the tri would appear like a decal, but with no Z-fighting. This has been removed and replaced with the decal fix, which is automatic and does not require any special setup in the display list. </p>
 </div></div><!-- contents -->
 </div><!-- PageDoc -->
 </div><!-- doc-content -->

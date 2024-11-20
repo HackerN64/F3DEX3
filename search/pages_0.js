@@ -1,4 +1,4 @@
 var searchData=
 [
-  ['algorithm_0',['What happened to the clipping minimal scanlines algorithm?',['../minimal-scanlines.html',1,'md_docs_2documentation']]]
+  ['backwards_20compatibility_20with_20f3dex2_0',['Backwards Compatibility with F3DEX2',['../compatibility.html',1,'md_docs_2documentation']]]
 ];

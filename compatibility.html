@@ -109,6 +109,8 @@ Backwards Compatibility with F3DEX2</h1>
 C GBI Compatibility</h2>
 <p>F3DEX3 is backwards compatible with F3DEX2 at the C GBI level for all features and commands except:</p>
 <ul>
+<li>The viewport Y scale has been negated, and <code>G_MAXZ</code> has been renamed as its value has changed. See the comment near <code>G_MAXZ</code> in the GBI.</li>
+<li>For the same reason, in <code>BrZ</code> configuration, any Z threshold values in <code>SPBranchLessZ*</code> which are hard-coded into display lists (not based on <code>G_MAXZ</code>) must be multiplied by 0x20.</li>
 <li>The <code>G_SPECIAL_*</code> command IDs have been removed. <code>G_SPECIAL_2</code> and <code>G_SPECIAL_3</code> were no-ops in F3DEX2, and <code>G_SPECIAL_1</code> was a trigger to recalculate the MVP matrix. There is no MVP matrix in F3DEX3 so this is useless.</li>
 <li><code>G_LINE3D</code> (and <code>Gfx.line</code>) has been removed. This command did not actually work in F3DEX2 (it behaved as a no-op).</li>
 <li><code>G_MW_CLIP</code> has been removed, and <code>SPClipRatio</code> has been converted into a no-op. Clipping is handled differently in F3DEX3 and the clip ratio cannot be changed from 2.</li>

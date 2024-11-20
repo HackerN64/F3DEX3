@@ -109,6 +109,14 @@ $(function(){initNavTree('md_README.html',''); initResizable(true); });
 <p><a href="https://www.youtube.com/playlist?list=PLU2OUGtyQi6QswDQOXWIMaYFUcgQ9Psvm">Sauraen's videos on F3DEX3</a></p>
 <h1><a class="anchor" id="autotoc_md5"></a>
 Features</h1>
+<p>Compared to F3DEX2 or any other F3D family microcode, F3DEX3 is...</p><ul>
+<li>faster on the RDP</li>
+<li>in <code>LVP_NOC</code> configuration (<a href="https://hackern64.github.io/F3DEX3/configuration.html">see docs</a>), <a href="https://hackern64.github.io/F3DEX3/performance.html">also faster on the RSP</a></li>
+<li>more accurate</li>
+<li>full of new visual features</li>
+<li><a href="https://hackern64.github.io/F3DEX3/counters.html">measurable in performance</a></li>
+</ul>
+<p>all at the same time!</p>
 <h2><a class="anchor" id="autotoc_md6"></a>
 New visual features</h2>
 <ul>
@@ -122,7 +130,7 @@ New visual features</h2>
 </ul>
 </li>
 <li>New geometry mode bit <code>G_LIGHTING_SPECULAR</code> changes lighting computation from diffuse to <b>specular</b>. If enabled, the vertex normal for lighting is replaced with the reflection of the vertex-to-camera vector over the vertex normal. Also, a new size value for each light controls how large the light reflection appears to be. This technique is lower fidelity in some ways than the vanilla <code>hilite</code> system, as it is per-vertex rather than per-pixel, but it allows the material to be textured normally. Plus, it supports all scene lights (including point) with different dynamic colors, whereas the vanilla system supports up to two directional lights and more than one dynamic color is difficult.</li>
-<li>New geometry mode bits <code>G_ATTROFFSET_ST_ENABLE</code> and <code>G_ATTROFFSET_Z_ENABLE</code> apply settable offsets to vertex ST (<code>SPAttrOffsetST</code>) and/or Z (<code>SPAttrOffsetZ</code>) values. These offsets are applied after their respective scales. For Z, this enables a method of drawing coplanar surfaces like decals but <b>without the Z fighting</b> which can happen with the RDP's native decal mode. For ST, this enables <b>UV scrolling</b> without CPU intervention.</li>
+<li>New geometry mode bit <code>G_ATTROFFSET_ST_ENABLE</code> applies a settable offset to vertex ST (<code>SPAttrOffsetST</code>) after the texture scale. This enables <b>UV scrolling</b> without CPU intervention.</li>
 </ul>
 <h2><a class="anchor" id="autotoc_md7"></a>
 Performance improvements</h2>
@@ -139,6 +147,7 @@ Performance improvements</h2>
 <h2><a class="anchor" id="autotoc_md8"></a>
 Miscellaneous</h2>
 <ul>
+<li><b>Z-fighting of decals has been nearly eliminated</b>, with only a modest increase in overdraw of very close occluding geometry. This is based on a technique developed by SGI, neglected and removed by Nintendo, and re-added by Rare; the F3DEX3 version improves upon it by choosing optimal parameters and automatically enabling it for all decals with no code or DL changes. In addition, the reduction in Z buffer precision from F3DEX(1) to F3DEX2 has been reversed, and additional Z buffer precision beyond F3DEX(1) has been added.</li>
 <li><b>Point lighting</b> has been redesigned. The appearance when a light is close to an object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where a Z component was accidentally doubled in the point lighting calculations. The quadratic point light attenuation factor is now an E3M5 floating-point number. The performance penalty for using large numbers of point lights has been reduced.</li>
 <li>Maximum number of directional / point <b>lights raised from 7 to 9</b>. Minimum number of directional / point lights lowered from 1 to 0 (F3DEX2 required at least one). Also supports loading all lights in one DMA transfer (<code>SPSetLights</code>), rather than one per light.</li>
 <li>New <code>SPLightToRDP</code> family of commands (e.g. <code>SPLightToPrimColor</code>) writes a selectable RDP command (e.g. <code>DPSetPrimColor</code>) with the RGB color of a selectable light (any including ambient). The alpha channel and any other parameters are encoded in the command. With some limitations, this allows the tint colors of cel shading to <b>match scene lighting</b> with no code intervention. Also useful for other lighting-dependent effects.</li>
