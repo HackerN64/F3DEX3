@@ -7,15 +7,15 @@
 .section .text
 
 .balign 16
-glabel gspXXX_fifoTextStart
+glabel gspXXXTextStart
     .incbin "build/XXX/XXX.code"
 .balign 16
-glabel gspXXX_fifoTextEnd
+glabel gspXXXTextEnd
 
 .section .data
 
 .balign 16
-glabel gspXXX_fifoDataStart
+glabel gspXXXDataStart
     .incbin "build/XXX/XXX.data"
 .balign 16
-glabel gspXXX_fifoDataEnd
+glabel gspXXXDataEnd

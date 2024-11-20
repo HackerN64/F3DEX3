@@ -68,7 +68,7 @@ ALL_UCODES_WITH_MD5S :=
 ALL_OUTPUT_DIRS :=
 
 ifneq (, $(AS))
-%.o: %.s
+%.o: %.o.s
 	@$(AS) -march=vr4300 -mabi=32 -I . $< -o $@
 endif
 
@@ -95,8 +95,8 @@ define ucode_rule
   DATA_FILE := $$(UCODE_OUTPUT_DIR)/$(NAME).data
   SYM_FILE  := $$(UCODE_OUTPUT_DIR)/$(NAME).sym
   TEMP_FILE := $$(UCODE_OUTPUT_DIR)/$(NAME).tmp.s
-  S_FILE    := $$(UCODE_OUTPUT_DIR)/gsp$(NAME).fifo.s
-  O_FILE    := $$(UCODE_OUTPUT_DIR)/gsp$(NAME).fifo.o
+  OS_FILE   := $$(UCODE_OUTPUT_DIR)/gsp$(NAME).o.s
+  O_FILE    := $$(UCODE_OUTPUT_DIR)/gsp$(NAME).o
   ALL_UCODES += $(NAME)
   ifneq ($(MD5_CODE),)
    ALL_UCODES_WITH_MD5S += $(NAME)
@@ -142,8 +142,8 @@ define ucode_rule
   $$(CODE_FILE): ARMIPS_CMDLINE:=$$(ARMIPS_CMDLINE)
   $$(CODE_FILE): CODE_FILE:=$$(CODE_FILE)
   $$(CODE_FILE): DATA_FILE:=$$(DATA_FILE)
-  $$(S_FILE): S_FILE:=$$(S_FILE)
-  $$(S_FILE): NAME:=$$(NAME)
+  $$(OS_FILE): OS_FILE:=$$(OS_FILE)
+  $$(OS_FILE): NAME:=$$(NAME)
   # Target recipe
   $$(CODE_FILE): ./f3dex3.s ./rsp/* $(EXTRA_DEPS) | $$(UCODE_OUTPUT_DIR)
 	@printf "$(INFO)Building microcode: $(NAME): $(DESCRIPTION)$(NO_COL)\n"
@@ -153,8 +153,8 @@ define ucode_rule
 	@(printf "$(MD5_DATA) *$$(DATA_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) data matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) data differs$(NO_COL)\n"
   endif
   ifneq (, $(AS))
-  $$(S_FILE): $$(CODE_FILE)
-	@sed "s|XXX|$(NAME)|g" ./template.fifo.s > $$(S_FILE)
+  $$(OS_FILE): $$(CODE_FILE)
+	@sed "s|XXX|$(NAME)|g" ./template.o.s > $$(OS_FILE)
   endif
   $$(eval $$(call reset_vars))
 endef
