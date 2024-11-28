@@ -174,11 +174,11 @@ CLIP_CAMPLANE_SHIFT  equ 3 // equiv to CLIP_SCRN_NW_SHIFT; camera plane is -w in
 CLIP_SCAL_NX_SHIFT   equ 4
 CLIP_SCAL_NY_SHIFT   equ 5
 CLIP_VTX_USED_SHIFT  equ 6 // replaces meaningless CLIP_SCAL_NZ_SHIFT
-CLIP_OCCLUDED_SHIFT  equ 7 // replaces meaningless CLIP_SCAL_NW_SHIFT
+//CLIP_SCAL_NW_SHIFT equ 7 // meaningless 
 CLIP_SCRN_PX_SHIFT   equ 8
 CLIP_SCRN_PY_SHIFT   equ 9
 //CLIP_SCRN_PZ_SHIFT equ 10 // would be farclipping; not supported in F3DEX3
-//CLIP_SCRN_PW_SHIFT equ 11 // meaningless
+CLIP_OCCLUDED_SHIFT  equ 11 // replaces meaningless CLIP_SCRN_PW_SHIFT
 CLIP_SCAL_PX_SHIFT   equ 12
 CLIP_SCAL_PY_SHIFT   equ 13
 //CLIP_SCAL_PZ_SHIFT equ 14 // meaningless
@@ -189,9 +189,9 @@ CLIP_CAMPLANE equ (1 << CLIP_CAMPLANE_SHIFT)
 CLIP_SCAL_NX  equ (1 << CLIP_SCAL_NX_SHIFT )
 CLIP_SCAL_NY  equ (1 << CLIP_SCAL_NY_SHIFT )
 CLIP_VTX_USED equ (1 << CLIP_VTX_USED_SHIFT)
-CLIP_OCCLUDED equ (1 << CLIP_OCCLUDED_SHIFT)
 CLIP_SCRN_PX  equ (1 << CLIP_SCRN_PX_SHIFT )
 CLIP_SCRN_PY  equ (1 << CLIP_SCRN_PY_SHIFT )
+CLIP_OCCLUDED equ (1 << CLIP_OCCLUDED_SHIFT)
 CLIP_SCAL_PX  equ (1 << CLIP_SCAL_PX_SHIFT )
 CLIP_SCAL_PY  equ (1 << CLIP_SCAL_PY_SHIFT )
 // Combinations for simpler code
