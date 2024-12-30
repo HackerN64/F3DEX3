@@ -126,6 +126,9 @@ In the true codepath of Sched_TaskComplete:
             OS_YIELD_DATA_SIZE - sizeof(F3DEX3YieldDataFooter));
         osInvalDCache(footer, sizeof(F3DEX3YieldDataFooter));
         bcopy(footer, &gRSPProfilingResults, sizeof(F3DEX3YieldDataFooter));
+        /* The second invalidate is to get the footer out of the CPU cache,
+        because it could get written back and overwrite newer data in RAM */
+        osInvalDCache(footer, sizeof(F3DEX3YieldDataFooter));
     }
 #endif
 ```
