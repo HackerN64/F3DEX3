@@ -140,8 +140,8 @@ of warnings if you use -Wpedantic. */
 #define G_ZBUFFER               0x00000001
 #define G_TEXTURE_ENABLE        0x00000000  /* actually 2, but controlled by SPTexture */
 #define G_SHADE                 0x00000004
-#define G_AMBOCCLUSION          0x00000040
-#define G_ATTROFFSET_ST_ENABLE  0x00000100
+#define G_ATTROFFSET_ST_ENABLE  0x00000080
+#define G_AMBOCCLUSION          0x00000100
 #define G_CULL_NEITHER          0x00000000
 #define G_CULL_FRONT            0x00000200
 #define G_CULL_BACK             0x00000400
@@ -157,7 +157,7 @@ of warnings if you use -Wpedantic. */
 #define G_TEXTURE_GEN_LINEAR    0x00080000
 #define G_LOD                   0x00100000  /* Ignored by all F3DEX* variants */
 #define G_SHADING_SMOOTH        0x00200000
-#define G_LIGHTING_POSITIONAL   0x00400000  /* Ignored by F3DEX3, assumed always on */
+#define G_LIGHTING_POSITIONAL   0x00400000  /* In F3DEX3, replaced by ENABLE_POINT_LIGHTS */
 #define G_CLIPPING              0x00800000  /* Ignored by all F3DEX* variants */
 
 /* See SPDisplayList / SPBranchList */
@@ -3237,8 +3237,15 @@ _DW({                                               \
  * Lighting Commands
  */
 
+/**
+ * OR this flag into n in SPNumLights or SPSetLights* to indicate that one or
+ * more of the lights are point lights.
+ * Example: gSPSetLights(POLY_OPA_DISP++, numLights | ENABLE_POINT_LIGHTS, *lights);
+ */
+#define ENABLE_POINT_LIGHTS (0x8000 >> 4)
+
 #define NUML(n)    ((n) * 0x10)
-/*
+/**
  * F3DEX3 properly supports zero lights, so there is no need to use these macros
  * anymore.
  */
@@ -3265,7 +3272,7 @@ _DW({                                               \
 #define gsSPNumLights(n)                                \
     gsMoveWd(    G_MW_NUMLIGHT, G_MWO_NUMLIGHT, NUML(n))
 
-/* There is also no need to use these macros. */
+/** There is also no need to use these macros. */
 #define LIGHT_1     1
 #define LIGHT_2     2
 #define LIGHT_3     3

@@ -7,8 +7,8 @@
 G_ZBUFFER               equ 0x00000001
 //G_TEXTURE_ENABLE      equ 0x00000002
 G_SHADE                 equ 0x00000004
-G_AMBOCCLUSION          equ 0x00000040
-G_ATTROFFSET_ST_ENABLE  equ 0x00000100
+G_ATTROFFSET_ST_ENABLE  equ 0x00000080
+G_AMBOCCLUSION          equ 0x00000100
 // Bits 9 and 10 (0x0600) determine front/backface culling.
 G_CULL_NEITHER          equ 0x00000000
 G_CULL_FRONT            equ 0x00000200
