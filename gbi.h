@@ -1187,6 +1187,15 @@ typedef union {
 } Vp;
 
 /**
+  * Lighting types.
+  * LIGHT_TYPE_DIR: Standard directional light. Equivalent to 0.
+  * LIGHT_TYPE_POINT(x): Enables point lighting, with x acting as the kc coefficient.
+  */
+
+#define LIGHT_TYPE_DIR 0
+#define LIGHT_TYPE_POINT(x) x
+
+/**
  * Light structure.
  *
  * Note: the weird order is for the DMEM alignment benefit of
