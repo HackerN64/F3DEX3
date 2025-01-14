@@ -2139,17 +2139,17 @@ vtx_load_mvp:
 vtx_setup_no_lighting:
     li      vLoopRet, vtx_loop_no_lighting
 vtx_after_lt_setup:
-    andi    fogFlag, vGeomMid, G_FOG >> 8  // Nonzero if fog enabled. Can't put before lt b/c fogFlag = mtx valid flag.
+    andi    fogFlag, vGeomMid, G_FOG >> 8  // Can't put before lt b/c fogFlag = mtx valid flag.
     srl     fogFlag, fogFlag, 5            // 8 if G_FOG is set, 0 otherwise
     bgezal  vLoopRet, while_wait_dma_busy  // Wait for vertex load to finish; vLoopRet < 0 if already did
      addi   outVtx1, rdpCmdBufEndP1, vtxSize // Temp mem; fog writes up to vtxSize before. Can't put before lt ovl loads.
     ldv     vpMdl[0], (VTX_IN_OB + 0 * inputVtxSize)(inVtx) // 1st vec pos
     ldv     vpMdl[8], (VTX_IN_OB + 1 * inputVtxSize)(inVtx) // 2nd vec pos
-    llv     sTCL[8],      (VTX_IN_CN + 0 * inputVtxSize)(inVtx) // RGBA in 4:5
-    llv     sTCL[12],     (VTX_IN_CN + 1 * inputVtxSize)(inVtx) // RGBA in 6:7
-    llv     vpST[0],   (VTX_IN_TC + 0 * inputVtxSize)(inVtx) // ST in 0:1
+    llv     sTCL[8],  (VTX_IN_CN + 0 * inputVtxSize)(inVtx) // RGBA in 4:5
+    llv     sTCL[12], (VTX_IN_CN + 1 * inputVtxSize)(inVtx) // RGBA in 6:7
+    llv     vpST[0],  (VTX_IN_TC + 0 * inputVtxSize)(inVtx) // ST in 0:1
     j       vtx_store_loop_entry
-     llv    vpST[8],   (VTX_IN_TC + 1 * inputVtxSize)(inVtx) // ST in 4:5
+     llv    vpST[8],  (VTX_IN_TC + 1 * inputVtxSize)(inVtx) // ST in 4:5
 
 .align 8
 
@@ -2938,11 +2938,20 @@ ltbasic_continue_setup:
     bnez    $11, ltbasic_setup_after_xfrm  // Skip if lights and matrix were valid
      addi   ambLight, ambLight, altBase    // Point to ambient light; stored through vtx proc
 xfrm_dir_lights:
-    TODO fix register usage
+lpWrld  equ $v11  // light pair world direction
+lpMdl   equ $v12  // light pair model space direction (not yet normalized)
+lpFinal equ $v13  // light pair normalized model space direction
+lpSqrI  equ $v14  // Light pair direction squared int part
+lpSqrF  equ $v15  // Light pair direction squared frac part
+lpMdl2  equ $v19  // Copy of lpMdl for pipelining
+lpSumI  equ $v20  // Light pair direction sum of squares int part
+lpSumF  equ $v21  // Light pair direction sum of squares frac part
+lpRsqI  equ $v22  // Light pair reciprocal square root int part
+lpRsqF  equ $v23  // Light pair reciprocal square root frac part
     // Transform directional lights' direction by M transpose.
-    // First, load M transpose. Can use any regs except TODO, $v28-$v31.
-    // This algorithm clobbers all of $v0-$v7 and $v16-$v23 with the transposes;
-    // it's mainly just an excuse to use the rare ltv and swv instructions.
+    // First, load M transpose. $v0-$v7 is the MVP matrix and $v24-$v31 is
+    // permanent values, leaving $v8-$v15 and $v16-$v23 for the transposes.
+    // This is mainly just an excuse to use the rare ltv and swv instructions.
     // The F3DEX2 implementation takes 18 instructions and 11 cycles.
     // This implementation is 23 instructions and 17 cycles, but this version
     // loads M transpose to both halves of each vector so we can process two
@@ -2954,88 +2963,87 @@ xfrm_dir_lights:
     // G H I - - - - - (Z int, W int)
     // M N O - P Q R - (X frac, Y frac)
     // S T U - - - - - (Z frac, W frac)
-    // First, make $v0-$v7 contain this, and same for $v16-$v23 frac parts.
-    // $v0 A - G - A - G -   $v16 M - S - M - S -
-    // $v1 - B - H - B - H   $v17 - N - T - N - T
-    // $v2 I - C - I - C -   $v18 U - O - U - O -
-    // $v3 - - - - - - - -   $v19 - - - - - - - -
-    // $v4 D - - - D - - -   $v20 P - - - P - - -
-    // $v5 - E - - - E - -   $v21 - Q - - - Q - -
-    // $v6 - - F - - - F -   $v22 - - R - - - R -
-    // $v7 - - - - - - - -   $v23 - - - - - - - -
-    ltv     $v0[0],   (mMatrix + 0x00)($zero) // A to $v0[0] etc.
-    ltv     $v0[12],  (mMatrix + 0x10)($zero) // G to $v0[2] etc.
-    ltv     $v0[8],   (mMatrix + 0x00)($zero) // A to $v0[4] etc.
-    ltv     $v0[4],   (mMatrix + 0x10)($zero) // G to $v0[6] etc.
+    // First, load this pattern in $v8-$v15 (int) and $v16-$v23 (frac).
+    // $v8  A - G - A - G -   $v16 M - S - M - S -
+    // $v9  - B - H - B - H   $v17 - N - T - N - T
+    // $v10 I - C - I - C -   $v18 U - O - U - O -
+    // $v11 - - - - - - - -   $v19 - - - - - - - -
+    // $v12 D - - - D - - -   $v20 P - - - P - - -
+    // $v13 - E - - - E - -   $v21 - Q - - - Q - -
+    // $v14 - - F - - - F -   $v22 - - R - - - R -
+    // $v15 - - - - - - - -   $v23 - - - - - - - -
+    ltv     $v8[0],   (mMatrix + 0x00)($zero) // A to $v8[0] etc.
+    ltv     $v8[12],  (mMatrix + 0x10)($zero) // G to $v8[2] etc.
+    ltv     $v8[8],   (mMatrix + 0x00)($zero) // A to $v8[4] etc.
+    ltv     $v8[4],   (mMatrix + 0x10)($zero) // G to $v8[6] etc.
     ltv     $v16[0],  (mMatrix + 0x20)($zero)
     ltv     $v16[12], (mMatrix + 0x30)($zero)
     ltv     $v16[8],  (mMatrix + 0x20)($zero)
     ltv     $v16[4],  (mMatrix + 0x30)($zero)
     veq     $v29, $v31, $v31[0q] // Set VCC to 10101010
-    vmudh   $v1, vOne, $v1[1q]                // B - H - B - H -
+    vmudh   $v9, vOne, $v9[1q]                // B - H - B - H -
     lsv     $v18[6],  (mMatrix + 0x2C)($zero) // U - O(R)U - O -
-    vmrg    $v0, $v0, $v4[0q]                 // A D G - A D G -
+    vmrg    $v8, $v8, $v12[0q]                // A D G - A D G -
     lsv     $v18[14], (mMatrix + 0x2C)($zero) // U - O R U - O(R)
-    vmrg    $v2, $v2, $v6[0q]                 // I - C F I - C F
-    lpv     $v3[0], (lightBufferLookat - altBase)(altBaseReg) // Lookat 0 and 1
+    vmrg    $v10, $v10, $v14[0q]              // I - C F I - C F
+    lpv     lpWrld[0], (lightBufferLookat - altBase)(altBaseReg) // Lookat 0 and 1
     vmudh   $v17, vOne, $v17[1q]              // N - T - N - T -
     li      curLight, altBase - 4 * lightSize // + ltBufOfs = light -4; write pointer
-    vmrg    $v1, $v1, $v5                     // B E H - B E H -
+    vmrg    $v9, $v9, $v13                    // B E H - B E H -
     li      $11, 0x7F                         // Mark lights valid
-    // Interleave the start of transforming pairs of dir lights, including lookat.
     vmrg    $v16, $v16, $v20[0q]              // M P S - M P S -
     swv     $v18[4], (tempXfrmSingle)(rdpCmdBufEndP1) // Stores O R U - O R U -
-    vmudh   $v29, $v0,  $v3[0h]
+    vmudh   $v29,  $v8,  lpWrld[0h]           // Start transforming lookat
     lqv     $v18,    (tempXfrmSingle)(rdpCmdBufEndP1)
     // This is slightly wrong, vmrg writes accum lo. But only affects lookat and
     // we are only reading accum mid result. Basically rounding error.
     vmrg    $v17, $v17, $v21                  // N Q T - N Q T -
-    swv     $v2[4],  (tempXfrmSingle)(rdpCmdBufEndP1) // Stores C F I - C F I -
-    vmadh   $v29, $v1,  $v3[1h]
-    lqv     $v2,     (tempXfrmSingle)(rdpCmdBufEndP1)
-    vmadn   $v29, $v16, $v3[0h]
+    swv     $v10[4], (tempXfrmSingle)(rdpCmdBufEndP1) // Stores C F I - C F I -
+    vmadh   $v29,  $v9,  lpWrld[1h]
+    lqv     $v10,    (tempXfrmSingle)(rdpCmdBufEndP1)
+    vmadn   $v29,  $v16, lpWrld[0h]
     sb      $11, pointLightFlagOrDirXfrmValid
     // 18 cycles
 xfrm_light_loop_1:
-    vmadn   $v29, $v18, $v3[2h]
+    vmadn   $v29,  $v18, lpWrld[2h]
 xfrm_light_loop_2:
-    vmadn   $v29, $v17, $v3[1h]
-    vmadh   $v4,  $v2,  $v3[2h]  // $v4[0:2] and [4:6] = two lights dir in model space
-    vrsqh   $v29[0], $v20[0]
-    vrsql   $v23[0], $v21[0]
-    vrsqh   $v22[0], $v20[4]
+    vmadn   $v29,  $v17, lpWrld[1h]
+    vmadh   lpMdl, $v10, lpWrld[2h]  // lpMdl[0:2] and [4:6] = two lights dir in model space
+    vrsqh   $v29[0], lpSumI[0]
+    vrsql   lpRsqF[0], lpSumF[0]
+    vrsqh   lpRsqI[0], lpSumI[4]
     addi    curLight, curLight, 2 * lightSize // Iters: -2, 0, 2, ...
-    vrsql   $v23[4], $v21[4]
+    vrsql   lpRsqF[4], lpSumF[4]
     lw      $20, (ltBufOfs + 8 + 2 * lightSize)(curLight) // First iter = light 0
-    vrsqh   $v22[4], $v31[2]     // 0
+    vrsqh   lpRsqI[4], $v31[2]       // 0
     lw      $24, (ltBufOfs + 8 + 3 * lightSize)(curLight) // First iter = light 1
-    vmudh   $v29, $v4, $v4       // Squared
+    vmudh   $v29, lpMdl, lpMdl       // Squared
     sub     $10, curLight, altBaseReg // Is curLight (write ptr) <= 0?
-    vreadacc $v7, ACC_MIDDLE     // Read not-clamped value
-    sub     $11, curLight, ambLight   // Is curLight (write ptr) <, =, or > ambient light?
-    vreadacc $v6, ACC_UPPER
-    sw      $20,    (tempXfrmSingle)(rdpCmdBufEndP1) // Store light 0
-    vmudm   $v29, $v19, $v23[0h] // Vec int * frac scaling
-    sw      $24,    (tempXfrmSingle + 4)(rdpCmdBufEndP1) // Store light 1
-    vmadh   $v5,  $v19, $v22[0h] // Vec int * int scaling
-    lpv     $v3[0], (tempXfrmSingle)(rdpCmdBufEndP1) // Load dirs 0-2, 4-6
-    vmudm   $v29, vOne, $v7[2h]  // Sum of squared components
-    vmadh   $v29, vOne, $v6[2h]
-    vmadm   $v29, vOne, $v7[1h]
-    vmadh   $v29, vOne, $v6[1h]
-    spv     $v5[0], (tempXfrmSingle)(rdpCmdBufEndP1) // Store elem 0-2, 4-6 as bytes to temp memory
-    vmadn   $v21, $v7,  vOne     // elem 0, 4; swapped so we can do vmadn and get result
-    lw      $20,    (tempXfrmSingle)(rdpCmdBufEndP1) // Load 3 (4) bytes to scalar unit
-    vmadh   $v20, $v6,  vOne
-    lw      $24,    (tempXfrmSingle + 4)(rdpCmdBufEndP1) // Load 3 (4) bytes to scalar unit
-    vcopy   $v19, $v4
+    vreadacc lpSqrF, ACC_MIDDLE      // Read not-clamped value
+    sub     $11, curLight, ambLight  // Is curLight (write ptr) <, =, or > ambient light?
+    vreadacc lpSqrI, ACC_UPPER
+    sw      $20, (tempXfrmSingle)(rdpCmdBufEndP1) // Store light 0
+    vmudm   $v29,    lpMdl2, lpRsqF[0h] // Vec int * frac scaling
+    sw      $24, (tempXfrmSingle + 4)(rdpCmdBufEndP1) // Store light 1
+    vmadh   lpFinal, lpMdl2, lpRsqI[0h] // Vec int * int scaling
+    lpv     lpWrld[0], (tempXfrmSingle)(rdpCmdBufEndP1) // Load dirs 0-2, 4-6
+    vmudm   $v29, vOne, lpSqrF[2h]  // Sum of squared components
+    vmadh   $v29, vOne, lpSqrI[2h]
+    vmadm   $v29, vOne, lpSqrF[1h]
+    vmadh   $v29, vOne, lpSqrI[1h]
+    spv     lpFinal[0], (tempXfrmSingle)(rdpCmdBufEndP1) // Store elem 0-2, 4-6 as bytes to temp memory
+    vmadn   lpSumF, lpSqrF,  vOne     // elem 0, 4; swapped so we can do vmadn and get result
+    lw      $20, (tempXfrmSingle)(rdpCmdBufEndP1) // Load 3 (4) bytes to scalar unit
+    vmadh   lpSumI, lpSqrI,  vOne
+    lw      $24, (tempXfrmSingle + 4)(rdpCmdBufEndP1) // Load 3 (4) bytes to scalar unit
+    vcopy   lpMdl2, lpMdl
     blez    $10, xfrm_light_store_lookat // curLight = -2 or 0
-     vmudh  $v29, $v0,  $v3[0h]
+     vmudh  $v29, $v8,  lpWrld[0h]
      // 20 cycles from xfrm_light_loop_2 not counting land
-    vmadh   $v29, $v1,  $v3[1h]
+    vmadh   $v29, $v9,  lpWrld[1h]
     bgtz    $11, ltbasic_setup_after_xfrm // curLight > ambient; only one light valid
      sw     $20, (ltBufOfs + 0xC - 2 * lightSize)(curLight) // Write light relative -2
-    vmadn   $v29, $v16, $v3[0h]
+    vmadn   $v29, $v16, lpWrld[0h]
     bltz    $11, xfrm_light_loop_1   // curLight < ambient; more lights to compute
      sw     $24, (ltBufOfs + 0xC - 1 * lightSize)(curLight) // Write light relative -1
 ltbasic_setup_after_xfrm:
@@ -3055,12 +3063,12 @@ ltbasic_setup_after_xfrm:
     beqz    lbPacked, @@skip_packed
      andi   lbL2A, vGeomMid, G_LIGHTTOALPHA >> 8
     // vLTC[0:3] = [0xF800, 0xFC00, (1 << 11) = 0x0800, (1 << 5) = 0x0020]
-    lpv     $v20[0], (packedConstants - altBase)(altBaseReg) // Elems 0-2 above
-    lqv     $v21, (v30Value)($zero)  // Sadly 0x0020 was in element 4 of $v30, already overwritten
+    lpv     vTemp1[0], (packedConstants - altBase)(altBaseReg) // Elems 0-2 above
+    lqv     vTemp2, (v30Value)($zero)  // Sadly 0x0020 was in element 4 of $v30, already overwritten
     vlt     $v29, $v31, $v31[3] // Set VCC to 11100000
     li      lbAfter, ltbasic_no_l2a
-    vmrg    vLTC, $v20, vLTC // Consts in elems 0-2, first lt dir in elems 4-6
-    vmov    vLTC[3], $v21[4] // 0x0020 constant to element 3
+    vmrg    vLTC, vTemp1, vLTC // Consts in elems 0-2, first lt dir in elems 4-6
+    vmov    vLTC[3], vTemp2[4] // 0x0020 constant to element 3
 @@skip_packed:
     beqz    lbL2A, @@skip_l2a
      sll    lbAOSign, vGeomMid, 31             // G_AMBOCCLUSION
@@ -3073,11 +3081,11 @@ ltbasic_setup_after_xfrm:
      li     lbAfter, ltbasic_ao
     
 xfrm_light_store_lookat:
-    vmadh   $v29, $v1,  $v3[1h]
-    spv     $v5[0], (xfrmLookatDirs)($zero) // First time is garbage; second actual
-    vmadn   $v29, $v16, $v3[0h]
+    vmadh   $v29, $v9,  lpWrld[1h]
+    spv     lpFinal[0], (xfrmLookatDirs)($zero) // Store lookat. 1st time garbage, 2nd real
+    vmadn   $v29, $v16, lpWrld[0h]
     j       xfrm_light_loop_2
-     vmadn  $v29, $v18, $v3[2h]
+     vmadn  $v29, $v18, lpWrld[2h]
 
 // Lighting within vertex loop
 
