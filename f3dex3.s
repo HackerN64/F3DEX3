@@ -928,21 +928,19 @@ sOCM equ vPerm3 // vtx_store Occlusion plane Mid coefficients
 .endif
 sSTS equ vPerm4
 
-
-
-
-
-
-
 // Temp storage after rdpCmdBufEndP1. There is 0xA8 of space here which will
 // always be free during vtx load or clipping.
-tempViewportScale equ 0x00
-tempViewportOffset equ 0x10
-tempOccPlusMinus equ 0x20
-tempVpRGBA equ 0x30
-tempVpPkNorm equ 0x40
-tempXfrmSingle equ 0x50
-tempPrevVtxGarbage equ 0x50 // Up to 2 * 0x26 = 0x4C used -> to 0x9C
+tempViewportScale     equ 0x00
+tempViewportOffset    equ 0x10
+tempOccPlusMinus      equ 0x20
+tempVpRGBA            equ 0x30        // Only used during loop
+tempXfrmLt            equ tempVpRGBA  // Only used during init
+tempPrevInvalVtxStart equ 0x40
+tempPrevInvalVtx      equ (tempPrevInvalVtxStart + vtxSize) // 0x66; fog writes here
+tempPrevInvalVtxEnd   equ (tempPrevInvalVtx + vtxSize)      // 0x8C; rest of vtx writes here
+.if tempPrevInvalVtxEnd > (RDP_CMD_BUFSIZE_EXCESS - 8)
+    .error "Too much temp storage used!"
+.endif
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1868,29 +1866,31 @@ clip_skipxy:
     vmudl   cTemp, cDiffF, cRRF[3]          // Multiply clDiffI:F by RR frac*frac
     andi    $11, $11, ~CLIP_VTX_USED        // Clear used flag from off screen vert
     vmadm   cDiffI, cDiffI, cRRF[3]         // int*frac, int out
-TODO
-    li      $1, -1                          // $1 < 0 triggers last vtx loop iter
+.if CFG_NO_OCCLUSION_PLANE
+    li      vtxLeft, -1                     // vtxLeft < 0 triggers vtx_epilogue
+.else
+    li      vtxLeft, inputVtxSize           // but trigger this on the second loop in this version
+.endif
     vmadn   cDiffF, $v31, $v31[2]           // 0; get frac out
     sh      $11, VTX_CLIP(clipVLastOfsc)    // Store modified clip flags for off screen vert
     vrcph   sRTI[3], cDiffI[3]              // Reciprocal of new scaled cDiff (discard)
-    TODO
-.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
-TODO
+.if CFG_NO_OCCLUSION_PLANE
     addi    outVtxBase, outVtxBase, -vtxSize // Inc'd by 2, must point to second vtx
+.else
+    addi    outVtxBase, outVtxBase, vtxSize // Not inc'd, must point to second vtx
 .endif
     vrcpl   sRTF[3], cDiffF[3]              // frac part
-.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
-TODO
     srl     fogFlag, fogFlag, 5             // 8 if G_FOG is set, 0 otherwise
-.endif
     vrcph   sRTI[3], $v31[2]                // 0; int part
-.if CFG_LEGACY_VTX_PIPE && CFG_NO_OCCLUSION_PLANE // New LVP_NOC
-TODO
-    li      $ra, clip_after_vtx_store + 0x8000
+.if !CFG_NO_OCCLUSION_PLANE
+    li      vLoopRet, vtx_loop_no_lighting  // Branch to epilogue is before jr vLoopRet on NOC
 .endif
     vmudl   $v29, sRTF, cDiffF              // D*R (see Newton-Raphson explanation)
+    li      inVtx, -(4 * inputVtxSize)      // inVtx < 0 after += 2*size -> return to clipping
     vmadm   $v29, sRTI, cDiffF
+    addi    outVtx1, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
     vmadn   cDiffF, sRTF, cDiffI
+    addi    outVtx2, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
     vmadh   cDiffI, sRTI, cDiffI
     vmudh   $v29, vOne, $v31[4]             // 4; 4 - 4 * (D*R)
     vmadn   cDiffF, cDiffF, $v31[0]         // -4
@@ -1914,9 +1914,7 @@ TODO
     vmadn   cDiffF, $v31, $v31[2]           // Done cDiffI:F = cBaseI:F / cDiffI:F
     // Clamp to 0x0001 to 0xFFFF range and create inverse on-screen factor
     vlt     cDiffI, cDiffI, vOne[0]         // If integer part of factor less than 1,
-    addi    outVtx1, rdpCmdBufEndP1, vtxSize  // Temp mem; fog writes up to vtxSize before
     vmrg    cDiffF, cDiffF, $v31[1]         // keep frac part of factor, else set to 0xFFFF (max val)
-    addi    outVtx2, rdpCmdBufEndP1, vtxSize  // Temp mem; fog writes up to vtxSize before
     vsubc   $v29, cDiffF, vOne[0]           // frac part - 1 for carry
     vge     cDiffI, cDiffI, $v31[2]         // 0; If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
     vmrg    cFadeOf, cDiffF, vOne[0]        // keep frac part of factor, else set to 1 (min val)
@@ -2052,7 +2050,7 @@ vtx_after_dma:
     lhu     vGeomMid, geometryModeLabel + 1    // Load middle 2 bytes of geom mode
     andi    inVtx, dmemAddr, 0xFFF8            // Round down input start addr to DMA word
     addi    outVtxBase, outVtxBase, -vtxSize   // Will inc by 2, but need point to 2nd
-    addi    outVtx2, rdpCmdBufEndP1, vtxSize   // Temp mem; fog writes up to vtxSize before
+    addi    outVtx2, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
 .if COUNTER_A_UPPER_VERTEX_COUNT
     sll     $11, vtxLeft, 12                   // Vtx count * 0x10000
     add     perfCounterA, perfCounterA, $11    // Add to vertex count
@@ -2142,7 +2140,7 @@ vtx_after_lt_setup:
     andi    fogFlag, vGeomMid, G_FOG >> 8  // Can't put before lt b/c fogFlag = mtx valid flag.
     srl     fogFlag, fogFlag, 5            // 8 if G_FOG is set, 0 otherwise
     bgezal  vLoopRet, while_wait_dma_busy  // Wait for vertex load to finish; vLoopRet < 0 if already did
-     addi   outVtx1, rdpCmdBufEndP1, vtxSize // Temp mem; fog writes up to vtxSize before. Can't put before lt ovl loads.
+     addi   outVtx1, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
     ldv     vpMdl[0], (VTX_IN_OB + 0 * inputVtxSize)(inVtx) // 1st vec pos
     ldv     vpMdl[8], (VTX_IN_OB + 1 * inputVtxSize)(inVtx) // 2nd vec pos
     llv     sTCL[8],  (VTX_IN_CN + 0 * inputVtxSize)(inVtx) // RGBA in 4:5
@@ -2387,22 +2385,22 @@ vtx_store_for_clip:
     vmadh   s1WI, s1WI, sRTI[3h]
     sdv     vpClpF[0],  (VTX_FRAC_VEC  )(outVtx1)
     vcl     $v29, vpClpF, vpClpF[3h] // Clip screen low
-    sqv     vpClpI, (tempvpClpI)(rdpCmdBufEndP1) // For Z to W manip
+    sqv     vpClpI, (tempVpRGBA)(rdpCmdBufEndP1) // For Z to W manip. RGBA not currently stored here
     vmudh   $v29, vOne, $v31[4]  // 4
     cfc2    flagsV1, $vcc                   // Screen clip results
     vmadn   s1WF, s1WF, $v31[0]  // -4
-    ssv     vpClpI[4],  (tempvpClpI + 6)(rdpCmdBufEndP1)  // First Z to W
+    ssv     vpClpI[4],  (tempVpRGBA + 6)(rdpCmdBufEndP1)  // First Z to W
     vmadh   s1WI, s1WI, $v31[0]  // -4
 // sTCL <- vpLtTot
     ldv     sTCL[0],   (VTX_IN_TC + 0 * inputVtxSize)(inVtx) // ST in 0:1, RGBA in 2:3
 // sSCF <- vpScrF
     vmudn   sSCF, vpClpF, $v31[3]       // W * clip ratio for scaled clipping
-    ssv     vpClpI[12], (tempvpClpI + 14)(rdpCmdBufEndP1) // Second Z to W
+    ssv     vpClpI[12], (tempVpRGBA + 14)(rdpCmdBufEndP1) // Second Z to W
 // sSCI <- vpScrI
     vmadh   sSCI, vpClpI, $v31[3]       // W * clip ratio for scaled clipping
     lsv     vpClpF[14], (VTX_Z_FRAC    )(outVtx2) // load Z into W slot, will be for fog below
     vmudl   $v29, s1WF, sRTF[2h]
-    lqv     vpClpI, (tempvpClpI)(rdpCmdBufEndP1) // Load int part with Z in W
+    lqv     vpClpI, (tempVpRGBA)(rdpCmdBufEndP1) // Load int part with Z in W
     vmadm   $v29, s1WI, sRTF[2h]
     lsv     vpClpF[6],  (VTX_Z_FRAC    )(outVtx1) // load Z into W slot, will be for fog below
     vmadn   s1WF, s1WF, sRTI[3h]
@@ -2992,15 +2990,15 @@ lpRsqF  equ $v23  // Light pair reciprocal square root frac part
     vmrg    $v9, $v9, $v13                    // B E H - B E H -
     li      $11, 0x7F                         // Mark lights valid
     vmrg    $v16, $v16, $v20[0q]              // M P S - M P S -
-    swv     $v18[4], (tempXfrmSingle)(rdpCmdBufEndP1) // Stores O R U - O R U -
+    swv     $v18[4], (tempXfrmLt)(rdpCmdBufEndP1) // Stores O R U - O R U -
     vmudh   $v29,  $v8,  lpWrld[0h]           // Start transforming lookat
-    lqv     $v18,    (tempXfrmSingle)(rdpCmdBufEndP1)
+    lqv     $v18,    (tempXfrmLt)(rdpCmdBufEndP1)
     // This is slightly wrong, vmrg writes accum lo. But only affects lookat and
     // we are only reading accum mid result. Basically rounding error.
     vmrg    $v17, $v17, $v21                  // N Q T - N Q T -
-    swv     $v10[4], (tempXfrmSingle)(rdpCmdBufEndP1) // Stores C F I - C F I -
+    swv     $v10[4], (tempXfrmLt)(rdpCmdBufEndP1) // Stores C F I - C F I -
     vmadh   $v29,  $v9,  lpWrld[1h]
-    lqv     $v10,    (tempXfrmSingle)(rdpCmdBufEndP1)
+    lqv     $v10,    (tempXfrmLt)(rdpCmdBufEndP1)
     vmadn   $v29,  $v16, lpWrld[0h]
     sb      $11, pointLightFlagOrDirXfrmValid
     // 18 cycles
@@ -3022,20 +3020,20 @@ xfrm_light_loop_2:
     vreadacc lpSqrF, ACC_MIDDLE      // Read not-clamped value
     sub     $11, curLight, ambLight  // Is curLight (write ptr) <, =, or > ambient light?
     vreadacc lpSqrI, ACC_UPPER
-    sw      $20, (tempXfrmSingle)(rdpCmdBufEndP1) // Store light 0
+    sw      $20, (tempXfrmLt)(rdpCmdBufEndP1) // Store light 0
     vmudm   $v29,    lpMdl2, lpRsqF[0h] // Vec int * frac scaling
-    sw      $24, (tempXfrmSingle + 4)(rdpCmdBufEndP1) // Store light 1
+    sw      $24, (tempXfrmLt + 4)(rdpCmdBufEndP1) // Store light 1
     vmadh   lpFinal, lpMdl2, lpRsqI[0h] // Vec int * int scaling
-    lpv     lpWrld[0], (tempXfrmSingle)(rdpCmdBufEndP1) // Load dirs 0-2, 4-6
+    lpv     lpWrld[0], (tempXfrmLt)(rdpCmdBufEndP1) // Load dirs 0-2, 4-6
     vmudm   $v29, vOne, lpSqrF[2h]  // Sum of squared components
     vmadh   $v29, vOne, lpSqrI[2h]
     vmadm   $v29, vOne, lpSqrF[1h]
     vmadh   $v29, vOne, lpSqrI[1h]
-    spv     lpFinal[0], (tempXfrmSingle)(rdpCmdBufEndP1) // Store elem 0-2, 4-6 as bytes to temp memory
+    spv     lpFinal[0], (tempXfrmLt)(rdpCmdBufEndP1) // Store elem 0-2, 4-6 as bytes to temp memory
     vmadn   lpSumF, lpSqrF,  vOne     // elem 0, 4; swapped so we can do vmadn and get result
-    lw      $20, (tempXfrmSingle)(rdpCmdBufEndP1) // Load 3 (4) bytes to scalar unit
+    lw      $20, (tempXfrmLt)(rdpCmdBufEndP1) // Load 3 (4) bytes to scalar unit
     vmadh   lpSumI, lpSqrI,  vOne
-    lw      $24, (tempXfrmSingle + 4)(rdpCmdBufEndP1) // Load 3 (4) bytes to scalar unit
+    lw      $24, (tempXfrmLt + 4)(rdpCmdBufEndP1) // Load 3 (4) bytes to scalar unit
     vcopy   lpMdl2, lpMdl
     blez    $10, xfrm_light_store_lookat // curLight = -2 or 0
      vmudh  $v29, $v8,  lpWrld[0h]
