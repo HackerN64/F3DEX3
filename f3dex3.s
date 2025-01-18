@@ -162,14 +162,15 @@ for boot code       Overlay 0       Overlay 1
 start                 task)         handlers)
 (initialization)       |                |
 
-Many command
-handlers
+Rest command handlers
+Vertex start
+All tri write cmds
 
 Overlay 2           Overlay 3       Overlay 4
-(Lighting)          (Clipping)      (mIT, rare cmds)
+(Basic lighting)    (Clipping,      (Advanced
+                    rare cmds)      lighting)
 
-Vertex and
-tri handlers
+Main vertex write
 
 DMA code
 
@@ -1158,11 +1159,6 @@ G_SETxIMG_handler:
     j       G_RDP_handler
      sb     $7, materialCullMode
 
-.if CFG_LEGACY_VTX_PIPE
-
-G_DMA_IO_handler:
-    instantiate_dma_io
-    
 G_BRANCH_WZ_handler:
     lhu     $10, (vertexTable)(cmd_w0)  // Vertex addr from byte 3
 .if CFG_G_BRANCH_W                      // G_BRANCH_W/G_BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
@@ -1176,11 +1172,6 @@ G_BRANCH_WZ_handler:
     j       branch_dl                   // need $2 < 0 for nopush and cmd_w1_dram
      li     cmd_w0, 0                   // No count of DL cmds to skip
     
-G_MEMSET_handler:
-    instantiate_memset
-
-.endif
-
 G_LOAD_UCODE_handler:
     j       load_overlay_0_and_enter         // Delay slot is harmless
 G_MODIFYVTX_handler:
@@ -1759,11 +1750,11 @@ clip_init_used_loop:
     li      clipPolySelect, 6  // Everything being indexed from 6 saves one instruction at the end of the loop
     sh      $1, (clipPoly - 6 + 0)(clipPolySelect) // Write the current three verts
     sh      $2, (clipPoly - 6 + 2)(clipPolySelect) // as the initial polygon
-    sh      $3, (clipPoly - 6 + 4)(clipPolySelect) // Initial state $3 = clipVLastOfs
+    sh      $3, (clipPoly - 6 + 4)(clipPolySelect) // Initial state $3 = clipVLastOfsc
     sh      $zero, (clipPoly)(clipPolySelect)  // nullptr to mark end of polygon
 // Available locals here: $11, $1, $7, $20, $24, $10
 clip_condlooptop:
-    lhu     clipFlags, VTX_CLIP(clipVLastOfs)  // Load flags for final vertex of the last polygon
+    lhu     clipFlags, VTX_CLIP(clipVLastOfsc) // Load flags for final vertex of the last polygon
     addi    clipPolyRead,   clipPolySelect, -6 // Start reading at the beginning of the old polygon
     xori    clipPolySelect, clipPolySelect, 6 ^ ((clipPoly2 - clipPoly) + 6) // Swap to the other polygon memory
     addi    clipPolyWrite,  clipPolySelect, -6 // Start writing at the beginning of the new polygon
@@ -1790,7 +1781,7 @@ clip_find_unused_loop:
     move    clipVOnsc, clipVLastOfsc           // Otherwise swap; note we are overwriting
     move    clipVLastOfsc, clipVNext           // clipVLastOfsc but not clipVNext
 clip_skipswap23:
-    // Interpolate between clipVLastOfs and clipVOns; create a new vertex which is on the
+    // Interpolate between clipVLastOfsc and clipVOns; create a new vertex which is on the
     // clipping boundary (e.g. at the screen edge)
 cPosOnOfF equ vpClpF
 cPosOnOfI equ vpClpI
@@ -1852,7 +1843,7 @@ clip_skipxy:
     addi    $11, $11, 6 - ((MAX_CLIP_POLY_VERTS) * 2) // Write ptr to last zero slot
     vrcpl   cRRF[3], cDiffF[3]              // 1 / (x+y+z+w), vtx on screen - vtx off screen
     bgez    $11, clip_done                  // If so, give up
-     vrcph  $cRRI[3], $v31[2]               // 0; get int result of reciprocal
+     vrcph  cRRI[3], $v31[2]                // 0; get int result of reciprocal
     vabs    cTemp, cTemp, $v31[3]           // 2; cTemp = +/- 2 based on sum positive (incl. zero) or negative
     lhu     vGeomMid, geometryModeLabel + 1 // Load middle 2 bytes of geom mode, incl fog setting
     vmudn   cRRF, cRRF, cTemp[3]            // multiply reciprocal by +/- 2
@@ -2043,6 +2034,44 @@ ovl3_padded_end:
 .orga max(max(ovl2_padded_end - ovl2_start, ovl4_padded_end - ovl4_start) + orga(ovl3_start), orga())
 ovl234_end:
 
+G_MTX_end:
+// Multiplies the temp loaded matrix into the M or VP matrix
+    lhu     $6, (movememTable + G_MV_MMTX)($1) // Output; $1 holds 0 for M or 4 for VP.
+    li      $3, tempMatrix // Input 1 = temp mem (loaded mtx)
+    jal     while_wait_dma_busy
+     move   $2, $6 // Input 0 = output
+mtx_multiply:
+    // $3, $2 are input matrices; $6 is output matrix; $7 is 0 for return to vtx
+    addi    $10, $3, 0x0018
+@@loop:
+    vmadn   $v7, $v31, $v31[2]  // 0
+    addi    $11, $3, 0x0008
+    vmadh   $v6, $v31, $v31[2]  // 0
+    addi    $2, $2, -0x0020
+    vmudh   $v29, $v31, $v31[2] // 0
+@@innerloop:
+    ldv     $v3[0], 0x0040($2)
+    ldv     $v3[8], 0x0040($2)
+    lqv     $v1[0], 0x0020($3) // Input 1
+    ldv     $v2[0], 0x0020($2)
+    ldv     $v2[8], 0x0020($2)
+    lqv     $v0[0], 0x0000($3) // Input 1
+    vmadl   $v29, $v3, $v1[0h]
+    addi    $3, $3, 0x0002
+    vmadm   $v29, $v2, $v1[0h]
+    addi    $2, $2, 0x0008 // Increment input 0 pointer
+    vmadn   $v5, $v3, $v0[0h]
+    bne     $3, $11, @@innerloop
+     vmadh  $v4, $v2, $v0[0h]
+    bne     $3, $10, @@loop
+     addi   $3, $3, 0x0008
+    sqv     $v7[0], (0x0020)($6)
+    sqv     $v6[0], (0x0000)($6)
+    beqz    $7, vtx_after_mtx_multiply
+     sqv    $v4[0], (0x0010)($6)
+    j       run_next_DL_command
+     sqv    $v5[0], (0x0030)($6)
+
 vtx_after_dma:
     srl     $2, cmd_w0, 11                     // n << 1
     sub     $2, cmd_w0, $2                     // = v0 << 1
@@ -2148,7 +2177,10 @@ vtx_after_lt_setup:
     llv     vpST[0],  (VTX_IN_TC + 0 * inputVtxSize)(inVtx) // ST in 0:1
     j       vtx_store_loop_entry
      llv    vpST[8],  (VTX_IN_TC + 1 * inputVtxSize)(inVtx) // ST in 4:5
-
+     
+.if (. & 4)
+    .warning "One instruction of padding before vertex loop"
+.endif
 .align 8
 
 .if CFG_NO_OCCLUSION_PLANE
@@ -2500,45 +2532,6 @@ tris_end:
      lqv    $v30, (v30Value)($zero)           // Restore value overwritten in vtx_store
 .endif
 
-G_MTX_end:
-// Multiplies the temp loaded matrix into the M or VP matrix
-    lhu     $6, (movememTable + G_MV_MMTX)($1) // Output; $1 holds 0 for M or 4 for VP.
-    li      $3, tempMatrix // Input 1 = temp mem (loaded mtx)
-    jal     while_wait_dma_busy
-     move   $2, $6 // Input 0 = output
-mtx_multiply:
-    // $3, $2 are input matrices; $6 is output matrix; $7 is 0 for return to vtx
-    addi    $10, $3, 0x0018
-@@loop:
-    vmadn   $v7, $v31, $v31[2]  // 0
-    addi    $11, $3, 0x0008
-    vmadh   $v6, $v31, $v31[2]  // 0
-    addi    $2, $2, -0x0020
-    vmudh   $v29, $v31, $v31[2] // 0
-@@innerloop:
-    ldv     $v3[0], 0x0040($2)
-    ldv     $v3[8], 0x0040($2)
-    lqv     $v1[0], 0x0020($3) // Input 1
-    ldv     $v2[0], 0x0020($2)
-    ldv     $v2[8], 0x0020($2)
-    lqv     $v0[0], 0x0000($3) // Input 1
-    vmadl   $v29, $v3, $v1[0h]
-    addi    $3, $3, 0x0002
-    vmadm   $v29, $v2, $v1[0h]
-    addi    $2, $2, 0x0008 // Increment input 0 pointer
-    vmadn   $v5, $v3, $v0[0h]
-    bne     $3, $11, @@innerloop
-     vmadh  $v4, $v2, $v0[0h]
-    bne     $3, $10, @@loop
-     addi   $3, $3, 0x0008
-    sqv     $v7[0], (0x0020)($6)
-    sqv     $v6[0], (0x0000)($6)
-.if CFG_LEGACY_VTX_PIPE
-    beqz    $7, vtx_after_mtx_multiply
-.endif
-     sqv    $v4[0], (0x0010)($6)
-    j       run_next_DL_command
-     sqv    $v5[0], (0x0030)($6)
 
 
 .if CFG_PROFILING_B
@@ -2737,7 +2730,7 @@ ovl0_padded_end:
     .error "Automatic resizing for overlay 0 failed"
 .endif
 
-// overlay 1 (0x170 bytes loaded into 0x1000)
+// overlay 1 (0x178 bytes loaded into 0x1000)
 .headersize 0x00001000 - orga()
 
 ovl1_start:
@@ -3252,7 +3245,10 @@ ltbasic_common_end:
     beqz    $11, vtx_return_from_lighting
      vmrg   vpRGBA, vLtRGBOut, vLtAOut  // Merge base output and alpha output
 ltbasic_texgen:
-// Texgen uses vLookat0:1 = vpLtTot and vAAA, vCCC:vDDD, and of course vpST.
+// Texgen uses vpLtTot, vAAA, vCCC:vDDD, and of course vpST.
+ltLookAt equ vCCC
+vLookat0 equ vpLtTot
+vLookat1 equ vAAA
     lpv     ltLookAt[0], (xfrmLookatDirs + 0)($zero) // Lookat 0 in 0-2, 1 in 4-6; = vNrmOut
     vmulf   $v29, vpNrmlX, ltLookAt[0]   // Normals X elems 0, 4 * lookat 0 X
     vmacf   $v29, vpNrmlY, ltLookAt[1]        // Normals Y elems 0, 4 * lookat 0 Y
@@ -3367,7 +3363,6 @@ vNrmOut    equ $v18 // Output of lt_normalize (rarely used, but needed as all te
 .endif
 vPackPXY equ $v25 // = vCCC; positive X and Y in packed normals
 vPackZ   equ $v26 // = vDDD; Z in packed normals
-.if !CFG_LEGACY_VTX_PIPE
     vand    vPackPXY, vAAA, $v31[6]          // 0x7F00; positive X, Y
     vmudh   $v29, vOne, $v31[1]              // -1; set all elems of $v29 to -1
     // vnop; vnop
@@ -3399,14 +3394,12 @@ lt_skip_packed_normals:
     beqz    $11, lt_after_xfrm_normals // Skip if G_NORMALSMODE_FAST
      vmadh  vAAA, vM2I, vPairNrml[2h] // vAAA = normals int
     // Transform normals by M inverse transpose, for G_NORMALSMODE_AUTO or G_NORMALSMODE_MANUAL
-.endif
 vLtMIT0I   equ $v26 // = vDDD
 vLtMIT1I   equ $v25 // = vCCC
 vLtMIT2I   equ $v23 // = vAAA; last in multiply
 vLtMIT0F   equ $v29 // = temp; first
 vLtMIT1F   equ $v17 // = vPairLt
 vLtMIT2F   equ $v24 // = vBBB; second to last
-.if !CFG_LEGACY_VTX_PIPE
     lqv     vLtMIT0I,    (mvpMatrix + 0x00)($zero) // x int, y int
     lqv     vLtMIT2I,    (mvpMatrix + 0x10)($zero) // z int, x frac
     lqv     vLtMIT1F,    (mvpMatrix + 0x20)($zero) // y frac, z frac
@@ -3504,10 +3497,8 @@ lt_skip_specular:
 lt_post:
     // Valid: vpMdlI/F, vpST, modified vpRGBA ([3h] = alpha - 1),
     // vPairNrml normal [0h:2h] fresnel [3h], vPairLt [0h:2h], vAAA lookat 0 dir
-.endif
 vLtRGBOut  equ $v25 // = vCCC: light / effects RGB output
 vLtAOut    equ $v26 // = vDDD: light / effects alpha output
-.if !CFG_LEGACY_VTX_PIPE
     vadd    vpRGBA, vpRGBA, $v31[7]  // 0x7FFF; undo change for ambient occlusion
     andi    $11, vGeomMid, G_LIGHTTOALPHA >> 8
     // vnop
@@ -3560,11 +3551,9 @@ lt_skip_fresnel:
     vmudh   $v29, vOne, vLookat1[0h]
     vmadh   $v29, vOne, vLookat1[1h]
     vmadh   vLookat1, vOne, vLookat1[2h]
-.endif
-    TODO Rest of texgen shared by F3DEX3 native and LVP
     
+    TODO Rest of texgen
     
-.if !CFG_LEGACY_VTX_PIPE
 lt_point:
     comment
     Input vector 1 elem size 7FFF.0000 -> len^2 3FFF0001 -> 1/len 0001.0040 -> vec +801E.FFC0 -> clamped 7FFF

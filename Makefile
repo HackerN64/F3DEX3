@@ -1,4 +1,4 @@
-# To build, run something like `make F3DEX3_BrZ` or`make F3DEX3_BrW_LVP_NOC_PA`.
+# To build, run something like `make F3DEX3_BrZ` or`make F3DEX3_BrW_NOC_PA`.
 # For an explanation of what all the suffixes mean, see README.md.
 
 MAKEFLAGS += --no-builtin-rules
@@ -11,7 +11,6 @@ default: F3DEX3_BrZ F3DEX3_BrW
 ALL_OPTIONS := \
   CFG_G_BRANCH_W \
   CFG_NO_OCCLUSION_PLANE \
-  CFG_LEGACY_VTX_PIPE \
   CFG_PROFILING_A \
   CFG_PROFILING_B \
   CFG_PROFILING_C
@@ -197,24 +196,14 @@ define rule_builder_noc
   $$(eval $$(call rule_builder_prof))
 endef
 
-define rule_builder_lvp
-  NAME_NOC := $(NAME_LVP)
-  OPTIONS_NOC := $(OPTIONS_LVP)
-  $$(eval $$(call rule_builder_noc))
-  
-  NAME_NOC := $(NAME_LVP)_LVP
-  OPTIONS_NOC := $(OPTIONS_LVP) CFG_LEGACY_VTX_PIPE
-  $$(eval $$(call rule_builder_noc))
-endef
-
 define rule_builder_br
-  NAME_LVP := $(NAME_BR)_BrZ
-  OPTIONS_LVP := $(OPTIONS_BR)
-  $$(eval $$(call rule_builder_lvp))
+  NAME_NOC := $(NAME_BR)_BrZ
+  OPTIONS_NOC := $(OPTIONS_BR)
+  $$(eval $$(call rule_builder_noc))
   
-  NAME_LVP := $(NAME_BR)_BrW
-  OPTIONS_LVP := $(OPTIONS_BR) CFG_G_BRANCH_W
-  $$(eval $$(call rule_builder_lvp))
+  NAME_NOC := $(NAME_BR)_BrW
+  OPTIONS_NOC := $(OPTIONS_BR) CFG_G_BRANCH_W
+  $$(eval $$(call rule_builder_noc))
 endef
 
 NAME_BR := 
