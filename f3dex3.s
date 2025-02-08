@@ -1297,6 +1297,12 @@ G_MEMSET_handler:
 
 .endif
 
+G_FLUSH_handler:
+    jal     flush_rdp_buffer                 // Flush once to push partial DMEM buf to FIFO
+     sub    $8, rdpCmdBufPtr, rdpCmdBufEndP1 // Prereq for flush_rdp_buffer
+    j       flush_rdp_buffer                 // Flush second time to wait for DMA and set RDP end
+     li     $ra, run_next_DL_command
+
 G_LOAD_UCODE_handler:
     j       load_overlay_0_and_enter         // Delay slot is harmless
 G_MODIFYVTX_handler:
@@ -1721,16 +1727,17 @@ tri_return_from_decal_fix_z:
      slv    $v10[12], 0x00($10)   // ZI:F
      // 156 cycles
 flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
-    mfc0    $10, SP_DMA_BUSY                 // Check if any DMA is in flight
+    mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
     lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
-    addi    dmaLen, $8, RDP_CMD_BUFSIZE + 8  // dmaLen = size of DMEM buffer to copy
+    lw      $10, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
 .if CFG_PROFILING_C
     // This is a wait for DMA busy loop, but written inline to avoid overwriting ra.
-    addi    perfCounterD, perfCounterD, 10   // 6 instr + 2 between end load and mfc + 0 taken branch overlaps with last + 2 between mfc and load
+    addi    perfCounterD, perfCounterD, 7    // 6 instr + 1 taken branch
 .endif
-    bnez    $10, flush_rdp_buffer            // Wait until no DMAs are active
-     lw     $10, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
-    mtc0    cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
+    bnez    $11, flush_rdp_buffer            // Wait until no DMAs are active
+     addi   dmaLen, $8, RDP_CMD_BUFSIZE + 8  // dmaLen = size of DMEM buffer to copy
+    blez    dmaLen, old_return_routine       // If nothing to copy, exit
+     mtc0   cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
     add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
     sub     $10, $10, $11                    // $10 = FIFO end addr - future pointer
     bgez    $10, @@has_room                  // Branch if we can fit this
@@ -2925,12 +2932,10 @@ dma_write:
 // The action here is controlled by $1. If yielding, $1 > 0. If this was
 // G_LOAD_UCODE, $1 == 0. If we got to the end of the parent DL, $1 < 0.
 ovl0_start:
-    sub     $8, rdpCmdBufPtr, rdpCmdBufEndP1
-    addi    $10, $8, (RDP_CMD_BUFSIZE + 8) - 1 // Does the current buffer contain anything?
-    bgezal  $10, flush_rdp_buffer   // - 1 because there is no bgtzal instruction
+    jal     flush_rdp_buffer                 // Flush once to push partial DMEM buf to FIFO
+     sub    $8, rdpCmdBufPtr, rdpCmdBufEndP1 // Prereq for flush_rdp_buffer
+    jal     flush_rdp_buffer                 // Flush second time to wait for DMA and set RDP end
      add    taskDataPtr, taskDataPtr, inputBufferPos // inputBufferPos <= 0; taskDataPtr was where in the DL after the current chunk loaded
-    jal     while_wait_dma_busy     // Wait for possible RDP flush to finish
-     lw     $24, rdpFifoPos
 .if CFG_PROFILING_C
     mfc0    $11, DPC_CLOCK
     lw      $10, startCounterTime
@@ -2938,9 +2943,8 @@ ovl0_start:
     add     perfCounterA, perfCounterA, $11
 .endif
     bnez    $1, task_done_or_yield  // Continue to load ucode if 0
-     mtc0   $24, DPC_END            // Set the end pointer of the RDP so that it starts the task
 load_ucode:
-    lw      cmd_w1_dram, (inputBufferEnd - 0x04)(inputBufferPos) // word 1 = ucode code DRAM addr
+     lw     cmd_w1_dram, (inputBufferEnd - 0x04)(inputBufferPos) // word 1 = ucode code DRAM addr
     sw      $zero, OSTask + OSTask_flags    // So next ucode knows it didn't come from yield
     li      dmemAddr, start         // Beginning of overwritable part of IMEM
     sw      taskDataPtr, OSTask + OSTask_data_ptr // Store where we are in the DL
