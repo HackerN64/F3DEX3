@@ -36,7 +36,9 @@ var menudata={children:[
 {text:"Globals",url:"globals.html",children:[
 {text:"All",url:"globals.html",children:[
 {text:"g",url:"globals.html#index_g"},
+{text:"l",url:"globals.html#index_l"},
 {text:"m",url:"globals.html#index_m"}]},
 {text:"Typedefs",url:"globals_type.html"},
 {text:"Macros",url:"globals_defs.html",children:[
-{text:"g",url:"globals_defs.html#index_g"}]}]}]}]}
+{text:"g",url:"globals_defs.html#index_g"},
+{text:"l",url:"globals_defs.html#index_l"}]}]}]}]}

@@ -155,5 +155,7 @@ var gbi_8h =
     [ "gsSPTriFan", "gbi_8h.html#ac103f222729a278441c02d4ab3fdbcf6", null ],
     [ "gsSPTriStrip", "gbi_8h.html#a4ce5938563a7b529ef58fc2719c1a019", null ],
     [ "gsSPVertex", "gbi_8h.html#a57debef2e9c1dfcd0c711f8d6bb0c0e5", null ],
+    [ "LIGHT_TYPE_DIR", "gbi_8h.html#a8229c1b02537492ab81de6efc3346dd7", null ],
+    [ "LIGHT_TYPE_POINT", "gbi_8h.html#a2e726cbca940e0998abc03fe4c50a64c", null ],
     [ "Mtx_t", "gbi_8h.html#a337d3271dded333fc80aa798bf36efe3", null ]
 ];
