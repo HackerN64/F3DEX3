@@ -1186,6 +1186,18 @@ typedef union {
     long long int force_structure_alignment[2];
 } Vp;
 
+/*
+ * Light types, encoded in the kc coefficient.
+ */
+/**
+ * Standard directional light. Equivalent to kc = 0.
+ */
+#define LIGHT_TYPE_DIR 0
+/**
+ * Identifies the light as a point light, with x acting as the kc coefficient.
+ */
+#define LIGHT_TYPE_POINT(x) x
+
 /**
  * Light structure.
  *
