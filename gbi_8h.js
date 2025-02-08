@@ -141,7 +141,7 @@ var gbi_8h =
     [ "gsSPLookAtX", "gbi_8h.html#a50d2a6fb30a49e45e3ae5b96ec5972df", null ],
     [ "gsSPLookAtY", "gbi_8h.html#a7340785bc6142704ca8fa39fa5e1e680", null ],
     [ "gsSPMatrix", "gbi_8h.html#aee3588cfbd5b017041757eed414c5a40", null ],
-    [ "gsSPMemset", "gbi_8h.html#a100dc628b1b8952e0f3bb2e4e9ddd7e4", null ],
+    [ "gsSPMemset", "gbi_8h.html#ae51b3ee3f567d1038b75c135374584ef", null ],
     [ "gsSPMITMatrix", "gbi_8h.html#ae2ae0e0fe29b05d0f62ff6b14a94c1cd", null ],
     [ "gsSPModifyVertex", "gbi_8h.html#afa7f692f104a3fca8d37ab59708148bc", null ],
     [ "gsSPNormalsMode", "gbi_8h.html#a7f28956eea7abd6c804d228e2ab2da8d", null ],

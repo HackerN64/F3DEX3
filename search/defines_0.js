@@ -124,7 +124,7 @@ var searchData=
   ['gssplookatx_121',['gsSPLookAtX',['../gbi_8h.html#a50d2a6fb30a49e45e3ae5b96ec5972df',1,'gbi.h']]],
   ['gssplookaty_122',['gsSPLookAtY',['../gbi_8h.html#a7340785bc6142704ca8fa39fa5e1e680',1,'gbi.h']]],
   ['gsspmatrix_123',['gsSPMatrix',['../gbi_8h.html#aee3588cfbd5b017041757eed414c5a40',1,'gbi.h']]],
-  ['gsspmemset_124',['gsSPMemset',['../gbi_8h.html#a100dc628b1b8952e0f3bb2e4e9ddd7e4',1,'gbi.h']]],
+  ['gsspmemset_124',['gsSPMemset',['../gbi_8h.html#ae51b3ee3f567d1038b75c135374584ef',1,'gbi.h']]],
   ['gsspmitmatrix_125',['gsSPMITMatrix',['../gbi_8h.html#ae2ae0e0fe29b05d0f62ff6b14a94c1cd',1,'gbi.h']]],
   ['gsspmodifyvertex_126',['gsSPModifyVertex',['../gbi_8h.html#afa7f692f104a3fca8d37ab59708148bc',1,'gbi.h']]],
   ['gsspnormalsmode_127',['gsSPNormalsMode',['../gbi_8h.html#a7f28956eea7abd6c804d228e2ab2da8d',1,'gbi.h']]],
