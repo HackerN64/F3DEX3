@@ -3013,19 +3013,16 @@ ovl0_padded_end:
 ovl1_start:
 
 G_POPMTX_handler:
-    // TODO optimize this, remove the "no change" codepath, can eliminate 2 instrs
-    lw      $11, matrixStackPtr             // Get the current matrix stack pointer
-    lw      $2, OSTask + OSTask_dram_stack  // Read the location of the dram stack
-    sub     cmd_w1_dram, $11, cmd_w1_dram           // Decrease the matrix stack pointer by the amount passed in the second command word
-    sub     $1, cmd_w1_dram, $2                     // Subtraction to check if the new pointer is greater than or equal to $2
-    bgez    $1, do_popmtx                   // If the new matrix stack pointer is greater than or equal to $2, then use the new pointer as is
-     nop
-    move    cmd_w1_dram, $2                         // If the new matrix stack pointer is less than $2, then use $2 as the pointer instead
-do_popmtx:
-    beq     cmd_w1_dram, $11, run_next_DL_command   // If no bytes were popped, then we don't need to make the mvp matrix as being out of date and can run the next command
-     sw     cmd_w1_dram, matrixStackPtr             // Update the matrix stack pointer with the new value
-    j       do_movemem
-     sb     $zero, mITValid
+    lw      $11, matrixStackPtr             // Current matrix stack pointer
+    lw      $2, OSTask + OSTask_dram_stack  // Top of the stack
+    sub     cmd_w1_dram, $11, cmd_w1_dram   // Decrease pointer by amount in command
+    sub     $1, cmd_w1_dram, $2             // Is it still valid / within the stack?
+    bgez    $1, @@skip                      // If so, skip the failsafe
+     sb     $zero, mITValid                 // Mark matrix as needing recompute
+    move    cmd_w1_dram, $2                 // Use the top of the stack as the new pointer
+@@skip:    
+    j       do_movemem                      // Load the new matrix from the stack
+     sw     cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
 
 G_MTX_handler:
     // The lower 3 bits of G_MTX are, from LSb to MSb (0 value/1 value),
