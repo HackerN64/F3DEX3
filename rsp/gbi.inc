@@ -48,7 +48,6 @@ G_SETOTHERMODE_L    equ 0xe2
 G_SETOTHERMODE_H    equ 0xe3
 G_TEXRECT           equ 0xe4
 G_TEXRECTFLIP       equ 0xe5
-// G_RDP_handler group start v
 G_RDPLOADSYNC       equ 0xe6
 G_RDPPIPESYNC       equ 0xe7
 G_RDPTILESYNC       equ 0xe8
@@ -72,12 +71,10 @@ G_SETBLENDCOLOR     equ 0xf9
 G_SETPRIMCOLOR      equ 0xfa
 G_SETENVCOLOR       equ 0xfb
 G_SETCOMBINE        equ 0xfc
-// G_RDP_handler group end ^
 G_SETTIMG           equ 0xfd
 G_SETZIMG           equ 0xfe
 G_SETCIMG           equ 0xff
 G_NOOP              equ 0x00
-// Second table start v
 G_VTX               equ 0x01
 G_MODIFYVTX         equ 0x02
 G_CULLDL            equ 0x03
@@ -102,10 +99,6 @@ G_MV_MMTX     equ 0x02
 G_MV_PMTX     equ 0x06
 G_MV_VIEWPORT equ 0x08
 G_MV_LIGHT    equ 0x0A
-
-G_NORMALSMODE_FAST equ 0x00
-G_NORMALSMODE_AUTO equ 0x01
-G_NORMALSMODE_MANUAL equ 0x02
 
 ZMODE_DEC equ 0x0C00  // from othermode low; the value is the mask
 

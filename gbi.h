@@ -196,11 +196,6 @@ of warnings if you use -Wpedantic. */
  */
 #define G_MTX_PUSH         0x01
 
-/* See SPNormalsMode */
-#define G_NORMALS_MODE_FAST      0x00
-#define G_NORMALS_MODE_AUTO      0x01
-#define G_NORMALS_MODE_MANUAL    0x02
-
 /* See SPAlphaCompareCull */
 #define G_ALPHA_COMPARE_CULL_DISABLE  0
 #define G_ALPHA_COMPARE_CULL_BELOW    1
@@ -2925,49 +2920,6 @@ _DW({                                         \
         (_SHIFTL((mode), 8, 8) | _SHIFTL((thresh), 0, 8)))
 
 /**
- * Normals mode: How to handle transformation of vertex normals from model to
- * world space for lighting.
- * 
- * If mode = G_NORMALS_MODE_FAST, transforms normals from model space to world
- * space with the M matrix. This is correct if the object's transformation
- * matrix stack only included translations, rotations, and uniform scale (i.e.
- * same scale in X, Y, and Z); otherwise, if the transformation matrix has
- * nonuniform scale or shear, the lighting on the object will be somewhat
- * distorted.
- * 
- * If mode = G_NORMALS_MODE_AUTO, transforms normals from model space to world
- * space with M inverse transpose, which renders lighting correctly for the
- * object regardless of its transformation matrix (nonuniform scale or shear is
- * okay). Whenever vertices are drawn with lighting enabled after M has been
- * changed, computes M inverse transpose from M. This requires swapping to
- * overlay 4 for M inverse transpose and then back to overlay 2 for lighting,
- * which produces roughly 3.5 us of extra DRAM traffic. This performance penalty
- * happens effectively once per matrix, which is once per normal object or
- * separated limb or about twice per flex skeleton limb. So in a scene with lots
- * of complex skeletons, this may have a noticeable performance impact.
- * 
- * If mode = G_NORMALS_MODE_MANUAL, uses M inverse transpose for correct results
- * like G_NORMALS_MODE_AUTO, but it never internally computes M inverse
- * transpose. You have to upload M inverse transpose to the RSP using
- * SPMITMatrix every time you change the M matrix. The DRAM traffic for the
- * extra matrix uploads is much smaller than the overlay swaps, so if you can
- * efficiently compute M inverse transpose on the CPU, this may be faster than
- * G_NORMALS_MODE_AUTO.
- * 
- * Recommended to leave this set to G_NORMALS_MODE_FAST generally, and only set
- * it to G_NORMALS_MODE_AUTO for specific objects at times when they actually
- * have a nonuniform scale. For example, G_NORMALS_MODE_FAST for Mario
- * generally, but G_NORMALS_MODE_AUTO temporarily while he is squashed.
- */
-#define gSPNormalsMode(pkt, mode) \
-    gMoveHalfwd(pkt, G_MW_FX, G_MWO_NORMALS_MODE, (mode) & 0xFF)
-/**
- * @copydetails gSPNormalsMode
- */
-#define gsSPNormalsMode(mode) \
-    gsMoveHalfwd(G_MW_FX, G_MWO_NORMALS_MODE, (mode) & 0xFF)
-
-/**
  * F3DEX3 has a basic auto-batched rendering system. At a high level, if a
  * material display list being run is the same as the last material, the texture
  * loads are automatically skipped the second time as they should already be in
@@ -3002,35 +2954,6 @@ _DW({                                         \
  */
 #define gsSPDontSkipTexLoadsAcross() \
     gsMoveWd(G_MW_FX, G_MWO_LAST_MAT_DL_ADDR, 0xFFFFFFFF)
-
-typedef union {
-    struct {
-        s16 intPart[3][4];  /** Fourth row containing translations is omitted. */
-        u16 fracPart[3][4]; /** Also the fourth column data is ignored, need not be 0. */
-    };
-    long long int force_structure_alignment;
-} MITMtx;
-
-/**
- * See SPNormalsMode. mtx is the address of a MITMtx (M inverse transpose).
- * 
- * The matrix values must be scaled down so that the matrix norm is <= 1,
- * i.e. multiplying this matrix by any vector length <= 1 must produce a vector
- * with length <= 1. Normally, M scales things down substantially, so M inverse
- * transpose natively would scale them up substantially; you need to apply a
- * constant scale to counteract this. One easy way to do this is compute M
- * inverse transpose normally, then scale it so until the maximum absolute
- * value of any element is 0.5. Because of this scaling, you can also skip the
- * part of the inverse computation where you compute the determinant and divide
- * by it, cause you're going to rescale it arbitrarily anyway.
- */
-#define gSPMITMatrix(pkt, mit) \
-        gDma2p((pkt), G_MOVEMEM, (mit), sizeof(MITMtx), G_MV_MMTX, 0x80)
-/**
- * @copydetails gSPMITMatrix
- */
-#define gsSPMITMatrix(mtx) \
-        gsDma2p(      G_MOVEMEM, (mit), sizeof(MITMtx), G_MV_MMTX, 0x80)
 
 
 /**

@@ -9,6 +9,7 @@
     .error "armips 0.11 or newer is required"
 .endif
 
+// Sign-extends the immediate using addi. ori would zero-extend.
 .macro li, reg, imm
     addi    reg, $zero, imm
 .endmacro
@@ -460,17 +461,23 @@ alphaCompareCullMode:
     .db 0x00 // 0 = disabled, 1 = cull if all < thresh, -1 = cull if all >= thresh
 alphaCompareCullThresh:
     .db 0x00 // Alpha threshold, 00 - FF
-
-materialCullMode: // Overwritten to 0 by SPNormalsMode, but that should not
-    .db 0     // happen in the middle of tex setup
-normalsMode:
-    .db 0     // Overwrites materialCullMode
-
-lastMatDLPhyAddr:
-    .dw 0
     
 activeClipPlanes:
     .dh CLIP_SCAL_NPXY | CLIP_CAMPLANE  // Normal tri write, set to zero when clipping
+
+.if (. & 7) != 0
+    .error "packedConstants alignment broken"
+.endif
+packedConstants:  // See ltbasic_start_packed_ao for explanations of these values
+    .db 0xF8
+    .db 0xFC
+    .db 0x08
+    
+materialCullMode:
+    .db 0
+    
+lastMatDLPhyAddr:
+    .dw 0
     
 // Constants for clipping algorithm
 clipCondShifts:
@@ -497,7 +504,6 @@ movewordTable:
     .dh fogFactor          // G_MW_FOG
     .dh lightBufferMain    // G_MW_LIGHTCOL
 
-
 .macro jumpTableEntry, addr
     .dh addr & 0xFFFF
 .endmacro
@@ -507,14 +513,6 @@ movememHandlerTable:
 jumpTableEntry G_POPMTX_end   // G_POPMTX
 jumpTableEntry G_MTX_end      // G_MTX (multiply)
 jumpTableEntry G_MOVEMEM_end  // G_MOVEMEM, G_MTX (load)
-
-.if (. & 7) != 0
-    .error "packedConstants alignment broken"
-.endif
-packedConstants:  // See ltbasic_start_packed_ao for explanations of these values
-    .db 0xF8
-    .db 0xFC
-    .db 0x08
 
 .macro miniTableEntry, addr
     .if addr < 0x1000 || addr >= 0x1400
@@ -1183,12 +1181,12 @@ G_VTX_handler:
     sub     dmemAddr, dmemAddr, vtxLeft        // Start addr = end addr - size. Rounded down to DMA word by H/W
     addi    dmaLen, vtxLeft, -1                // DMA length is always offset by -1
     j       dma_read_write
-     li     $ra, 0x8000 | vtx_after_dma        // Negative = flag to not to return to clipping in vtx_setup_constants
+     li     $ra, vtx_after_dma
 
 G_TRIFAN_handler:
-    li      $1, 0x8000 // $ra negative = flag for G_TRIFAN
+    li      $1, 0x8000                   // $ra negative = flag for G_TRIFAN
 G_TRISTRIP_handler:
-    addi    $ra, $1, tri_strip_fan_loop // otherwise $1 == 0
+    addi    $ra, $1, tri_strip_fan_loop  // otherwise $1 == 0
     addi    cmd_w0, inputBufferPos, inputBufferEnd - 8 // Start pointing to cmd byte
 tri_strip_fan_loop:
     lw      cmd_w1_dram, 0(cmd_w0)       // Load tri indices to lower 3 bytes of word
@@ -1733,7 +1731,7 @@ clip_start:
 .if CFG_PROFILING_B
     addi    perfCounterB, perfCounterB, 1  // Increment clipped (input) tris count
 .endif
-    li      inVtx, -0x4000                 // inVtx < 0 means from clipping. Inc'd each vtx write by 2 * inputVtxSize, but this is large enough it should stay negative.
+    li      inVtx, 0x8000                  // inVtx < 0 means from clipping. Inc'd each vtx write by 2 * inputVtxSize, but this is large enough it should stay negative.
     jal     vtx_setup_constants
      sb     $zero, materialCullMode        // In case only/all tri(s) clip then offscreen
 clip_after_constants:
