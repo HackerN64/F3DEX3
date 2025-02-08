@@ -570,8 +570,12 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_MDSFT_PIPELINE        23
 
 /* G_SETOTHERMODE_H gPipelineMode */
-#define G_PM_1PRIMITIVE     (1 << G_MDSFT_PIPELINE)
 #define G_PM_NPRIMITIVE     (0 << G_MDSFT_PIPELINE)
+#ifdef KAZE_GBI_HACKS
+#define G_PM_1PRIMITIVE     G_PM_NPRIMITIVE
+#else
+#define G_PM_1PRIMITIVE     (1 << G_MDSFT_PIPELINE)
+#endif
 
 /* G_SETOTHERMODE_H gSetCycleType */
 #define G_CYC_1CYCLE        (0 << G_MDSFT_CYCLETYPE)
@@ -2032,6 +2036,26 @@ typedef union {
  */
 
 /*
+ * Command where only the first word (containing the command byte) is used,
+ * saving one CPU instruction to write the second word as zero.
+ */
+#define g1Word(pkt, c, l)                   \
+_DW({                                       \
+    Gfx *_g = (Gfx *)(pkt);                 \
+    _g->words.w0 = (_SHIFTL((c), 24,  8) |  \
+                    _SHIFTL((l),  0, 24));  \
+})
+/*
+ * The static version has to fill in the second word with something.
+ */
+#define gs1Word(c, l)       \
+{                           \
+   (_SHIFTL((c), 24,  8) |  \
+    _SHIFTL((l),  0, 24)),  \
+    0                       \
+}
+
+/*
  * DMA macros
  */
 #define gDma0p(pkt, c, s, l)                \
@@ -2088,8 +2112,8 @@ _DW({                                                   \
     (unsigned int)(adrs)                \
 }
 
-#define gSPNoOp(pkt)    gDma0p(pkt, G_SPNOOP, 0, 0)
-#define gsSPNoOp()      gsDma0p(    G_SPNOOP, 0, 0)
+#define gSPNoOp(pkt)    g1Word(pkt, G_SPNOOP, 0)
+#define gsSPNoOp()      gs1Word(    G_SPNOOP, 0)
 
 /**
  * @brief macro which inserts a matrix operation at the end display list.
@@ -2262,8 +2286,8 @@ _DW({                                               \
 #define _gSPBranchListRaw(pkt,dl,hint)   gDma1p(pkt, G_DL, dl, hint, G_DL_NOPUSH)
 #define _gsSPBranchListRaw(   dl,hint)   gsDma1p(    G_DL, dl, hint, G_DL_NOPUSH)
 
-#define _gSPEndDisplayListRaw(pkt,hint)  gDma0p(pkt, G_ENDDL, 0, hint)
-#define _gsSPEndDisplayListRaw(hint)     gsDma0p(    G_ENDDL, 0, hint)
+#define _gSPEndDisplayListRaw(pkt,hint)  g1Word(pkt, G_ENDDL, hint)
+#define _gsSPEndDisplayListRaw(hint)     gs1Word(    G_ENDDL, hint)
 
 /*
  * Converts a total expected count of DL commands to a number of bytes to
@@ -2434,7 +2458,7 @@ _DW({                                                   \
 /**
  * @copydetails gSPMemset
  */
-#define gsSPMemset(pkt, dram, value, size)    \
+#define gsSPMemset(dram, value, size)    \
     gsImmp1(G_RDPHALF_1, ((value) & 0xFFFF)), \
     gsDma0p(G_MEMSET, (dram), ((size) & 0xFFFFF0))
 
@@ -2563,22 +2587,13 @@ _DW({                                       \
 /**
  * 1 Triangle
  */
-#define gSP1Triangle(pkt, v0, v1, v2, flag)                 \
-_DW({                                                       \
-    Gfx *_g = (Gfx *)(pkt);                                 \
-    _g->words.w0 = (_SHIFTL(G_TRI1, 24, 8) |                \
-                    __gsSP1Triangle_w1f(v0, v1, v2, flag)); \
-    _g->words.w1 = 0;                                       \
-})
+#define gSP1Triangle(pkt, v0, v1, v2, flag) \
+    g1Word(pkt, G_TRI1, __gsSP1Triangle_w1f(v0, v1, v2, flag))
 /**
  * @copydetails gSP1Triangle
  */
 #define gsSP1Triangle(v0, v1, v2, flag)     \
-{                                           \
-   (_SHIFTL(G_TRI1, 24, 8) |                \
-    __gsSP1Triangle_w1f(v0, v1, v2, flag)), \
-    0                                       \
-}
+    gs1Word(G_TRI1, __gsSP1Triangle_w1f(v0, v1, v2, flag))
 
 /**
  * 1 Quadrangle
@@ -5236,19 +5251,8 @@ _DW({                                               \
     _SHIFTL(sB,  0,  8))                        \
 }
 
-#define gDPNoParam(pkt, cmd)            \
-_DW({                                   \
-    Gfx *_g = (Gfx *)(pkt);             \
-                                        \
-    _g->words.w0 = _SHIFTL(cmd, 24, 8); \
-    _g->words.w1 = 0;                   \
-})
-
-#define gsDPNoParam(cmd)    \
-{                           \
-    _SHIFTL(cmd, 24, 8),    \
-    0                       \
-}
+#define gDPNoParam(pkt, cmd)   g1Word(pkt, cmd, 0)
+#define gsDPNoParam(cmd)      gs1Word(pkt, cmd, 0)
 
 #define gDPParam(pkt, cmd, param)       \
 _DW({                                   \

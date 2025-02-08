@@ -3013,6 +3013,7 @@ ovl0_padded_end:
 ovl1_start:
 
 G_POPMTX_handler:
+    // TODO optimize this, remove the "no change" codepath, can eliminate 2 instrs
     lw      $11, matrixStackPtr             // Get the current matrix stack pointer
     lw      $2, OSTask + OSTask_dram_stack  // Read the location of the dram stack
     sub     cmd_w1_dram, $11, cmd_w1_dram           // Decrease the matrix stack pointer by the amount passed in the second command word
