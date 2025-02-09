@@ -798,7 +798,7 @@ curLight     equ $9
 
 // Arguments to dma_read_write
 dmaLen   equ $19 // also used by itself
-dmemAddr equ $20
+dmemAddr equ $20 // Also = rdpCmdBufPtr - rdpCmdBufEndP1 for flush_rdp_buffer
 // cmd_w1_dram   // used for all dma_read_write DRAM addresses
 
 // Argument to load_overlay*
@@ -1199,8 +1199,8 @@ G_SYNC_handler:
     sw      cmd_w0, 0(rdpCmdBufPtr)          // Add the command word to the RDP command buffer
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8    // Increment the next RDP command pointer by 2 words
 check_rdp_buffer_full_and_run_next_cmd:
-    sub     $8, rdpCmdBufPtr, rdpCmdBufEndP1
-    bgezal  $8, flush_rdp_buffer
+    sub     dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1
+    bgezal  dmemAddr, flush_rdp_buffer
      // $1 on next instr survives flush_rdp_buffer
 .if CFG_NO_OCCLUSION_PLANE && CFG_LEGACY_VTX_PIPE && !CFG_PROFILING_A
 vertex_end:
@@ -1299,9 +1299,15 @@ G_MEMSET_handler:
 .endif
 
 G_FLUSH_handler:
-    jal     flush_rdp_buffer                 // Flush once to push partial DMEM buf to FIFO
-     sub    $8, rdpCmdBufPtr, rdpCmdBufEndP1 // Prereq for flush_rdp_buffer
-    j       flush_rdp_buffer                 // Flush second time to wait for DMA and set RDP end
+    jal     flush_rdp_buffer        // Flush once to push partial DMEM buf to FIFO
+     sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Prereq; offset buffer fullness
+    // If the DMEM buffer was empty, dmemAddr will be unchanged and valid for this next
+    // jump. Otherwise, running the DMA write will cause dmemAddr to get set to a large
+    // negative number. Then for this second jump, the same codepath will be triggered as
+    // if the buffer was empty. The result is it will wait for the DMA to finish, set
+    // DPC_END, and return to $ra. This is why the dmemAddr register (as opposed to,
+    // for example, dmaLen) is used as the DMEM buf fullness.
+    j       flush_rdp_buffer
      li     $ra, run_next_DL_command
 
 G_LOAD_UCODE_handler:
@@ -1565,7 +1571,7 @@ tMx1W equ $v27
     vmadn   $v2, $v22, tSubPxHI[1]
     ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vmadh   $v3, tPosCatI, tSubPxHI[1]
-    lw      $20, otherMode1
+    lw      $19, otherMode1
 tMnWI equ $v27
 tMnWF equ $v10
     vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
@@ -1591,11 +1597,11 @@ tSTWHMF equ $v25
 tSTWLI equ $v10 // L = elems 4-6; init W = 7FFF
 tSTWLF equ $v13
     vmudh   tSTWLI, vOne, $v31[7]  // 0x7FFF
-    andi    $20, ZMODE_DEC
+    andi    $19, $19, ZMODE_DEC    // Mask to two Z mode bits
     set_vcc_11110001                // select RGBA___Z or ____STW_
     llv     tSTWLI[8], VTX_TC_VEC($3)
     vmudm   $v29, tSTWHMI, t1WF[0h] // (S, T, 7FFF) * (1 or <1) for H and M
-    addi    $20, $20, -ZMODE_DEC
+    addi    $19, $19, -ZMODE_DEC  // Check if equal to decal mode
     vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
     ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
     vmadn   tSTWHMF, $v31, $v31[2]  // 0
@@ -1677,7 +1683,7 @@ tDaDyI equ $v7
     vmudl   $v29, tDaDyF, tXPRcpF[1]
     add     rdpCmdBufPtr, rdpCmdBufPtr, $11  // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
     vmadm   $v29, tDaDyI, tXPRcpF[1]
-    sub     $8, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
+    sub     dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
     vmadn   tDaDyF, tDaDyF, tXPRcpI[1]
     sdv     tDaDxF[0], 0x0018($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
     vmadh   tDaDyI, tDaDyI, tXPRcpI[1]
@@ -1712,7 +1718,7 @@ tDaDeI equ $v9
     // VCC is still 11110001
     // 145 cycles
     vmrg    tDaDyI, tDaDyF, tDaDyI[7] // Elems 6-7: DzDyI:F
-    beqz    $20, tri_decal_fix_z
+    beqz    $19, tri_decal_fix_z
      vmrg   tDaDxI, tDaDxF, tDaDxI[7] // Elems 6-7: DzDxI:F
 tri_return_from_decal_fix_z:
     vmrg    tDaDeI, tDaDeF, tDaDeI[7] // Elems 6-7: DzDeI:F
@@ -1724,10 +1730,10 @@ tri_return_from_decal_fix_z:
     slv     tDaDyI[12], 0x0C($10)  // DzDyI:F
     slv     tDaDxI[12], 0x04($10)  // DzDxI:F
     slv     tDaDeI[12], 0x08($10)  // DzDeI:F
-    bltz    $8, return_and_end_mat      // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
+    bltz    dmemAddr, return_and_end_mat     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
      slv    $v10[12], 0x00($10)   // ZI:F
      // 156 cycles
-flush_rdp_buffer: // Prereq: $8 = rdpCmdBufPtr - rdpCmdBufEndP1
+flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAddr = large neg num -> only wait and set DPC_END
     mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
     lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
     lw      $10, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
@@ -1736,8 +1742,8 @@ flush_rdp_buffer: // Prereq: $8 = rdpCmdBufPtr - rdpCmdBufEndP1
     addi    perfCounterD, perfCounterD, 7    // 6 instr + 1 taken branch
 .endif
     bnez    $11, flush_rdp_buffer            // Wait until no DMAs are active
-     addi   dmaLen, $8, RDP_CMD_BUFSIZE + 8  // dmaLen = size of DMEM buffer to copy
-    blez    dmaLen, old_return_routine       // If nothing to copy, exit
+     addi   dmaLen, dmemAddr, RDP_CMD_BUFSIZE + 8  // dmaLen = size of DMEM buffer to copy
+    blez    dmaLen, old_return_routine       // Exit if nothing to copy, or if dmemAddr is large negative num from last flush DMA write
      mtc0   cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
     add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
     sub     $10, $10, $11                    // $10 = FIFO end addr - future pointer
@@ -2933,9 +2939,9 @@ dma_write:
 // The action here is controlled by $1. If yielding, $1 > 0. If this was
 // G_LOAD_UCODE, $1 == 0. If we got to the end of the parent DL, $1 < 0.
 ovl0_start:
-    jal     flush_rdp_buffer                 // Flush once to push partial DMEM buf to FIFO
-     sub    $8, rdpCmdBufPtr, rdpCmdBufEndP1 // Prereq for flush_rdp_buffer
-    jal     flush_rdp_buffer                 // Flush second time to wait for DMA and set RDP end
+    jal     flush_rdp_buffer   // See G_FLUSH_handler for docs on these 3 instructions.
+     sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1
+    jal     flush_rdp_buffer
      add    taskDataPtr, taskDataPtr, inputBufferPos // inputBufferPos <= 0; taskDataPtr was where in the DL after the current chunk loaded
 .if CFG_PROFILING_C
     mfc0    $11, DPC_CLOCK
