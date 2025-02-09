@@ -269,10 +269,10 @@ Macros</h2></td></tr>
 <tr class="separator:a48bee06f620e9930c1af1d7e1d7550d4"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ae51b3ee3f567d1038b75c135374584ef" id="r_ae51b3ee3f567d1038b75c135374584ef"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ae51b3ee3f567d1038b75c135374584ef">gsSPMemset</a>(dram,  value,  size)</td></tr>
 <tr class="separator:ae51b3ee3f567d1038b75c135374584ef"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a702a60836e516af74b6af9abb8e5c31f" id="r_a702a60836e516af74b6af9abb8e5c31f"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a702a60836e516af74b6af9abb8e5c31f">gImmp0</a>(pkt,  c)</td></tr>
-<tr class="separator:a702a60836e516af74b6af9abb8e5c31f"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a60c27d98cb1f0e602dbc5d3cd3841eab" id="r_a60c27d98cb1f0e602dbc5d3cd3841eab"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a60c27d98cb1f0e602dbc5d3cd3841eab">gsImmp0</a>(c)</td></tr>
-<tr class="separator:a60c27d98cb1f0e602dbc5d3cd3841eab"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a96b43b2109e914532fc9e5ec3a0aca3d" id="r_a96b43b2109e914532fc9e5ec3a0aca3d"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a96b43b2109e914532fc9e5ec3a0aca3d">gSPFlush</a>(pkt)&#160;&#160;&#160;g1Word(pkt, G_FLUSH, 0)</td></tr>
+<tr class="separator:a96b43b2109e914532fc9e5ec3a0aca3d"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a6061f3d1d1d55d22cfe648bdd542f04c" id="r_a6061f3d1d1d55d22cfe648bdd542f04c"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a6061f3d1d1d55d22cfe648bdd542f04c">gsSPFlush</a>()&#160;&#160;&#160;gs1Word(     G_FLUSH, 0)</td></tr>
+<tr class="separator:a6061f3d1d1d55d22cfe648bdd542f04c"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:afe0d779cf45ef43bbffd47bbaea0e390" id="r_afe0d779cf45ef43bbffd47bbaea0e390"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a>(pkt,  v0,  v1,  v2,  flag)&#160;&#160;&#160;    g1Word(pkt, G_TRI1, __gsSP1Triangle_w1f(v0, v1, v2, flag))</td></tr>
 <tr class="separator:afe0d779cf45ef43bbffd47bbaea0e390"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:afa187a694b91e928b8454cf4720f6898" id="r_afa187a694b91e928b8454cf4720f6898"><td class="memItemLeft" align="right" valign="top">#define&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#afa187a694b91e928b8454cf4720f6898">gsSP1Triangle</a>(v0,  v1,  v2,  flag)&#160;&#160;&#160;    gs1Word(G_TRI1, __gsSP1Triangle_w1f(v0, v1, v2, flag))</td></tr>
@@ -1378,7 +1378,7 @@ Typedefs</h2></td></tr>
 <div class="line">                    _SHIFTL(mode0, 0, 24));             \</div>
 <div class="line">    _g-&gt;words.w1 = (<span class="keywordtype">unsigned</span> int)(mode1);               \</div>
 <div class="line">})</div>
-<div class="ttc" id="aunionGfx_html"><div class="ttname"><a href="unionGfx.html">Gfx</a></div><div class="ttdef"><b>Definition</b> gbi.h:2004</div></div>
+<div class="ttc" id="aunionGfx_html"><div class="ttname"><a href="unionGfx.html">Gfx</a></div><div class="ttdef"><b>Definition</b> gbi.h:2005</div></div>
 </div><!-- fragment --><p>gDPSetOtherMode (This is for expert user.)</p>
 <p>This command makes all othermode parameters set. Do not use this command in the same DL with another g*SPSetOtherMode DLs.</p>
 <p>[Usage] <a class="el" href="#a3264496f9b6d03ea021eec53d41e4e2c">gDPSetOtherMode(pkt, modeA, modeB)</a> </p><pre class="fragment">'modeA' is described all parameters of GroupA GBI command.
@@ -1465,33 +1465,6 @@ Typedefs</h2></td></tr>
 <div class="line">                    _SHIFTL(dtdy,  0, 16));                                 \</div>
 <div class="line">})</div>
 </div><!-- fragment --><p>Notice that textured rectangles are 128-bit commands, therefore <a class="el" href="#a893dbe684cf887f611ee6f9951913225">gsDPTextureRectangle()</a> should not be used in display lists under normal circumstances (use gsSPTextureRectangle()). That is also why there is no <a class="el" href="#ad43bb31267b11ea7d8e3c0009fa9e3de">gDPTextureRectangle()</a> macros.    </p>
-
-</div>
-</div>
-<a id="a702a60836e516af74b6af9abb8e5c31f" name="a702a60836e516af74b6af9abb8e5c31f"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a702a60836e516af74b6af9abb8e5c31f">&#9670;&#160;</a></span>gImmp0</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define gImmp0</td>
-          <td>(</td>
-          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>pkt</em></span>, </td>
-        </tr>
-        <tr>
-          <td class="paramkey"></td>
-          <td></td>
-          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>c</em></span>&#160;)</td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-<b>Value:</b><div class="fragment"><div class="line">_DW({                                   \</div>
-<div class="line">    <a class="code hl_union" href="unionGfx.html">Gfx</a> *_g = (<a class="code hl_union" href="unionGfx.html">Gfx</a> *)(pkt);             \</div>
-<div class="line">                                        \</div>
-<div class="line">    _g-&gt;words.w0 = _SHIFTL((c), 24, 8); \</div>
-<div class="line">})</div>
-</div><!-- fragment --><p>RSP short command (no DMA required) macros </p>
 
 </div>
 </div>
@@ -2327,27 +2300,6 @@ Typedefs</h2></td></tr>
 
 </div>
 </div>
-<a id="a60c27d98cb1f0e602dbc5d3cd3841eab" name="a60c27d98cb1f0e602dbc5d3cd3841eab"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a60c27d98cb1f0e602dbc5d3cd3841eab">&#9670;&#160;</a></span>gsImmp0</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">#define gsImmp0</td>
-          <td>(</td>
-          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>c</em></span></td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-<b>Value:</b><div class="fragment"><div class="line">{                       \</div>
-<div class="line">    _SHIFTL((c), 24, 8) \</div>
-<div class="line">}</div>
-</div><!-- fragment --><p>RSP short command (no DMA required) macros    </p>
-
-</div>
-</div>
 <a id="a423cc35c28537bd28c2f0cde9c520121" name="a423cc35c28537bd28c2f0cde9c520121"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a423cc35c28537bd28c2f0cde9c520121">&#9670;&#160;</a></span>gSP1Quadrangle</h2>
 
@@ -3028,6 +2980,25 @@ Typedefs</h2></td></tr>
 
 </div>
 </div>
+<a id="a96b43b2109e914532fc9e5ec3a0aca3d" name="a96b43b2109e914532fc9e5ec3a0aca3d"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a96b43b2109e914532fc9e5ec3a0aca3d">&#9670;&#160;</a></span>gSPFlush</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define gSPFlush</td>
+          <td>(</td>
+          <td class="paramtype"></td>          <td class="paramname"><span class="paramname"><em>pkt</em></span></td><td>)</td>
+          <td>&#160;&#160;&#160;g1Word(pkt, G_FLUSH, 0)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+<p>Flush the internal DMEM buffer of RDP commands to the RDP FIFO in DRAM, causing the RDP to immediately begin executing any previous commands. Without SPFlush, the RDP may not begin executing any given command until up to 46 more RDP commands after that have been processed by the RSP (or the final end of the display list for the frame).</p>
+<p>The primary use case is if your frame's display list begins with clearing the framebuffer and/or Z buffer, and then proceeds to things which take significant time on the RSP before emitting many RDP commands, such as matrix and lighting for drawing a character model. You should insert SPFlush after the first large buffer clear to cause the RDP to begin executing those long operations immediately while the RSP is continuing to work. If you are clearing both the framebuffer and Z buffer, you would usually only need one SPFlush after the first of these two DPFillRect commands. </p>
+
+</div>
+</div>
 <a id="a7be3a9b95e9f25cf6a77c357c4237f9d" name="a7be3a9b95e9f25cf6a77c357c4237f9d"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a7be3a9b95e9f25cf6a77c357c4237f9d">&#9670;&#160;</a></span>gSPFogFactor</h2>
 
@@ -3619,10 +3590,10 @@ Example</h1>
 <div class="line"> </div>
 <div class="line"><span class="comment">// draw triangle 2 using vertex #3</span></div>
 <div class="line"><a class="code hl_define" href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a>(glistp++, 1,2,3,0);</div>
-<div class="ttc" id="agbi_8h_html_aa10b6a6fa88381b34eb4325034230024"><div class="ttname"><a href="#aa10b6a6fa88381b34eb4325034230024">gSPVertex</a></div><div class="ttdeci">#define gSPVertex(pkt, v, n, v0)</div><div class="ttdoc">macro which loads an internal vertex buffer in the RSP with points that are used by gSP1Triangle macr...</div><div class="ttdef"><b>Definition</b> gbi.h:2251</div></div>
-<div class="ttc" id="agbi_8h_html_abc12c0642acde2394639e9f9e247dde9"><div class="ttname"><a href="#abc12c0642acde2394639e9f9e247dde9">gSPModifyVertex</a></div><div class="ttdeci">#define gSPModifyVertex(pkt, vtx, where, val)</div><div class="ttdoc">You can use this macro to modify certain sections of a vertex after it has been sent to the RSP (by t...</div><div class="ttdef"><b>Definition</b> gbi.h:3112</div></div>
-<div class="ttc" id="agbi_8h_html_afb84e8da2787a5cf8ca385335a850d5c"><div class="ttname"><a href="#afb84e8da2787a5cf8ca385335a850d5c">G_MWO_POINT_ST</a></div><div class="ttdeci">#define G_MWO_POINT_ST</div><div class="ttdoc">changes the S and T values (texture coordinates of the vertex). The high 16 bits of val specify the S...</div><div class="ttdef"><b>Definition</b> gbi.h:295</div></div>
-<div class="ttc" id="agbi_8h_html_afe0d779cf45ef43bbffd47bbaea0e390"><div class="ttname"><a href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a></div><div class="ttdeci">#define gSP1Triangle(pkt, v0, v1, v2, flag)</div><div class="ttdef"><b>Definition</b> gbi.h:2590</div></div>
+<div class="ttc" id="agbi_8h_html_aa10b6a6fa88381b34eb4325034230024"><div class="ttname"><a href="#aa10b6a6fa88381b34eb4325034230024">gSPVertex</a></div><div class="ttdeci">#define gSPVertex(pkt, v, n, v0)</div><div class="ttdoc">macro which loads an internal vertex buffer in the RSP with points that are used by gSP1Triangle macr...</div><div class="ttdef"><b>Definition</b> gbi.h:2252</div></div>
+<div class="ttc" id="agbi_8h_html_abc12c0642acde2394639e9f9e247dde9"><div class="ttname"><a href="#abc12c0642acde2394639e9f9e247dde9">gSPModifyVertex</a></div><div class="ttdeci">#define gSPModifyVertex(pkt, vtx, where, val)</div><div class="ttdoc">You can use this macro to modify certain sections of a vertex after it has been sent to the RSP (by t...</div><div class="ttdef"><b>Definition</b> gbi.h:3070</div></div>
+<div class="ttc" id="agbi_8h_html_afb84e8da2787a5cf8ca385335a850d5c"><div class="ttname"><a href="#afb84e8da2787a5cf8ca385335a850d5c">G_MWO_POINT_ST</a></div><div class="ttdeci">#define G_MWO_POINT_ST</div><div class="ttdoc">changes the S and T values (texture coordinates of the vertex). The high 16 bits of val specify the S...</div><div class="ttdef"><b>Definition</b> gbi.h:296</div></div>
+<div class="ttc" id="agbi_8h_html_afe0d779cf45ef43bbffd47bbaea0e390"><div class="ttname"><a href="#afe0d779cf45ef43bbffd47bbaea0e390">gSP1Triangle</a></div><div class="ttdeci">#define gSP1Triangle(pkt, v0, v1, v2, flag)</div><div class="ttdef"><b>Definition</b> gbi.h:2548</div></div>
 </div><!-- fragment --><dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
     <tr><td class="paramname">vtx</td><td>specifies which of the RSP's vertices (0-55) to modify </td></tr>
@@ -4662,6 +4633,25 @@ Example</h1>
 
 </div>
 </div>
+<a id="a6061f3d1d1d55d22cfe648bdd542f04c" name="a6061f3d1d1d55d22cfe648bdd542f04c"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a6061f3d1d1d55d22cfe648bdd542f04c">&#9670;&#160;</a></span>gsSPFlush</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">#define gsSPFlush</td>
+          <td>(</td>
+          <td class="paramname"><span class="paramname"><em></em></span></td><td>)</td>
+          <td>&#160;&#160;&#160;gs1Word(     G_FLUSH, 0)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+<p>Flush the internal DMEM buffer of RDP commands to the RDP FIFO in DRAM, causing the RDP to immediately begin executing any previous commands. Without SPFlush, the RDP may not begin executing any given command until up to 46 more RDP commands after that have been processed by the RSP (or the final end of the display list for the frame).</p>
+<p>The primary use case is if your frame's display list begins with clearing the framebuffer and/or Z buffer, and then proceeds to things which take significant time on the RSP before emitting many RDP commands, such as matrix and lighting for drawing a character model. You should insert SPFlush after the first large buffer clear to cause the RDP to begin executing those long operations immediately while the RSP is continuing to work. If you are clearing both the framebuffer and Z buffer, you would usually only need one SPFlush after the first of these two DPFillRect commands.    </p>
+
+</div>
+</div>
 <a id="ad71caddcceec419f1f1f64c65c26619a" name="ad71caddcceec419f1f1f64c65c26619a"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#ad71caddcceec419f1f1f64c65c26619a">&#9670;&#160;</a></span>gsSPFogFactor</h2>
 
@@ -5322,7 +5312,7 @@ Example</h1>
 </div><div class="memdoc">
 <b>Value:</b><div class="fragment"><div class="line">    <a class="code hl_define" href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a>(n), \</div>
 <div class="line">    gsDma2p(G_MOVEMEM, &amp;(name), (n) * 0x10 + 8, G_MV_LIGHT, 0x10)</div>
-<div class="ttc" id="agbi_8h_html_a05cbbc5a54641419bc1258390f3d6710"><div class="ttname"><a href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a></div><div class="ttdeci">#define gsSPNumLights(n)</div><div class="ttdef"><b>Definition</b> gbi.h:3292</div></div>
+<div class="ttc" id="agbi_8h_html_a05cbbc5a54641419bc1258390f3d6710"><div class="ttname"><a href="#a05cbbc5a54641419bc1258390f3d6710">gsSPNumLights</a></div><div class="ttdeci">#define gsSPNumLights(n)</div><div class="ttdef"><b>Definition</b> gbi.h:3250</div></div>
 </div><!-- fragment --><p>Set all your scene's lights (directional/point + ambient) with one memory transaction. n is the number of directional / point lights, from 0 to 9. There is also always an ambient light. name should be the NAME of a Lights struct (NOT A POINTER) filled in with all the lighting data. You can use the gdSPDef* macros to fill in the struct or just do it manually. Example: Lights2 myLights; // 2 dir/pos + 1 ambient <code> gSPSetLights(POLY_OPA_DISP++, 2, myLights);</code></p>
 <p><code>If you need to use a pointer, e.g. if the number of lights is variable at runtime: Light *lights = memory_allocate((numLights + 1) * sizeof(Light)); lights[0].p.pos = ...; lights[1].l.dir = ...; ... lights[numLights].l.col = ambient_color(); gSPSetLights(POLY_OPA_DISP++, numLights, *lights); // &lt;- NOTE DEREFERENCE</code></p>
 <p><code>If you're wondering why this macro takes a name / dereference instead of a pointer, it's for backwards compatibility.    </code></p>
