@@ -31,6 +31,7 @@ G_SHADING_SMOOTH        equ 0x00200000
 
 G_TRI_FILL          equ 0xc8 // not a GBI command
 
+G_FLUSH             equ 0xd4
 G_MEMSET            equ 0xd5
 G_DMA_IO            equ 0xd6
 G_TEXTURE           equ 0xd7

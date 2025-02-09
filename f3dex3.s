@@ -516,6 +516,7 @@ jumpTableEntry G_MOVEMEM_end  // G_MOVEMEM, G_MTX (load)
 
 // RDP/Immediate Command Mini Table
 // 1 byte per entry, after << 2 points to an addr in first 1/4 of IMEM
+miniTableEntry G_FLUSH_handler
 miniTableEntry G_MEMSET_handler
 miniTableEntry G_DMA_IO_handler
 miniTableEntry G_TEXTURE_handler
@@ -1726,7 +1727,7 @@ tri_return_from_decal_fix_z:
     bltz    $8, return_and_end_mat      // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
      slv    $v10[12], 0x00($10)   // ZI:F
      // 156 cycles
-flush_rdp_buffer: // $8 = rdpCmdBufPtr - rdpCmdBufEndP1
+flush_rdp_buffer: // Prereq: $8 = rdpCmdBufPtr - rdpCmdBufEndP1
     mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
     lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
     lw      $10, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
