@@ -36,7 +36,7 @@
     .error "bge is a macro using slt, and silently clobbers $1!"
 .endmacro
 
-// This version doesn't depend on $v0 to be vZero, which it usually is not in
+// This version doesn't depend on $v0 to be vZero, which it often is not in
 // F3DEX3, and also doesn't get corrupted if $vco is set / consume $vco which
 // may be needed for a subsequent instruction.
 .macro vcopy, dst, src
@@ -1956,7 +1956,7 @@ clip_nextcond:
      addi   clipMaskIdx, clipMaskIdx, -1
     
 clip_draw_tris:
-    vclr    vZero // TODO may not need this
+    vclr    vZero // TODO may be able to move some regs around and get rid of this
     sh      $zero, activeClipPlanes
     lqv     $v30, (v30Value)($zero)
 // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
@@ -2185,8 +2185,10 @@ vtx_after_lt_setup:
 .endif
     bgezal  vLoopRet, while_wait_dma_busy  // Wait for vertex load to finish; vLoopRet < 0 if already did
      addi   outVtxBase, outVtxBase, -vtxSize   // Will inc by 2, but need point to 2nd
+.if CFG_NO_OCCLUSION_PLANE  // With occlusion plane, vpMdl loaded at vtx_store_loop_entry
     ldv     vpMdl[0], (VTX_IN_OB + 0 * inputVtxSize)(inVtx) // 1st vec pos
     ldv     vpMdl[8], (VTX_IN_OB + 1 * inputVtxSize)(inVtx) // 2nd vec pos
+.endif
     llv     sTCL[8],  (VTX_IN_CN + 0 * inputVtxSize)(inVtx) // RGBA in 4:5
     llv     sTCL[12], (VTX_IN_CN + 1 * inputVtxSize)(inVtx) // RGBA in 6:7
     llv     vpST[0],  (VTX_IN_TC + 0 * inputVtxSize)(inVtx) // ST in 0:1
@@ -2501,13 +2503,13 @@ vtx_store_for_clip:
     cfc2    $10, $vcc // Load occlusion plane mid results to bits 3 and 7
     vmudh   sOTM, vpScrI, $v31[4]   // 4; scale up x and y
 // vpMdl <- s1WI
+vtx_store_loop_entry:
     ldv     vpMdl[0], (VTX_IN_OB + 0 * inputVtxSize)(inVtx) // Pos of 1st vector for next iteration
     vge     sFOG, sFOG, $v31[6]   // 0x7F00; clamp fog to >= 0 (want low byte only)   
     ldv     vpMdl[8], (VTX_IN_OB + 1 * inputVtxSize)(inVtx) // Pos of 2nd vector on next iteration
     // vnop
     andi    $10, $10, (1 << 0) | (1 << 4) // Only bits 0, 4 from occlusion
     vmulf   $v29, sOPM, vpScrI[1h]  // -0x4000*Y1, --, +0x4000*Y1, --, repeat vtx 2
-vtx_store_loop_entry:  // TODO maybe move this a few back to encompass vpMdl?
     sub     $11, outVtx2, fogFlag      // Points 8 before outVtx2 if fog, else 0
     vmacf   sOCS, sO03, sOTM[0h]  //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
     sdv     sTCL[8],      (tempVpRGBA)(rdpCmdBufEndP1) // Vtx 0 and 1 RGBA in order
