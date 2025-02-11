@@ -1,7 +1,8 @@
 # F3DEX3
 
-Modern microcode for N64 romhacks. Will make you want to finally ditch HLE.
-Heavily modified version of F3DEX2, partially rewritten from scratch.
+Modern graphics microcode for N64 romhacks. Will make you want to finally ditch
+HLE. Heavily modified version of F3DEX2, with all vertex and lighting code
+rewritten from scratch.
 
 **F3DEX3 is in alpha. It is not guaranteed to be bug-free, and updates may bring
 breaking changes.**

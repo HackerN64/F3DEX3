@@ -523,6 +523,7 @@ jumpTableEntry G_MOVEMEM_end  // G_MOVEMEM, G_MTX (load)
 
 // RDP/Immediate Command Mini Table
 // 1 byte per entry, after << 2 points to an addr in first 1/4 of IMEM
+miniTableEntry G_FLUSH_handler
 miniTableEntry G_MEMSET_handler
 miniTableEntry G_DMA_IO_handler
 miniTableEntry G_TEXTURE_handler
@@ -736,7 +737,7 @@ $4    flat shading vtx or (perf) initial FIFO stall time -------------------
 $5    <------------------------ vGeomMid -------------------->  
 $6    geom mode   clipMaskIdx -----> <----- lbPacked
 $7    v2flag tile <------------- fogFlag ---------->  mtx valid   cmd byte
-$8    v3flag      <------------- outVtx2 -------------------->  cmdBufOver
+$8    v3flag      <------------- outVtx2 -------------------->
 $9    xp texenab  clipMask --------> <----- curLight  viLtFlag  ovlInitClock
 $10   -------------------------- temp2 -------------------------------------
 $11   --------------------------- temp -------------------------------------
@@ -808,11 +809,10 @@ clipPolyWrite  equ $21   // Write pointer within current polygon being clipped
 viLtFlag       equ $9    // Holds pointLightFlagOrDirXfrmValid
 
 // Misc
-cmdBufOver     equ $8    // = rdpCmdBufPtr - rdpCmdBufEndP1
 ovlInitClock   equ $9    // Temp for profiling
 postOvlRA      equ $10   // Address to return to after overlay load
 dmaLen         equ $19   // DMA length in bytes minus 1
-dmemAddr       equ $20   // DMA address in DMEM or IMEM
+dmemAddr       equ $20   // DMA address in DMEM or IMEM. Also = rdpCmdBufPtr - rdpCmdBufEndP1 for flush_rdp_buffer
 cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
 cmd_w0         equ $25   // DL command word 0, also holds next tris info
 
@@ -1071,8 +1071,8 @@ G_SYNC_handler:
     sw      cmd_w0, 0(rdpCmdBufPtr)          // Add the command word to the RDP command buffer
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8    // Increment the next RDP command pointer by 2 words
 check_rdp_buffer_full_and_run_next_cmd:
-    sub     cmdBufOver, rdpCmdBufPtr, rdpCmdBufEndP1
-    bgezal  cmdBufOver, flush_rdp_buffer
+    sub     dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1
+    bgezal  dmemAddr, flush_rdp_buffer
      // $1 on next instr survives flush_rdp_buffer
 .if !CFG_PROFILING_A
 tris_end:
@@ -1167,6 +1167,19 @@ G_BRANCH_WZ_handler:
     j       branch_dl                   // need $2 < 0 for nopush and cmd_w1_dram
      li     cmd_w0, 0                   // No count of DL cmds to skip
     
+
+G_FLUSH_handler:
+    jal     flush_rdp_buffer        // Flush once to push partial DMEM buf to FIFO
+     sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Prereq; offset buffer fullness
+    // If the DMEM buffer was empty, dmemAddr will be unchanged and valid for this next
+    // jump. Otherwise, running the DMA write will cause dmemAddr to get set to a large
+    // negative number. Then for this second jump, the same codepath will be triggered as
+    // if the buffer was empty. The result is it will wait for the DMA to finish, set
+    // DPC_END, and return to $ra. This is why the dmemAddr register (as opposed to,
+    // for example, dmaLen) is used as the DMEM buf fullness.
+    j       flush_rdp_buffer
+     li     $ra, run_next_DL_command
+
 G_LOAD_UCODE_handler:
     j       load_overlay_0_and_enter         // Delay slot is harmless
 G_MODIFYVTX_handler:
@@ -1428,7 +1441,7 @@ tMx1W equ $v27
     vmadn   $v2, $v22, tSubPxHI[1]
     ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vmadh   $v3, tPosCatI, tSubPxHI[1]
-    lw      $20, otherMode1
+    lw      $19, otherMode1
 tMnWI equ $v27
 tMnWF equ $v10
     vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
@@ -1454,11 +1467,11 @@ tSTWHMF equ $v25
 tSTWLI equ $v10 // L = elems 4-6; init W = 7FFF
 tSTWLF equ $v13
     vmudh   tSTWLI, vOne, $v31[7]  // 0x7FFF
-    andi    $20, ZMODE_DEC
+    andi    $19, $19, ZMODE_DEC    // Mask to two Z mode bits
     set_vcc_11110001                // select RGBA___Z or ____STW_
     llv     tSTWLI[8], VTX_TC_VEC($3)
     vmudm   $v29, tSTWHMI, t1WF[0h] // (S, T, 7FFF) * (1 or <1) for H and M
-    addi    $20, $20, -ZMODE_DEC
+    addi    $19, $19, -ZMODE_DEC  // Check if equal to decal mode
     vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
     ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
     vmadn   tSTWHMF, $v31, $v31[2]  // 0
@@ -1540,7 +1553,7 @@ tDaDyI equ $v7
     vmudl   $v29, tDaDyF, tXPRcpF[1]
     add     rdpCmdBufPtr, rdpCmdBufPtr, $11  // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
     vmadm   $v29, tDaDyI, tXPRcpF[1]
-    sub     cmdBufOver, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
+    sub     dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
     vmadn   tDaDyF, tDaDyF, tXPRcpI[1]
     sdv     tDaDxF[0], 0x0018($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
     vmadh   tDaDyI, tDaDyI, tXPRcpI[1]
@@ -1575,7 +1588,7 @@ tDaDeI equ $v9
     // VCC is still 11110001
     // 145 cycles
     vmrg    tDaDyI, tDaDyF, tDaDyI[7] // Elems 6-7: DzDyI:F
-    beqz    $20, tri_decal_fix_z
+    beqz    $19, tri_decal_fix_z
      vmrg   tDaDxI, tDaDxF, tDaDxI[7] // Elems 6-7: DzDxI:F
 tri_return_from_decal_fix_z:
     vmrg    tDaDeI, tDaDeF, tDaDeI[7] // Elems 6-7: DzDeI:F
@@ -1587,20 +1600,21 @@ tri_return_from_decal_fix_z:
     slv     tDaDyI[12], 0x0C($10)  // DzDyI:F
     slv     tDaDxI[12], 0x04($10)  // DzDxI:F
     slv     tDaDeI[12], 0x08($10)  // DzDeI:F
-    bltz    cmdBufOver, return_and_end_mat   // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
+    bltz    dmemAddr, return_and_end_mat     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
      slv    $v10[12], 0x00($10)   // ZI:F
      // 156 cycles
-flush_rdp_buffer: // cmdBufOver = rdpCmdBufPtr - rdpCmdBufEndP1
-    mfc0    $10, SP_DMA_BUSY                 // Check if any DMA is in flight
+flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAddr = large neg num -> only wait and set DPC_END
+    mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
     lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
-    addi    dmaLen, cmdBufOver, RDP_CMD_BUFSIZE + 8 // dmaLen = size of DMEM buffer to copy
+    lw      $10, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
 .if CFG_PROFILING_C
     // This is a wait for DMA busy loop, but written inline to avoid overwriting ra.
-    addi    perfCounterD, perfCounterD, 10   // 6 instr + 2 between end load and mfc + 0 taken branch overlaps with last + 2 between mfc and load
+    addi    perfCounterD, perfCounterD, 7    // 6 instr + 1 taken branch
 .endif
-    bnez    $10, flush_rdp_buffer            // Wait until no DMAs are active
-     lw     $10, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
-    mtc0    cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
+    bnez    $11, flush_rdp_buffer            // Wait until no DMAs are active
+     addi   dmaLen, dmemAddr, RDP_CMD_BUFSIZE + 8  // dmaLen = size of DMEM buffer to copy
+    blez    dmaLen, old_return_routine       // Exit if nothing to copy, or if dmemAddr is large negative num from last flush DMA write
+     mtc0   cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
     add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
     sub     $10, $10, $11                    // $10 = FIFO end addr - future pointer
     bgez    $10, @@has_room                  // Branch if we can fit this
@@ -2293,7 +2307,7 @@ vtx_store_for_clip:
     ssv     s1WI[14],          (VTX_INV_W_INT )(outVtx2)
     vmadn   vpClpF, $v31, $v31[2] // 0; Now vpClpI:vpClpF = projected position
     ssv     s1WI[6],           (VTX_INV_W_INT )(outVtx1)
-    // vnop
+    // vnop  // TODO maybe can rotate the loop so this is the jr land slot?
     slv     sST2[8],           (VTX_TC_VEC    )(outVtx2) // Store scaled S, T vertex 2
     vmudh   $v29, sVPO, vOne // offset * 1
     slv     sST2[0],           (VTX_TC_VEC    )(outVtx1) // Store scaled S, T vertex 1
@@ -2493,7 +2507,7 @@ vtx_store_for_clip:
     // vnop
     andi    $10, $10, (1 << 0) | (1 << 4) // Only bits 0, 4 from occlusion
     vmulf   $v29, sOPM, vpScrI[1h]  // -0x4000*Y1, --, +0x4000*Y1, --, repeat vtx 2
-vtx_store_loop_entry:
+vtx_store_loop_entry:  // TODO maybe move this a few back to encompass vpMdl?
     sub     $11, outVtx2, fogFlag      // Points 8 before outVtx2 if fog, else 0
     vmacf   sOCS, sO03, sOTM[0h]  //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
     sdv     sTCL[8],      (tempVpRGBA)(rdpCmdBufEndP1) // Vtx 0 and 1 RGBA in order
@@ -2648,12 +2662,10 @@ dma_write:
 // The action here is controlled by $1. If yielding, $1 > 0. If this was
 // G_LOAD_UCODE, $1 == 0. If we got to the end of the parent DL, $1 < 0.
 ovl0_start:
-    sub     cmdBufOver, rdpCmdBufPtr, rdpCmdBufEndP1
-    addi    $10, cmdBufOver, (RDP_CMD_BUFSIZE + 8) - 1 // Does the current buffer contain anything?
-    bgezal  $10, flush_rdp_buffer   // - 1 because there is no bgtzal instruction
+    jal     flush_rdp_buffer   // See G_FLUSH_handler for docs on these 3 instructions.
+     sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1
+    jal     flush_rdp_buffer
      add    taskDataPtr, taskDataPtr, inputBufferPos // inputBufferPos <= 0; taskDataPtr was where in the DL after the current chunk loaded
-    jal     while_wait_dma_busy     // Wait for possible RDP flush to finish
-     lw     $24, rdpFifoPos
 .if CFG_PROFILING_C
     mfc0    $11, DPC_CLOCK
     lw      $10, startCounterTime
@@ -2661,9 +2673,8 @@ ovl0_start:
     add     perfCounterA, perfCounterA, $11
 .endif
     bnez    $1, task_done_or_yield  // Continue to load ucode if 0
-     mtc0   $24, DPC_END            // Set the end pointer of the RDP so that it starts the task
 load_ucode:
-    lw      cmd_w1_dram, (inputBufferEnd - 0x04)(inputBufferPos) // word 1 = ucode code DRAM addr
+     lw     cmd_w1_dram, (inputBufferEnd - 0x04)(inputBufferPos) // word 1 = ucode code DRAM addr
     sw      $zero, OSTask + OSTask_flags    // So next ucode knows it didn't come from yield
     li      dmemAddr, start         // Beginning of overwritable part of IMEM
     sw      taskDataPtr, OSTask + OSTask_data_ptr // Store where we are in the DL
@@ -2736,18 +2747,16 @@ ovl0_padded_end:
 ovl1_start:
 
 G_POPMTX_handler:
-    lw      $11, matrixStackPtr             // Get the current matrix stack pointer
-    lw      $2, OSTask + OSTask_dram_stack  // Read the location of the dram stack
-    sub     cmd_w1_dram, $11, cmd_w1_dram   // Decrease the matrix stack pointer by the amount passed in the second command word
-    sub     $1, cmd_w1_dram, $2             // Subtraction to check if the new pointer is greater than or equal to $2
-    bgez    $1, do_popmtx                   // If the new matrix stack pointer is greater than or equal to $2, then use the new pointer as is
-     nop
-    move    cmd_w1_dram, $2                 // If the new matrix stack pointer is less than $2, then use $2 as the pointer instead
-do_popmtx:
-    beq     cmd_w1_dram, $11, run_next_DL_command   // If no bytes were popped, then we don't need to make the mvp matrix as being out of date and can run the next command
-     sw     cmd_w1_dram, matrixStackPtr             // Update the matrix stack pointer with the new value
-    j       do_movemem
-     sb     $zero, mvpValid
+    lw      $11, matrixStackPtr             // Current matrix stack pointer
+    lw      $2, OSTask + OSTask_dram_stack  // Top of the stack
+    sub     cmd_w1_dram, $11, cmd_w1_dram   // Decrease pointer by amount in command
+    sub     $1, cmd_w1_dram, $2             // Is it still valid / within the stack?
+    bgez    $1, @@skip                      // If so, skip the failsafe
+     sb     $zero, mvpValid                 // Mark matrix as needing recompute
+    move    cmd_w1_dram, $2                 // Use the top of the stack as the new pointer
+@@skip:    
+    j       do_movemem                      // Load the new matrix from the stack
+     sw     cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
 
 G_MTX_handler:
     // The lower 3 bits of G_MTX are, from LSb to MSb (0 value/1 value),
