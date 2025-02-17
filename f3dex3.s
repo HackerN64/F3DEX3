@@ -1291,8 +1291,7 @@ tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vmrg    $v4, tHPos, $v8   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     mfc2    $9, $v26[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    tHPos, $v8, tHPos // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
-    //bnez    $10, ovl234_clipmisc_entrypoint // Facing info and occlusion may be garbage if need to clip
-    bnez    $10, return_and_end_mat // TODO
+    bnez    $10, ovl234_clipmisc_entrypoint // Facing info and occlusion may be garbage if need to clip
      // 30 cycles
      sll    $20, $6, 21       // Bit 10 in the sign bit, for facing cull
     vlt     $v29, $v6, $v2    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
@@ -1802,7 +1801,7 @@ cRGBAOf   equ vpLtTot
 cRGBAOn   equ vpRGBA
 cSTOf     equ vpST
 cSTOn     equ sSTS // Intentionally overwriting this kept reg. Vtx scales ST again, need to re-store unscaled value.
-// Also uses sRTF, sRTI = vTemp1, vTemp2
+// Also uses sRTF, sRTI = vTemp1, vTemp2, and vtx_final_setup_for_clip sets sOPM = vKept2
 cTemp     equ vpMdl
 cBaseF    equ $v0
 cBaseI    equ $v1
@@ -1848,7 +1847,7 @@ clip_skipxy:
     // (roughly min(1.0f, abs(1.0f / cDiffI:F))) which scales down cDiffI:F (denominator)
     // Then the reciprocal of cDiffI:F is computed with a Newton-Raphson iteration
     // and multiplied by cBaseI:F. Finally scale down the result (numerator) by cRRF.
-    vor     cTemp, cDiffI, vOne[0]  // Round up int sum to odd; this ensures the value is not 0, otherwise v29 will be 0 instead of +/- 2
+    vor     cTemp, cDiffI, vOne[0]  // Round up int sum to odd; this ensures the value is not 0, otherwise vabs result will be 0 instead of +/- 2
     sub     $11, clipPolyWrite, clipPolySelect // Make sure we are not overflowing
     vrcph   cRRI[3], cDiffI[3]
     addi    $11, $11, 6 - ((MAX_CLIP_POLY_VERTS) * 2) // Write ptr to last zero slot
@@ -1865,26 +1864,30 @@ clip_skipxy:
     andi    $11, $11, ~CLIP_VTX_USED        // Clear used flag from off screen vert
     vmrg    cRRF, cRRF, $v31[1]             // keep RR frac, otherwise set frac to 0xFFFF (max)
     sh      $11, VTX_CLIP(clipVLastOfsc)    // Store modified clip flags for off screen vert
-    vmudl   cTemp, cDiffF, cRRF[3]          // Multiply clDiffI:F by RR frac*frac
+    vmudl   $v29, cDiffF, cRRF[3]           // Multiply clDiffI:F by RR frac*frac
+    ldv     cPosOfF[0], VTX_FRAC_VEC (clipVLastOfsc) // Off screen loaded above, but need
+    vmadm   cDiffI, cDiffI, cRRF[3]         // int*frac, int out
+    ldv     cPosOfI[0], VTX_INT_VEC  (clipVLastOfsc) // it in elems 0-3 for interp
+    vmadn   cDiffF, $v31, $v31[2]           // 0; get frac out
+    luv     cRGBAOf[0], VTX_COLOR_VEC(clipVLastOfsc)
+    vrcph   sRTI[3], cDiffI[3]              // Reciprocal of new scaled cDiff (discard)
+    luv     cRGBAOn[0], VTX_COLOR_VEC(clipVOnsc)
+    vrcpl   sRTF[3], cDiffF[3]              // frac part
+    llv     cSTOf[0],   VTX_TC_VEC   (clipVLastOfsc)
+    vrcph   sRTI[3], $v31[2]                // 0; int part
+    llv     cSTOn[0],   VTX_TC_VEC   (clipVOnsc) // Must be before vtx_final_setup_for_clip
+    vmudl   $v29, sRTF, cDiffF              // D*R (see Newton-Raphson explanation)
 .if CFG_NO_OCCLUSION_PLANE
     li      vtxLeft, -1                     // vtxLeft < 0 triggers vtx_epilogue
 .else
     li      vtxLeft, inputVtxSize           // but trigger this on the second loop in this version
 .endif
-    vmadm   cDiffI, cDiffI, cRRF[3]         // int*frac, int out
+    vmadm   $v29, sRTI, cDiffF
 .if CFG_NO_OCCLUSION_PLANE
     addi    outVtxBase, outVtxBase, -vtxSize // Inc'd by 2, must point to second vtx
 .else
     addi    outVtxBase, outVtxBase, vtxSize // Not inc'd, must point to second vtx
 .endif
-    vmadn   cDiffF, $v31, $v31[2]           // 0; get frac out
-    j       vtx_final_setup_for_clip
-     vrcph  sRTI[3], cDiffI[3]              // Reciprocal of new scaled cDiff (discard)
-clip_after_final_setup:
-    vrcpl   sRTF[3], cDiffF[3]              // frac part
-    vrcph   sRTI[3], $v31[2]                // 0; int part
-    vmudl   $v29, sRTF, cDiffF              // D*R (see Newton-Raphson explanation)
-    vmadm   $v29, sRTI, cDiffF
     vmadn   cDiffF, sRTF, cDiffI
     vmadh   cDiffI, sRTI, cDiffI
     vmudh   $v29, vOne, $v31[4]             // 4; 4 - 4 * (D*R)
@@ -1895,24 +1898,20 @@ clip_after_final_setup:
     vmadn   sRTF, sRTF, cDiffI
     vmadh   sRTI, sRTI, cDiffI
     vmudl   $v29, cBaseF, sRTF              // cDiff regs = cBase / cDiff
-    ldv     cPosOfF[0], VTX_FRAC_VEC (clipVLastOfsc) // Off screen loaded above, but need
     vmadm   $v29, cBaseI, sRTF
-    ldv     cPosOfI[0], VTX_INT_VEC  (clipVLastOfsc) // it in elems 0-3 for interp
     vmadn   cDiffF, cBaseF, sRTI
-    luv     cRGBAOf[0], VTX_COLOR_VEC(clipVLastOfsc)
     vmadh   cDiffI, cBaseI, sRTI 
-    luv     cRGBAOn[0], VTX_COLOR_VEC(clipVOnsc)
     vmudl   $v29, cDiffF, cRRF[3]           // Scale by range reduction
-    llv     cSTOf[0],   VTX_TC_VEC   (clipVLastOfsc)
     vmadm   cDiffI, cDiffI, cRRF[3]
-    llv     cSTOn[0],   VTX_TC_VEC   (clipVOnsc)
     vmadn   cDiffF, $v31, $v31[2]           // Done cDiffI:F = cBaseI:F / cDiffI:F
     // Clamp to 0x0001 to 0xFFFF range and create inverse on-screen factor
     vlt     cDiffI, cDiffI, vOne[0]         // If integer part of factor less than 1,
     vmrg    cDiffF, cDiffF, $v31[1]         // keep frac part of factor, else set to 0xFFFF (max val)
     vsubc   $v29, cDiffF, vOne[0]           // frac part - 1 for carry
     vge     cDiffI, cDiffI, $v31[2]         // 0; If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
-    vmrg    cFadeOf, cDiffF, vOne[0]        // keep frac part of factor, else set to 1 (min val)
+    j       vtx_final_setup_for_clip        // Clobbers vcc and accum in !NOC config.
+     vmrg   cFadeOf, cDiffF, vOne[0]        // keep frac part of factor, else set to 1 (min val)
+clip_after_final_setup: // This is here because otherwise be 3 cycle stall here.
     vmudn   cFadeOn, cFadeOf, $v31[1]       // signed x * -1 = 0xFFFF - unsigned x! Fade factor for on screen vert
     // Fade between attributes for on screen and off screen vert
     vmudm   $v29,     cRGBAOf, cFadeOf[3]
@@ -2548,7 +2547,7 @@ tris_end:
      add    perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
 .else
     j       run_next_DL_command
-     lqv    $v30, (v30Value)($zero)           // Restore value overwritten in vtx_store
+     lqv    $v30, (v30Value)($zero)          // Restore value overwritten in vtx_store
 .endif
 
 
