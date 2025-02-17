@@ -1291,7 +1291,8 @@ tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vmrg    $v4, tHPos, $v8   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     mfc2    $9, $v26[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    tHPos, $v8, tHPos // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
-    bnez    $10, ovl234_clipmisc_entrypoint // Facing info and occlusion may be garbage if need to clip
+    //bnez    $10, ovl234_clipmisc_entrypoint // Facing info and occlusion may be garbage if need to clip
+    bnez    $10, return_and_end_mat // TODO
      // 30 cycles
      sll    $20, $6, 21       // Bit 10 in the sign bit, for facing cull
     vlt     $v29, $v6, $v2    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
@@ -2089,6 +2090,7 @@ vtx_setup_constants:
     // Results fill vPerm1:4. Uses misc temps.
     lhu     vGeomMid, geometryModeLabel + 1       // Load middle 2 bytes of geom mode
 .if CFG_NO_OCCLUSION_PLANE
+    llv     sFOG[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
     ldv     sVPO[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
     veq     $v29, $v31, $v31[3h]                  // VCC = 00010001
     ldv     sVPO[8], (viewport + 8)($zero)
@@ -2159,7 +2161,8 @@ vtx_load_mvp:
     ldv     vMVP0F[8],  (mvpMatrix + 0x20)($zero)
     ldv     vMVP2F[8],  (fourthQWMVP +  0)($zero)
     andi    $11, vGeomMid, G_LIGHTING >> 8
-    bnez    $11, vtx_select_lighting
+    // bnez    $11, vtx_select_lighting
+    nop  // TODO
      sb     $zero, materialCullMode        // Vtx ends material
 vtx_setup_no_lighting:
 vtx_final_setup_for_clip:
@@ -2387,45 +2390,45 @@ vtx_return_from_lighting:
     vmadn   $v29, vMVP1F, vpMdl[1h]
     or      $11, $11, $10    // Combine occlusion results. Any set in 0-3, 4-7 = not occluded
     vmadh   $v29, vMVP1I, vpMdl[1h]
-    slv     vpST[8], (VTX_TC_VEC    )(outVtx2) // Store scaled S, T vertex 2
+    andi    $10, $11, 0x000F // Bits 0-3 for vtx 1
 // vpClpF <- vAAA
     vmadn   vpClpF, vMVP2F, vpMdl[2h]
-    andi    $10, $11, 0x000F // Bits 0-3 for vtx 1
+    addi    $11, $11, -(0x0010) // If not occluded, atl 1 of 4-7 set, so $11 >= 0x10. Else $11 < 0x10.
 // vpClpI <- vBBB
     vmadh   vpClpI, vMVP2I, vpMdl[2h]
     bnez    $10, @@skipv1    // If nonzero, at least one equation false, don't set occluded flag
-     slv    vpST[0], (VTX_TC_VEC    )(outVtx1) // Store scaled S, T vertex 1
+     andi   $11, $11, CLIP_OCCLUDED // This is bit 11, = sign bit b/c |$11| <= 0xFF
     ori     flagsV1, flagsV1, CLIP_OCCLUDED // All equations true, set vtx 1 occluded flag
 @@skipv1:
     // 16 cycles
 vtx_store_for_clip:
     vmudl   $v29, vpClpF, $v30[3]       // Persp norm
-    addi    $11, $11, -(0x0010) // If not occluded, atl 1 of 4-7 set, so $11 >= 0x10. Else $11 < 0x10.
+    or      flagsV2, flagsV2, $11 // occluded = $11 negative = sign bit set = $11 is flag, else 0
 // s1WI <- vpMdl
     vmadm   s1WI, vpClpI, $v30[3]       // Persp norm
-    andi    $11, $11, CLIP_OCCLUDED // This is bit 11, = sign bit b/c |$11| <= 0xFF
-// s1WF <- vpNrmlX
-    vmadn   s1WF, $v31, $v31[2]             // 0
-    or      flagsV2, flagsV2, $11 // occluded = $11 negative = sign bit set = $11 is flag, else 0
-    vmudn   $v29, vpClpF, sOCM          // X * kx, Y * ky, Z * kz
     sh      flagsV2,            (VTX_CLIP      )(outVtx2) // Store second vertex clip flags
-    vmadh   $v29, vpClpI, sOCM          // Int * int
+// s1WF <- vpNrmlX
+    vmadn   s1WF, $v31, $v31[2]         // 0
     blez    vtxLeft, vtx_epilogue
-     vrcph  $v29[0], s1WI[3]
+     vmudn  $v29, vpClpF, sOCM          // X * kx, Y * ky, Z * kz
+    vmadh   $v29, vpClpI, sOCM          // Int * int
+    sh      flagsV1,            (VTX_CLIP      )(outVtx1) // Store first vertex flags
+    vrcph   $v29[0], s1WI[3]
+    addi    vtxLeft, vtxLeft, -2*inputVtxSize // Decrement vertex count by 2
 // sRTF <- vCCC
     vrcpl   sRTF[2], s1WF[3]
-    sh      flagsV1,            (VTX_CLIP      )(outVtx1) // Store first vertex flags
+    sra     $11, vtxLeft, 31   // All 1s if on single-vertex last iter
 // sRTI <- vDDD
     vrcph   sRTI[3], s1WI[7]
-    addi    vtxLeft, vtxLeft, -2*inputVtxSize // Decrement vertex count by 2
-    vrcpl   sRTF[6], s1WF[7]
-    sra     $11, vtxLeft, 31   // All 1s if on single-vertex last iter
-    vrcph   sRTI[7], $v31[2] // 0
     andi    $11, $11, vtxSize  // vtxSize if on single-vertex last iter, else normally 0
-    vreadacc sOCS, ACC_UPPER                // Load int * int portion
+    vrcpl   sRTF[6], s1WF[7]
     sub     outVtx2, outVtxBase, $11 // First output vtx on last iter, else second
-    vch     $v29, vpClpI, vpClpI[3h] // Clip screen high
+    vrcph   sRTI[7], $v31[2] // 0
     addi    outVtx1, outVtxBase, -vtxSize  // First output vtx always
+    vreadacc sOCS, ACC_UPPER                // Load int * int portion
+    suv     vpRGBA[4],  (VTX_COLOR_VEC )(outVtx2) // Store RGBA for second vtx
+    vch     $v29, vpClpI, vpClpI[3h] // Clip screen high
+    suv     vpRGBA[0],  (VTX_COLOR_VEC )(outVtx1) // Store RGBA for first vtx
     vmudl   $v29, s1WF, sRTF[2h]
     sdv     vpClpI[8],  (VTX_INT_VEC   )(outVtx2)
     vmadm   $v29, s1WI, sRTF[2h]
@@ -2460,11 +2463,11 @@ vtx_store_for_clip:
     vch     $v29, vpClpI, sSCI[3h] // Clip scaled high
     andi    flagsV2, flagsV2, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
     vcl     $v29, vpClpF, sSCF[3h] // Clip scaled low
-    suv     vpRGBA[4],   (VTX_COLOR_VEC )(outVtx2) // Store RGBA for second vtx
+    slv     vpST[8], (VTX_TC_VEC    )(outVtx2) // Store scaled S, T vertex 2
     vmudl   $v29, vpClpF, s1WF[3h] // Pos times inv W
     cfc2    $11, $vcc                   // Scaled clip results
     vmadm   $v29, vpClpI, s1WF[3h] // Pos times inv W
-    suv     vpRGBA[0],   (VTX_COLOR_VEC )(outVtx1) // Store RGBA for first vtx
+    slv     vpST[0], (VTX_TC_VEC    )(outVtx1) // Store scaled S, T vertex 1
     vmadn   vpClpF, vpClpF, s1WI[3h]
 // sVPO <- sSCF
     ldv     sVPO[0], (viewport + 8)($zero) // Load viewport offset incl. fog for first vertex

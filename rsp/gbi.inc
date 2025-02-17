@@ -25,7 +25,7 @@ G_TEXTURE_GEN           equ 0x00040000
 G_TEXTURE_GEN_LINEAR    equ 0x00080000
 //G_LOD                 equ 0x00100000 // Ignored by all F3DEX* variants
 G_SHADING_SMOOTH        equ 0x00200000
-//G_LIGHTING_POSITIONAL equ 0x00400000 // Ignored by F3DEX3, assumed always on
+//G_LIGHTING_POSITIONAL equ 0x00400000 // In F3DEX3, replaced by ENABLE_POINT_LIGHTS, part of light count
 //G_CLIPPING            equ 0x00800000 // Ignored by all F3DEX* variants
 // The top byte holds the geometry mode opcode.
 
