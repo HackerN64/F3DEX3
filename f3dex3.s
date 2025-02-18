@@ -322,11 +322,11 @@ v31Value:
     .dh 0x7F00 // used in fog, normals unpacking
     .dh 0x7FFF // used often
 
-// constants for register $v30
+// constants for register vTRC
 .if (. & 15) != 0
-    .error "Wrong alignment for v30value"
+    .error "Wrong alignment for vTRCValue"
 .endif
-v30Value:
+vTRCValue:
 decalFixMult equ 0x0400
 decalFixOff equ (-(decalFixMult / 2))
     .dh vertexBuffer // currently 0x02DE; for converting vertex index to address
@@ -337,20 +337,20 @@ decalFixOff equ (-(decalFixMult / 2))
     .dh 0xFFF8 // used once in tri write, mask away lower ST bits
     .dh decalFixOff // negative
     .dh 0x0100 // used several times in tri write
-.macro set_vcc_11110001  // Only VCC pattern used with $v30
-    vge    $v29, $v30, $v30[7]
+.macro set_vcc_11110001  // Only VCC pattern used with vTRC
+    vge    $v29, vTRC, vTRC[7]
 .endmacro
 .if (vertexBuffer < 0x0100 || decalFixMult < 0x100)
-    .error "VCC pattern for $v30 corrupted"
+    .error "VCC pattern for vTRC corrupted"
 .endif
-v30_VB   equ $v30[0] // Vertex Buffer
-v30_VS   equ $v30[1] // Vertex Size
-v30_1000 equ $v30[2]
-v30_DM   equ $v30[3] // Decal Multiplier
-v30_0020 equ $v30[4]
-v30_FFF8 equ $v30[5]
-v30_DO   equ $v30[6] // Decal Offset
-v30_0100 equ $v30[7]
+vTRC_VB   equ vTRC[0] // Vertex Buffer
+vTRC_VS   equ vTRC[1] // Vertex Size
+vTRC_1000 equ vTRC[2]
+vTRC_DM   equ vTRC[3] // Decal Multiplier
+vTRC_0020 equ vTRC[4]
+vTRC_FFF8 equ vTRC[5]
+vTRC_DO   equ vTRC[6] // Decal Offset
+vTRC_0100 equ vTRC[7]
 
 /*
 Quick note on Newton-Raphson:
@@ -817,10 +817,11 @@ cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
 cmd_w0         equ $25   // DL command word 0, also holds next tris info
 
 // Global vector regs:
-vZero equ $v0  // All elements = 0; NOT global, only in tri write
+vZero equ $v0  // All elements = 0; NOT global, only in tri write and clip. Mtx in vtx.
+vTRC  equ $v1  // Triangle Constants; NOT global, only in tri write and clip. Mtx in vtx.
 vOne  equ $v28 // All elements = 1; global
 // $v29: permanent temp register, also write results here to discard
-// $v30: tri write = constants. vtx / lt = sSTO + persp norm + AO params
+// $v30: vtx / lt = sSTO + persp norm + AO params
 // $v31: Global constant vector register
 
 // Vertex / lighting vector regs:
@@ -952,7 +953,7 @@ start: // This is at IMEM 0x1080, not the start of IMEM
     vnop    // Return to here from S2DEX overlay 0 G_LOAD_UCODE jumps to start+4!
     lqv     $v31[0], (v31Value)($zero)      // Actual start is here
     vadd    $v29, $v29, $v29 // Consume VCO (carry) value possibly set by the previous ucode
-    lqv     $v30, (v30Value)($zero)         // Always as this value except vtx_store
+    lqv     vTRC, (vTRCValue)($zero)        // Always as this value except vtx_store
     li      altBaseReg, altBase
     li      rdpCmdBufPtr, rdpCmdBuffer1
     vclr    vOne
@@ -1245,9 +1246,9 @@ tri_main:
     lbu     $3, 7(rdpCmdBufPtr)
     vclr    vZero
     lhu     $1, (vertexTable)($1)
-    vmudn   $v29, vOne, v30_VB    // Address of vertex buffer
+    vmudn   $v29, vOne, vTRC_VB    // Address of vertex buffer
     lhu     $2, (vertexTable)($2)
-    vmadl   $v27, $v27, v30_VS    // Plus vtx indices times length
+    vmadl   $v27, $v27, vTRC_VS    // Plus vtx indices times length
     lhu     $3, (vertexTable)($3)
     vmadl   $v4, $v31, $v31[2]    // 0; vtx 2 addr in $v4 elem 6
 .if !ENABLE_PROFILING
@@ -1372,15 +1373,15 @@ tri_skip_flat_shading:
     lw      $7, VTX_INV_W_VEC($2)
     vrcph   $v22[3], tPosLmH[1]
     lw      $8, VTX_INV_W_VEC($3)
-    vmudl   tHAtI, tHAtI, v30_0100 // vertex color 1 >>= 8
+    vmudl   tHAtI, tHAtI, vTRC_0100 // vertex color 1 >>= 8
     lbu     $9, textureSettings1 + 3
-    vmudl   tMAtI, tMAtI, v30_0100 // vertex color 2 >>= 8
+    vmudl   tMAtI, tMAtI, vTRC_0100 // vertex color 2 >>= 8
     sub     $11, $16, $7  // Four instr: $16 = max($16, $7)
-    vmudl   tLAtI, tLAtI, v30_0100 // vertex color 3 >>= 8
+    vmudl   tLAtI, tLAtI, vTRC_0100 // vertex color 3 >>= 8
     sra     $10, $11, 31
-    vmudl   $v29, $v20, v30_0020
+    vmudl   $v29, $v20, vTRC_0020
     // no nop if tri_skip_flip_facing was unaligned
-    vmadm   $v22, $v22, v30_0020
+    vmadm   $v22, $v22, vTRC_0020
     beqz    $20, tri_skip_alpha_compare_cull
      vmadn  $v20, $v31, $v31[2] // 0
     // Alpha compare culling
@@ -1397,7 +1398,7 @@ tri_skip_flat_shading:
     bltz    $24, return_and_end_mat // if max < thresh or if min >= thresh.
 tri_skip_alpha_compare_cull:
     // 63 cycles
-    vmudm   tPosCatF, tPosCatI, v30_1000
+    vmudm   tPosCatF, tPosCatI, vTRC_1000
     // no nop if tri_skip_alpha_compare_cull was unaligned
     vmadn   tPosCatI, $v31, $v31[2] // 0
     and     $11, $11, $10
@@ -1422,9 +1423,9 @@ tMx1W equ $v27
     lbu     $7, textureSettings1 + 2
     vmadh   tXPI, tXPRcpI, tXPI
     lsv     tMAtI[14], VTX_SCR_Z($2)
-    vand    $v22, $v20, v30_FFF8
+    vand    $v22, $v20, vTRC_FFF8
     lsv     tLAtI[14], VTX_SCR_Z($3)
-    vcr     tPosCatI, tPosCatI, v30_0100
+    vcr     tPosCatI, tPosCatI, vTRC_0100
     lsv     tMAtF[14], VTX_SCR_Z_FRAC($2)
     vmudh   $v29, vOne, $v31[4] // 4
     lsv     tLAtF[14], VTX_SCR_Z_FRAC($3)
@@ -1662,8 +1663,8 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
 
 tri_decal_fix_z:
     // Valid range of tHAtI = 0 to 7FFF, but most of the scene is large values
-    vmudh   $v29, vOne, v30_DO  // accum all elems = -DM/2
-    vmadm   $v25, tHAtI, v30_DM // elem 7 = (0 to DM/2-1) - DM/2 = -DM/2 to -1
+    vmudh   $v29, vOne, vTRC_DO  // accum all elems = -DM/2
+    vmadm   $v25, tHAtI, vTRC_DM // elem 7 = (0 to DM/2-1) - DM/2 = -DM/2 to -1
     vcr     tDaDyI, tDaDyI, $v25[7] // Clamp DzDyI (6) to <= -val or >= val; clobbers DzDyF (7)
     j       tri_return_from_decal_fix_z
      set_vcc_11110001 // Clobbered by vcr
@@ -1801,8 +1802,8 @@ cSTOf     equ vpST
 cSTOn     equ sSTS // Intentionally overwriting this kept reg. Vtx scales ST again, need to re-store unscaled value.
 // Also uses sRTF, sRTI = vTemp1, vTemp2, and vtx_final_setup_for_clip sets sOPM = vKept2
 cTemp     equ vpMdl
-cBaseF    equ $v0
-cBaseI    equ $v1
+cBaseF    equ vpNrmlX
+cBaseI    equ vpNrmlY
 cDiffF    equ $v2
 cDiffI    equ $v3
 cRRF      equ $v4  // Range Reduction frac
@@ -1954,9 +1955,7 @@ clip_nextcond:
      addi   clipMaskIdx, clipMaskIdx, -1
     
 clip_draw_tris:
-    vclr    vZero // TODO may be able to move some regs around and get rid of this
     sh      $zero, activeClipPlanes
-    lqv     $v30, (v30Value)($zero)
 // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
 // Draws verts in pattern like 0-1-4, 1-2-4, 2-3-4
 clip_draw_tris_loop:
@@ -1972,7 +1971,6 @@ clip_draw_tris_loop:
 clip_done:
     li      $11, CLIP_SCAL_NPXY | CLIP_CAMPLANE
     sh      $11, activeClipPlanes
-    lqv     $v30, (v30Value)($zero) // Need this repeated here in case we exited early
     lh      $ra, tempTriRA
 fill_vertex_table:
     // Create bytes 00-07
@@ -1988,9 +1986,9 @@ fill_vertex_table:
     li      $3, vertexTable + ((G_MAX_VERTS + 8) * 2) // Need 0-56 inclusive, so do 0-63
     vmudh   $v3, $v3, $v31[3] // 2; now 0x0000, 0x0200, ..., 0x0E00
 @@loop2:
-    vmudn   $v29, vOne, v30_VB  // Address of vertex buffer
-    vmadl   $v4, $v3, v30_VS    // Plus vtx indices times length
-    vadd    $v3, $v3, v30_1000  // increment by 8 verts = 16
+    vmudn   $v29, vOne, vTRC_VB  // Address of vertex buffer
+    vmadl   $v4, $v3, vTRC_VS    // Plus vtx indices times length
+    vadd    $v3, $v3, vTRC_1000  // increment by 8 verts = 16
     addi    $2, $2, 0x10
     bne     $2, $3, @@loop2
      sqv    $v4[0], (-0x10)($2)
@@ -2053,17 +2051,17 @@ mtx_multiply:
 @@innerloop:
     ldv     $v3[0], 0x0040($2)
     ldv     $v3[8], 0x0040($2)
-    lqv     $v1[0], 0x0020($3) // Input 1
+    lqv     vTemp2[0], 0x0020($3) // Input 1
     ldv     $v2[0], 0x0020($2)
     ldv     $v2[8], 0x0020($2)
-    lqv     $v0[0], 0x0000($3) // Input 1
-    vmadl   $v29, $v3, $v1[0h]
+    lqv     vTemp1[0], 0x0000($3) // Input 1
+    vmadl   $v29, $v3, vTemp2[0h]
     addi    $3, $3, 0x0002
-    vmadm   $v29, $v2, $v1[0h]
+    vmadm   $v29, $v2, vTemp2[0h]
     addi    $2, $2, 0x0008 // Increment input 0 pointer
-    vmadn   $v5, $v3, $v0[0h]
+    vmadn   $v5, $v3, vTemp1[0h]
     bne     $3, $11, @@innerloop
-     vmadh  $v4, $v2, $v0[0h]
+     vmadh  $v4, $v2, vTemp1[0h]
     bne     $3, $10, @@loop
      addi   $3, $3, 0x0008
     sqv     $v7[0], (0x0020)($6)
@@ -2531,7 +2529,7 @@ vtx_epilogue:
 vtx_end:
 .if CFG_PROFILING_A
     li      $ra, 0                           // Flag for coming from vtx
-    lqv     $v30, (v30Value)($zero)          // Restore value overwritten in vtx_store
+    lqv     vTRC, (vTRCValue)($zero)         // Restore value overwritten by matrix
 tris_end:
     mfc0    $11, DPC_CLOCK
     lw      $10, startCounterTime
@@ -2545,7 +2543,7 @@ tris_end:
      add    perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
 .else
     j       run_next_DL_command
-     lqv    $v30, (v30Value)($zero)          // Restore value overwritten in vtx_store
+     lqv    vTRC, (vTRCValue)($zero)         // Restore value overwritten by matrix
 .endif
 
 
@@ -3066,7 +3064,7 @@ ltbasic_setup_after_xfrm:
      andi   lbL2A, vGeomMid, G_LIGHTTOALPHA >> 8
     // vLTC[0:3] = [0xF800, 0xFC00, (1 << 11) = 0x0800, (1 << 5) = 0x0020]
     lpv     vTemp1[0], (packedConstants - altBase)(altBaseReg) // Elems 0-2 above
-    lqv     vTemp2, (v30Value)($zero)  // Sadly 0x0020 was in element 4 of $v30, already overwritten
+    lqv     vTemp2, (vTRCValue)($zero)  // Sadly 0x0020 was in element 4 of vTRC, already overwritten by mtx
     vlt     $v29, $v31, $v31[3] // Set VCC to 11100000
     li      lbAfter, ltbasic_no_l2a
     vmrg    vLTC, vTemp1, vLTC // Consts in elems 0-2, first lt dir in elems 4-6
@@ -3261,31 +3259,32 @@ ltLookAt equ vCCC
 vLookat0 equ vpLtTot
 vLookat1 equ vAAA
     lpv     ltLookAt[0], (xfrmLookatDirs + 0)($zero) // Lookat 0 in 0-2, 1 in 4-6; = vNrmOut
-    vmulf   $v29, vpNrmlX, ltLookAt[0]   // Normals X elems 0, 4 * lookat 0 X
-    vmacf   $v29, vpNrmlY, ltLookAt[1]        // Normals Y elems 0, 4 * lookat 0 Y
+    vmulf   $v29, vpNrmlX, ltLookAt[0]       // Normals X elems 0, 4 * lookat 0 X
+    vmacf   $v29, vpNrmlY, ltLookAt[1]       // Normals Y elems 0, 4 * lookat 0 Y
 .if !CFG_NO_OCCLUSION_PLANE
     addi    outVtxBase, outVtxBase, -2*vtxSize // Undo doing this twice due to repeating ST scale
 .endif
-    vmacf   vLookat0, vpNrmlZ, ltLookAt[2]    // Normals Z elems 0, 4 * lookat 0 Z
-    vmulf   $v29, vpNrmlX, ltLookAt[4]   // Normals X elems 0, 4 * lookat 1 X
-    vmacf   $v29, vpNrmlY, ltLookAt[5]        // Normals Y elems 0, 4 * lookat 1 Y
-    vmacf   vLookat1, vpNrmlZ, ltLookAt[6]    // Normals Z elems 0, 4 * lookat 1 Z
-    vmudh   vLookat0, vOne, vLookat0[3h]   // Move lookat 0 dot product to elem 0
-    vne     $v29, $v31, $v31[1h]           // Set VCC to 10111011
+    vmacf   vLookat0, vpNrmlZ, ltLookAt[2]   // Normals Z elems 0, 4 * lookat 0 Z
+    vmulf   $v29, vpNrmlX, ltLookAt[4]       // Normals X elems 0, 4 * lookat 1 X
+    vmacf   $v29, vpNrmlY, ltLookAt[5]       // Normals Y elems 0, 4 * lookat 1 Y
+    vmacf   vLookat1, vpNrmlZ, ltLookAt[6]   // Normals Z elems 0, 4 * lookat 1 Z
+    vmudh   vLookat0, vOne, vLookat0[3h]     // Move lookat 0 dot product to elem 0
+    llv     vCCC[0], (texgenLinearCoeffs - altBase)(altBaseReg)
+    vne     $v29, $v31, $v31[1h]             // Set VCC to 10111011
     andi    $11, vGeomMid, G_TEXTURE_GEN_LINEAR >> 8
     vmrg    vLookat0, vLookat0, vLookat1[3h] // Dot products in elements 0, 1, 4, 5
-    vmudh   $v29, vOne, $v31[5]            // 1 * 0x4000
+    vmudh   $v29, vOne, $v31[5]              // 1 * 0x4000
     beqz    $11, vtx_return_from_texgen
-     vmacf  vpST, vLookat0, $v31[5]     // + dot products * 0x4000 ( / 2)
+     vmacf  vpST, vLookat0, $v31[5]          // + dot products * 0x4000 ( / 2)
     // Texgen_Linear:
-    vmulf   vpST, vLookat0, $v31[5]     // dot products * 0x4000 ( / 2)
-    vmulf   vDDD, vpST, vpST         // ST squared
-    vmulf   $v29, vpST, $v31[7]         // Move ST to accumulator (0x7FFF = 1)
-    vmacf   vCCC, vpST, $v30[5]         // + ST * 0x6CB3
-    vmudh   $v29, vOne, $v31[5]            // 1 * 0x4000
-    vmacf   vpST, vpST, $v30[4]      // + ST * 0x44D3
+    vmulf   vpST, vLookat0, $v31[5]          // dot products * 0x4000 ( / 2)
+    vmulf   vDDD, vpST, vpST                 // ST squared
+    vmulf   $v29, vpST, $v31[7]              // Move ST to accumulator (0x7FFF = 1)
+    vmacf   vAAA, vpST, vCCC[1]              // + ST * 0x6CB3
+    vmudh   $v29, vOne, $v31[5]              // 1 * 0x4000
+    vmacf   vpST, vpST, vCCC[0]              // + ST * 0x44D3
     j       vtx_return_from_texgen
-     vmacf  vpST, vDDD, vCCC            // + ST squared * (ST + ST * coeff)
+     vmacf  vpST, vDDD, vAAA                 // + ST squared * (ST + ST * coeff)
     
 ovl2_end:
 .align 8
@@ -3537,7 +3536,7 @@ lt_skip_novtxcolor:
      vmrg   vpRGBA, vLtRGBOut, vLtAOut  // Merge base output and alpha output
     // Fresnel: dot product in vPairNrml[3h]. Also valid rest of vPairNrml for texgen,
     // vLookat0, vpRGBA. Available: vAAA, vBBB, vNrmOut.
-    lqv     vBBB, (v30Value)($zero)     // Need 0x0100 constant, in elem 3
+    lqv     vBBB, (vTRCValue)($zero)     // Need 0x0100 constant, in elem 3
     vabs    vAAA, vPairNrml, vPairNrml  // Absolute value of dot product for underwater
     andi    $11, vGeomMid, G_FRESNEL_COLOR >> 8
     vmudh   $v29, vOne, $v30[7]         // Fresnel offset
