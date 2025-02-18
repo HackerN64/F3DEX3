@@ -849,7 +849,7 @@ vpNrmlX  equ $v20 // Vertex pair normal X (elems 3, 7)
 vpNrmlY  equ $v21 // Vertex pair normal Y (elems 3, 7)
 vpNrmlZ  equ $v22 // Vertex pair normal Z (elems 3, 7)
 vLTC     equ $v23 // Lighting constants - first light dir, constants for packed normals
-vPerm1   equ $v24 // Regs loaded in vtx_setup_constants and permanently kept through vtx/lt
+vPerm1   equ $v24 // Regs loaded in vtx_constants_for_clip and permanently kept through vtx/lt
 vPerm2   equ $v25
 vPerm3   equ $v26
 vPerm4   equ $v27
@@ -923,7 +923,7 @@ sFGM equ $v29   // Does not exist
 sO03 equ vPerm1 // vtx_store Occlusion plane edge coefficients 0-3
 sO47 equ vPerm2 // vtx_store Occlusion plane edge coefficients 4-7
 sOCM equ vPerm3 // vtx_store Occlusion plane Mid coefficients
-sOPM equ vKept2 // vtx_store Occlusion Plus Minus. Loaded in vtx_after_lt_setup not vtx_setup_constants b/c clobbered by lighting.
+sOPM equ vKept2 // vtx_store Occlusion Plus Minus. Loaded in vtx_after_lt_setup not vtx_constants_for_clip b/c clobbered by lighting.
 .endif
 sSTS equ vPerm4
 
@@ -1727,8 +1727,9 @@ ovl234_ltadv_entrypoint_ovl3ver:           // same IMEM address as ovl234_ltadv_
 // the clipping code.
 ovl234_clipmisc_entrypoint:
     sh      $ra, tempTriRA                 // Tri return after clipping
-    bnez    $1, clip_start                 // In clipping, $1 is vtx 1 addr, never 0. Cmd dispatch, $1 = 0.
-     li     $3, (0xFF00 | G_MEMSET)
+    bnez    $1, vtx_constants_for_clip     // In clipping, $1 is vtx 1 addr, never 0. Cmd dispatch, $1 = 0.
+     li     inVtx, 0x8000                  // inVtx < 0 means from clipping. Inc'd each vtx write by 2 * inputVtxSize, but this is large enough it should stay negative.
+    li      $3, (0xFF00 | G_MEMSET)
     beq     $3, $7, g_memset_ovl3
      lw     cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Overwritten by overlay load
 g_dma_io_ovl3:  // otherwise
@@ -1741,14 +1742,10 @@ g_dma_io_ovl3:  // otherwise
     j       dma_read_write  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
      li     $ra, wait_for_dma_and_run_next_command  // Setup the return address for running the next DL command
 
-clip_start:
+clip_after_constants:
 .if CFG_PROFILING_B
     addi    perfCounterB, perfCounterB, 1  // Increment clipped (input) tris count
 .endif
-    li      inVtx, 0x8000                  // inVtx < 0 means from clipping. Inc'd each vtx write by 2 * inputVtxSize, but this is large enough it should stay negative.
-    jal     vtx_setup_constants
-     sb     $zero, materialCullMode        // In case only/all tri(s) clip then offscreen
-clip_after_constants:
     // Clear all temp vertex slots used.
     li      $11, (MAX_CLIP_GEN_VERTS - 1) * vtxSize
 clip_init_used_loop:
@@ -1762,6 +1759,7 @@ clip_init_used_loop:
     sh      $2, (clipPoly - 6 + 2)(clipPolySelect) // as the initial polygon
     sh      $3, (clipPoly - 6 + 4)(clipPolySelect) // Initial state $3 = clipVLastOfsc
     sh      $zero, (clipPoly)(clipPolySelect)  // nullptr to mark end of polygon
+    sb      $zero, materialCullMode            // In case only/all tri(s) clip then offscreen
 // Available locals here: $11, $1, $7, $20, $24, $10
 clip_condlooptop:
     lhu     clipFlags, VTX_CLIP(clipVLastOfsc) // Load flags for final vertex of the last polygon
@@ -1911,7 +1909,7 @@ clip_skipxy:
     vge     cDiffI, cDiffI, $v31[2]         // 0; If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
     j       vtx_final_setup_for_clip        // Clobbers vcc and accum in !NOC config.
      vmrg   cFadeOf, cDiffF, vOne[0]        // keep frac part of factor, else set to 1 (min val)
-clip_after_final_setup: // This is here because otherwise be 3 cycle stall here.
+clip_after_final_setup: // This is here because otherwise 3 cycle stall here.
     vmudn   cFadeOn, cFadeOf, $v31[1]       // signed x * -1 = 0xFFFF - unsigned x! Fade factor for on screen vert
     // Fade between attributes for on screen and off screen vert
     vmudm   $v29,     cRGBAOf, cFadeOf[3]
@@ -2084,7 +2082,7 @@ vtx_after_dma:
     sll     $11, vtxLeft, 12                   // Vtx count * 0x10000
     add     perfCounterA, perfCounterA, $11    // Add to vertex count
 .endif
-vtx_setup_constants:
+vtx_constants_for_clip:
     // Sets up constants needed for vertex loop, including during clipping.
     // Results fill vPerm1:4. Uses misc temps.
     lhu     vGeomMid, geometryModeLabel + 1       // Load middle 2 bytes of geom mode
@@ -2227,12 +2225,12 @@ vtx_return_from_lighting:
 vtx_return_from_texgen:
 vtx_store_for_clip:
     vmudl   $v29, vpClpF, $v30[3]       // Persp norm
-    sub     $11, outVtx2, fogFlag           // Points 8 before outVtx2 if fog, else 0
+    sub     $11, outVtx2, fogFlag       // Points 8 before outVtx2 if fog, else 0
 // s1WI <- vpNrmlX
     vmadm   s1WI, vpClpI, $v30[3]       // Persp norm
     addi    outVtxBase, outVtxBase, 2*vtxSize // Points to SECOND output vtx
 // s1WF <- vpLtTot
-    vmadn   s1WF, $v31, $v31[2]             // 0
+    vmadn   s1WF, $v31, $v31[2]         // 0
     sbv     sFOG[15], (VTX_COLOR_A + 8)($11) // In VTX_SCR_Y if fog disabled...
     vmov    vpScrF[1], sCLZ[2]
     sbv     sFOG[7],  (VTX_COLOR_A + 8 - vtxSize)($11) // ...which gets overwritten below
