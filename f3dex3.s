@@ -1728,6 +1728,9 @@ ovl234_ltadv_entrypoint_ovl3ver:           // same IMEM address as ovl234_ltadv_
 // the clipping code.
 ovl234_clipmisc_entrypoint:
     sh      $ra, tempTriRA                 // Tri return after clipping
+.if CFG_PROFILING_B
+    nop                                    // Needs to take up the space for the other perf counter
+.endif
     bnez    $1, vtx_constants_for_clip     // In clipping, $1 is vtx 1 addr, never 0. Cmd dispatch, $1 = 0.
      li     inVtx, 0x8000                  // inVtx < 0 means from clipping. Inc'd each vtx write by 2 * inputVtxSize, but this is large enough it should stay negative.
     li      $3, (0xFF00 | G_MEMSET)
@@ -2156,8 +2159,7 @@ vtx_load_mvp:
     ldv     vMVP0F[8],  (mvpMatrix + 0x20)($zero)
     ldv     vMVP2F[8],  (fourthQWMVP +  0)($zero)
     andi    $11, vGeomMid, G_LIGHTING >> 8
-    // bnez    $11, vtx_select_lighting
-    nop  // TODO
+    bnez    $11, vtx_select_lighting
      sb     $zero, materialCullMode        // Vtx ends material
 vtx_setup_no_lighting:
 vtx_final_setup_for_clip:
@@ -3165,22 +3167,22 @@ ltbasic_start_packed_ao:
      vand   vpNrmlY, vpNrmlY, vLTC[1]           // 0xFC00; mask Y to only top 6 bits
 
 ltbasic_start_ao:
-    lpv     vpNrmlX[3],     (tempVpRGBA)(rdpCmdBufEndP1) // X to elem 3, 7
+    lpv     vpNrmlX[3], (tempVpRGBA)(rdpCmdBufEndP1) // X to elem 3, 7
     instan_lt_vec_3
-    lpv     vpNrmlZ[1],      (tempVpRGBA - 8)(rdpCmdBufEndP1) // Z to elem 3, 7
+    lpv     vpNrmlZ[1], (tempVpRGBA)(rdpCmdBufEndP1) // Z to elem 3, 7
     vclr    vpLtTot
     j       ltbasic_after_start
-     lpv    vpNrmlY[2],      (tempVpRGBA - 8)(rdpCmdBufEndP1) // Y to elem 3, 7
+     lpv    vpNrmlY[2], (tempVpRGBA)(rdpCmdBufEndP1) // Y to elem 3, 7
 
 .align 8
 ltbasic_start_standard:
     // Using elem 3, 7 for regular normals because packed normal results are there.
     instan_lt_vec_1
-    lpv     vpNrmlX[3],     (tempVpRGBA)(rdpCmdBufEndP1) // X to elem 3, 7
+    lpv     vpNrmlX[3], (tempVpRGBA)(rdpCmdBufEndP1) // X to elem 3, 7
     instan_lt_vec_2
-    lpv     vpNrmlZ[1],      (tempVpRGBA - 8)(rdpCmdBufEndP1) // Z to elem 3, 7
+    lpv     vpNrmlZ[1], (tempVpRGBA)(rdpCmdBufEndP1) // Z to elem 3, 7
     instan_lt_vec_3
-    lpv     vpNrmlY[2],      (tempVpRGBA - 8)(rdpCmdBufEndP1) // Y to elem 3, 7
+    lpv     vpNrmlY[2], (tempVpRGBA)(rdpCmdBufEndP1) // Y to elem 3, 7
     // vnop
     luv     vpLtTot,     (ltBufOfs + 0)(ambLight)  // Total light level, init to ambient
 ltbasic_after_start:
@@ -3189,7 +3191,7 @@ ltbasic_after_start:
     vmulf   $v29, vpNrmlX, vLTC[4] // Normals X elems 3, 7 * first light dir
     lpv     vpRGBA[0], (ltBufOfs + 8 - 2*lightSize)(ambLight) // Xfrmed dir in elems 4-6; temp reg
     vmacf   $v29, vpNrmlZ, vLTC[6] // Normals Z elems 3, 7 * first light dir
-    luv     vDDD[0],          (tempVpRGBA)(rdpCmdBufEndP1) // Load RGBA
+    luv     vDDD[0],    (tempVpRGBA)(rdpCmdBufEndP1) // Load RGBA
     vmacf   vAAA, vpNrmlY, vLTC[5] // Normals Y elems 3, 7 * first light dir
     instan_lt_scl_1  // $11 can be used as a temporary, except b/w instan_lt_scl_1...
     // vnop
