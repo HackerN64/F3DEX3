@@ -468,9 +468,8 @@ activeClipPlanes:
 .if (. & 7) != 0
     .error "packedConstants alignment broken"
 .endif
-packedConstants:  // See ltbasic_start_packed_ao for explanations of these values
+packedConstants:  // See ltbasic_start_packed for explanations of these values
     .db 0xF8
-    .db 0xFC
     .db 0x08
     
 materialCullMode:
@@ -731,11 +730,11 @@ Scalar regs:
       Tri write   Clip VW       Vtx write   Lighting  V/L init  Cmd dispatch
 $zero ---------------------- Hardwired zero --------------------------------
 $1    v1 texptr   <------------- vtxLeft -------------------->  temp, init 0
-$2    v2 shdptr   clipVNext -------> <------ lbL2A                  temp
+$2    v2 shdptr   clipVNext -------> <----- lbPostAo                temp
 $3    v3 shdflg   clipVLastOfsc  vLoopRet --------->                temp
 $4    flat shading vtx or (perf) initial FIFO stall time -------------------
 $5    <------------------------ vGeomMid -------------------->  
-$6    geom mode   clipMaskIdx -----> <----- lbPacked
+$6    geom mode   clipMaskIdx -----> <--- lbTexgenOrRet
 $7    v2flag tile <------------- fogFlag ---------->  mtx valid   cmd byte
 $8    v3flag      <------------- outVtx2 -------------------->
 $9    xp texenab  clipMask --------> <----- curLight  viLtFlag  ovlInitClock
@@ -745,9 +744,9 @@ $12   ----------------------- perfCounterD ---------------------------------
 $13   ------------------------ altBaseReg ----------------------------------
 $14               <-------------- inVtx --------------------->
 $15               <------------ outVtxBase ------------------>
-$16   v1flag lmaj clipFlags -------> <----- lbAOSign
+$16   v1flag lmaj clipFlags -------> <----- lbFakeAmb
 $17               clipPolyRead ---->
-$18   <---------- clipPolySelect --> 
+$18   <---------- clipPolySelect -->
 $19      temp     clipVOnsc      outVtx1 ---------->  <---------   dmaLen
 $20      temp     <------------- flagsV1 ---------->  <---------  dmemAddr
 $21   <---------- clipPolyWrite ---> <----- ambLight ---------->
@@ -787,10 +786,10 @@ flagsV1        equ $20   // Clip flags for vertex 1
 flagsV2        equ $24   // Clip flags for vertex 2
 
 // Lighting (lb = ltbasic)
-lbL2A          equ $2    // Nonzero if light-to-alpha (cel shading) enabled
-lbPacked       equ $6    // Nonzero if packed normals enabled
+lbPostAo       equ $2    // Address to return to after AO
+lbTexgenOrRet  equ $6    // ltbasic_texgen as negative if texgen, else vtx_return_from_lighting
 curLight       equ $9    // Current light pointer with offset
-lbAOSign       equ $16   // Sign bit set if ambient occlusion enabled
+lbFakeAmb      equ $16   // Pointer to ambient light or to 8 bytes of zeros if AO enabled
 ambLight       equ $21   // Ambient (top) light pointer with offset
 lbAfter        equ $25   // Address to return to after main lighting loop (vertex or extras)
 
@@ -932,9 +931,10 @@ sSTS equ vPerm4
 // always be free during vtx load or clipping.
 tempVpRGBA            equ 0x00        // Only used during loop
 tempXfrmLt            equ tempVpRGBA  // Only used during init
-tempPrevInvalVtxStart equ 0x10
-tempPrevInvalVtx      equ (tempPrevInvalVtxStart + vtxSize) // 0x36; fog writes here
-tempPrevInvalVtxEnd   equ (tempPrevInvalVtx + vtxSize)      // 0x5C; rest of vtx writes here
+tempAmbient           equ 0x10
+tempPrevInvalVtxStart equ 0x20
+tempPrevInvalVtx      equ (tempPrevInvalVtxStart + vtxSize) // 0x46; fog writes here
+tempPrevInvalVtxEnd   equ (tempPrevInvalVtx + vtxSize)      // 0x6C; rest of vtx writes here
 .if tempPrevInvalVtxEnd > (RDP_CMD_BUFSIZE_EXCESS - 8)
     .error "Too much temp storage used!"
 .endif
@@ -3049,36 +3049,49 @@ xfrm_light_loop_2:
     bltz    $11, xfrm_light_loop_1   // curLight < ambient; more lights to compute
      sw     $24, (ltBufOfs + 0xC - 1 * lightSize)(curLight) // Write light relative -1
 ltbasic_setup_after_xfrm:
+    // Constants registers:
+    //       e0     e1     e2     e3     e4     e5     e6     e7
+    // vLTC  0x0020 Lt1 Z  AOAmb  AODir  Lt1 X  Lt1 Y  AOAmb  AODir
+    // $v30  SOffs  TOffs  0/AOa  Persp  SOffs  TOffs  0xF800 0x0800
     lpv     vLTC[0], (ltBufOfs + 8 - lightSize)(ambLight) // First lt xfrmed dir in elems 4-6
+    addi    lbFakeAmb, ambLight, ltBufOfs  // Ptr to load amb light from; normally actual ambient light
     li      vLoopRet, ltbasic_start_standard
     andi    $11, vGeomMid, (G_AMBOCCLUSION | G_PACKED_NORMALS | G_LIGHTTOALPHA | G_TEXTURE_GEN) >> 8
+    vmov    $v30[2], $v31[2] // 0 as AO alpha offset
+    vmov    vLTC[1], vLTC[6] // Move first lt Z to elem 1; watch stall on vLTC load
     beqz    $11, vtx_after_lt_setup  // None of the above features enabled
      li     lbAfter, vtx_return_from_lighting
-    andi    $11, $11, ~(G_TEXTURE_GEN >> 8)
-    beqz    $11, vtx_after_lt_setup  // Zero = only texgen enabled
-     li     lbAfter, ltbasic_texgen
-    andi    $11, $11, ~(G_LIGHTTOALPHA >> 8)
-    beqz    $11, vtx_after_lt_setup  // Zero = L2A (and maybe texgen) enabled, but AO and PN not
-     li     lbAfter, ltbasic_l2a
-    // AO and/or packed are enabled
-    andi    lbPacked, vGeomMid, G_PACKED_NORMALS >> 8
-    beqz    lbPacked, @@skip_packed
-     andi   lbL2A, vGeomMid, G_LIGHTTOALPHA >> 8
-    // vLTC[0:3] = [0xF800, 0xFC00, (1 << 11) = 0x0800, (1 << 5) = 0x0020]
-    lpv     vTemp1[0], (packedConstants - altBase)(altBaseReg) // Elems 0-2 above
+    andi    $11, vGeomMid, G_TEXTURE_GEN >> 8
+    beqz    $11, @@skip_texgen
+     andi   $10, vGeomMid, G_PACKED_NORMALS >> 8
+    li      lbAfter, 0x8000 | ltbasic_texgen // Negative is used as flag
+@@skip_texgen:
+    beqz    $10, @@skip_packed
+     move   lbTexgenOrRet, lbAfter
+    // Packed normals setup
+    lpv     vTemp1[6], (packedConstants - altBase)(altBaseReg) // Elems 6-7: 0xF800, 0x0800
     lqv     vTemp2, (vTRCValue)($zero)  // Sadly 0x0020 was in element 4 of vTRC, already overwritten by mtx
-    vlt     $v29, $v31, $v31[3] // Set VCC to 11100000
-    li      lbAfter, ltbasic_no_l2a
-    vmrg    vLTC, vTemp1, vLTC // Consts in elems 0-2, first lt dir in elems 4-6
-    vmov    vLTC[3], vTemp2[4] // 0x0020 constant to element 3
+    vge     $v29, $v31, $v31[6] // Set VCC to 00000011
+    li      lbAfter, ltbasic_packed
+    li      vLoopRet, ltbasic_start_packed
+    sbv     $v31[15], (3)(lbFakeAmb)  // 0xFF; Set ambient "alpha" to FF / 7F80
+    vmrg    $v30, $v30, vTemp1 // Other stuff in elems 0-5, consts in elems 6-7
+    sbv     $v31[15], (7)(lbFakeAmb)  // 0xFF; so vpLtTot alpha ~= 7FFF, so * vtx alpha
+    vmov    vLTC[0], vTemp2[4] // 0x0020 constant to element 0
 @@skip_packed:
-    beqz    lbL2A, @@skip_l2a
-     sll    lbAOSign, vGeomMid, 31             // G_AMBOCCLUSION
+    andi    $11, vGeomMid, G_LIGHTTOALPHA >> 8
+    beqz    $11, @@skip_l2a
+     andi   $10, vGeomMid, G_AMBOCCLUSION >> 8
     li      lbAfter, ltbasic_l2a
 @@skip_l2a:
-    bgez    lbAOSign, vtx_after_lt_setup       // Sign bit clear = AO disabled
-     li     vLoopRet, ltbasic_start_packed_ao
-    llv     $v30[12], (aoAmbientFactor - altBase)(altBaseReg) // Ambient and dir to elems 6, 7
+    beqz    $10, vtx_after_lt_setup
+     // AO setup
+     move   lbPostAo, lbAfter // Harmless to be done even if not AO
+    addi    lbFakeAmb, rdpCmdBufEndP1, tempAmbient  // Temp mem as ambient light
+    vmov    $v30[2], $v31[7] // 7FFF as AO alpha offset
+    spv     vOne[0], (0)(lbFakeAmb) // Store all zeros here (upper bytes of vOne are 0)
+    llv     vLTC[4], (aoAmbientFactor - altBase)(altBaseReg) // Ambient and dir to elems 2, 3
+    llv     vLTC[12], (aoAmbientFactor - altBase)(altBaseReg) // Ambient and dir to elems 6, 7
     j       vtx_after_lt_setup
      li     lbAfter, ltbasic_ao
     
@@ -3148,31 +3161,17 @@ xfrm_light_store_lookat:
 
 .align 8
 
-// If lighting, vLoopRet = ltbasic_start_packed_ao if packed or AO, else ltbasic_start_standard
+// If lighting, vLoopRet = ltbasic_start_packed if packed, else ltbasic_start_standard
 
-ltbasic_start_packed_ao:
+ltbasic_start_packed:
     instan_lt_vec_1
-    beqz    lbPacked, ltbasic_start_ao    // Go to AO only if packed normals disabled
-     instan_lt_vec_2
+    instan_lt_vec_2
     instan_lt_vec_3
-    luv     vpLtTot,     (ltBufOfs + 0)(ambLight)  // Total light level, init to ambient
-    vmudn   vpNrmlY, vpMdl, vLTC[3]      // (1 << 5) = 0x20; left shift normals Y
-    sra     $11, lbAOSign, 31             // All 1s if AO enabled
-    vand    vpNrmlX, vpMdl, vLTC[0] // 0xF800; mask X to only top 5 bits
-    nor     $11, $11, $zero               // All 1s if AO disabled
-    vmudn   vpNrmlZ, vpMdl, vLTC[2]      // (1 << 11) = 0x0800; left shift normals Z
-    ctc2    $11, $vcc                     // Set VCC to all 1s if AO disabled, else all 0s
-    vmrg    vpLtTot, vpLtTot, $v31[2]     // 0; clear vpLtTot if AO enabled
+    vand    vpNrmlX, vpMdl, $v30[6]  // 0xF800; mask X to only top 5 bits
+    luv     vDDD[0],    (tempVpRGBA)(rdpCmdBufEndP1) // Load RGBA
+    vmudn   vpNrmlY, vpMdl, vLTC[0]  // (1 << 5) = 0x20; left shift normals Y
     j       ltbasic_after_start
-     vand   vpNrmlY, vpNrmlY, vLTC[1]           // 0xFC00; mask Y to only top 6 bits
-
-ltbasic_start_ao:
-    lpv     vpNrmlX[3], (tempVpRGBA)(rdpCmdBufEndP1) // X to elem 3, 7
-    instan_lt_vec_3
-    lpv     vpNrmlZ[1], (tempVpRGBA)(rdpCmdBufEndP1) // Z to elem 3, 7
-    vclr    vpLtTot
-    j       ltbasic_after_start
-     lpv    vpNrmlY[2], (tempVpRGBA)(rdpCmdBufEndP1) // Y to elem 3, 7
+     vmudn  vpNrmlZ, vpMdl, $v30[7]  // (1 << 11) = 0x0800; left shift normals Z
 
 .align 8
 ltbasic_start_standard:
@@ -3180,26 +3179,26 @@ ltbasic_start_standard:
     instan_lt_vec_1
     lpv     vpNrmlX[3], (tempVpRGBA)(rdpCmdBufEndP1) // X to elem 3, 7
     instan_lt_vec_2
-    lpv     vpNrmlZ[1], (tempVpRGBA)(rdpCmdBufEndP1) // Z to elem 3, 7
-    instan_lt_vec_3
     lpv     vpNrmlY[2], (tempVpRGBA)(rdpCmdBufEndP1) // Y to elem 3, 7
-    // vnop
-    luv     vpLtTot,     (ltBufOfs + 0)(ambLight)  // Total light level, init to ambient
-ltbasic_after_start:
-// vAAA <- (NOC: vpMdl, Occ: sCLZ)
-// vpRGBA <- (NOC: -, Occ: sOTM)
-    vmulf   $v29, vpNrmlX, vLTC[4] // Normals X elems 3, 7 * first light dir
-    lpv     vpRGBA[0], (ltBufOfs + 8 - 2*lightSize)(ambLight) // Xfrmed dir in elems 4-6; temp reg
-    vmacf   $v29, vpNrmlZ, vLTC[6] // Normals Z elems 3, 7 * first light dir
+    instan_lt_vec_3
+    lpv     vpNrmlZ[1], (tempVpRGBA)(rdpCmdBufEndP1) // Z to elem 3, 7
+    vnop
     luv     vDDD[0],    (tempVpRGBA)(rdpCmdBufEndP1) // Load RGBA
-    vmacf   vAAA, vpNrmlY, vLTC[5] // Normals Y elems 3, 7 * first light dir
+ltbasic_after_start:
+    vmulf   $v29, vpNrmlX, vLTC[4] // Normals X elems 3, 7 * first light dir X
+// vpRGBA <- (NOC: -, Occ: sOTM)
+    lpv     vpRGBA[0], (ltBufOfs + 8 - 2*lightSize)(ambLight) // Xfrmed dir in elems 4-6; temp reg
+    vmacf   $v29, vpNrmlY, vLTC[5] // Normals Y elems 3, 7 * first light dir Y
+    luv     vpLtTot,    (0)(lbFakeAmb)  // Total light level, init to ambient or zeros if AO
+// vAAA <- (NOC: vpMdl, Occ: sCLZ)
+    vmacf   vAAA, vpNrmlZ, vLTC[1] // Normals Z elems 3, 7 * first light dir Z
     instan_lt_scl_1  // $11 can be used as a temporary, except b/w instan_lt_scl_1...
-    // vnop
-    beq     ambLight, altBaseReg, ltbasic_post
-     instan_lt_scl_2 // ...and instan_lt_scl_2
+    vsub    vDDD, vDDD, $v30[2] // Offset alpha for AO, or 0 normally
+    instan_lt_scl_2 // ...and instan_lt_scl_2
 // vBBB <- (Occ: sFOG here / NOC: sSCI earlier)
     // vnop
-    move    curLight, ambLight                   // Point to ambient light
+    beq     ambLight, altBaseReg, ltbasic_post
+     move   curLight, ambLight                   // Point to ambient light
 ltbasic_loop:
     vge     vCCC, vAAA, $v31[2] // 0; clamp dot product to >= 0
     vmulf   $v29, vpNrmlX, vpRGBA[4] // Normals X elems 3, 7 * next light dir
@@ -3217,44 +3216,34 @@ ltbasic_post:
     vne     $v29, $v31, $v31[3h]           // Set VCC to 11101110
     jr      lbAfter
      vmrg   vpRGBA, vpLtTot, vDDD  // RGB = light, A = vtx alpha
-     
-// lbAfter = ltbasic_ao if AO else
-//           ltbasic_l2a if L2A else
-//           ltbasic_no_l2a if packed else
-//           ltbasic_texgen if texgen else
-//           vtx_return_from_lighting
-vLtRGBOut equ vpRGBA
-vLtAOut   equ vAAA
+    
+// lbAfter       = ltbasic_ao if AO else
+// lbPostAo      = ltbasic_l2a if L2A else
+//                 ltbasic_packed if packed else
+// lbTexgenOrRet = ltbasic_texgen if texgen else
+//                 vtx_return_from_lighting
      
 ltbasic_ao:
-    vsub    vpRGBA, vDDD, $v31[7] // 0x7FFF; offset alpha
-    vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
-    vmadm   vCCC, vpRGBA, $v30[7] // + (alpha - 1) * aoDir factor; elems 3, 7
-    luv     vAAA,     (ltBufOfs + 0)(ambLight)  // Ambient light level
-    vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
-    vmadm   vpRGBA, vpRGBA, $v30[6] // + (alpha - 1) * aoAmb factor; elems 3, 7
-    vmulf   $v29, vpLtTot, vCCC[3h] // Sum of dir lights *= dir factor
-    beqz    lbL2A, ltbasic_no_l2a
-     vmacf  vpLtTot, vAAA, vpRGBA[3h] // + ambient * amb factor
+    vmudn   $v29, vLTC, vDDD[3h]      // (aoAmb 2 6, aoDir 3 7) * (alpha - 1)
+    luv     vpRGBA, (ltBufOfs + 0)(ambLight)  // Ambient light level
+    vmadh   vCCC, vOne, $v31[7]       // + 0x7FFF (1 in s.15)
+    vadd    vDDD, vDDD, $v31[7]       // 0x7FFF; undo offset alpha
+    vmulf   $v29, vpLtTot, vCCC[3h]   // Sum of dir lights *= dir factor
+    vmacf   vpLtTot, vpRGBA, vCCC[2h] // + ambient * amb factor
+    jr      lbPostAo                  // Return, texgen, l2a, or packed
+     vmacf  vpRGBA, $v31, $v31[2]     // 0; need it in vpRGBA if returning, else in vpLtTot
+     
 ltbasic_l2a:
     // Light-to-alpha (cel shading): alpha = max of light components, RGB = vertex color
-    vge     vLtAOut, vpLtTot, vpLtTot[1h]  // elem 0 = max(R0, G0); elem 4 = max(R1, G1)
-    vge     vLtAOut, vLtAOut, vLtAOut[2h]  // elem 0 = max(R0, G0, B0); equiv for elem 4
-    vcopy   vLtRGBOut, vDDD                // RGB output is vertex color
-    vne     $v29, $v31, $v31[3h]           // Set VCC to 11101110
-    j       ltbasic_common_end
-     vmudh  vLtAOut, vOne, vLtAOut[0h]     // move light level elem 0, 4 to 3, 7
+    vge     vpLtTot, vpLtTot, vpLtTot[1h] // elem 0 = max(R0, G0); elem 4 = max(R1, G1)
+    vge     vpLtTot, vpLtTot, vpLtTot[2h] // elem 0 = max(R0, G0, B0); equiv for elem 4
+    vne     $v29, $v31, $v31[3h]          // Reset VCC to 11101110 (clobbered by vge)
+    jr      lbTexgenOrRet
+     vmrg   vpRGBA, vDDD, vpLtTot[0h]     // RGB is vcol (garbage if not packed); A is light
     
-ltbasic_no_l2a:
-    vcopy   vLtAOut, vDDD                  // Alpha output (only 3, 7 matter) = vertex alpha 
-    vmulf   vLtRGBOut, vDDD, vpLtTot       // RGB output is RGB * light
-ltbasic_common_end:
-    bnez    lbPacked, @@skip               // If packed normals, skip
-     andi   $11, vGeomMid, G_TEXTURE_GEN >> 8
-    vcopy   vLtRGBOut, vpLtTot             // If no packed normals, base output is just light
-@@skip:
-    beqz    $11, vtx_return_from_lighting
-     vmrg   vpRGBA, vLtRGBOut, vLtAOut  // Merge base output and alpha output
+ltbasic_packed:
+    bgez    lbTexgenOrRet, vtx_return_from_lighting // < 0 for texgen
+     vmulf  vpRGBA, vpLtTot, vDDD      // (Light color, 7FFF alpha) * vertex RGBA.
 ltbasic_texgen:
 // Texgen uses vpLtTot, vAAA, vCCC:vDDD, and of course vpST.
 ltLookAt equ vCCC
