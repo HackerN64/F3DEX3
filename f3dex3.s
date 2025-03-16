@@ -1928,6 +1928,7 @@ clip_skipxy:
     addi    outVtxBase, outVtxBase, vtxSize // Not inc'd, must point to second vtx
 .endif
     vmadn   cDiffF, sRTF, cDiffI
+    li      vLoopRet, vtx_loop_no_lighting
     vmadh   cDiffI, sRTI, cDiffI
     vmudh   $v29, vOne, $v31[4]             // 4; 4 - 4 * (D*R)
     vmadn   cDiffF, cDiffF, $v31[0]         // -4
@@ -2169,40 +2170,42 @@ vtx_constants_for_clip:
     bltz    inVtx, clip_after_constants             // inVtx < 0 means from clipping
      lsv    $v30[6], (perspNorm - altBase)(altBaseReg) // Perspective norm elem 3
 vtx_after_setup_constants:
-    bnez    $7, vtx_load_mvp
-     li     $2, vpMatrix
+    bnez    $7, vtx_mtx_ready
+     lb     viLtFlag, pointLightFlagOrDirXfrmValid
+    li      $2, vpMatrix
     li      $3, mMatrix
     j       mtx_multiply
      li     $6, mvpMatrix
 vtx_after_mtx_multiply:
     sqv     $v5[0], (fourthQWMVP +    0)($zero)
     sb      $10, mvpValid  // $10 is nonzero from mtx_multiply, in fact 0x18
-vtx_load_mvp:
-    lqv     vMVP0I,     (mvpMatrix + 0x00)($zero)  // Load MVP matrix
-    lqv     vMVP2I,     (mvpMatrix + 0x10)($zero)
-    lqv     vMVP0F,     (mvpMatrix + 0x20)($zero)
-    lqv     vMVP2F,     (fourthQWMVP +  0)($zero)
-    lb      viLtFlag, pointLightFlagOrDirXfrmValid
-    vcopy   vMVP1I,  vMVP0I
-    vcopy   vMVP3I,  vMVP2I
-    ldv     vMVP1I[0],  (mvpMatrix + 0x08)($zero)
-    vcopy   vMVP1F,  vMVP0F
-    ldv     vMVP3I[0],  (mvpMatrix + 0x18)($zero)
-    vcopy   vMVP3F,  vMVP2F
-    ldv     vMVP1F[0],  (mvpMatrix + 0x28)($zero)
-    ldv     vMVP3F[0],  (fourthQWMVP +  8)($zero)
-    ldv     vMVP0I[8],  (mvpMatrix + 0x00)($zero)
-    ldv     vMVP2I[8],  (mvpMatrix + 0x10)($zero)
-vtx_return_from_ltadv:
-    ldv     vMVP0F[8],  (mvpMatrix + 0x20)($zero)
-    ldv     vMVP2F[8],  (fourthQWMVP +  0)($zero)
+vtx_mtx_ready:
     andi    $11, vGeomMid, G_LIGHTING >> 8
     bnez    $11, vtx_select_lighting
      sb     $zero, materialCullMode        // Vtx ends material
 vtx_setup_no_lighting:
-vtx_final_setup_for_clip:
     li      vLoopRet, vtx_loop_no_lighting
 vtx_after_lt_setup:
+    li      $11, mvpMatrix
+vtx_load_mvp:
+    lqv     vMVP0I,     (0x00)($11)  // Load MVP matrix
+    lqv     vMVP2I,     (0x10)($11)
+    lqv     vMVP0F,     (0x20)($11)
+    lqv     vMVP2F,     (fourthQWMVP + 0)($zero)
+    // nop TODO
+    vcopy   vMVP1I,  vMVP0I
+    vcopy   vMVP3I,  vMVP2I
+    ldv     vMVP1I[0],  (0x08)($11)
+    vcopy   vMVP1F,  vMVP0F
+    ldv     vMVP3I[0],  (0x18)($11)
+    vcopy   vMVP3F,  vMVP2F
+    ldv     vMVP1F[0],  (0x28)($11)
+    ldv     vMVP3F[0],  (fourthQWMVP + 8)($zero)
+    ldv     vMVP0I[8],  (0x00)($11)
+    ldv     vMVP2I[8],  (0x10)($11)
+    ldv     vMVP0F[8],  (0x20)($11)
+    ldv     vMVP2F[8],  (fourthQWMVP + 0)($zero)
+vtx_final_setup_for_clip:
 .if !CFG_NO_OCCLUSION_PLANE
     vge     $v29, $v31, $v31[2h] // VCC = 00110011
 .endif
@@ -3579,8 +3582,8 @@ ltadv_normal_to_vertex:
 // aSCL <- aDWF
     vmudm   aSCL, aL2I, $v29[1h]       // PL: len^2 int * 1/len frac
     vmadn   aSCL, aL2F, $v29[0h]       // PL: len^2 frac * 1/len int = len frac
-    mtc2    $20, aL2I[14]              // PL: Quadratic int part in elem 7
     vmadh   $v29, aL2I, $v29[0h]       // PL: len^2 int * 1/len int = len int
+    mtc2    $20, aL2I[14]              // PL: Quadratic int part in elem 7
     vmulf   aDWI, aDIR, vpWNrm         // Both: Normalized light dir * normalized normals
     vmudl   aSCL, aSCL, vpLtTot[7]     // PL:   len frac * linear factor frac
     vmadm   aSCL, $v29, vpLtTot[7]     // PL: + len int * linear factor frac
