@@ -212,27 +212,15 @@ In C, the matrix is accessed as matrix[row][col], and the vector is vector[row].
 */
 // 0x0000-0x0040: model matrix
 mMatrix:
-    .fill 64
+    .fill 0x40
 
 // 0x0040-0x0080: view * projection matrix
 vpMatrix:
-    .fill 64
+    .fill 0x40
 
-// model * (view * projection) matrix; first three rows only, last is in OSTask
+// model * (view * projection) matrix
 mvpMatrix:
-    .fill 0x30
-    
-fogFactor:
-    .dw 0x00000000
-
-textureSettings1:
-    .dw 0x00000000 // first word, has command byte, level, tile, and on
-    
-textureSettings2:
-    .dw 0xFFFFFFFF // second word, has s and t scale
-    
-geometryModeLabel:
-    .dw 0x00000000 // originally initialized to G_CLIPPING, but that does nothing
+    .fill 0x40
     
 .if . != 0x00C0
 .error "Scissor and othermode must be at 0x00C0 for S2DEX"
@@ -322,36 +310,6 @@ v31Value:
     .dh 0x7F00 // used in fog, normals unpacking
     .dh 0x7FFF // used often
 
-// constants for register vTRC
-.if (. & 15) != 0
-    .error "Wrong alignment for vTRCValue"
-.endif
-vTRCValue:
-decalFixMult equ 0x0400
-decalFixOff equ (-(decalFixMult / 2))
-    .dh vertexBuffer // currently 0x02DE; for converting vertex index to address
-    .dh vtxSize << 7 // 0x1300; it's not 0x2600 because vertex indices are *2
-    .dh 0x1000 // some multiplier in tri write, increment in vertex indices
-    .dh decalFixMult
-    .dh 0x0020 // some edge write thing in tri write; formerly Z scale factor
-    .dh 0xFFF8 // used once in tri write, mask away lower ST bits
-    .dh decalFixOff // negative
-    .dh 0x0100 // used several times in tri write
-.macro set_vcc_11110001  // Only VCC pattern used with vTRC
-    vge    $v29, vTRC, vTRC[7]
-.endmacro
-.if (vertexBuffer < 0x0100 || decalFixMult < 0x100)
-    .error "VCC pattern for vTRC corrupted"
-.endif
-vTRC_VB   equ vTRC[0] // Vertex Buffer
-vTRC_VS   equ vTRC[1] // Vertex Size
-vTRC_1000 equ vTRC[2]
-vTRC_DM   equ vTRC[3] // Decal Multiplier
-vTRC_0020 equ vTRC[4]
-vTRC_FFF8 equ vTRC[5]
-vTRC_DO   equ vTRC[6] // Decal Offset
-vTRC_0100 equ vTRC[7]
-
 /*
 Quick note on Newton-Raphson:
 https://en.wikipedia.org/wiki/Division_algorithm#Newton%E2%80%93Raphson_division
@@ -425,7 +383,52 @@ occlusionPlaneMidCoeffs:
 
 // Alternate base address because vector load offsets can't reach all of DMEM.
 // altBaseReg permanently points here.
+.if (. & 15) != 0
+    .error "Wrong alignment for altBase"
+.endif
 altBase:
+
+textureSettings1:
+    .dw 0x00000000 // first word, has command byte, level, tile, and on
+    
+textureSettings2:
+    .dw 0xFFFFFFFF // second word, has s and t scale
+    
+geometryModeLabel:
+    .dw 0x00000000 // originally initialized to G_CLIPPING, but that does nothing
+    
+fogFactor:
+    .dw 0x00000000
+
+// constants for register $v30
+.if (. & 15) != 0
+    .error "Wrong alignment for v30value"
+.endif
+v30Value:
+decalFixMult equ 0x0400
+decalFixOff equ (-(decalFixMult / 2))
+    .dh vertexBuffer // currently 0x02DE; for converting vertex index to address
+    .dh vtxSize << 7 // 0x1300; it's not 0x2600 because vertex indices are *2
+    .dh 0x1000 // some multiplier in tri write, increment in vertex indices
+    .dh decalFixMult
+    .dh 0x0020 // some edge write thing in tri write; formerly Z scale factor
+    .dh 0xFFF8 // used once in tri write, mask away lower ST bits
+    .dh decalFixOff // negative
+    .dh 0x0100 // used several times in tri write
+.macro set_vcc_11110001  // Only VCC pattern used with $v30
+    vge    $v29, $v30, $v30[7]
+.endmacro
+.if (vertexBuffer < 0x0100 || decalFixMult < 0x100)
+    .error "VCC pattern for $v30 corrupted"
+.endif
+v30_VB   equ $v30[0] // Vertex Buffer
+v30_VS   equ $v30[1] // Vertex Size
+v30_1000 equ $v30[2]
+v30_DM   equ $v30[3] // Decal Multiplier
+v30_0020 equ $v30[4]
+v30_FFF8 equ $v30[5]
+v30_DO   equ $v30[6] // Decal Offset
+v30_0100 equ $v30[7]
 
 fxParams:
 
@@ -621,8 +624,11 @@ RDP_CMD_BUFSIZE_TOTAL equ (RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS)
 
 INPUT_BUFFER_CMDS equ 21
 INPUT_BUFFER_SIZE_BYTES equ (INPUT_BUFFER_CMDS * 8)
+INPUT_BUFFER_CLOBBER_OSTASK_AMT equ 0x10 // Input buffer overwrites beginning of OSTask, see rsp_defs.inc
+OSTASK_ORIG_SIZE equ 0x40
+OSTASK_CLOBBERED_SIZE equ (OSTASK_ORIG_SIZE - INPUT_BUFFER_CLOBBER_OSTASK_AMT)
 
-END_VARIABLE_LEN_DMEM equ (0xFC0 - INPUT_BUFFER_SIZE_BYTES - (2 * RDP_CMD_BUFSIZE_TOTAL) - (2 * CLIP_POLY_SIZE_BYTES) - CLIP_TEMP_VERTS_SIZE_BYTES - VERTEX_BUFFER_SIZE_BYTES)
+END_VARIABLE_LEN_DMEM equ (0x1000 - OSTASK_CLOBBERED_SIZE - INPUT_BUFFER_SIZE_BYTES - (2 * RDP_CMD_BUFSIZE_TOTAL) - (2 * CLIP_POLY_SIZE_BYTES) - CLIP_TEMP_VERTS_SIZE_BYTES - VERTEX_BUFFER_SIZE_BYTES)
 
 startFreeDmem:
 .org END_VARIABLE_LEN_DMEM
@@ -686,36 +692,29 @@ rdpCmdBuffer2EndPlus1Word:
 
 // Input buffer. After RDP cmd buffers so it can be vector addressed from end.
 inputBuffer:
-    .skip INPUT_BUFFER_SIZE_BYTES
+    .skip INPUT_BUFFER_SIZE_BYTES - INPUT_BUFFER_CLOBBER_OSTASK_AMT
+// 0x0FC0-0x1000: OSTask
+OSTask:
+    .skip INPUT_BUFFER_CLOBBER_OSTASK_AMT
 inputBufferEnd:
 inputBufferEndSgn equ -(0x1000 - inputBufferEnd) // Underflow DMEM address
+// rest of OSTask
+    .skip OSTASK_CLOBBERED_SIZE
 
-.if . != 0xFC0
+.if . != 0x1000
     .error "DMEM organization incorrect"
 .endif
 
-.org 0xFC0
+.close // DATA_FILE
 
-// 0x0FC0-0x1000: OSTask
-OSTask:
-    .skip 0x40
-// The only thing used in the first 16 bytes of OSTask is flags, which we now
-// set up correctly (zero) when loading another ucode. This is a negative offset
-// relative to $zero to wrap around DMEM to the top.
-fourthQWMVP equ -(0x1000 - (OSTask + OSTask_type))
-// This word is not used by F3DEX3, S2DEX, or even boot. Reuse it as a temp.
+// See rsp_defs.inc about why these are not used and we can reuse them.
 startCounterTime equ (OSTask + OSTask_ucode_size)
-// These two words are used by boot, but not by F3DEX3 or S2DEX.
 xfrmLookatDirs equ -(0x1000 - (OSTask + OSTask_ucode_data)) // and OSTask_ucode_data_size
-
 
 memsetBufferStart equ ((vertexBuffer + 0xF) & 0xFF0)
 memsetBufferMaxEnd equ (rdpCmdBuffer1 & 0xFF0)
 memsetBufferMaxSize equ (memsetBufferMaxEnd - memsetBufferStart)
 memsetBufferSize equ (memsetBufferMaxSize > 0x800 ? 0x800 : memsetBufferMaxSize)
-
-
-.close // DATA_FILE
 
 ////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////// Register Naming ////////////////////////////////
@@ -2080,6 +2079,7 @@ G_MTX_end:
     li      $3, tempMatrix // Input 1 = temp mem (loaded mtx)
     jal     while_wait_dma_busy
      move   $2, $6 // Input 0 = output
+    li      $ra, run_next_DL_command
 mtx_multiply:
     // $3, $2 are input matrices; $6 is output matrix; $7 is 0 for return to vtx
     addi    $10, $3, 0x0018
@@ -2107,9 +2107,8 @@ mtx_multiply:
      addi   $3, $3, 0x0008
     sqv     $v7[0], (0x0020)($6)
     sqv     $v6[0], (0x0000)($6)
-    beqz    $7, vtx_after_mtx_multiply
-     sqv    $v4[0], (0x0010)($6)
-    j       run_next_DL_command
+    sqv     $v4[0], (0x0010)($6)
+    jr      $ra
      sqv    $v5[0], (0x0030)($6)
 
 vtx_after_dma:
@@ -2126,11 +2125,11 @@ vtx_constants_for_clip:
     // Results fill vPerm1:4. Uses misc temps.
     lhu     vGeomMid, geometryModeLabel + 1       // Load middle 2 bytes of geom mode
 .if CFG_NO_OCCLUSION_PLANE
-    llv     sFOG[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
+    llv     sFOG[0], (fogFactor - altBase)(altBaseReg) // Load fog multiplier 0 and offset 1
     ldv     sVPO[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
     veq     $v29, $v31, $v31[3h]                  // VCC = 00010001
     ldv     sVPO[8], (viewport + 8)($zero)
-    llv     sSTS[0], (textureSettings2)($zero)    // Texture ST scale in 0, 1
+    llv     sSTS[0], (textureSettings2 - altBase)(altBaseReg) // Texture ST scale in 0, 1
     vmrg    sFGM, vOne, $v31[2]                   // sFGM is 0,0,0,1,0,0,0,1
     ldv     sVPS[0], (viewport)($zero)            // Load vscale duplicated in 0-3 and 4-7
     vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
@@ -2174,10 +2173,8 @@ vtx_after_setup_constants:
      lb     viLtFlag, pointLightFlagOrDirXfrmValid
     li      $2, vpMatrix
     li      $3, mMatrix
-    j       mtx_multiply
+    jal     mtx_multiply
      li     $6, mvpMatrix
-vtx_after_mtx_multiply:
-    sqv     $v5[0], (fourthQWMVP +    0)($zero)
     sb      $10, mvpValid  // $10 is nonzero from mtx_multiply, in fact 0x18
 vtx_mtx_ready:
     andi    $11, vGeomMid, G_LIGHTING >> 8
