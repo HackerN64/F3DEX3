@@ -311,8 +311,7 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_MWO_ATTR_OFFSET_S      0x10
 #define G_MWO_ATTR_OFFSET_T      0x12
 #define G_MWO_ALPHA_COMPARE_CULL 0x14
-#define G_MWO_NORMALS_MODE       0x16
-#define G_MWO_LAST_MAT_DL_ADDR   0x18
+#define G_MWO_LAST_MAT_DL_ADDR   0x16
 
 /*
  * RDP command argument defines
