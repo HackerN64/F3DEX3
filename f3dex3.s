@@ -3023,6 +3023,7 @@ G_POPMTX_handler:
     lw      $2, OSTask + OSTask_dram_stack  // Top of the stack
     sub     cmd_w1_dram, $11, cmd_w1_dram   // Decrease pointer by amount in command
     sub     $1, cmd_w1_dram, $2             // Is it still valid / within the stack?
+    sb      $zero, dirLightsXfrmValid       // Mark lights as needing recompute
     bgez    $1, @@skip                      // If so, skip the failsafe
      sb     $zero, mITValid                 // Mark matrix as needing recompute
     move    cmd_w1_dram, $2                 // Use the top of the stack as the new pointer
@@ -3051,6 +3052,7 @@ G_MTX_handler:
     lw      cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Load command word 1 again
 load_mtx:
     add     $7, $7, $2        // Add the load type to the command byte in $7, selects the return address based on whether the matrix needs multiplying or just loading
+    sb      $zero, dirLightsXfrmValid
     sb      $zero, mITValid
 G_MOVEMEM_handler:
     jal     segmented_to_physical   // convert the memory address cmd_w1_dram to a virtual one
