@@ -729,39 +729,39 @@ memsetBufferSize equ (memsetBufferMaxSize > 0x800 ? 0x800 : memsetBufferMaxSize)
 
 /*
 Scalar regs:
-      Tri write   Clip VW       Vtx write   Lighting  V/L init  Cmd dispatch
-$zero ---------------------- Hardwired zero --------------------------------
-$1    v1 texptr   <------------- vtxLeft -------------------->  temp, init 0
-$2    v2 shdptr   clipVNext -------> <----- lbPostAo                temp
-$3    v3 shdflg   clipVLastOfsc  vLoopRet --------->                temp
-$4    flat shading vtx or (perf) initial FIFO stall time -------------------
-$5    <------------------------ vGeomMid -------------------->  
-$6    geom mode   clipMaskIdx -----> <--- lbTexgenOrRet
-$7    v2flag tile <------------- fogFlag ---------->  mtx valid   cmd byte
-$8    v3flag      <------------- outVtx2 -------------------->
-$9    xp texenab  clipMask --------> <----- curLight  viLtFlag  ovlInitClock
-$10   -------------------------- temp2 -------------------------------------
-$11   --------------------------- temp -------------------------------------
-$12   ----------------------- perfCounterD ---------------------------------
-$13   ------------------------ altBaseReg ----------------------------------
-$14               <-------------- inVtx --------------------->
-$15               <------------ outVtxBase ------------------>
-$16   v1flag lmaj clipFlags -------> <----- lbFakeAmb
+      Tri write   Clip VW       Vtx write   ltbasic    ltadv    V/L init  Cmd dispatch
+$zero ---------------------- Hardwired zero ------------------------------------------
+$1    v1 texptr   <------------- vtxLeft ------------------------------>  temp, init 0
+$2    v2 shdptr   clipVNext -------> <----- lbPostAo   laPtr                  temp
+$3    v3 shdflg   clipVLastOfsc  vLoopRet ---------> laVtxLeft                temp
+$4    flat shading vtx or (perf) initial FIFO stall time -----------------------------
+$5    <------------------------ vGeomMid ------------------------------>  
+$6    geom mode   clipMaskIdx -----> <-- lbTexgenOrRet laSTKept
+$7    v2flag tile <------------- fogFlag ---------->  laPacked  mtx valid   cmd byte
+$8    v3flag      <------------- outVtx2 ---------->  laSpecular outVtx2
+$9    xp texenab  clipMask --------> <----- curLight ---------> viLtFlag  ovlInitClock
+$10   -------------------------- temp2 -----------------------------------------------
+$11   --------------------------- temp -----------------------------------------------
+$12   ----------------------- perfCounterD -------------------------------------------
+$13   ------------------------ altBaseReg --------------------------------------------
+$14               <-------------- inVtx ------------------------------->
+$15               <------------ outVtxBase ---------------------------->
+$16   v1flag lmaj clipFlags -------> <----- lbFakeAmb laSpecFres
 $17               clipPolyRead ---->
 $18   <---------- clipPolySelect -->
-$19      temp     clipVOnsc      outVtx1 ---------->  <---------   dmaLen
-$20      temp     <------------- flagsV1 ---------->  <---------  dmemAddr
-$21   <---------- clipPolyWrite ---> <----- ambLight ---------->
-$22   ---------------------- rdpCmdBufEndP1 --------------------------------
-$23   ----------------------- rdpCmdBufPtr ---------------------------------
-$24      temp     <------------- flagsV2 ---------->  <--------- cmd_w1_dram
-$25     cmd_w0 --------------------> <----- lbAfter   <---------    cmd_w0
-$26   ------------------------ taskDataPtr ---------------------------------
-$27   ---------------------- inputBufferPos --------------------------------
-$28   ----------------------- perfCounterA ---------------------------------
-$29   ----------------------- perfCounterB ---------------------------------
-$30   ----------------------- perfCounterC ---------------------------------
-$ra   return address, sometimes sign bit is flag ---------------------------
+$19      temp     clipVOnsc      outVtx1 ---------->    laL2A   <---------   dmaLen
+$20      temp     <------------- flagsV1 ---------->   laTexgen <---------  dmemAddr
+$21   <---------- clipPolyWrite ---> <----- ambLight             ambLight
+$22   ---------------------- rdpCmdBufEndP1 ------------------------------------------
+$23   ----------------------- rdpCmdBufPtr -------------------------------------------
+$24      temp     <------------- flagsV2 ---------->   fp temp  <--------- cmd_w1_dram
+$25     cmd_w0 --------------------> <----- lbAfter             <---------    cmd_w0
+$26   ------------------------ taskDataPtr -------------------------------------------
+$27   ---------------------- inputBufferPos ------------------------------------------
+$28   ----------------------- perfCounterA -------------------------------------------
+$29   ----------------------- perfCounterB -------------------------------------------
+$30   ----------------------- perfCounterC -------------------------------------------
+$ra   return address, sometimes sign bit is flag -------------------------------------
 */
 
 // Global scalar regs:
@@ -796,14 +796,14 @@ ambLight       equ $21   // Ambient (top) light pointer with offset
 lbAfter        equ $25   // Address to return to after main lighting loop (vertex or extras)
 
 // Lighting advanced:
-laPtr          equ TODO  // Pointer to current vertex pair being lit
-laSTKept       equ TODO  // Texture coords of vertex 1 kept through processing
-laVtxLeft      equ TODO  // Count of vertices left * 0x10
-laPacked       equ TODO  // Nonzero if packed normals enabled
-laSpecular     equ TODO  // Sign bit set if specular enabled
-laSpecFres     equ TODO  // Nonzero if doing ltadv_normal_to_vertex for specular or Fresnel
-laL2A          equ TODO  // Nonzero if light-to-alpha (cel shading) enabled
-laTexgen       equ TODO  // Nonzero if texgen enabled
+laPtr          equ $2    // Pointer to current vertex pair being lit
+laVtxLeft      equ $3    // Count of vertices left * 0x10
+laSTKept       equ $6    // Texture coords of vertex 1 kept through processing
+laPacked       equ $7    // Nonzero if packed normals enabled
+laSpecular     equ $8    // Sign bit set if specular enabled
+laSpecFres     equ $16   // Nonzero if doing ltadv_normal_to_vertex for specular or Fresnel
+laL2A          equ $19   // Nonzero if light-to-alpha (cel shading) enabled
+laTexgen       equ $20   // Nonzero if texgen enabled
 
 // Clipping
 clipVNext      equ $2    // Next vertex (vertex at forward end of current edge)
@@ -960,7 +960,9 @@ aAOF2  equ aLen2F // Version of aAOF in init, can't be aDPosI/F or vpMdl there
 aPLFcF equ aLen2F // Point Light Factor Frac part
 aLTC   equ aLen2F // ltadv Light Color
 aPLFcI equ aLen2I // Point Light Factor Int part
-aDOT   equ vpMdl // ltadv Dot product = normals dot direction; also briefly light dir
+aDOT   equ vpMdl  // ltadv Dot product = normals dot direction; also briefly light dir
+aClOut equ vpWrlF // ltadv Color Out
+aAlOut equ vpWrlI // ltadv Alpha Out
 aDIR   equ aDPosF // ltadv Direction = normalize(light or cam - vertex)
 aDotSc equ aDPosF // ltadv Dot product Scale factor
 aLenF  equ aDPosI // ltadv Length Frac part
@@ -970,8 +972,6 @@ vpWNrm equ vpNrmlX // vertex pair World space Normals
 aRcpLn equ $v29 // ltadv Reciprocal of Length
 aLenI  equ $v29 // ltadv Length Int part
 
-aClOut equ TODO // ltadv Color Out
-aAlOut equ TODO // ltadv Alpha Out
 
 
 // Temp storage after rdpCmdBufEndP1. There is 0xA8 of space here which will
@@ -2160,7 +2160,7 @@ vtx_constants_for_clip:
 .else
     lb      flagsV1, geometryModeLabel + 3    // G_ATTROFFSET_ST_ENABLE in sign bit
     lw      $11, (fogFactor)($zero)           // Load fog multiplier MSBs and offset LSBs
-    llv     sSTS[0], (textureSettings2)($zero)    // Texture ST scale in 0, 1
+    llv     sSTS[0], (textureSettings2 - altBase)(altBaseReg) // Texture ST scale in 0, 1
     llv     $v30[0], (attrOffsetST - altBase)(altBaseReg)  // Texture ST offset in 0, 1
     llv     $v30[8], (attrOffsetST - altBase)(altBaseReg)  // Texture ST offset in 4, 5
     bltz    flagsV1, @@keepoffset
@@ -3398,9 +3398,9 @@ ltadv_vtx_loop:
     lw      laSTKept,(VTX_IN_TC + 0 * inputVtxSize)(laPtr) // Vtx 1 ST
     jal     ltadv_xfrm
      sw     $11,     (VTX_IN_TC + 0 * inputVtxSize)(laPtr) // Vtx 2 RGBA -> Vtx 1 ST
-    vmadn   vpWrlF, vM3F, vOne // Finish vertex pos transform
+    vmadn   vpWrlF, vMTX3F, vOne // Finish vertex pos transform
     andi    laPacked, vGeomMid, G_PACKED_NORMALS >> 8
-    vmadh   vpWrlI, vM3I, vOne
+    vmadh   vpWrlI, vMTX3I, vOne
     luv     vpLtTot, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
     vsub    aOffsA, vpRGBA, $v31[7]  // 0x7FFF; offset alpha
     beqz    laPacked, @@skip_packed
@@ -3450,16 +3450,16 @@ ltadv_finish_light:
      vmacf  vpLtTot, aLTC, aDOT[0h] // + light color * dot product
 
 ltadv_xfrm:
-    vmudn   $v29, vM0F, vpMdl[0h]
+    vmudn   $v29, vMTX0F, vpMdl[0h]
     lbu     curLight, numLightsxSize // Scalar instructions here must be OK to do twice
-    vmadh   $v29, vM0I, vpMdl[0h]
+    vmadh   $v29, vMTX0I, vpMdl[0h]
     luv     vpRGBA,  (VTX_IN_TC + 0 * inputVtxSize)(laPtr) // Vtx 2:1 RGBA
-    vmadn   $v29, vM1F, vpMdl[1h]
-    vmadh   $v29, vM1I, vpMdl[1h]
+    vmadn   $v29, vMTX1F, vpMdl[1h]
+    vmadh   $v29, vMTX1I, vpMdl[1h]
     addi    curLight, curLight, altBase // Point to ambient light
-    vmadn   aDPosF, vM2F, vpMdl[2h]
+    vmadn   aDPosF, vMTX2F, vpMdl[2h]
     jr      $ra
-     vmadh  aDPosI, vM2I, vpMdl[2h]
+     vmadh  aDPosI, vMTX2I, vpMdl[2h]
     
 ltadv_spec_fres_setup:
     // Get aDIR = normalize(camera - vertex), aDOT = (vpWNrm dot aDIR)
@@ -3468,7 +3468,7 @@ ltadv_spec_fres_setup:
      ldv    aDPosI[8], (cameraWorldPos - altBase)(altBaseReg)
 ltadv_after_camera:
     vmov    aOffsA[0], aDOT[0]       // Save Fresnel dot product in aOffsA[0h]
-    vmov    aOffsA[4], aDOT[0]
+    vmov    aOffsA[4], aDOT[4]
     bgez    laSpecular, ltadv_loop   // Sign bit clear = not specular
      li     laSpecFres, 0            // Clear flag for specular or fresnel
 // aProj <- aLenF
@@ -3487,37 +3487,40 @@ ltadv_specular: // aDOT in/out, uses vpLtTot[3] and $11 as temps
      vxor   aDOT, aDOT, $v31[7]    // = 0x7FFF - result
 
 ltadv_post:
-    vmulf   aClOut, vpRGBA, vpLtTot  // RGB output is RGB * light
+// aClOut <- vpWrlF
+// aAlOut <- vpWrlI
+    vmulf   aClOut, vpRGBA, vpLtTot    // RGB output is RGB * light
     beqz    laL2A, @@skip_cel
      vcopy  aAlOut, vpRGBA             // Alpha output = vertex alpha (only 3, 7 matter)
     // Cel: alpha = max of light components, RGB = vertex color
-    vge     aAlOut, vpLtTot, vpLtTot[1h]  // elem 0 = max(R0, G0); elem 4 = max(R1, G1)
-    vge     aAlOut, aAlOut, aAlOut[2h]  // elem 0 = max(R0, G0, B0); equiv for elem 4
-    vcopy   aClOut, vpRGBA           // RGB output is vertex color
-    vmudh   aAlOut, vOne, aAlOut[0h]     // move light level elem 0, 4 to 3, 7
+    vge     aAlOut, vpLtTot, vpLtTot[1h] // elem 0 = max(R0, G0); elem 4 = max(R1, G1)
+    vge     aAlOut, aAlOut, aAlOut[2h] // elem 0 = max(R0, G0, B0); equiv for elem 4
+    vcopy   aClOut, vpRGBA             // RGB output is vertex color
+    vmudh   aAlOut, vOne, aAlOut[0h]   // move light level elem 0, 4 to 3, 7
 @@skip_cel:
-    vne     $v29, $v31, $v31[3h]           // Set VCC to 11101110
+    vne     $v29, $v31, $v31[3h]       // Set VCC to 11101110
     bnez    laPacked, @@skip_novtxcolor
      andi   $11, vGeomMid, (G_FRESNEL_COLOR | G_FRESNEL_ALPHA) >> 8
-    vcopy   aClOut, vpLtTot             // If no packed normals, base output is just light
+    vcopy   aClOut, vpLtTot            // If no packed normals, base output is just light
 @@skip_novtxcolor:
     beqz    $11, @@skip_fresnel
-     vmrg   vpRGBA, aClOut, aAlOut  // Merge base output and alpha output
-    lsv     TODO[0], (vTRC_0100_addr - altBase)(altBaseReg) // 0x0100 to TODO[0]
-    vabs    aDOT, aOffsA, aOffsA        // Fresnel dot in aOffsA[0h]; absolute value for underwater
+     vmrg   vpRGBA, aClOut, aAlOut     // Merge base output and alpha output
+    lsv     aAOF[0], (vTRC_0100_addr - altBase)(altBaseReg) // Load constant 0x0100 to temp
+    vabs    aOffsA, aOffsA, aOffsA     // Fresnel dot in aOffsA[0h]; absolute value for underwater
     andi    $11, vGeomMid, G_FRESNEL_COLOR >> 8
-    vmudh   $v29, vOne, aParam[7]       // Fresnel offset
-    vmacf   aDOT, aDOT, aParam[6]       // + factor * scale
+    vmudh   $v29, vOne, aParam[7]      // Fresnel offset
+    vmacf   aOffsA, aOffsA, aParam[6]  // + factor * scale
     beqz    $11, @@skip
-     vmudh  aDOT, aDOT, TODO[0]         // Result * 0x0100, clamped to 0x7FFF
-    veq     $v29, $v31, $v31[3h]        // Set VCC to 00010001 if G_FRESNEL_COLOR
+     vmudh  aOffsA, aOffsA, aAOF[0]    // Result * 0x0100, clamped to 0x7FFF
+    veq     $v29, $v31, $v31[3h]       // Set VCC to 00010001 if G_FRESNEL_COLOR
 @@skip:
-    vmrg    vpRGBA, vpRGBA, aDOT[0h] // Replace color or alpha with fresnel
-    vge     vpRGBA, vpRGBA, $v31[2]  // Clamp to >= 0 for fresnel; doesn't affect others
+    vmrg    vpRGBA, vpRGBA, aOffsA[0h] // Replace color or alpha with fresnel
+    vge     vpRGBA, vpRGBA, $v31[2]    // Clamp to >= 0 for fresnel; doesn't affect others
 @@skip_fresnel:
-    beqz    laTexgen, @@skip_texgen  // no texgen
+    beqz    laTexgen, @@skip_texgen    // no texgen
      suv    vpRGBA,   (VTX_IN_TC - 2 * inputVtxSize)(laPtr) // Vtx 2:1 RGBA
-    nop // TODO texgen
+    // Texgen: aDOT still contains lookat 0 in elems 0-2, lookat 1 in elems 4-6
+    nop     // TODO
 @@skip_texgen:
 // vpMdl <- aDOT
     lw      $11,      (VTX_IN_TC - 2 * inputVtxSize)(laPtr) // Vtx 2 RGBA from vtx 1 ST slot
@@ -3526,7 +3529,7 @@ ltadv_post:
     bgtz    laVtxLeft, ltadv_vtx_loop
      sw     $11,      (VTX_IN_CN - 1 * inputVtxSize)(laPtr) // Real vtx 2 RGBA
     j       vtx_setup_no_lighting
-     TODO make sure delay slot is OK
+     // Delay slot is OK
     
 ltadv_point:
     /*
@@ -3540,7 +3543,7 @@ ltadv_point:
 // aDPosI <- aAOF
     ldv     aDPosI[0], (ltBufOfs + 8 - lightSize)(curLight) // Light position int part 0-3
     ldv     aDPosI[8], (ltBufOfs + 8 - lightSize)(curLight) // 4-7
-    lbu     $20,     (ltBufOfs + 7 - lightSize)(curLight) // PL: Linear factor
+    lbu     $10,     (ltBufOfs + 7 - lightSize)(curLight) // PL: Linear factor
 ltadv_normal_to_vertex:
     vadd    aDPosI, aDPosI, vpWrlI     // Not using aDPosF; frac part is just vpWrlF
     lbu     $24,     (ltBufOfs + 0xE - lightSize)(curLight) // PL: Quadratic factor
@@ -3548,41 +3551,41 @@ ltadv_normalize: // Normalize vector in aDPosI:vpWrlF i/f
     vmudm   $v29, aDPosI, vpWrlF       // Squared. Don't care about frac*frac term
     sll     $11, $11, 8                // Constant factor, 00000100 - 0000FF00
     vmadn   $v29, vpWrlF, aDPosI
-    sll     $20, $20, 6                // Linear factor, 00000040 - 00003FC0
+    sll     $10, $10, 6                // Linear factor, 00000040 - 00003FC0
     vmadh   $v29, aDPosI, aDPosI
     mtc2    $11, aNrmSc[4]             // Constant frac part in elem 2
 // aLen2F <- aLTC
     vreadacc aLen2F, ACC_MIDDLE
-    mtc2    $20, aNrmSc[6]             // Linear frac part in elem 3
+    mtc2    $10, aNrmSc[6]             // Linear frac part in elem 3
     vreadacc aLen2I, ACC_UPPER
     srl     $11, $24, 5                // Top 3 bits
     // vnop; vnop
     vmudm   $v29, vOne, aLen2F[2h]     // Sum of squared components
-    andi    $20, $24, 0x1F             // Bottom 5 bits
+    andi    $10, $24, 0x1F             // Bottom 5 bits
     vmadh   $v29, vOne, aLen2I[2h]
-    ori     $20, $20, 0x20             // Append leading 1 to mantissa
+    ori     $10, $10, 0x20             // Append leading 1 to mantissa
     vmadm   $v29, vOne, aLen2F[1h]
-    sllv    $20, $20, $11              // Left shift to create floating point
+    sllv    $10, $10, $11              // Left shift to create floating point
     vmadh   $v29, vOne, aLen2I[1h]
-    sll     $20, $20, 8 // Min range 00002000, 00002100... 00003F00, max 00100000...001F8000
+    sll     $10, $10, 8 // Min range 00002000, 00002100... 00003F00, max 00100000...001F8000
     vmadn   aLen2F, aLen2F, vOne       // elem 0; swapped so we can do vmadn and get result
     bnez    $24, @@skip // If original value is zero, set to zero; TODO shuffle some instr here
      vmadh  aLen2I, aLen2I, vOne
-    li      $20, 0
+    li      $10, 0
 @@skip:
     // vnop; vnop
 // aRcpLn <- $v29
     vrsqh   aRcpLn[2], aLen2I[0]       // High input, garbage output
     vrsql   aRcpLn[1], aLen2F[0]       // Low input, low output
-    mtc2    $20, aNrmSc[12]            // Quadratic frac part in elem 6
+    mtc2    $10, aNrmSc[12]            // Quadratic frac part in elem 6
     vrsqh   aRcpLn[0], aLen2I[4]       // High input, high output
-    srl     $20, $20, 16
+    srl     $10, $10, 16
     vrsql   aRcpLn[5], aLen2F[4]       // Low input, low output
     beq     laPtr, inVtx, ltadv_continue_setup // Return aRcpLn; cond works only iter 0
      vrsqh  aRcpLn[4], $v31[2]         // 0 input, high output
     // vnop; vnop; vnop
     vmudn   aDIR, vpWrlF, aRcpLn[0h]   // Vec frac * int scaling, discard result
-    mtc2    $20, aNrmSc[14]            // Quadratic int part in elem 7
+    mtc2    $10, aNrmSc[14]            // Quadratic int part in elem 7
     vmadm   aDIR, aDPosI, aRcpLn[1h]   // Vec int * frac scaling, discard result
     vmadh   aDIR, aDPosI, aRcpLn[0h]   // Vec int * int scaling
 // aLenF <- aDPosI
