@@ -739,14 +739,14 @@ $5    <------------------------ vGeomMid ------------------------------>
 $6    geom mode   clipMaskIdx -----> <-- lbTexgenOrRet laSTKept
 $7    v2flag tile <------------- fogFlag ---------->  laPacked  mtx valid   cmd byte
 $8    v3flag      <------------- outVtx2 ---------->  laSpecular outVtx2
-$9    xp texenab  clipMask --------> <----- curLight ---------> viLtFlag  ovlInitClock
+$9    xp texenab  clipMask --------> <----- curLight ---------> viLtFlag
 $10   -------------------------- temp2 -----------------------------------------------
 $11   --------------------------- temp -----------------------------------------------
 $12   ----------------------- perfCounterD -------------------------------------------
 $13   ------------------------ altBaseReg --------------------------------------------
 $14               <-------------- inVtx ------------------------------->
 $15               <------------ outVtxBase ---------------------------->
-$16   v1flag lmaj clipFlags -------> <----- lbFakeAmb laSpecFres
+$16   v1flag lmaj clipFlags -------> <----- lbFakeAmb laSpecFres          ovlInitClock
 $17               clipPolyRead ---->
 $18   <---------- clipPolySelect -->
 $19      temp     clipVOnsc      outVtx1 ---------->    laL2A   <---------   dmaLen
@@ -755,7 +755,7 @@ $21   <---------- clipPolyWrite ---> <----- ambLight             ambLight
 $22   ---------------------- rdpCmdBufEndP1 ------------------------------------------
 $23   ----------------------- rdpCmdBufPtr -------------------------------------------
 $24      temp     <------------- flagsV2 ---------->   fp temp  <--------- cmd_w1_dram
-$25     cmd_w0 --------------------> <----- lbAfter             <---------    cmd_w0
+$25     cmd_w0 --------------------> <----- lbAfter             <---------   cmd_w0
 $26   ------------------------ taskDataPtr -------------------------------------------
 $27   ---------------------- inputBufferPos ------------------------------------------
 $28   ----------------------- perfCounterA -------------------------------------------
@@ -820,8 +820,8 @@ clipPolyWrite  equ $21   // Write pointer within current polygon being clipped
 viLtFlag       equ $9    // Holds pointLightFlag
 
 // Misc
-ovlInitClock   equ $9    // Temp for profiling
 postOvlRA      equ $10   // Address to return to after overlay load
+ovlInitClock   equ $16   // Temp for profiling
 dmaLen         equ $19   // DMA length in bytes minus 1
 dmemAddr       equ $20   // DMA address in DMEM or IMEM. Also = rdpCmdBufPtr - rdpCmdBufEndP1 for flush_rdp_buffer
 cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
@@ -3569,7 +3569,7 @@ ltadv_normalize: // Normalize vector in aDPosI:vpWrlF i/f
     vmadh   $v29, vOne, aLen2I[1h]
     sll     $10, $10, 8 // Min range 00002000, 00002100... 00003F00, max 00100000...001F8000
     vmadn   aLen2F, aLen2F, vOne       // elem 0; swapped so we can do vmadn and get result
-    bnez    $24, @@skip // If original value is zero, set to zero; TODO shuffle some instr here
+    bnez    $24, @@skip // If original value is zero, set to zero
      vmadh  aLen2I, aLen2I, vOne
     li      $10, 0
 @@skip:
