@@ -3169,7 +3169,7 @@ _DW({                                               \
 
 /**
  * Number of directional / point lights, in the range 0-9. There is also always
- * one ambient light not counted in this number.
+ * one ambient light not counted in this number. See also ENABLE_POINT_LIGHTS.
  */
 #define gSPNumLights(pkt, n)                            \
     gMoveWd(pkt, G_MW_NUMLIGHT, G_MWO_NUMLIGHT, NUML(n))
@@ -3263,7 +3263,8 @@ _DW({\
  * Set all your scene's lights (directional/point + ambient) with one memory
  * transaction.
  * n is the number of directional / point lights, from 0 to 9. There is also
- * always an ambient light.
+ * always an ambient light. If there are point lights, logically or in
+ * ENABLE_POINT_LIGHTS.
  * name should be the NAME of a Lights struct (NOT A POINTER)
  * filled in with all the lighting data. You can use the gdSPDef* macros to fill
  * in the struct or just do it manually. Example:
@@ -3278,7 +3279,8 @@ _DW({\
  * lights[1].l.dir = ...;
  * ...
  * lights[numLights].l.col = ambient_color();
- * gSPSetLights(POLY_OPA_DISP++, numLights, *lights); // <- NOTE DEREFERENCE
+ * gSPSetLights(POLY_OPA_DISP++, ENABLE_POINT_LIGHTS | numLights,
+ *     *lights); // <- NOTE DEREFERENCE
  * 
  * If you're wondering why this macro takes a name / dereference instead of a
  * pointer, it's for backwards compatibility.
