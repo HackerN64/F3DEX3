@@ -3384,7 +3384,7 @@ ltadv_continue_setup:
     lqv     aParam, (fxParams - altBase)(altBaseReg)
     vcopy   aNrmSc, aRcpLn // aRcpLn[0:1] is int:frac scale (1 / length)
     andi    $11, vGeomMid, G_AMBOCCLUSION >> 8
-    vlt     $v29, $v31, $v31[3] // Set VCC to 11100000
+    vge     $v29, $v31, $v31[3] // Set VCC to 00011111
     bnez    $11, @@skip_zero_ao
      andi   laL2A, vGeomMid, G_LIGHTTOALPHA >> 8
     vmrg    aParam, aParam, $v31[2] // 0
@@ -3403,10 +3403,10 @@ ltadv_vtx_loop:
     vmadh   vpWrlI, vMTX3I, vOne
     luv     vpLtTot, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
     vsub    aOffsA, vpRGBA, $v31[7]  // 0x7FFF; offset alpha
-    beqz    laPacked, @@skip_packed
+    bnez    laPacked, @@skip_regular_normals
      vmudh  vpMdl, aPNScl, vpMdl[3h] // Packed normals from elem 3,7 of model pos
     lpv     vpMdl,  (VTX_IN_TC + 0 * inputVtxSize)(laPtr) // Vtx 2:1 regular normals
-@@skip_packed:
+@@skip_regular_normals:
     vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
     jal     ltadv_xfrm
      vmadm  aAOF2, aOffsA, aParam[0] // + (alpha - 1) * aoAmb factor; elems 3, 7
