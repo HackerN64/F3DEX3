@@ -123,6 +123,7 @@ Porting Your Romhack Codebase to F3DEX3</h1>
 Required Changes</h2>
 <p>Both OoT and SM64:</p>
 <ul>
+<li>In any place where your game creates a viewport (whether statically or dynamically) (search for <code>Vp</code> case-sensitive, <code>SPViewport</code>, and <code>G_MAXZ</code>), change the maximum Z value from <code>G_MAXZ</code> to <code>G_NEW_MAXZ</code> and negate the Y scale. For more information, see the comment next to <code>G_MAXZ</code> in the GBI. Note that your romhack codebase may have the constant hardcoded, usually as <code>511</code> which is supposed to be <code>(G_MAXZ/2)</code>, instead of actually writing <code>G_MAXZ</code>; you need to change these too, there are several of these in SM64.</li>
 <li>Remove uses of internal GBI features which have been removed in F3DEX3 (see <a class="el" href="compatibility.html">Backwards Compatibility with F3DEX2</a> for full list). In OoT, the only changes needed are:<ul>
 <li>In <code>src/code/ucode_disas.c</code>, remove the switch statement cases for <code>G_LINE3D</code>, <code>G_MW_CLIP</code>, <code>G_MV_MATRIX</code>, <code>G_MVO_LOOKATX</code>, <code>G_MVO_LOOKATY</code>, and <code>G_MW_PERSPNORM</code>.</li>
 <li>In <code>src/libultra/gu/lookathil.c</code>, remove the lines which set the <code>col</code>, <code>colc</code>, and <code>pad</code> fields.</li>

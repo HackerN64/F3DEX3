@@ -1,5 +1,7 @@
 <map id="gbi.h" name="gbi.h">
-<area shape="rect" id="Node000001" title="Modded GBI for use with F3DEX3 custom microcode." alt="" coords="33,5,87,31"/>
+<area shape="rect" id="Node000001" title="Modded GBI for use with F3DEX3 custom microcode." alt="" coords="103,5,158,31"/>
 <area shape="rect" id="Node000002" title=" " alt="" coords="5,79,115,104"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="63,31,63,65,57,65,57,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="121,33,83,71,79,67,117,29"/>
+<area shape="rect" id="Node000003" title=" " alt="" coords="139,79,266,104"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="144,29,183,67,179,71,141,33"/>
 </map>
