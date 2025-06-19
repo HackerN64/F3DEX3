@@ -244,7 +244,7 @@ texrectWord1:
 texrectWord2:
     .fill 4 // second word, has tile, xl, yl
 
-// First half of RDP value for split commands; overwritten by numLightsxSize
+// First half of RDP value for split commands
 rdpHalf1Val:
     .fill 4
     
@@ -474,7 +474,7 @@ materialCullMode:
 // moveword table
 movewordTable:
     .dh fxParams           // G_MW_FX
-    .dh numLightsxSize - 3 // G_MW_NUMLIGHT
+    .dh numLightsxSize - 3 // G_MW_NUMLIGHT; writes numLightsxSize and pointLightFlag, zeroes dirLightsXfrmValid
 packedNormalsConstants:
 .if (. & 4) != 0
     .error "Alignment broken for packed normals constants in movewordTable"
@@ -659,6 +659,9 @@ vertexTable:
     // to also fit vertexTable to avoid recompute after yield
     .error "Too much being stored in yieldable DMEM"
 .endif
+.if (. & 15) != 0
+    .error "tempMatrix not aligned"
+.endif
 
 tempMatrix:
     .skip 0x40
@@ -817,7 +820,7 @@ clipPolySelect equ $18   // Clip poly double buffer selection
 clipPolyWrite  equ $21   // Write pointer within current polygon being clipped
 
 // Vertex init
-viLtFlag       equ $9    // Holds pointLightFlag
+viLtFlag       equ $9    // Holds pointLightFlag or dirLightsXfrmValid
 
 // Misc
 postOvlRA      equ $10   // Address to return to after overlay load
@@ -2806,7 +2809,6 @@ G_POPMTX_handler:
     lw      $2, OSTask + OSTask_dram_stack  // Top of the stack
     sub     cmd_w1_dram, $11, cmd_w1_dram   // Decrease pointer by amount in command
     sub     $1, cmd_w1_dram, $2             // Is it still valid / within the stack?
-    sb      $zero, dirLightsXfrmValid       // Mark lights as needing recompute
     bgez    $1, @@skip                      // If so, skip the failsafe
      sh     $zero, mvpValid                 // and dirLightsXfrmValid; mark both mtx and dir lts invalid
     move    cmd_w1_dram, $2                 // Use the top of the stack as the new pointer
@@ -3376,7 +3378,7 @@ ltadv_after_mtx:
     vcopy   aPNScl, vOne
     move    laVtxLeft, vtxLeft
     vmudn   aDPosF, vMTX1F, $v31[7] // 0x7FFF; transform a normal (0, 7FFF, 0)
-    // 0001 00[20 0800 XX]00 = (1<<0),(1<<5),(1<<11),XX, repeat
+    // 0001 00[20 0800 XX]01 = (1<<0),(1<<5),(1<<11),XX, repeat
     llv     aPNScl[3],  (packedNormalsConstants - altBase)(altBaseReg)
     vmadh   aDPosI, vMTX1I, $v31[7]
     j       ltadv_normalize
@@ -3404,8 +3406,9 @@ ltadv_vtx_loop:
     vmadh   vpWrlI, vMTX3I, vOne
     luv     vpLtTot, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
     vsub    aOffsA, vpRGBA, $v31[7]  // 0x7FFF; offset alpha
+    vmudm   $v29, aPNScl, vpMdl[3h] // Packed normals from elem 3,7 of model pos
     bnez    laPacked, @@skip_regular_normals
-     vmudh  vpMdl, aPNScl, vpMdl[3h] // Packed normals from elem 3,7 of model pos
+     vmadn  vpMdl, $v31, $v31[2] // 0; load lower (vpMdl unsigned but must be T operand)
     lpv     vpMdl,  (VTX_IN_TC + 0 * inputVtxSize)(laPtr) // Vtx 2:1 regular normals
 @@skip_regular_normals:
     vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)

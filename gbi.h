@@ -1203,9 +1203,9 @@ typedef union {
  */
 #define LIGHT_TYPE_DIR 0
 /**
- * Identifies the light as a point light, with x acting as the kc coefficient.
+ * Identifies the light as a point light, with the given kc coefficient (nonzero).
  */
-#define LIGHT_TYPE_POINT(x) x
+#define LIGHT_TYPE_POINT(kc) kc
 
 /**
  * Light structure.
@@ -3273,8 +3273,8 @@ _DW({\
  * Set all your scene's lights (directional/point + ambient) with one memory
  * transaction.
  * n is the number of directional / point lights, from 0 to 9. There is also
- * always an ambient light. If there are point lights, logically or in
- * ENABLE_POINT_LIGHTS.
+ * always an ambient light. If there are point lights, set ENABLE_POINT_LIGHTS
+ * in n via logical or (i.e. set n to (numLights | ENABLE_POINT_LIGHTS))
  * name should be the NAME of a Lights struct (NOT A POINTER)
  * filled in with all the lighting data. You can use the gdSPDef* macros to fill
  * in the struct or just do it manually. Example:
