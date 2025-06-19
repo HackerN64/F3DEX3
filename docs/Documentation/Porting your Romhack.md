@@ -37,6 +37,13 @@ similar for other games):
 
 Both OoT and SM64:
 
+- In any place where your game creates a viewport (whether statically or
+  dynamically) (search for `Vp` case-sensitive, `SPViewport`, and `G_MAXZ`),
+  change the maximum Z value from `G_MAXZ` to `G_NEW_MAXZ` and negate the
+  Y scale. For more information, see the comment next to `G_MAXZ` in the GBI.
+  Note that your romhack codebase may have the constant hardcoded, usually as
+  `511` which is supposed to be `(G_MAXZ/2)`, instead of actually writing
+  `G_MAXZ`; you need to change these too, there are several of these in SM64.
 - Remove uses of internal GBI features which have been removed in F3DEX3 (see
   @ref compatibility for full list). In OoT, the only changes needed are:
     - In `src/code/ucode_disas.c`, remove the switch statement cases for

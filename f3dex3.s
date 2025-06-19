@@ -2806,6 +2806,7 @@ G_POPMTX_handler:
     lw      $2, OSTask + OSTask_dram_stack  // Top of the stack
     sub     cmd_w1_dram, $11, cmd_w1_dram   // Decrease pointer by amount in command
     sub     $1, cmd_w1_dram, $2             // Is it still valid / within the stack?
+    sb      $zero, dirLightsXfrmValid       // Mark lights as needing recompute
     bgez    $1, @@skip                      // If so, skip the failsafe
      sh     $zero, mvpValid                 // and dirLightsXfrmValid; mark both mtx and dir lts invalid
     move    cmd_w1_dram, $2                 // Use the top of the stack as the new pointer

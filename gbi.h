@@ -16,9 +16,19 @@
 #ifndef F3DEX3_H
 #define F3DEX3_H
 
+/* Don't remove this line which defines F3DEX3 as F3DEX2. Other headers in your
+romhack codebase will likely assume that if the microcode is not F3DEX2, it is
+F3DEX1 or older, thus breaking F3DEX3 compatibility even more. */
 #define F3DEX_GBI_2  1
 #define F3DEX_GBI_PL 1
 #define F3DEX_GBI_3  1
+
+/* This is only included to check correctness of OS_YIELD_DATA_SIZE. If you are
+sure this is correct in your project, you can remove this include. */
+#include "ultra64/sptask.h"
+#if OS_YIELD_DATA_SIZE != 0xC00
+#error "F3DEX3 requires OS_YIELD_DATA_SIZE == 0xC00"
+#endif
 
 #ifdef REQUIRE_SEMICOLONS_AFTER_GBI_COMMANDS
 /* OoT style, semicolons required after using macros, cleaner code. If modding
