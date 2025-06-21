@@ -1109,6 +1109,7 @@ G_MOVEMEM_end:
     j       while_wait_dma_busy                         // wait for the DMA read to finish
      li     $ra, run_next_DL_command
 
+G_POPMTX_handler:
 G_DMA_IO_handler:
 G_MEMSET_handler:
     j       ovl234_clipmisc_entrypoint       // Delay slot is harmless
@@ -1166,21 +1167,6 @@ run_next_DL_command:
     // $7 must retain the command byte for load_mtx and overlay 4 stuff
     // $11 must contain the handler called for several handlers
 
-G_DL_handler:
-    sll     $2, cmd_w0, 15                  // Shifts the push/nopush value to the sign bit
-branch_dl:
-    lbu     $1, displayListStackLength      // Get the DL stack length
-    jal     segmented_to_physical
-     add    $3, taskDataPtr, inputBufferPos // Current DL pos to push on stack
-    bltz    $2, call_ret_common             // Nopush = branch = flag is set
-     move   taskDataPtr, cmd_w1_dram        // Set the new DL to the target display list
-    sw      $3, (displayListStack)($1)
-    addi    $1, $1, 4                       // Increment the DL stack length
-call_ret_common:
-    sb      $zero, materialCullMode         // This covers call, branch, return, and cull and branchZ successes
-    j       displaylist_dma_with_count
-     sb     $1, displayListStackLength
-
 .if !ENABLE_PROFILING
 G_LIGHTTORDP_handler:
     lbu     $11, numLightsxSize          // Ambient light
@@ -1193,19 +1179,6 @@ G_LIGHTTORDP_handler:
     j       G_RDP_handler                // Send to RDP
      or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
 .endif
-
-G_SETxIMG_handler:
-    lb      $3, materialCullMode            // Get current mode
-    jal     segmented_to_physical           // Convert image to physical address
-     lw     $2, lastMatDLPhyAddr            // Get last material physical addr
-    bnez    $3, G_RDP_handler               // If not in normal mode (0), exit
-     add    $10, taskDataPtr, inputBufferPos // Current material physical addr
-    beq     $10, $2, @@skip                 // Branch if we are executing the same mat again
-     sw     $10, lastMatDLPhyAddr           // Store material physical addr
-    li      $7, 1                           // > 0: in material first time
-@@skip:                                     // Otherwise $7 was < 0: cull mode (in mat second time)
-    j       G_RDP_handler
-     sb     $7, materialCullMode
 
 G_BRANCH_WZ_handler:
     lhu     $10, (vertexTable)(cmd_w0)  // Vertex addr from byte 3
@@ -1220,18 +1193,18 @@ G_BRANCH_WZ_handler:
     j       branch_dl                   // need $2 < 0 for nopush and cmd_w1_dram
      li     cmd_w0, 0                   // No count of DL cmds to skip
     
-
-G_FLUSH_handler:
-    jal     flush_rdp_buffer        // Flush once to push partial DMEM buf to FIFO
-     sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Prereq; offset buffer fullness
-    // If the DMEM buffer was empty, dmemAddr will be unchanged and valid for this next
-    // jump. Otherwise, running the DMA write will cause dmemAddr to get set to a large
-    // negative number. Then for this second jump, the same codepath will be triggered as
-    // if the buffer was empty. The result is it will wait for the DMA to finish, set
-    // DPC_END, and return to $ra. This is why the dmemAddr register (as opposed to,
-    // for example, dmaLen) is used as the DMEM buf fullness.
-    j       flush_rdp_buffer
-     li     $ra, run_next_DL_command
+G_RELSEGMENT_handler:
+    jal     segmented_to_physical    // Resolve new segment address relative to existing segment
+G_MOVEWORD_handler:
+     srl    $2, cmd_w0, 16           // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
+    lhu     $10, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
+do_moveword:
+    sll     $11, cmd_w0, 16          // Sign bit = upper bit of offset
+    add     $10, $10, cmd_w0         // Offset + base; only lower 12 bits matter
+    bltz    $11, run_next_DL_command // If upper bit of offset is set, exit after halfword
+     sh     cmd_w1_dram, ($10)       // Store value from cmd into halfword
+    j       run_next_DL_command
+     sw     cmd_w1_dram, ($10)       // Store value from cmd into word (offset + moveword_table[index])
 
 G_LOAD_UCODE_handler:
     j       load_overlay_0_and_enter         // Delay slot is harmless
@@ -1729,11 +1702,6 @@ return_and_end_mat:
     jr      $ra
      sb     $zero, materialCullMode // This covers all tri early exits except clipping
 
-tri_fan_store:
-    lb      $11, (inputBufferEnd - 7)(inputBufferPos) // Load vtx 1
-    j       tri_main
-     sb     $11, 5(rdpCmdBufPtr)         // Store vtx 1
-
 .if (. & 4)
     .warning "One instruction of padding before ovl234"
 .endif
@@ -1785,10 +1753,36 @@ ovl234_clipmisc_entrypoint:
 .endif
     bnez    $1, vtx_constants_for_clip     // In clipping, $1 is vtx 1 addr, never 0. Cmd dispatch, $1 = 0.
      li     inVtx, 0x8000                  // inVtx < 0 means from clipping. Inc'd each vtx write by 2 * inputVtxSize, but this is large enough it should stay negative.
-    li      $3, (0xFF00 | G_MEMSET)
-    beq     $3, $7, g_memset_ovl3
-     lw     cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Overwritten by overlay load
-g_dma_io_ovl3:  // otherwise
+    lw      cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Overwritten by overlay load
+    li      $3, (0xFF00 | G_MTX)
+    beq     $3, $7, g_mtx_push_ovl3
+     li     $11, (0xFF00 | G_MEMSET)
+    beq     $11, $7, g_memset_ovl3
+     li     $3, (0xFF00 | G_DMA_IO)
+    beq     $3, $7, g_dma_io_ovl3
+g_popmtx_ovl3:  // otherwise
+     lw     $11, matrixStackPtr             // Current matrix stack pointer
+    lw      $2, OSTask + OSTask_dram_stack  // Top of the stack
+    sub     cmd_w1_dram, $11, cmd_w1_dram   // Decrease pointer by amount in command
+    sub     $1, cmd_w1_dram, $2             // Is it still valid / within the stack?
+    bgez    $1, @@skip                      // If so, skip the failsafe
+     sh     $zero, mvpValid                 // and dirLightsXfrmValid; mark both mtx and dir lts invalid
+    move    cmd_w1_dram, $2                 // Use the top of the stack as the new pointer
+@@skip:    
+    j       do_movemem                      // Load the new matrix from the stack
+     sw     cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
+
+g_mtx_push_ovl3:
+    lw      cmd_w1_dram, matrixStackPtr     // Set up the DMA from dmem to rdram at the matrix stack pointer
+    li      dmemAddr, (mMatrix | 0x8000)    // mMatrix, negative = write
+    jal     dma_read_write                  // DMA the current matrix from dmem to rdram
+     li     dmaLen, 0x0040 - 1              // Set the DMA length to the size of a matrix (minus 1 because DMA is inclusive)
+    addi    cmd_w1_dram, cmd_w1_dram, 0x40  // Increase the matrix stack pointer by the size of one matrix
+    sw      cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
+    j       load_mtx
+     lw     cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Load command word 1 again
+
+g_dma_io_ovl3:
     jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
      lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
     andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
@@ -2081,13 +2075,17 @@ g_memset_ovl3:
     jr      $ra
      addi   $2, $11, memsetBufferSize
 
-
 ovl3_end:
 .align 8
 ovl3_padded_end:
 
 .orga max(max(ovl2_padded_end - ovl2_start, ovl4_padded_end - ovl4_start) + orga(ovl3_start), orga())
 ovl234_end:
+
+tri_fan_store:
+    lb      $11, (inputBufferEnd - 7)(inputBufferPos) // Load vtx 1
+    j       tri_main
+     sb     $11, 5(rdpCmdBufPtr)         // Store vtx 1
 
 G_MTX_end: // TODO move to ovl3?
 // Multiplies the temp loaded matrix into the M or VP matrix
@@ -2804,17 +2802,20 @@ ovl0_padded_end:
 
 ovl1_start:
 
-G_POPMTX_handler:
-    lw      $11, matrixStackPtr             // Current matrix stack pointer
-    lw      $2, OSTask + OSTask_dram_stack  // Top of the stack
-    sub     cmd_w1_dram, $11, cmd_w1_dram   // Decrease pointer by amount in command
-    sub     $1, cmd_w1_dram, $2             // Is it still valid / within the stack?
-    bgez    $1, @@skip                      // If so, skip the failsafe
-     sh     $zero, mvpValid                 // and dirLightsXfrmValid; mark both mtx and dir lts invalid
-    move    cmd_w1_dram, $2                 // Use the top of the stack as the new pointer
-@@skip:    
-    j       do_movemem                      // Load the new matrix from the stack
-     sw     cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
+G_DL_handler:
+    sll     $2, cmd_w0, 15                  // Shifts the push/nopush value to the sign bit
+branch_dl:
+    lbu     $1, displayListStackLength      // Get the DL stack length
+    jal     segmented_to_physical
+     add    $3, taskDataPtr, inputBufferPos // Current DL pos to push on stack
+    bltz    $2, call_ret_common             // Nopush = branch = flag is set
+     move   taskDataPtr, cmd_w1_dram        // Set the new DL to the target display list
+    sw      $3, (displayListStack)($1)
+    addi    $1, $1, 4                       // Increment the DL stack length
+call_ret_common:
+    sb      $zero, materialCullMode         // This covers call, branch, return, and cull and branchZ successes
+    j       displaylist_dma_with_count
+     sb     $1, displayListStackLength
 
 G_MTX_handler:
     // The lower 3 bits of G_MTX are, from LSb to MSb (0 value/1 value),
@@ -2826,16 +2827,8 @@ G_MTX_handler:
     addi    perfCounterC, perfCounterC, 1  // Increment matrix count
 .endif
     andi    $11, cmd_w0, G_MTX_P_MV | G_MTX_NOPUSH_PUSH // Read the matrix type and push type flags into $11
-    bnez    $11, load_mtx                               // If the matrix type is projection or this is not a push, skip pushing the matrix
+    beqz    $11, ovl234_clipmisc_entrypoint             // Modelview and push: go to overlay for push
      andi   $2, cmd_w0, G_MTX_MUL_LOAD                  // Read the matrix load type into $2 (0 is multiply, 2 is load)
-    // TODO move this codepath to ovl3
-    lw      cmd_w1_dram, matrixStackPtr                 // Set up the DMA from dmem to rdram at the matrix stack pointer
-    li      dmemAddr, -0x2000                           //
-    jal     dma_read_write                              // DMA the current matrix from dmem to rdram
-     li     dmaLen, 0x0040 - 1                          // Set the DMA length to the size of a matrix (minus 1 because DMA is inclusive)
-    addi    cmd_w1_dram, cmd_w1_dram, 0x40              // Increase the matrix stack pointer by the size of one matrix
-    sw      cmd_w1_dram, matrixStackPtr                 // Update the matrix stack pointer
-    lw      cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Load command word 1 again
 load_mtx:
     add     $7, $7, $2        // Add the load type to the command byte in $7, selects the return address based on whether the matrix needs multiplying or just loading
     sh      $zero, mvpValid   // and dirLightsXfrmValid
@@ -2900,19 +2893,6 @@ G_RDPHALF_2_handler:
     j       G_RDP_handler
      sdv    $v29[0], -8(rdpCmdBufPtr)
 
-G_RELSEGMENT_handler:
-    jal     segmented_to_physical    // Resolve new segment address relative to existing segment
-G_MOVEWORD_handler:
-     srl    $2, cmd_w0, 16           // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
-    lhu     $10, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
-do_moveword:
-    sll     $11, cmd_w0, 16          // Sign bit = upper bit of offset
-    add     $10, $10, cmd_w0         // Offset + base; only lower 12 bits matter
-    bltz    $11, run_next_DL_command // If upper bit of offset is set, exit after halfword
-     sh     cmd_w1_dram, ($10)       // Store value from cmd into halfword
-    j       run_next_DL_command
-     sw     cmd_w1_dram, ($10)       // Store value from cmd into word (offset + moveword_table[index])
-
 // Converts the segmented address in cmd_w1_dram to the corresponding physical address
 segmented_to_physical:
     srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
@@ -2922,6 +2902,31 @@ segmented_to_physical:
     srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
     jr      $ra
      add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
+
+G_SETxIMG_handler:
+    lb      $3, materialCullMode            // Get current mode
+    jal     segmented_to_physical           // Convert image to physical address
+     lw     $2, lastMatDLPhyAddr            // Get last material physical addr
+    bnez    $3, G_RDP_handler               // If not in normal mode (0), exit
+     add    $10, taskDataPtr, inputBufferPos // Current material physical addr
+    beq     $10, $2, @@skip                 // Branch if we are executing the same mat again
+     sw     $10, lastMatDLPhyAddr           // Store material physical addr
+    li      $7, 1                           // > 0: in material first time
+@@skip:                                     // Otherwise $7 was < 0: cull mode (in mat second time)
+    j       G_RDP_handler
+     sb     $7, materialCullMode
+
+G_FLUSH_handler:
+    jal     flush_rdp_buffer        // Flush once to push partial DMEM buf to FIFO
+     sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Prereq; offset buffer fullness
+    // If the DMEM buffer was empty, dmemAddr will be unchanged and valid for this next
+    // jump. Otherwise, running the DMA write will cause dmemAddr to get set to a large
+    // negative number. Then for this second jump, the same codepath will be triggered as
+    // if the buffer was empty. The result is it will wait for the DMA to finish, set
+    // DPC_END, and return to $ra. This is why the dmemAddr register (as opposed to,
+    // for example, dmaLen) is used as the DMEM buf fullness.
+    j       flush_rdp_buffer
+     li     $ra, run_next_DL_command
 
 G_CULLDL_handler:
     lhu     $10, (vertexTable)(cmd_w0)      // Start vtx addr
