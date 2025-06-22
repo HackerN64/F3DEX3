@@ -92,12 +92,15 @@ G_RELSEGMENT        equ 0x0b
 G_BRANCH_Z equ G_BRANCH_WZ
 G_BRANCH_W equ G_BRANCH_WZ
 
-G_MTX_P_MV        equ 0x04
-G_MTX_MUL_LOAD    equ 0x02
-G_MTX_NOPUSH_PUSH equ 0x01
+// Note that load and push are inverted in the GBI encoding.
+G_MTX_VP_M        equ 0x04  // Binary: set for VP, clear for M
+G_MTX_MUL_LOAD    equ 0x02  // Binary: set for mul, clear for load
+G_MTX_NOPUSH_PUSH equ 0x01  // Binary: set for nopush, clear for push
 
-G_MV_MMTX     equ 0x02
-G_MV_PMTX     equ 0x06
+G_MV_MMTX     equ 0x00
+G_MV_TEMPMTX0 equ 0x02
+G_MV_VPMTX    equ 0x04
+G_MV_TEMPMTX1 equ 0x06
 G_MV_VIEWPORT equ 0x08
 G_MV_LIGHT    equ 0x0A
 

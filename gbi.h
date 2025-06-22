@@ -177,35 +177,51 @@ of warnings if you use -Wpedantic. */
 
 /* See SPMatrix */
 /**
- * @brief specifies whether the matrix operation will be performed on the projection or the model view matrix.
- * 
+ * @brief Specifies whether the matrix operation will be performed on the
+ * model or the view*projection matrix.
  */
-#define G_MTX_MODELVIEW    0x00    /* matrix types */
+#define G_MTX_MODEL           0x00
 /**
- * @brief @copybrief G_MTX_MODELVIEW
- * 
+ * @brief Equivalent to G_MTX_MODEL, for backwards compatibility. The view
+ * matrix used to be put in the same stack as the model matrix, whereas now it
+ * should be multiplied with the projection matrix. In SM64, this is called
+ * "mat stack fix"; in OoT, the vanilla game already does this.
  */
-#define G_MTX_PROJECTION   0x04
+#define G_MTX_MODELVIEW       G_MTX_MODEL
 /**
- * @brief concatenates the matrix (m) with the top of the matrix stack.
- * 
+ * @brief @copybrief G_MTX_MODEL
  */
-#define G_MTX_MUL          0x00    /* concat or load */
+#define G_MTX_VIEWPROJECTION  0x04
 /**
- * @brief loads the matrix (m) onto the top of the matrix stack.
- * 
+ * @brief Equivalent to G_MTX_VIEWPROJECTION, @see G_MTX_MODELVIEW.
  */
-#define G_MTX_LOAD         0x02
+#define G_MTX_PROJECTION      G_MTX_VIEWPROJECTION
 /**
- * @brief specifies do not push the matrix stack prior to matrix operations
- * 
+ * @brief Multiplies the incoming matrix into the top of the matrix stack.
+ * @note The binary encoding of this bit is flipped in SPMatrix to save a RSP
+ * instruction. This is new in F3DEX3.
  */
-#define G_MTX_NOPUSH       0x00    /* push or not */
+#define G_MTX_MUL             0x00
 /**
- * @brief specifies push the matrix stack prior to matrix operations
- * 
+ * @brief Replaces the top of the matrix stack with the incoming matrix.
+ * @note The binary encoding of this bit is flipped in SPMatrix to save a RSP
+ * instruction. This is new in F3DEX3.
  */
-#define G_MTX_PUSH         0x01
+#define G_MTX_LOAD            0x02
+/**
+ * @brief Do not push the top of the matrix stack to DRAM prior to matrix
+ * operations.
+ * @note The binary encoding of this bit is flipped in SPMatrix to save a RSP
+ * instruction. This is true in both F3DEX2 and F3DEX3.
+ */
+#define G_MTX_NOPUSH          0x00
+/**
+ * @brief Push the top of the matrix stack to DRAM prior to matrix operations.
+ * This is not supported for G_MTX_VIEWPROJECTION, only G_MTX_MODEL.
+ * @note The binary encoding of this bit is flipped in SPMatrix to save a RSP
+ * instruction. This is true in both F3DEX2 and F3DEX3.
+ */
+#define G_MTX_PUSH            0x01
 
 /* See SPAlphaCompareCull */
 #define G_ALPHA_COMPARE_CULL_DISABLE  0
@@ -217,15 +233,15 @@ of warnings if you use -Wpedantic. */
  * Each of these indexes an entry in a dmem table which points to an arbitrarily
  * sized block of dmem in which to store the result of a DMA.
  */
-#define G_MV_TEMPMTX0  0  /* for internal use by G_MTX multiply mode */
-#define G_MV_MMTX      2
-#define G_MV_TEMPMTX1  4  /* for internal use by G_MTX multiply mode */
-#define G_MV_VPMTX     6
+#define G_MV_MMTX      0
+#define G_MV_TEMPMTX0  2  /* for internal use by G_MTX multiply mode */
+#define G_MV_VPMTX     4
+#define G_MV_TEMPMTX1  6  /* for internal use by G_MTX multiply mode */
 #define G_MV_VIEWPORT  8
 #define G_MV_LIGHT     10
 /* G_MV_POINT is no longer supported because the internal vertex format is no
 longer a multiple of 8 (DMA word). This was not used in any command anyway. */
-/* G_MV_MATRIX is no longer supported because there is no MVP matrix in F3DEX3. */
+/* G_MV_MATRIX is no longer supported. */
 #define G_MV_PMTX G_MV_VPMTX /* backwards compatibility */
 
 /*
@@ -239,7 +255,7 @@ longer a multiple of 8 (DMA word). This was not used in any command anyway. */
 #define G_MW_SEGMENT        0x06
 #define G_MW_FOG            0x08
 #define G_MW_LIGHTCOL       0x0A
-/* G_MW_FORCEMTX is no longer supported because there is no MVP matrix in F3DEX3. */
+/* G_MW_FORCEMTX is no longer supported. */
 /* G_MW_PERSPNORM is removed; perspective norm is now set via G_MW_FX. */
 
 #define G_MW_HALFWORD_FLAG 0x8000 /* indicates store 2 bytes instead of 4 */
@@ -2123,16 +2139,36 @@ _DW({                                                   \
 /**
  * @brief macro which inserts a matrix operation at the end display list.
  * 
- * It inserts a matrix operation in the display list. The parameters allow you to select which matrix stack to use (projection or model view), where to load or concatenate, and whether or not to push the matrix stack. The following parameters are bit OR'ed together:
- * - @ref G_MTX_PROJECTION @ref G_MTX_MODELVIEW - @copybrief G_MTX_MODELVIEW
+ * It inserts a matrix operation in the display list. The parameters allow you
+ * to select which matrix stack to use (projection or model view), whether to
+ * load or multiply, and whether or not to push the matrix stack. The following
+ * parameters are bitwise OR'ed together:
+ * - @ref G_MTX_MODEL - @copybrief G_MTX_MODEL
+ * - @ref G_MTX_VIEWPROJECTION - @copybrief G_MTX_VIEWPROJECTION
  * - @ref G_MTX_MUL - @copybrief G_MTX_MUL
  * - @ref G_MTX_LOAD - @copybrief G_MTX_LOAD
  * - @ref G_MTX_NOPUSH - @copybrief G_MTX_NOPUSH
  * - @ref G_MTX_PUSH - @copybrief G_MTX_PUSH
- * # Matrix Format
- * The format of the fixed-point matrices may seem a little awkward to the application programmer because it is optimized for the RSP geometry engine. This unusual format is hidden in the graphics utility libraries and not usually exposed to the application programmer, but in some cases (static matrix declarations or direct element manipulation) it is necessary to understand the format.
  * 
- * The integer and fractional components of the matrix elements are separated. The first 8 words (16 shorts) hold the 16-bit integer elements, the second 8 words (16 shorts) hold the 16-bit fractional elements. The fact that the Mtx type is declared as a long [4][4] array is slightly misleading. For example, to declare a static identity matrix, use code similar to this:
+ * The legacy parameters @ref G_MTX_MODELVIEW and @ref G_MTX_PROJECTION are also
+ * supported, but in F3DEX3 you should always multiply the view matrix with the
+ * projection matrix as G_MTX_VIEWPROJECTION, and only put model matrices in the
+ * G_MTX_MODEL stack.
+ * 
+ * # Matrix Format
+ * 
+ * The format of the fixed-point matrices may seem a little awkward to the
+ * application programmer because it is optimized for the RSP geometry engine.
+ * This unusual format is hidden in the graphics utility libraries and not
+ * usually exposed to the application programmer, but in some cases (static
+ * matrix declarations or direct element manipulation) it is necessary to
+ * understand the format.
+ * 
+ * The integer and fractional components of the matrix elements are separated.
+ * The first 8 words (16 shorts) hold the 16-bit integer elements, the second
+ * 8 words (16 shorts) hold the 16-bit fractional elements. The fact that the
+ * Mtx type is declared as a long [4][4] array is slightly misleading. For
+ * example, to declare a static identity matrix, use code similar to this:
  * ```#include "gbi.h"
  * static Mtx ident =
  * {
@@ -2149,7 +2185,8 @@ _DW({                                                   \
  * 0x00000000, 0x00000000,
  * };
  * ```
- * To force the translation elements of a matrix to be (10.5, 20.5, 30.5), use code similar to this:
+ * To force the translation elements of a matrix to be (10.5, 20.5, 30.5), use
+ * code similar to this:
  * ```
  * #include "gbi.h"
  * 
@@ -2163,70 +2200,113 @@ _DW({                                                   \
  * mat.m[3][3] =
  *    (0x8000 << 16) | (0);
  * ```
- * @note
- * Matrix concatenation in the RSP geometry engine is done using 32-bit integer arithmetic. A 32 x 32 bit multiply results in a 64-bit number. Only the middle 32 bits of this 64-bit result are kept for the new matrix. Therefore, when concatenating matrices, remember about the resulting fixed-point numerical error.
+ *
+ * # Accuracy
  * 
- * For example, to retain maximum precision, the number ranges must be similar. Large-scale and translate parameters can decrease the transformation precision. Because rotation and projection matrices require quite a bit of fractional accuracy, these fractions may get tossed out if multiplied against large integer numbers.
+ * Matrix multiplication in the RSP geometry engine is done using 32-bit integer
+ * arithmetic, in s15.16 format (16 integer, 16 fractional bits, in other words
+ * representing -32768.0 to 32767.999985 with a resolution of about 0.000015).
+ * A 32 x 32 bit multiply results in a 64-bit number. Only the middle 32 bits of
+ * this 64-bit result are kept for the new matrix, to preserve the s15.16
+ * format.
  * 
- * Each concatenation results in the rounding of the LSB of each matrix term. This means that each concatenation injects 1/2 LSB of error into the matrix. To keep full precision, concatenate matrices in floating-point on the processor and just load the result into the RSP.
+ * A typical game object's transformation will have a scale around the range of
+ * 1/100, a rotation which is always values -1.0 to 1.0, and a translation
+ * around the range of 1000. When producing a final transformation matrix, you
+ * will typically compose (multiply) one scale, multiple rotations (for limbs),
+ * and finally one translation. Each matrix multiply on the RSP will lose
+ * precision, especially if the scale has been applied before the rotations.
+ * 
+ * Therefore, your game should usually maintain a matrix stack on the CPU in
+ * floating point, and once you have a final model matrix for each limb /
+ * object, convert it to fixed point and load it to the RSP. Occasional uses of
+ * G_MTX_MUL, such as multiplying view * projection or for HUD elements, are
+ * okay. Both SM64 and OoT already operate this way.
  * 
  * # Performance
- * Each @ref G_MTX_MODELVIEW matrix operation has an implicit matrix multiplication even if you specify @ref G_MTX_LOAD. This is the combined model view (M) and projection (P) matrix that is necessary for the vertex transformation to use a single matrix during transformation.
  * 
- * You can optimize this by concatenating modeling matrices on the CPU and then putting the viewing (V) and projection matrices on the projection stack. By doing this, you only incur the single MxVP matrix concatenation each time you load a modeling matrix. Furthermore, the application has more information on how to do a cheap hack for modeling matrix concatenation. For example, if you want to combine a single axis rotation with a translation, just place the coefficients in the correct entries of the resulting matrix.
+ * Your game generally should not use G_MTX_PUSH or SPPopMatrix*, even in a
+ * scene graph style engine like SM64.
  * 
- * @param m is the pointer to the 4x4 fixed-point matrix (see note below about format)
- * @param p are the bit OR'd parameters to the matrix macro (@ref G_MTX_PROJECTION, @ref G_MTX_MODELVIEW, @ref G_MTX_MUL, @ref G_MTX_LOAD, @ref G_MTX_NOPUSH)
+ * If you have taken the advice above to just compute and upload final model
+ * matrices, there is no need to use push or pop--you'll always just do a single
+ * load before rendering any model. If you need to return to a previous
+ * transformation matrix, just upload that already-computed matrix again. Again,
+ * both SM64 and OoT already do this.
+ * 
+ * In F3DEX3, the code for G_MTX_PUSH and SPPopMatrix* is moved to overlay 3,
+ * meaning these operations will be slower on average than in F3DEX2.
+ * 
+ * @param m is the pointer to the 4x4 fixed-point matrix (see note above about
+ * format)
+ * @param p are the bit OR'd parameters to the matrix macro
+ * (@ref G_MTX_MODEL, @ref G_MTX_VIEWPROJECTION, @ref G_MTX_MUL,
+ * @ref G_MTX_LOAD, @ref G_MTX_NOPUSH, @ref G_MTX_PUSH)
+ * 
+ * @note The binary encoding for this command inverts both G_MTX_PUSH and
+ * G_MTX_LOAD. F3DEX2 already inverted G_MTX_PUSH, but the inversion of
+ * G_MTX_LOAD is new in F3DEX3. No C source level changes are needed due to
+ * these inversions, it's just a binary encoding change.
+ * 
+ * @note G_MTX_PUSH | G_MTX_VIEWPROJECTION is not supported; the behavior will
+ * be that G_MTX_PUSH is ignored in this case.
+ * 
+ * @note Unlike the display list stack, which is kept in DMEM and is 18 deep,
+ * the matrix stack is kept in RDRAM and is of no specified size. It is of
+ * whatever size the developer chooses to allocate; there is no bounds checking.
  */
 #define gSPMatrix(pkt, m, p) \
-        gDma2p((pkt),G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH, 0)
+        gDma2p((pkt),G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH ^ G_MTX_LOAD, 0)
 /**
  * @brief macro which inserts a matrix operation in a static display list.
  * 
  * @copydetails gSPMatrix
  */
 #define gsSPMatrix(m, p) \
-        gsDma2p(     G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH, 0)
+        gsDma2p(     G_MTX, (m), sizeof(Mtx), (p) ^ G_MTX_PUSH ^ G_MTX_LOAD, 0)
 
 /**
- * @brief macro which pops one of the matrix stacks at the end display list.
+ * @brief macro which pops multiple matrices from a matrix stack.
  * 
- * It pops `num` of the matrix stacks. The model view stack can be up to 10 matrices deep. The projection stack is 1 matrix deep, so it cannot be popped.
+ * It pops `num` matrices from the stack.
  * 
- * @note
- * If the stack is empty, the macro is ignored.
+ * @note If the number of matrices to pop is greater than the number of matrices
+ * currently on the stack, the stack ends up validly holding 0 matrices. This is
+ * a rare case of "exception" handling in the microcode. Perhaps SGI's intention
+ * was to allow for resetting the matrix stack by popping >= 10 matrices at
+ * once.
  * 
- * @param n is the flag field that identifies which matrix stack to pop:
- * - @ref G_MTX_MODELVIEW pops the modeling/viewing matrix stack
- * - @ref G_MTX_PROJECTION pops the projection matrix stack (NOT IMPLEMENTED)
+ * @param mtx is the flag field that identifies which matrix stack to pop:
+ * - @ref G_MTX_MODEL pops from the model matrix stack
+ * - @ref G_MTX_VIEWPROJECTION pops from the view*projection matrix stack; this
+ *   is not supposed to be supported but actually kind of is. The model matrix
+ *   stack pointer is reduced by the number of matrices specified here, and then
+ *   the resulting matrix is loaded into the view*projection matrix.
  * @param num is the number of matrices to pop
  */
-#define gSPPopMatrixN(pkt, n, num) gDma2p((pkt), G_POPMTX, (num) * 64, 64, 2, 0)
+#define gSPPopMatrixN(pkt, mtx, num) \
+    gDma2p((pkt), G_POPMTX, (num) * 64, 64, (mtx) + G_MV_MMTX, 0)
 /**
- * @brief macro which pops one of the matrix stacks in a static display list.
+ * @brief macro which pops multiple matrices from a matrix stack.
  * 
  * @copydetails gSPPopMatrixN
  */
-#define gsSPPopMatrixN(n, num)     gsDma2p(      G_POPMTX, (num) * 64, 64, 2, 0)
+#define gsSPPopMatrixN(mtx, num) \
+    gsDma2p(      G_POPMTX, (num) * 64, 64, (mtx) + G_MV_MMTX, 0)
 /**
- * @brief macro which pops one of the matrix stacks at the end display list.
+ * @brief macro which pops one matrix from a matrix stack in a static display list.
  * 
- * It pops one of the matrix stacks. The model view stack can be up to 10 matrices deep. The projection stack is 1 matrix deep, so it cannot be popped.
+ * This is just SPPopMatrixN with num=1:
  * 
- * @note
- * If the stack is empty, the macro is ignored.
- * 
- * @param n is the flag field that identifies which matrix stack to pop:
- * - @ref G_MTX_MODELVIEW pops the modeling/viewing matrix stack
- * - @ref G_MTX_PROJECTION pops the projection matrix stack (NOT IMPLEMENTED)
+ * @copydetails gSPPopMatrixN
  */
-#define gSPPopMatrix(pkt, n)       gSPPopMatrixN((pkt), (n), 1)
+#define gSPPopMatrix(pkt, mtx)       gSPPopMatrixN((pkt), (mtx), 1)
 /**
- * @brief macro which pops one of the matrix stacks in a static display list.
+ * @brief macro which pops one matrix from a matrix stack in a static display list.
  * 
  * @copydetails gSPPopMatrix
  */
-#define gsSPPopMatrix(n)           gsSPPopMatrixN(      (n), 1)
+#define gsSPPopMatrix(mtx)           gsSPPopMatrixN(      (mtx), 1)
 
 /**
  * @brief macro which loads an internal vertex buffer in the RSP with points that are used by @ref gSP1Triangle macros to generate polygons at the end display list.
