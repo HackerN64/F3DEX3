@@ -967,14 +967,16 @@ vpWrlF equ $v13 // vertex pair World position Frac part
 vpWrlI equ $v14 // vertex pair World position Int part
 aDPosF equ $v15 // ltadv Delta Position Frac part
 aDPosI equ $v16 // ltadv Delta Position Int part
-aOffsA equ $v17 // ltadv Offset Alpha
+aOAFrs equ $v17 // ltadv Offset Alpha (elem 3,7) and Fresnel (elem 0,4)
 // Uses vpRGBA, vpLtTot, vpNrmlX, vpNrmlY, vpNrmlZ = $v18, $v19, $v20, $v21, $v22
 aParam equ $v23 // ltadv Parameters = AO, texgen, and Fresnel params
 
 aAOF2  equ aLen2F // Version of aAOF in init, can't be aDPosI/F or vpMdl there
-aPLFcF equ aLen2F // Point Light Factor Frac part
+aPLFcF equ aLen2F // ltadv Point Light Factor Frac part
 aLTC   equ aLen2F // ltadv Light Color
-aPLFcI equ aLen2I // Point Light Factor Int part
+aLkDt0 equ aLen2F // ltadv Lookat Dot product 0 for texgen
+aPLFcI equ aLen2I // ltadv Point Light Factor Int part
+aLkDt1 equ aLen2I // ltadv Lookat Dot product 1 for texgen
 aDOT   equ vpMdl  // ltadv Dot product = normals dot direction; also briefly light dir
 aClOut equ vpWrlF // ltadv Color Out
 aAlOut equ vpWrlI // ltadv Alpha Out
@@ -983,6 +985,7 @@ aDotSc equ aDPosF // ltadv Dot product Scale factor
 aLenF  equ aDPosI // ltadv Length Frac part
 aAOF   equ aDPosI // ltadv Ambient Occlusion Factor
 aProj  equ aDPosI // ltadv Projection
+// vpST equ aOAFrs // ST used in texgen
 vpWNrm equ vpNrmlX // vertex pair World space Normals
 aRcpLn equ $v29 // ltadv Reciprocal of Length
 aLenI  equ $v29 // ltadv Length Int part
@@ -993,9 +996,8 @@ aLenI  equ $v29 // ltadv Length Int part
 // always be free during vtx load or clipping.
 tempVpRGBA            equ 0x00        // Only used during loop
 tempXfrmLt            equ tempVpRGBA  // ltbasic only used during init
-tempUnpackings        equ tempVpRGBA  // ltadv only during init
+tempVtx1ST            equ tempVpRGBA  // ltadv only during init
 tempAmbient           equ 0x10        // ltbasic set during init, used during loop
-tempNormalScales      equ tempAmbient // ltadv only during init
 tempPrevInvalVtxStart equ 0x20
 tempPrevInvalVtx      equ (tempPrevInvalVtxStart + vtxSize) // 0x46; fog writes here
 tempPrevInvalVtxEnd   equ (tempPrevInvalVtx + vtxSize)      // 0x6C; rest of vtx writes here
@@ -3297,35 +3299,45 @@ lLkDrs equ lDTC    // lighting Lookat Directions
 lLkDt0 equ vpLtTot // lighting Lookat Dot product 0
 lLkDt1 equ lDOT    // lighting Lookat Dot product 1
     lpv     lLkDrs[0], (xfrmLookatDirs + 0)($zero) // Lookat 0 in 0-2, 1 in 4-6
-    vmulf   $v29,   vpNrmlX, lLkDrs[0]  // Normals X elems 0, 4 * lookat 0 X
-    vmacf   $v29,   vpNrmlY, lLkDrs[1]  // Normals Y elems 0, 4 * lookat 0 Y
+.macro texgen_dots, lookats, dot0, dot1
+    vmulf   $v29, vpNrmlX, lookats[0]  // Normals X * lookat 0 X
+    vmacf   $v29, vpNrmlY, lookats[1]  // Normals Y * lookat 0 Y
+    vmacf   dot0, vpNrmlZ, lookats[2]  // Normals Z * lookat 0 Z
+    vmulf   $v29, vpNrmlX, lookats[4]  // Normals X * lookat 1 X
+    vmacf   $v29, vpNrmlY, lookats[5]  // Normals Y * lookat 1 Y
+    vmacf   dot1, vpNrmlZ, lookats[6]  // Normals Z * lookat 1 Z
+.endmacro
+    texgen_dots lLkDrs, lLkDt0, lLkDt1
 .if !CFG_NO_OCCLUSION_PLANE
     addi    outVtxBase, outVtxBase, -2*vtxSize // Undo doing this twice due to repeating ST scale
 .endif
-    vmacf   lLkDt0, vpNrmlZ, lLkDrs[2]  // Normals Z elems 0, 4 * lookat 0 Z
-    vmulf   $v29,   vpNrmlX, lLkDrs[4]  // Normals X elems 0, 4 * lookat 1 X
-    vmacf   $v29,   vpNrmlY, lLkDrs[5]  // Normals Y elems 0, 4 * lookat 1 Y
-    vmacf   lLkDt1, vpNrmlZ, lLkDrs[6]  // Normals Z elems 0, 4 * lookat 1 Z
-    vmudh   lLkDt0, vOne, lLkDt0[3h]    // Move lookat 0 dot product to elem 0
-lLkCns equ lLkDrs  // lighting Lookat Constants
-    llv     lLkCns[0], (texgenLinearCoeffs - altBase)(altBaseReg)
-    vne     $v29, $v31, $v31[1h]        // Set VCC to 10111011
+// In ltbasic, normals are in elems 3, 7; in ltadv, elems 0, 4
+    vmudh   lLkDt0, vOne, lLkDt0[3h] // Move dot 0 from elems 3, 7 to 0, 4
+.macro texgen_body, lookats, dot0, dot1, normalselem, branch_no_texgen_linear
+// lookats now holds texgen linear coefficients elems 0, 1
+    llv     lookats[0], (texgenLinearCoeffs - altBase)(altBaseReg)
+    vne     $v29, $v31, $v31[1h]    // Set VCC to 10111011
     andi    $11, vGeomMid, G_TEXTURE_GEN_LINEAR >> 8
-    vmrg    lLkDt0, lLkDt0, lLkDt1[3h]  // Dot products in elements 0, 1, 4, 5
-    vmudh   $v29, vOne, $v31[5]         // 1 * 0x4000
-    beqz    $11, vtx_return_from_texgen
-     vmacf  vpST, lLkDt0, $v31[5]       // + dot products * 0x4000 ( / 2)
+    vmrg    dot0, dot0, dot1[normalselem] // Dot products in elements 0, 1, 4, 5
+    vmudh   $v29, vOne, $v31[5]     // 1 * 0x4000
+    beqz    $11, branch_no_texgen_linear
+     vmacf  vpST, dot0, $v31[5]     // + dot products * 0x4000 ( / 2)
     // Texgen_Linear:
-    vmulf   vpST, lLkDt0, $v31[5]       // dot products * 0x4000 ( / 2)
-lLkST2 equ lLkDt0  // lighting Lookat ST squared
-    vmulf   lLkST2, vpST, vpST          // ST squared
-    vmulf   $v29, vpST, $v31[7]         // Move ST to accumulator (0x7FFF = 1)
-lLkTmp equ lLkDt1  // lighting Lookat Temp
-    vmacf   lLkTmp, vpST, lLkCns[1]     // + ST * 0x6CB3
-    vmudh   $v29, vOne, $v31[5]         // 1 * 0x4000
-    vmacf   vpST, vpST, lLkCns[0]       // + ST * 0x44D3
+    vmulf   vpST, dot0, $v31[5]     // dot products * 0x4000 ( / 2)
+// dot0 now holds lighting Lookat ST squared
+    vmulf   dot0, vpST, vpST        // ST squared
+    vmulf   $v29, vpST, $v31[7]     // Move ST to accumulator (0x7FFF = 1)
+// dot1 now holds lighting Lookat Temp
+    vmacf   dot1, vpST, lookats[1]  // + ST * 0x6CB3
+    vmudh   $v29, vOne, $v31[5]     // 1 * 0x4000
+    vmacf   vpST, vpST, lookats[0]  // + ST * 0x44D3
+.endmacro
+    texgen_body lLkDrs, lLkDt0, lLkDt1, 3h, vtx_return_from_texgen
     j       vtx_return_from_texgen
-     vmacf  vpST, lLkST2, lLkTmp        // + ST squared * (ST + ST * coeff)
+.macro texgen_lastinstr, dot0, dot1
+     vmacf  vpST, dot0, dot1        // + ST squared * (ST + ST * coeff)
+.endmacro
+     texgen_lastinstr lLkDt0, lLkDt1
     
 ovl2_end:
 .align 8
@@ -3396,7 +3408,8 @@ ltadv_vtx_loop:
     andi    laPacked, vGeomMid, G_PACKED_NORMALS >> 8
     vmadh   vpWrlI, vMTX3I, vOne
     luv     vpLtTot, (ltBufOfs + 0)(curLight) // Total light level, init to ambient
-    vsub    aOffsA, vpRGBA, $v31[7]  // 0x7FFF; offset alpha
+// aOAFrs <- vpST
+    vsub    aOAFrs, vpRGBA, $v31[7]  // 0x7FFF; offset alpha elems 3, 7
     vmudm   $v29, aPNScl, vpMdl[3h] // Packed normals from elem 3,7 of model pos
     bnez    laPacked, @@skip_regular_normals
      vmadn  vpMdl, $v31, $v31[2] // 0; load lower (vpMdl unsigned but must be T operand)
@@ -3404,7 +3417,7 @@ ltadv_vtx_loop:
 @@skip_regular_normals:
     vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
     jal     ltadv_xfrm
-     vmadm  aAOF2, aOffsA, aParam[0] // + (alpha - 1) * aoAmb factor; elems 3, 7
+     vmadm  aAOF2, aOAFrs, aParam[0] // + (alpha - 1) * aoAmb factor; elems 3, 7
 // aDOT <- vpMdl
     vmulf   vpLtTot, vpLtTot, aAOF2[3h] // light color *= ambient factor
 // aLTC <- aAOF2
@@ -3427,7 +3440,7 @@ ltadv_normals_to_regs:
 ltadv_loop:
     vmudh   $v29, vOne, $v31[7] // Load accum mid with 0x7FFF (1 in s.15)
     lbu     $11,     (ltBufOfs + 3 - lightSize)(curLight) // Light type / constant attenuation
-    vmadm   aAOF, aOffsA, aParam[1] // + (alpha - 1) * aoDir factor; elems 3, 7
+    vmadm   aAOF, aOAFrs, aParam[1] // + (alpha - 1) * aoDir factor; elems 3, 7
     beq     curLight, altBaseReg, ltadv_post
      lpv    aDOT[0], (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 0 dir in elems 0-2
     bnez    $11, ltadv_point
@@ -3462,8 +3475,8 @@ ltadv_spec_fres_setup:
     j       ltadv_normal_to_vertex
      ldv    aDPosI[8], (cameraWorldPos - altBase)(altBaseReg)
 ltadv_after_camera:
-    vmov    aOffsA[0], aDOT[0]       // Save Fresnel dot product in aOffsA[0h]
-    vmov    aOffsA[4], aDOT[4]
+    vmov    aOAFrs[0], aDOT[0]       // Save Fresnel dot product in aOAFrs[0h]
+    vmov    aOAFrs[4], aDOT[4]       // elems 0, 4
     bgez    laSpecular, ltadv_loop   // Sign bit clear = not specular
      li     laSpecFres, 0            // Clear flag for specular or fresnel
 // aProj <- aLenF
@@ -3501,26 +3514,35 @@ ltadv_post:
     beqz    $11, @@skip_fresnel
      vmrg   vpRGBA, aClOut, aAlOut     // Merge base output and alpha output
     lsv     aAOF[0], (vTRC_0100_addr - altBase)(altBaseReg) // Load constant 0x0100 to temp
-    vabs    aOffsA, aOffsA, aOffsA     // Fresnel dot in aOffsA[0h]; absolute value for underwater
+    vabs    aOAFrs, aOAFrs, aOAFrs     // Fresnel dot in aOAFrs[0h]; absolute value for underwater
     andi    $11, vGeomMid, G_FRESNEL_COLOR >> 8
     vmudh   $v29, vOne, aParam[7]      // Fresnel offset
-    vmacf   aOffsA, aOffsA, aParam[6]  // + factor * scale
+    vmacf   aOAFrs, aOAFrs, aParam[6]  // + factor * scale
     beqz    $11, @@skip
-     vmudh  aOffsA, aOffsA, aAOF[0]    // Result * 0x0100, clamped to 0x7FFF
+     vmudh  aOAFrs, aOAFrs, aAOF[0]    // Result * 0x0100, clamped to 0x7FFF
     veq     $v29, $v31, $v31[3h]       // Set VCC to 00010001 if G_FRESNEL_COLOR
 @@skip:
-    vmrg    vpRGBA, vpRGBA, aOffsA[0h] // Replace color or alpha with fresnel
+    vmrg    vpRGBA, vpRGBA, aOAFrs[0h] // Replace color or alpha with fresnel
     vge     vpRGBA, vpRGBA, $v31[2]    // Clamp to >= 0 for fresnel; doesn't affect others
 @@skip_fresnel:
-    beqz    laTexgen, @@skip_texgen    // no texgen
+    beqz    laTexgen, ltadv_after_texgen
      suv    vpRGBA,   (VTX_IN_TC - 2 * inputVtxSize)(laPtr) // Vtx 2:1 RGBA
-    // Texgen: aDOT still contains lookat 0 in elems 0-2, lookat 1 in elems 4-6
-    nop     // TODO
-@@skip_texgen:
+// Texgen: aDOT still contains lookat 0 in elems 0-2, lookat 1 in elems 4-6
+// vpST <- aOAFrs
+    texgen_dots aDOT, aLkDt0, aLkDt1
+    texgen_body aDOT, aLkDt0, aLkDt1, 0h, ltadv_texgen_end
+    texgen_lastinstr aLkDt0, aLkDt1
+ltadv_texgen_end:  // Vtx 2 ST in vpST elem 0, 1; vtx 1 ST in vpST elem 4, 5
+    slv     vpST[8],  (tempVtx1ST)(rdpCmdBufEndP1) // Vtx 1 ST
+    bltz    laVtxLeft, ltadv_after_texgen  // Only vtx 1 is valid, don't write vtx 2
+     lw     laSTKept, (tempVtx1ST)(rdpCmdBufEndP1) // Overwrite stored Vtx 1 ST
+    slv     vpST[0],  (VTX_IN_TC - 1 * inputVtxSize)(laPtr) // Vtx 2 ST
+ltadv_after_texgen:
 // vpMdl <- aDOT
     lw      $11,      (VTX_IN_TC - 2 * inputVtxSize)(laPtr) // Vtx 2 RGBA from vtx 1 ST slot
     bltz    laVtxLeft, vtx_setup_no_lighting
-     sw     laSTKept, (VTX_IN_TC - 2 * inputVtxSize)(laPtr) // Real vtx 1 ST
+     sw     laSTKept, (VTX_IN_TC - 2 * inputVtxSize)(laPtr) // Restore vtx 1 ST
+ltadv_vtx_loop_end:
     bgtz    laVtxLeft, ltadv_vtx_loop
      sw     $11,      (VTX_IN_CN - 1 * inputVtxSize)(laPtr) // Real vtx 2 RGBA
     j       vtx_setup_no_lighting
@@ -3605,7 +3627,7 @@ ltadv_normalize: // Normalize vector in aDPosI:vpWrlF i/f
      vmadh  aPLFcI, aLen2I, aNrmSc[7]  // + len^2 int * quadratic factor int  = aLen2I int
 // aAOF <- aLenF
     vmudh   aAOF, vOne, $v31[7]        // Load accum mid with 0x7FFF (1 in s.15)
-    vmadm   aAOF, aOffsA, aParam[2]    // + (alpha - 1) * aoPoint factor; elems 3, 7
+    vmadm   aAOF, aOAFrs, aParam[2]    // + (alpha - 1) * aoPoint factor; elems 3, 7
 // aDotSc <- aDIR
     vrcph   aDotSc[1], aPLFcI[0]       // 1/(2*light factor), input of 0000.8000 -> no change normals
     vrcpl   aDotSc[2], aPLFcF[0]       // Light factor 0001.0000 -> normals /= 2
