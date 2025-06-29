@@ -2775,7 +2775,7 @@ other segments. */
 /**
  * @brief Load new MVP matrix directly.
  * 
- * This is no longer supported as there is no MVP matrix in F3DEX3.
+ * This is no longer supported as it was not used in production games.
  * @deprecated
  */
 #define gSPForceMatrix(pkt, mptr) gSPNoOp(pkt)
@@ -2949,7 +2949,7 @@ _DW({                                         \
     
 /**
  * Alpha compare culling. Optimization for cel shading, could also be used for
- * other scenarios where lots of tris are being drawn with alpha compare.
+ * other scenarios where tris are being drawn with alpha compare.
  * 
  * If mode == G_ALPHA_COMPARE_CULL_DISABLE, tris are drawn normally.
  * 

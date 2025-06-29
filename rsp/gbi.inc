@@ -56,14 +56,14 @@ G_RDPFULLSYNC       equ 0xe9
 G_SETKEYGB          equ 0xea
 G_SETKEYR           equ 0xeb
 G_SETCONVERT        equ 0xec
-G_SETSCISSOR        equ 0xed // scis/oth handler
+G_SETSCISSOR        equ 0xed
 G_SETPRIMDEPTH      equ 0xee
-G_RDPSETOTHERMODE   equ 0xef // scis/oth handler
-G_LOADTLUT          equ 0xf0 // load handler
-G_RDPHALF_2         equ 0xf1 // own handler
+G_RDPSETOTHERMODE   equ 0xef
+G_LOADTLUT          equ 0xf0
+G_RDPHALF_2         equ 0xf1
 G_SETTILESIZE       equ 0xf2
-G_LOADBLOCK         equ 0xf3 // load handler
-G_LOADTILE          equ 0xf4 // load handler
+G_LOADBLOCK         equ 0xf3
+G_LOADTILE          equ 0xf4
 G_SETTILE           equ 0xf5
 G_FILLRECT          equ 0xf6
 G_SETFILLCOLOR      equ 0xf7
