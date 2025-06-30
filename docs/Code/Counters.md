@@ -116,7 +116,7 @@ In variables.h with the ENABLE_SPEEDMETER section:
 extern volatile F3DEX3YieldDataFooter gRSPProfilingResults;
 ```
 
-In the true codepath of Sched_TaskComplete:
+In the `true` codepath of Sched_TaskComplete:
 ```
 #ifdef ENABLE_SPEEDMETER
     /* Fetch number of primitives drawn from yield data */
@@ -139,7 +139,7 @@ volatile F3DEX3YieldDataFooter gRSPProfilingResults;
 ```
 
 You can display them on screen however you wish. Here is an example, in
-SpeedMeter_DrawTimeEntries
+SpeedMeter_DrawTimeEntries:
 ```
 GfxPrint printer;
 Gfx* opaStart;

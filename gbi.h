@@ -2707,13 +2707,19 @@ _DW({                                                        \
 }
 /**
  * 5 Triangles in strip arrangement. Draws the following tris:
- * v1-v2-v3, v3-v2-v4, v3-v4-v5, v5-v4-v6, v5-v6-v7
+ * v1-v2-v3, v2-v4-v3, v3-v4-v5, v4-v6-v5, v5-v6-v7
  * If you want to draw fewer tris, set indices to -1 from the right.
- * e.g. to draw 4 tris, set v7 to -1; to draw 3 tris, set v6 to -1
- * Note that any set of 3 adjacent tris can be drawn with either SPTriStrip
+ * e.g. to draw 4 tris, set v7 to -1; to draw 3 tris, set v6 to -1.
+ * 
+ * @note Any set of 3 adjacent tris can be drawn with either SPTriStrip
  * or SPTriFan. For arbitrary sets of 4 adjacent tris, four out of five of them
  * can be drawn with one of SPTriStrip or SPTriFan. The 4-triangle formation
- * which can't be drawn with either command looks like the Triforce.
+ * which can't be drawn with either command looks like the Triforce--maybe
+ * F3DEX4 will support gsSPTriForce. :)
+ *
+ * @note The first index of each triangle drawn is different, so that in
+ * !G_SHADING_SMOOTH (flat shading) mode, the single color or single normal of
+ * each triangle can be set independently.
  */
 #define gSPTriStrip(pkt, v1, v2, v3, v4, v5, v6, v7) \
     _gSP5Triangles(pkt, G_TRISTRIP, v1, v2, v3, v4, v5, v6, v7)
@@ -2724,8 +2730,8 @@ _DW({                                                        \
     _gsSP5Triangles(G_TRISTRIP, v1, v2, v3, v4, v5, v6, v7)
 /**
  * 5 Triangles in fan arrangement. Draws the following tris:
- * v1-v2-v3, v1-v3-v4, v1-v4-v5, v1-v5-v6, v1-v6-v7
- * Otherwise works the same as SPTriStrip, see above.
+ * v2-v3-v1, v3-v4-v1, v4-v5-v1, v5-v6-v1, v6-v7-v1
+ * Otherwise works the same as @see SPTriStrip.
  */
 #define gSPTriFan(pkt, v1, v2, v3, v4, v5, v6, v7) \
     _gSP5Triangles(pkt, G_TRIFAN, v1, v2, v3, v4, v5, v6, v7)

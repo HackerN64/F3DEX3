@@ -4,8 +4,8 @@ Modern graphics microcode for N64 romhacks. Will make you want to finally ditch
 HLE. Heavily modified version of F3DEX2, with all vertex and lighting code
 rewritten from scratch.
 
-**F3DEX3 is in alpha. It is not guaranteed to be bug-free, and updates may bring
-breaking changes.**
+**F3DEX3 is in beta. The GBI should be relatively stable but may change if there
+is a good reason.**
 
 [View the documentation here](https://hackern64.github.io/F3DEX3/) (or just look
 through the docs folder).
@@ -16,7 +16,7 @@ through the docs folder).
 
 Compared to F3DEX2 or any other F3D family microcode, F3DEX3 is...
 - faster on the RDP
-- in `LVP_NOC` configuration ([see docs](https://hackern64.github.io/F3DEX3/configuration.html)), [also faster on the RSP](https://hackern64.github.io/F3DEX3/performance.html)
+- in `NOC` configuration ([see docs](https://hackern64.github.io/F3DEX3/configuration.html)), [also faster on the RSP](https://hackern64.github.io/F3DEX3/performance.html)
 - more accurate
 - full of new visual features
 - [measurable in performance](https://hackern64.github.io/F3DEX3/counters.html)
@@ -27,9 +27,10 @@ all at the same time!
 
 - New geometry mode bit `G_PACKED_NORMALS` enables **simultaneous vertex colors
   and normals/lighting on the same mesh**, by encoding the normals in the unused
-  2 bytes of each vertex using a variant of [octahedral encoding](https://knarkowicz.wordpress.com/2014/04/16/octahedron-normal-vector-encoding/).
-  The normals are effectively as precise as with the vanilla method of replacing
-  vertex RGB with normal XYZ.
+  2 bytes of each vertex using the 5-6-5 bit encoding by HailToDodongo from
+  [Tiny3D](https://github.com/HailToDodongo/tiny3d). Model-space precision of
+  the normals is reduced, but this is rarely noticeable and there is barely any
+  performance penalty compared to regular normals without vertex colors.
 - New geometry mode bit `G_AMBOCCLUSION` enables **ambient occlusion** for
   opaque materials. Paint the shadow map into the vertex alpha channel; separate
   factors (set with `SPAmbOcclusion`) control how much this affects the ambient
@@ -106,6 +107,9 @@ all at the same time!
   value. This can be used for clearing the Z buffer or filling the framebuffer
   or the letterbox with a solid color **faster than the RDP can in fill mode**.
   Practical performance may vary due to scheduling constraints.
+- The key codepaths for triangle draw and vertex processing (assuming lighting
+  enabled and the occlusion plane disabled with the `NOC` configuration) are
+  **slightly faster than in F3DEX2**.
 
 ### Miscellaneous
 
@@ -132,14 +136,23 @@ all at the same time!
   parameters are encoded in the command. With some limitations, this allows the
   tint colors of cel shading to **match scene lighting** with no code
   intervention. Also useful for other lighting-dependent effects.
+- The microcode automatically switches between two lighting implementations
+  depending on which visual features are selected in the particular material.
+  The "basic lighting" codepath--which is roughly the same speed as F3DEX2--
+  supports all F3DEX2 features (directional lights, texgen), plus packed
+  normals, ambient occlusion, and light-to-alpha. The "advanced lighting"
+  codepath, which is slower, adds support for point lights, specular, and
+  Fresnel. You only pay the performance penalty for the features you use, and
+  only for the objects which use them.
+  
 
 ### Profiling
 
 F3DEX3 introduces a suite of performance profiling capabilities. These take the
 form of performance counters, which report cycle counts for various operations
 or the number of items processed of a given type. There are a total of 21
-performance counters across multiple microcode versions. See the Profiling
-section below.
+performance counters across multiple microcode versions. See the Performance
+Counters page in the docs.
 
 
 ## Credits
@@ -159,6 +172,7 @@ Other contributors:
 - Kaze Emanuar: several feature suggestions, testing
 - thecozies: Fresnel feature suggestion
 - Rasky: memset feature suggestion
+- HailToDodongo: packed normals encoding
 - coco875: Doxygen / GitHub Pages setup
 - ThePerfectLuigi64: CI build setup
 - neoshaman: feature discussions

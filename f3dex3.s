@@ -143,6 +143,8 @@ COUNTER_C_FIFO_FULL equ 1
 
 .endif
 
+CFG_DEBUG_NORMALS equ 0 // Can manually enable here
+
 // Only raise a warning in base modes; in profiling modes, addresses will be off
 .macro warn_if_base, warntext
     .if !ENABLE_PROFILING
@@ -1264,7 +1266,6 @@ G_MODIFYVTX_handler:
     j       do_moveword  // Moveword adds cmd_w0 to $10 for final addr
      lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx, bit 15 clear
 
-TODO check vtx 1 behavior
 G_TRIFAN_handler: // 17
     li      $1, 0x8000                   // $ra negative = flag for G_TRIFAN
 G_TRISTRIP_handler:
@@ -2597,8 +2598,9 @@ tris_end:
 
 tri_fan_store:
     lb      $11, (inputBufferEnd - 7)(inputBufferPos) // Load vtx 1
+    sh      cmd_w1_dram, 5(rdpCmdBufPtr) // Store vtx N+2 and N+3 as 1 and 2
     j       tri_main
-     sb     $11, 5(rdpCmdBufPtr)         // Store vtx 1
+     sb     $11, 7(rdpCmdBufPtr)         // Store vtx 1 as 3
 
 // Converts the segmented address in cmd_w1_dram to the corresponding physical address
 segmented_to_physical: // 7
@@ -3235,6 +3237,19 @@ ltbasic_start_standard:
     vnop
     luv     lVCI[0],    (tempVpRGBA)(rdpCmdBufEndP1) // Load vertex color input
 ltbasic_after_start:
+
+.if CFG_DEBUG_NORMALS
+.warning "Debug normals visualization is enabled"
+    vmudh   vpNrmlX, vOne, vpNrmlX[3h] // Move X to all elements
+    vne     $v29, $v31, $v31[1h] // Set VCC to 10111011
+    vmrg    vpNrmlX, vpNrmlX, vpNrmlY[3h] // X in 0, 4; Y to 1, 5
+    vne     $v29, $v31, $v31[2h] // Set VCC to 11011101
+    vmrg    vpNrmlX, vpNrmlX, vpNrmlZ[3h] // Z to 2, 6
+    vmudh   $v29, vOne, $v31[5] // 0x4000; middle gray
+    j       vtx_return_from_lighting
+     vmacf  vpRGBA, vpNrmlX, $v31[5] // 0x4000; + 0.5 * normal
+.else // CFG_DEBUG_NORMALS
+
     vmulf   $v29,  vpNrmlX, vLTC[4] // Normals X elems 3, 7 * first light dir X
 // lDIR <- (NOC: -, Occ: sOTM)
     lpv     lDIR[0], (ltBufOfs + 8 - 2*lightSize)(ambLight) // Xfrmed dir in elems 4-6; temp reg
@@ -3267,7 +3282,9 @@ ltbasic_post:
     jr      lbAfter
 // vpRGBA <- lDIR
      vmrg   vpRGBA, vpLtTot, lVCI  // RGB = light, A = vtx alpha
-    
+
+.endif // CFG_DEBUG_NORMALS
+
 // lbAfter       = ltbasic_ao if AO else
 // lbPostAo      = ltbasic_l2a if L2A else
 //                 ltbasic_packed if packed else
@@ -3469,6 +3486,17 @@ ltadv_vtx_loop: // Even instruction
     vmudn   vpWrlF, vpWrlF, $v31[1] // -1; negate world pos so add light/cam pos to it
     andi    laSpecFres, vGeomMid, (G_LIGHTING_SPECULAR | G_FRESNEL_COLOR | G_FRESNEL_ALPHA) >> 8
     vmadh   vpWrlI, vpWrlI, $v31[1] // -1
+
+.if CFG_DEBUG_NORMALS
+    vmudh   $v29, vOne, $v31[5] // 0x4000; middle gray
+    li      laTexgen, 0
+    vmacf   vpRGBA, vpWNrm, $v31[5] // 0x4000; + 0.5 * normal
+ltadv_finish_light:
+ltadv_loop:
+ltadv_normals_to_regs:
+ltadv_specular:
+.else
+
 ltadv_normals_to_regs:
     vmudh   vpNrmlY, vOne, vpWNrm[1h] // Move normals to separate registers
     bnez    laSpecFres, ltadv_spec_fres_setup
@@ -3504,7 +3532,7 @@ ltadv_specular: // aDOT in/out, uses vpLtTot[3] and $11 as temps
     jr      $ra
      vxor   aDOT, aDOT, $v31[7]    // = 0x7FFF - result
 
-align_with_warning 8, "One instruction of padding before ltadv_post"
+.align 8
 ltadv_post:
 // aClOut <- vpWrlF
 // aAlOut <- vpWrlI
@@ -3525,7 +3553,7 @@ ltadv_post:
     vcopy   aClOut, vpLtTot            // If no packed normals, base output is just light
 @@skip_novtxcolor:
     vmrg    vpRGBA, aClOut, aAlOut     // Merge base output and alpha output
-    beqz    $11, @@skip_fresnel
+    beqz    $11, ltadv_skip_fresnel
      ldv    vpMdl[8], (VTX_IN_OB + 0 * inputVtxSize)(laPtr) // Vtx 1 Model pos + PN
     lsv     aAOF[0], (vTRC_0100_addr - altBase)(altBaseReg) // Load constant 0x0100 to temp
     vabs    aOAFrs, aOAFrs, aOAFrs     // Fresnel dot in aOAFrs[0h]; absolute value for underwater
@@ -3538,7 +3566,10 @@ ltadv_post:
 @@skip:
     vmrg    vpRGBA, vpRGBA, aOAFrs[0h] // Replace color or alpha with fresnel
     vge     vpRGBA, vpRGBA, $v31[2]    // Clamp to >= 0 for fresnel; doesn't affect others
-@@skip_fresnel:
+
+.endif // CFG_DEBUG_NORMALS
+
+ltadv_skip_fresnel:
     beqz    laTexgen, ltadv_after_texgen
      suv    vpRGBA,   (VTX_IN_TC - 2 * inputVtxSize)(laPtr) // Vtx 2:1 RGBA
 // Texgen: aDOT still contains lookat 0 in elems 0-2, lookat 1 in elems 4-6
@@ -3659,13 +3690,6 @@ ltadv_normalize: // Normalize vector in aDPosI:vpWrlF i/f
      // aDIR <- aDotSc
 
 
-CFG_DEBUG_NORMALS equ 0 // Can manually enable here
-.if CFG_DEBUG_NORMALS
-.warning "Debug normals visualization is enabled"
-    vmudh   $v29, vOne, $v31[5] // 0x4000; middle gray
-    j       TODO
-     vmacf  vpRGBA, vpWNrm, $v31[5] // 0x4000; + 0.5 * normal
-.endif
 
 ovl4_end:
 .align 8

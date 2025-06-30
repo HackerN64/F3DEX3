@@ -4,6 +4,60 @@
 
 These features were present in earlier F3DEX3 versions, but have been removed.
 
+## Legacy Vertex Pipeline (LVP) Configuration
+
+Early versions of F3DEX3 were developed exclusively in an OoT context, where
+scenes are almost always RDP bottlenecked. Thus, these versions focused on
+reducing RDP time and adding new visual features at the cost of RSP time.
+
+Later, Kaze Emanuar became interested in using F3DEX3 in Return to Yoshi's
+Island due to the RDP performance improvements. However, due to the intense
+optimization work he had done, his game was relatively balanced in RDP / RSP
+time. Thus, when he tried F3DEX3, the decrease in RDP time and increase in RSP
+time made the game slower overall, which was not acceptable.
+
+As a result, the LVP configuration of F3DEX3 was developed, to bring
+F3DEX2-style vertex processing in exchange for dropping some of the advanced
+lighting features (which Kaze was not going to use anyway due to HLE
+compatibility). This was implemented, and after much optimization across the
+entire microcode, `F3DEX3_LVP_NOC` became slightly faster than F3DEX2 on both
+RDP and RSP. This caused Kaze to immediately adopt this configuration of F3DEX3
+for Return to Yoshi's Island.
+
+Unfortunately, this meant that if developers wanted to use the advanced lighting
+features of F3DEX3 in any part of their project, they were stuck with the much
+slower non-LVP configuration of F3DEX3. The desire to have the microcode
+automatically swap versions for each material, plus the invention of ways to
+include some of the advanced lighting features in the LVP vertex processing
+without any performance penalty when not using them, led to the reunion of the
+versions. Now you get LVP-style performance when not using some of the advanced
+features, and only pay the performance penalty while rendering objects which
+use them.
+
+A similar approach was also considered for the NOC configuration--to have the
+microcode only compute the occlusion plane when it is enabled. This is
+unfortunately infeasible. Register allocation / naming, as well as some
+pipelined instructions leading into and out of lighting, are significantly
+different between the occlusion plane and NOC versions of vertex processing.
+This means the microcode would have to swap between four versions of lighting
+code instead of just two, creating much more complexity with the overlay system
+and IMEM size issues. Furthermore, the occlusion plane is typically not
+enabled/disabled per object, but used when rendering as much of the game
+contents as possible to maximize occluded objects. So it is reasonable to choose
+the occlusion plane or NOC configuration on a per-frame or even per-scene basis.
+
+## Octahedral Encoding for Packed Normals
+
+Previous F3DEX3 versions encoded packed normals into the unused 2 bytes of each
+vertex using a variant of [octahedral encoding](https://knarkowicz.wordpress.com/2014/04/16/octahedron-normal-vector-encoding/).
+Using this method, the normals were effectively as precise as with the vanilla
+method of replacing vertex RGB with normal XYZ. However, the decoding of this
+format was inefficient, partly due to the requirement to also support vanilla
+normals at vanilla performance. Once HailToDodongo showed that the community was
+willing to accept the moderate precision loss of the much simpler 5-6-5 bit
+encoding in [Tiny3D](https://github.com/HailToDodongo/tiny3d), this was adopted
+in F3DEX3.
+
 ## Clipping minimal scanlines algorithm
 
 Earlier F3DEX3 versions included a modified algorithm for triangulating the
