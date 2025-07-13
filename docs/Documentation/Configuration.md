@@ -2,7 +2,7 @@
 
 # Microcode Configuration
 
-There are several selectable configuration settings when building F3DEX3, which
+There are a few selectable configuration settings when building F3DEX3, which
 can be enabled in any combination. With a couple minor exceptions, none of these
 settings affect the GBI--in fact, you can swap between the microcode versions on
 a per-frame basis if you build multiple versions into your romhack.
@@ -30,65 +30,21 @@ which version to use on the profiling results from the previous frame: if the
 RSP is the bottleneck (e.g. the RDP `CLK - CMD` is high), use the NOC version,
 and otherwise use the base version.
 
-## Legacy Vertex Pipeline (LVP)
-
-The primary tradeoff for all the new lighting features in F3DEX3 is increased
-RSP time for vertex processing. The base version of F3DEX3 takes about
-**2-2.5x** more RSP time for vertex processing than F3DEX2 (see Performance
-Results section below), assuming no lighting or directional lights only. You
-should use the F3DEX3 performance counters (see below) to determine whether your
-game is usually RSP or RDP bound.
-
-If your game is usually RDP bound--like OoT--this generally will not affect the
-game's overall framerate, so you should stick with base F3DEX3:
-- The increased time only applies to vertex processing, not triangle processing
-  or other miscellaneous microcode tasks. So the total RSP cycles spent doing
-  useful work during the frame is only modestly increased.
-- The increase in time is only RSP cycles; there is no additional memory
-  traffic, so the RDP time is not directly affected.
-- In scenes which are complex enough to fill the RSP->RDP FIFO in DRAM, the RSP
-  usually spends a significant fraction of time waiting for the FIFO to not be
-  full, as revealed by the performance counters. In these cases, slower vertex
-  processing simply means less time spent waiting, and little to no change in
-  total RSP time.
-- When the FIFO does not fill up, usually the RSP takes significantly less time
-  during the frame compared to the RDP, so increased RSP time usually does not
-  affect the overall framerate.
-
-However, for RSP bound or extremely optimized (Kaze Emanuar) games, base F3DEX3
-can become a bottleneck, so the Legacy Vertex Pipeline (LVP) configuration has
-been introduced.
-
-This configuration replaces F3DEX3's native vertex and lighting code with a
-faster version based on the same algorithms as F3DEX2. This removes:
-- Point lighting
-- F3DEX3 lighting features: packed normals, ambient occlusion, light-to-alpha
-  (cel shading), Fresnel, and specular lighting
-- ST attribute offsets
-
-However, it retains all other F3DEX3 features:
-- 56 verts, 9 directional lights
-- Occlusion plane (optional with NOC configuration)
-- All features not related to vertex/lighting: auto-batched rendering, packed 5
-  triangles commands, hints system, etc.
-
-With both LVP and NOC enabled, F3DEX3 is faster on the RSP than F3DEX2 (see
-@ref performance).
-
 ## Profiling
 
-As mentioned above, F3DEX3 includes many performance counters. There are far too
-many counters for a single microcode to maintain, so multiple configurations of
-the microcode can be built, each containing a different set of performance
-counters. These can be swapped while the game is running so the full set of
-counters can be effectively accessed over multiple frames.
+F3DEX3 includes many performance counters. There are far too many counters for a
+single microcode to maintain, so multiple configurations of the microcode can be
+built, each containing a different set of performance counters. These can be
+swapped while the game is running so the full set of counters can be effectively
+accessed over multiple frames.
 
 There are a total of 21 performance counters, including:
 - Counts of vertices, triangles, rectangles, matrices, DL commands, etc.
 - Times the microcode was processing vertices, processing triangles, stalled
   because the RDP FIFO in DMEM was full, and stalled waiting for DMAs to finish
 - A counter enabling a rough measurement of how long the RDP was stalled
-  waiting for RDRAM for I/O to the framebuffer / Z buffer
+  waiting for RDRAM for I/O to the framebuffer / Z buffer (spoiler: often
+  half to two thirds of the total RDP time!)
 
 The default configuration of F3DEX3 provides a few of the most basic counters.
 The additional profiling configurations, called A, B, and C (for example
@@ -103,7 +59,9 @@ because their removal does not affect the RDP render time.
 Use `BrZ` if the microcode is replacing F3DEX2 or an earlier F3D version (i.e.
 SM64), or `BrW` if the microcode is replacing F3DZEX (i.e. OoT or MM). This
 controls whether `SPBranchLessZ*` uses the vertex's W coordinate or screen Z
-coordinate.
+coordinate. If you are creating a new project for any game without using vanilla
+scenes, and you're considering using this instruction for LoD, you should use
+`BrW`.
 
 ## Debug Normals (`dbgN`)
 
@@ -113,10 +71,12 @@ version intended to be shipped. It can still be enabled by changing
 
 To help debug lighting issues when integrating F3DEX3 into your romhack, this
 feature causes the vertex colors of any material with lighting enabled to be set
-to the transformed, normalized world space normals. The X, Y, and Z components
-map to R, G, and B, with each dimension's conceptual (-1.0 ... 1.0) range mapped
-to (0 ... 255). This is not compatible with LVP as world space normals do not
-exist in that pipeline. This also breaks vertex alpha and texgen / lookat.
+to the normals. When F3DEX3 is using the "basic" lighting codepath, these are
+the model space normals, and when it is using the "advanced" lighting codepath
+(point lights, specular, or Fresnel) these are transformed, normalized world
+space normals. The X, Y, and Z components map to R, G, and B, with each
+dimension's conceptual (-1.0 ... 1.0) range mapped to (0 ... 255). This also
+breaks vertex alpha and texgen / lookat.
 
 Some ways to use this for debugging are:
 - If the normals have obvious problems (e.g. flickering, or not changing
@@ -124,9 +84,9 @@ Some ways to use this for debugging are:
   model space normals or the M matrix. Conversely, if there is a problem with
   the standard lighting results (e.g. flickering) but the normals don't have
   this problem, the problem is likely in the lighting data.
-- Check that the colors don't change based on the camera position, but DO change
-  as the object rotates, so that the same side of an object in world space is
-  always the same color.
+- If using the "advanced" lighting codepath, check that the colors don't change
+  based on the camera position, but DO change as the object rotates, so that the
+  same side of an object in world space is always the same color.
 - Make a simple object like an octahedron or sphere, view it in game, and check
   that the normals are correct. A normal pointing along +X would be
   (1.0, 0.0, 0.0), meaning (255, 128, 128) or pink. A normal pointing along -X

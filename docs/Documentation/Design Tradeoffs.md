@@ -2,85 +2,39 @@
 
 # What are the tradeoffs for all these new features?
 
-## Vertex Processing RSP Time
+In other words, when is F3DEX3 worse than F3DEX2?
 
-See the Microcode Configuration and Performance Results sections above.
+## Vertex processing RSP time for occlusion plane
 
-## Overlay 4
+In the occlusion plane F3DEX3 configuration, vertex processing is slower than
+in F3DEX2. If using this configuration and there is no occlusion plane or it is
+occluding almost nothing, the RSP will be slower with no other benefit.
 
-(Note that in the LVP configuration, Overlay 4 is absent; there is no M inverse
-transpose matrix discussed below, and the other commands mentioned below are
-directly in the microcode without an overlay, due to there being enough IMEM
-space.)
+However, when the occlusion plane is occluding even a few percent of the
+triangles in the scene, the situation changes. This saves RDP time, and most
+games are RDP bound, so this trades off RSP time for RDP time and makes the game
+faster overall. Plus, RSP time is also saved for the tris which are not drawn,
+which can approximately cancel out the extra RSP time for computing the
+occlusion plane for all vertices.
 
-F3DEX2 contains Overlay 2, which does lighting, and Overlay 3, which does
-clipping (run on any large triangle which extends a large distance offscreen).
-These overlays are more RSP assembly code which are loaded into the same space
-in IMEM. If the wrong overlay is loaded when the other is needed, the proper
-one is loaded and then code jumps to it. Display lists which do not use lighting
-can stay on Overlay 3 at all times. Display lists for things that are typically
-relatively small on screen, such as characters, can stay on Overlay 2 at all
-times, because even when a triangle overlaps the edge of the screen, it
-typically moves fully off the screen and is discarded before it reaches the
-clipping bounds (2x the screen size).
+## Functionality in Overlay 3
 
-In F3DEX2, the only case where the overlays are swapped frequently is for
-scenes with lighting, because they have large triangles which often extend far
-offscreen (Overlay 3) but also need lighting (Overlay 2). Worst case, the RSP
-will load Overlay 2 once for every `SPVertex` command and then load Overlay 3
-for every set of `SP*Triangle*` commands.
+The following commands are moved to Overlay 3 in F3DEX3 to save IMEM space. This
+means that code will have to be loaded from DRAM to run them if Overlays 2 or 4
+(for lighting) happen to be loaded already.
+- Push and multiply codepaths for `SPMatrix`
+- `SPPopMatrix*`
+- `SPDma*`
+- `SPMemset`
 
-(If you're curious, Overlays 0 and 1 are not related to 2 and 3, and have to do
-with starting and stopping RSP tasks. During normal display list execution,
-Overlay 1 is always loaded.)
+However:
+- Multiplying, pushing, and popping matrices is not recommended for performance
+  or accuracy, and these are not used for most 3D objects in SM64 or OoT.
+- `SPDma*` is rarely used except at startup for HLE detection.
+- `SPMemset` is a new F3DEX3 command which can improve performance. Plus, it is
+  typically run shortly after render start, when Overlay 3 is already in IMEM.
 
-F3DEX3 introduces Overlay 4, which can occupy the same IMEM as Overlay 2 and 3.
-This overlay contains handlers for:
-- Computing the inverse transpose of the model matrix M (abbreviated as mIT),
-  discussed below
-- The codepath for `SPMatrix` with `G_MTX_MUL` set (base version only; this is
-  moved out of the overlay to normal microcode in the NOC configuration due to
-  having extra IMEM space available)
-- `SPBranchLessZ*`
-- `SPDma_io`
-
-Whenever any of these features is needed, the RSP has to swap to Overlay 4. The
-next time lighting or clipping is needed, the RSP has to then swap back to
-Overlay 2 or 3. The round-trip of these two overlay loads takes about 5
-microseconds of DRAM time including overheads. Fortunately, all the above
-features other than the mIT matrix are rarely or never used.
-
-The mIT matrix is needed in F3DEX3 because normals are covectors--they stretch
-in the opposite direction of an object's scaling. So while you multiply a vertex
-by M to transform it from model space to world space, you have to multiply a
-normal by M inverse transpose to go to world space. F3DEX2 solves this problem
-by instead transforming light directions into model space with M transpose, and
-computing the lighting in model space. However, this requires extra DMEM to
-store the transformed lights, and adds an additional performance penalty for
-point lighting which is absent in F3DEX3. Plus, having world space normals in
-F3DEX3 enables Fresnel and specular lighting.
-
-If an object's transformation matrix stack only includes translations,
-rotations, and uniform scale (i.e. same scale in X, Y, and Z), then M inverse
-transpose is just a rescaled version of M, and the normals can be transformed
-with M directly. It is only when the matrix includes nonuniform scales or shear
-that M inverse transpose differs from M. The difference gets larger as the scale
-or shear gets more extreme.
-
-F3DEX3 provides three options for handling this (see `SPNormalsMode`):
-- `G_NORMALS_MODE_FAST`: Use M to transform normals. No performance penalty.
-  Lighting will be somewhat distorted for objects with nonuniform scale or
-  shear.
-- `G_NORMALS_MODE_AUTO`: The RSP will automatically compute M inverse transpose
-  whenever M changes. Costs about 3.5 microseconds of DRAM time per matrix, i.e.
-  per object or skeleton limb which has lighting enabled. Lighting is correct
-  for nonuniform scale or shear.
-- `G_NORMALS_MODE_MANUAL`: You compute M inverse transpose on the CPU and
-  manually upload it to the RSP every time M changes.
-
-It is recommended to use `G_NORMALS_MODE_FAST` (the default) for most things,
-and use `G_NORMALS_MODE_AUTO` only for objects while they currently have a
-nonuniform scale (e.g. Mario only while he is squashed).
+So there is not a significant practical performance impact from these changes.
 
 ## Far clipping removal
 
@@ -89,6 +43,13 @@ used for performance or aesthetic reasons in levels in vanilla SM64 or OoT,
 though it can be seen in certain extreme cases. However, it is used on the SM64
 title screen for the zoom-in on Mario's face, so this will look slightly
 different.
+
+Far clipping can be used to cull tris which are fully "fogged out" if the
+background color (no skybox) is also the fog color, for performance benefits.
+This effect has a bad reputation in '90s era games for being used as a cheap
+trick to hide performance problems, though it's occasionally used in "spooky"
+levels in romhacks. In F3DEX3, `SPAlphaCompareCull` can be used instead of far
+clipping to cull these triangles which are fully in fog.
 
 The removal of far clipping saved a bunch of DMEM space, and enabled other
 changes to the clipping implementation which saved even more DMEM space.
@@ -102,11 +63,11 @@ distance in front of the camera plane.
 
 A few clever romhackers figured out that you could shrink the normals on verts
 in your mesh (so their length is less than "1") to make the lighting on those
-verts dimmer and create a version of ambient occlusion. In the base vertex
-pipeline, F3DEX3 normalizes vertex normals after transforming them, which is
-required for most features of the lighting system including packed normals, so
-this no longer works. However, F3DEX3 has support for ambient occlusion via
-vertex alpha, which accomplishes the same goal with some extra benefits:
+verts dimmer and create a version of ambient occlusion. In the "advanced"
+lighting codepath, F3DEX3 normalizes vertex normals after transforming them,
+which is required for point lights, specular, and Fresnel, so this no longer
+works. However, F3DEX3 has support for ambient occlusion via vertex alpha, which
+accomplishes the same goal with some extra benefits:
 - Much easier to create: just paint the vertex alpha in Blender / fast64. The
   scaled normals approach was not supported in fast64 and had to be done with
   scripts or by hand.
@@ -118,16 +79,12 @@ vertex alpha, which accomplishes the same goal with some extra benefits:
   scaled normals never affect the ambient light, contrary to the concept of
   ambient occlusion.
 
-Furthermore, for partial HLE compatibility, the same mesh can have the ambient
-occlusion information encoded in both scaled normals and vertex alpha at the
-same time. HLE will ignore the vertex alpha AO but use the scaled normals;
-F3DEX3 will fix the normals' scale but then apply the AO.
-
 The only case where scaled normals work but F3DEX3 AO doesn't work is for meshes
 with vertex alpha actually used for transparency (therefore also no fog).
 
-Note that in LVP mode, scaled normals are supported and work the same way as in
-F3DEX2, while ambient occlusion is not supported.
+Note that in the "basic" lighting codepath in F3DEX3, vertex normals are treated
+the same way as in F3DEX2, so scaled normals are supported there. Ambient
+occlusion is also supported there.
 
 ## RDP temporary buffers shrinking
 
@@ -161,20 +118,13 @@ In F3DEX2, the RSP time for drawing non-textured tris was significantly lower
 than for textured tris, by skipping a chunk of computation for the texture
 coefficients if they were disabled. In F3DEX3, no computation is skipped when
 textures are disabled. However, almost all materials use textures, and F3DEX3 is
-a little faster at drawing textured tris than F3DEX2. Plus, DRAM access time RSP
--> FIFO and FIFO -> RDP is still saved from not sending the coefficients, and
-RDP time savings from avoiding loading a texture are unaffected of course. 
+a little faster at drawing textured tris than F3DEX2. Plus, F3DEX3 still does
+not send the texture cofficients if they are disabled, saving DRAM access time
+for RSP -> FIFO and FIFO -> RDP. RDP time savings from avoiding loading a
+texture are unaffected of course. 
 
 ## Obscure semantic differences from F3DEX2 that should never matter in practice
 
-- `SPLoadUcode*` corrupts the current M inverse transpose matrix state. If using
-  `G_NORMALS_MODE_FAST`, this doesn't matter. If using `G_NORMALS_MODE_AUTO`,
-  you must send the M matrix to the RSP again after returning to F3DEX3 from the
-  other microcode (which would normally be done anyway when starting to draw the
-  next object). If using `G_NORMALS_MODE_MANUAL`, you must send the updated
-  M inverse transpose matrix to the RSP after returning to F3DEX3 from the other
-  microcode (which would normally be done anyway when starting to draw the next
-  object).
 - Changing fog settings--i.e. enabling or disabling `G_FOG` in the geometry mode
   or executing `SPFogFactor` or `SPFogPosition`--between loading verts and
   drawing tris with those verts will lead to incorrect fog values for those

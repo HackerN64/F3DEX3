@@ -20,9 +20,9 @@ update the occlusion plane after updating the camera and write the pointer to
 this occlusion plane into the existing DL command near the beginning.
 
 3. Create a system in your game engine for dynamically choosing or creating an
-occlusion plane. For example, you might have a set of pre-determined occlusion
-planes in the scene, and at runtime pick the one which you think is most
-optimal. Some criteria to use for this include:
+occlusion plane. (See the implementation in HackerOoT.) For example, you might
+have a set of pre-determined occlusion planes in the scene, and at runtime pick
+the one which you think is most optimal. Some criteria to use for this include:
   - whether the camera is on the correct side of the occlusion plane
   - the distance from the camera to the full (infinite) plane
   - how far the point of the camera projected onto the full (infinite) plane is

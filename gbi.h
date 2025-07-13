@@ -2954,8 +2954,14 @@ _DW({                                         \
 
     
 /**
- * Alpha compare culling. Optimization for cel shading, could also be used for
- * other scenarios where tris are being drawn with alpha compare.
+ * Alpha compare culling. This was originally created as an optimization for cel
+ * shading, but it can also be used for other scenarios. In particular, it can
+ * be used with fog to cull tris which are entirely in the fog. This could also
+ * be accomplished with far clipping, but far clipping is removed in F3DEX3.
+ * ```
+ * // Cull tris where all three vertex shade alpha are >= 0xFF
+ * gSPAlphaCompareCull(..., G_ALPHA_COMPARE_CULL_ABOVE, 0xFF);
+ * ```
  * 
  * If mode == G_ALPHA_COMPARE_CULL_DISABLE, tris are drawn normally.
  * 

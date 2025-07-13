@@ -1346,7 +1346,7 @@ tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
     bnez    $11, return_and_end_mat // Then the whole tri is offscreen, cull
-     // 22 cycles
+     // 22 cycles (for tri2 first tri; tri1/only subtract 1 from counts)
      vmrg   tHPos, $v6, $v4   // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     vmudh   $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
     lhu     $24, activeClipPlanes
@@ -3147,6 +3147,7 @@ ltbasic_setup_after_xfrm:
     j       vtx_after_lt_setup
      li     lbAfter, ltbasic_ao
     
+.align 8
 xfrm_light_store_lookat:
     vmadh   $v29, $v9,  lpWrld[1h]
     spv     lpFinal[0], (xfrmLookatDirs)($zero) // Store lookat. 1st time garbage, 2nd real

@@ -29,8 +29,8 @@ all at the same time!
   and normals/lighting on the same mesh**, by encoding the normals in the unused
   2 bytes of each vertex using the 5-6-5 bit encoding by HailToDodongo from
   [Tiny3D](https://github.com/HailToDodongo/tiny3d). Model-space precision of
-  the normals is reduced, but this is rarely noticeable and there is barely any
-  performance penalty compared to regular normals without vertex colors.
+  the normals is reduced, but this is rarely noticeable, and the performance is
+  nearly identical to vanilla normals (without simultaneous vertex colors).
 - New geometry mode bit `G_AMBOCCLUSION` enables **ambient occlusion** for
   opaque materials. Paint the shadow map into the vertex alpha channel; separate
   factors (set with `SPAmbOcclusion`) control how much this affects the ambient
@@ -73,7 +73,7 @@ all at the same time!
   RSP time as fewer verts have to be reloaded and re-transformed, and also makes
   display lists shorter.
 - New **occlusion plane** system allows the placement of a 3D quadrilateral
-  where objects behind this plane in screen space are culled. This can
+  where triangles behind this plane in screen space are culled. This can
   dramatically improve RDP performance by reducing overdraw in scenes with walls
   in the middle, such as a city or an indoor scene.
 - If a material display list being drawn is the same as the last material, the
@@ -92,7 +92,8 @@ all at the same time!
   shade alpha values are all below or above a settable threshold. This
   **substantially reduces the performance penalty of cel shading**--only tris
   which "straddle" the cel threshold are drawn twice, the others are only drawn
-  once.
+  once. This can also be used to **cull tris which are fully in fog**, replacing
+  far clipping which is removed in F3DEX3.
 - A new "hints" system encodes the expected size of the target display list into
   call, branch, and return DL commands. This allows only the needed number of DL
   commands in the next DL to be fetched, rather than always fetching full
@@ -107,26 +108,30 @@ all at the same time!
   value. This can be used for clearing the Z buffer or filling the framebuffer
   or the letterbox with a solid color **faster than the RDP can in fill mode**.
   Practical performance may vary due to scheduling constraints.
-- The key codepaths for triangle draw and vertex processing (assuming lighting
-  enabled and the occlusion plane disabled with the `NOC` configuration) are
-  **slightly faster than in F3DEX2**.
+- New `SPFlush` command can ensure that the RDP starts clearing the framebuffer
+  as soon as possible during the frame, instead of waiting a short time for
+  further RSP processing.
+- The key codepaths for command dispatch, triangle draw, and vertex processing
+  (assuming lighting enabled and the occlusion plane disabled with the `NOC`
+  configuration) are **slightly faster than in F3DEX2**.
 
 ### Miscellaneous
 
 - **Z-fighting of decals has been nearly eliminated**, with only a modest
-  increase in overdraw of very close occluding geometry. This is based on a
-  technique developed by SGI, neglected and removed by Nintendo, and re-added
-  by Rare; the F3DEX3 version improves upon it by choosing optimal parameters
-  and automatically enabling it for all decals with no code or DL changes. In
-  addition, the reduction in Z buffer precision from F3DEX(1) to F3DEX2 has been
-  reversed, and additional Z buffer precision beyond F3DEX(1) has been added.
+  increase in overdraw onto the decal of very close occluding geometry. This is
+  based on a technique developed by SGI, neglected and removed by Nintendo, and
+  re-added by Rare; the F3DEX3 version improves upon it by choosing optimal
+  parameters and automatically enabling it for all decals with no code or DL
+  changes.
+- The reduction in Z buffer precision from F3DEX(1) to F3DEX2 has been reversed,
+  and **additional Z buffer precision** beyond F3DEX(1) has been added.
 - **Point lighting** has been redesigned. The appearance when a light is close
   to an object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where
   a Z component was accidentally doubled in the point lighting calculations. The
-  quadratic point light attenuation factor is now an E3M5 floating-point number.
-  The performance penalty for using large numbers of point lights has been
-  reduced.
-- Maximum number of directional / point **lights raised from 7 to 9**. Minimum
+  quadratic point light attenuation factor is now an E3M5 floating-point number
+  for a wider representable range. The performance penalty for using large
+  numbers of point lights has been reduced.
+- Maximum number of directional / point lights **raised from 7 to 9**. Minimum
   number of directional / point lights lowered from 1 to 0 (F3DEX2 required at
   least one). Also supports loading all lights in one DMA transfer
   (`SPSetLights`), rather than one per light.
@@ -136,15 +141,15 @@ all at the same time!
   parameters are encoded in the command. With some limitations, this allows the
   tint colors of cel shading to **match scene lighting** with no code
   intervention. Also useful for other lighting-dependent effects.
-- The microcode automatically switches between two lighting implementations
+- The microcode automatically switches between **two lighting implementations**
   depending on which visual features are selected in the particular material.
   The "basic lighting" codepath--which is roughly the same speed as F3DEX2--
   supports all F3DEX2 features (directional lights, texgen), plus packed
   normals, ambient occlusion, and light-to-alpha. The "advanced lighting"
   codepath, which is slower, adds support for point lights, specular, and
-  Fresnel. You only pay the performance penalty for the features you use, and
-  only for the objects which use them.
-  
+  Fresnel. You only pay the performance penalty for the objects which use these
+  advanced features.
+
 
 ### Profiling
 
