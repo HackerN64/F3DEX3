@@ -21,6 +21,14 @@ first cycle of the command handler inclusive, to the first cycle of whatever is
 after $ra exclusive; this is in order to capture the extra latency and stalls in
 F3DEX2.
 
+Vertex numbers assume no extra F3DEX3 features (packed normals, ambient
+occlusion, etc.). These features are listed below as the number of extra cycles
+the feature costs per vertex pair. ltbasic is the codepath when point lighting,
+specular, and Fresnel are disabled; ltadv is the codepath with any of these
+enabled. The reason timings are listed separately for each number of lights is
+because some implementations are pipelined for two lights, so going from an
+even to an odd number of lights adds a different time than vice versa.
+
 |                            | F3DEX2 | F3DEX3_NOC | F3DEX3 |
 |----------------------------|--------|------------|--------|
 | Command dispatch           | 12     | 12         | 12     |
@@ -49,16 +57,26 @@ F3DEX2.
 | Vtx pair, 7 dir lts        | 118    | 112        | 128    |
 | Vtx pair, 8 dir lts        | Can't  | 119        | 135    |
 | Vtx pair, 9 dir lts        | Can't  | 126        | 142    |
-| Vtx pair, 0 point lts      | Can't  | TODO       | +16    |
-| Vtx pair, 1 point lt       | TODO   | TODO       | +16    |
-| Vtx pair, 2 point lts      | TODO   | TODO       | +16    |
-| Vtx pair, 3 point lts      | TODO   | TODO       | +16    |
-| Vtx pair, 4 point lts      | TODO   | TODO       | +16    |
-| Vtx pair, 5 point lts      | TODO   | TODO       | +16    |
-| Vtx pair, 6 point lts      | TODO   | TODO       | +16    |
-| Vtx pair, 7 point lts      | TODO   | TODO       | +16    |
-| Vtx pair, 8 point lts      | Can't  | TODO       | +16    |
-| Vtx pair, 9 point lts      | Can't  | TODO       | +16    |
+| Vtx pair, 0 point lts      | Can't  | 117        | 133    |
+| Vtx pair, 1 point lt       | 276    | 194        | 210    |
+| Vtx pair, 2 point lts      | 420    | 271        | 287    |
+| Vtx pair, 3 point lts      | 564    | 348        | 364    |
+| Vtx pair, 4 point lts      | 708    | 425        | 441    |
+| Vtx pair, 5 point lts      | 852    | 502        | 518    |
+| Vtx pair, 6 point lts      | 996    | 579        | 595    |
+| Vtx pair, 7 point lts      | 1140   | 656        | 672    |
+| Vtx pair, 8 point lts      | Can't  | 733        | 749    |
+| Vtx pair, 9 point lts      | Can't  | 810        | 826    |
+| Packed normals, ltbasic    | Can't  | 6          | 6      |
+| Light-to-alpha, ltbasic    | Can't  | 10         | 10     |
+| Ambient occlusion, ltbasic | Can't  | 9          | 9      |
+| Packed normals, ltadv      | Can't  | -3         | -3     |
+| Light-to-alpha, ltadv      | Can't  | 6          | 6      |
+| Ambient occlusion, ltadv   | Can't  | 0          | 0      |
+| Specular or fresnel        | Can't  | 47         | 47     |
+| + Fresnel                  | Can't  | 27         | 27     |
+| + Specular per dir lt      | Can't  | 13         | 13     |
+| + Specular per point lt    | Can't  | 13         | 13     |
 | Light dir xfrm, 0 dir lts  | Can't  | 92         | 92     |
 | Light dir xfrm, 1 dir lt   | 141    | 92         | 92     |
 | Light dir xfrm, 2 dir lts  | 180    | 93         | 93     |

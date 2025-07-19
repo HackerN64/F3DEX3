@@ -3401,7 +3401,9 @@ ltadv_spec_fres_setup: // Odd instruction
     ldv     aDPosI[0], (cameraWorldPos - altBase)(altBaseReg) // Camera world pos
     j       ltadv_normal_to_vertex
      ldv    aDPosI[8], (cameraWorldPos - altBase)(altBaseReg)
+     // nop; nop
 ltadv_after_camera:
+    // vnop; vnop
     vmov    aOAFrs[0], aDOT[0]       // Save Fresnel dot product in aOAFrs[0h]
     vmov    aOAFrs[4], aDOT[4]       // elems 0, 4
     bgez    laSpecular, ltadv_loop   // Sign bit clear = not specular
@@ -3410,7 +3412,9 @@ ltadv_after_camera:
     vmulf   aProj, vpWNrm, aDOT[0h]  // Projection of camera vec onto normal
     vmudh   $v29, aDIR, $v31[1]      // -camera vec
     j       ltadv_normals_to_regs    // For specular, replace vpWNrm with reflected vector
+     // vnop; vnop
      vmadh  vpWNrm, aProj, $v31[3]   // + 2 * projection
+     // vnop; vnop
      // aDPosI <- aProj
     
 ltadv_xfrm: // Even instruction
@@ -3513,25 +3517,32 @@ ltadv_loop: // Even instruction
      lpv    aDOT[0], (ltBufOfs + 8 - lightSize)(curLight) // Light or lookat 0 dir in elems 0-2
     bnez    $11, ltadv_point
      luv    aLTC,    (ltBufOfs + 0 - lightSize)(curLight) // Light color
+    // vnop
     vmulf   $v29, vpNrmlX, aDOT[0]
     vmacf   $v29, vpNrmlY, aDOT[1]
     bltzal  laSpecular, ltadv_specular
      vmacf  aDOT, vpNrmlZ, aDOT[2]
+    // vnop; vnop
 ltadv_finish_light:
     vmulf   aLTC, aLTC, aAOF[3h] // light color *= dir or point light factor
     vge     aDOT, aDOT, $v31[2] // 0; clamp dot product to >= 0
     addi    curLight, curLight, -lightSize
     vmudh   $v29, vOne, vpLtTot // Load accum mid with current light level
     j       ltadv_loop
+     // vnop; vnop
      vmacf  vpLtTot, aLTC, aDOT[0h] // + light color * dot product
 
 ltadv_specular: // aDOT in/out, uses vpLtTot[3] and $11 as temps
     lb      $11, (ltBufOfs + 0xF - lightSize)(curLight) // Light size factor
+    // nop; nop
     mtc2    $11, vpLtTot[6]        // Light size factor in elem 3 as temp
     vxor    aDOT, aDOT, $v31[7]    // = 0x7FFF - dot product
+    // vnop; vnop; vnop
     vmudh   aDOT, aDOT, vpLtTot[3] // * size factor
     jr      $ra
+     // vnop; vnop; vnop
      vxor   aDOT, aDOT, $v31[7]    // = 0x7FFF - result
+     // land then one vnop before vmulf; replaces two vnops if not specular
 
 .align 8
 ltadv_post:
@@ -3560,13 +3571,18 @@ ltadv_post:
     vabs    aOAFrs, aOAFrs, aOAFrs     // Fresnel dot in aOAFrs[0h]; absolute value for underwater
     andi    $11, vGeomMid, G_FRESNEL_COLOR >> 8
     vmudh   $v29, vOne, aParam[7]      // Fresnel offset
+    // vnop; vnop
     vmacf   aOAFrs, aOAFrs, aParam[6]  // + factor * scale
     beqz    $11, @@skip
+     // vnop; vnop; vnop
      vmudh  aOAFrs, aOAFrs, aAOF[0]    // Result * 0x0100, clamped to 0x7FFF
     veq     $v29, $v31, $v31[3h]       // Set VCC to 00010001 if G_FRESNEL_COLOR
 @@skip:
+    // vnop; vnop
     vmrg    vpRGBA, vpRGBA, aOAFrs[0h] // Replace color or alpha with fresnel
+    // vnop; vnop; vnop
     vge     vpRGBA, vpRGBA, $v31[2]    // Clamp to >= 0 for fresnel; doesn't affect others
+    // vnop; vnop
 
 .endif // CFG_DEBUG_NORMALS
 
@@ -3606,9 +3622,11 @@ ltadv_point:
     ldv     aDPosI[0], (ltBufOfs + 8 - lightSize)(curLight) // Light position int part 0-3
     ldv     aDPosI[8], (ltBufOfs + 8 - lightSize)(curLight) // 4-7
     lbu     $10,     (ltBufOfs + 7 - lightSize)(curLight) // PL: Linear factor
+    // vnop; vnop
+    lbu     $24,     (ltBufOfs + 0xE - lightSize)(curLight) // PL: Quadratic factor
 ltadv_normal_to_vertex:
     vadd    aDPosI, aDPosI, vpWrlI     // Not using aDPosF; frac part is just vpWrlF
-    lbu     $24,     (ltBufOfs + 0xE - lightSize)(curLight) // PL: Quadratic factor
+    // vnop; vnop; vnop
 ltadv_normalize: // Normalize vector in aDPosI:vpWrlF i/f
     vmudm   $v29, aDPosI, vpWrlF       // Squared. Don't care about frac*frac term
     sll     $11, $11, 8                // Constant factor, 00000100 - 0000FF00
@@ -3673,6 +3691,7 @@ ltadv_normalize: // Normalize vector in aDPosI:vpWrlF i/f
 // aAOF <- aLenF
     vmudh   aAOF, vOne, $v31[7]        // Load accum mid with 0x7FFF (1 in s.15)
     vmadm   aAOF, aOAFrs, aParam[2]    // + (alpha - 1) * aoPoint factor; elems 3, 7
+    // vnop
 // aDotSc <- aDIR
     vrcph   aDotSc[1], aPLFcI[0]       // 1/(2*light factor), input of 0000.8000 -> no change normals
     vrcpl   aDotSc[2], aPLFcF[0]       // Light factor 0001.0000 -> normals /= 2
@@ -3682,15 +3701,27 @@ ltadv_normalize: // Normalize vector in aDPosI:vpWrlF i/f
     vrcph   aDotSc[7], $v31[2]         // 0
 // aLTC <- aPLFcF
     luv     aLTC,    (ltBufOfs + 0 - lightSize)(curLight) // aLTC = light color
+    // vnop; vnop; vnop
     // This is a scale on the dot product, not the light, because the scale can
     // increase a small dot product (close to perpendicular), while it can't
     // increase a light beyond white.
     vmudm   $v29, aDOT, aDotSc[2h]     // Dot product int * scale frac
     j       ltadv_finish_light         // Returns aLTC, aAOF, aDOT
      vmadh  aDOT, aDOT, aDotSc[3h]     // Dot product int * scale int, clamp to 0x7FFF
+     // vnop
      // aDIR <- aDotSc
 
-
+/*
+    ltadv per vertex pair up to light loop: 36
+    ltadv per vertex pair last loop iter: 4
+    ltadv per vertex pair after to next vtx pair, no packed normals: 23
+total ltadv per vertex pair: 63
+light loop directional: 18
+    light loop point through jump: 6
+    point: 64
+    light loop point after return: 7
+total point: 77
+*/
 
 ovl4_end:
 .align 8

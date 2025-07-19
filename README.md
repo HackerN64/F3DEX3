@@ -16,7 +16,7 @@ through the docs folder).
 
 Compared to F3DEX2 or any other F3D family microcode, F3DEX3 is...
 - faster on the RDP
-- in `NOC` configuration ([see docs](https://hackern64.github.io/F3DEX3/configuration.html)), [also faster on the RSP](https://hackern64.github.io/F3DEX3/performance.html)
+- in ([`NOC` configuration](https://hackern64.github.io/F3DEX3/configuration.html)) and/or when using point lights, [also faster on the RSP](https://hackern64.github.io/F3DEX3/performance.html)
 - more accurate
 - full of new visual features
 - [measurable in performance](https://hackern64.github.io/F3DEX3/counters.html)
@@ -99,6 +99,10 @@ all at the same time!
   commands in the next DL to be fetched, rather than always fetching full
   buffers, **saving some DRAM traffic** (maybe around 100 us per frame). The
   bits used for this are ignored by HLE.
+- **Point lighting is much faster** than in F3DEX2: F3DEX3 takes 77 cycles per
+  point light per vertex pair, while F3DEX2_PL takes 144. This is still much
+  slower than directional lighting, where both microcodes take about 7 cycles
+  per directional light per vertex pair.
 - Segment addresses are now resolved relative to other segments (feature by
   Tharo). This enables a strategy for **skipping repeated material DLs**: call
   a segment to run the material, remap the segment in the material to a
@@ -129,8 +133,7 @@ all at the same time!
   to an object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where
   a Z component was accidentally doubled in the point lighting calculations. The
   quadratic point light attenuation factor is now an E3M5 floating-point number
-  for a wider representable range. The performance penalty for using large
-  numbers of point lights has been reduced.
+  for a wider representable range.
 - Maximum number of directional / point lights **raised from 7 to 9**. Minimum
   number of directional / point lights lowered from 1 to 0 (F3DEX2 required at
   least one). Also supports loading all lights in one DMA transfer
@@ -146,9 +149,9 @@ all at the same time!
   The "basic lighting" codepath--which is roughly the same speed as F3DEX2--
   supports all F3DEX2 features (directional lights, texgen), plus packed
   normals, ambient occlusion, and light-to-alpha. The "advanced lighting"
-  codepath, which is slower, adds support for point lights, specular, and
-  Fresnel. You only pay the performance penalty for the objects which use these
-  advanced features.
+  codepath adds support for point lights, specular, and Fresnel, but is slower
+  (though still much faster than F3DEX2 point lighting). You only pay the
+  performance penalty for the objects which use these advanced features.
 
 
 ### Profiling
