@@ -31,8 +31,6 @@ G_SHADING_SMOOTH        equ 0x00200000
 
 G_TRI_FILL          equ 0xc8 // not a GBI command
 
-G_LIGHTTORDP        equ 0xd2
-G_RELSEGMENT        equ 0xd3
 G_FLUSH             equ 0xd4
 G_MEMSET            equ 0xd5
 G_DMA_IO            equ 0xd6
@@ -86,6 +84,9 @@ G_TRI1              equ 0x05
 G_TRI2              equ 0x06
 G_QUAD              equ 0x07
 G_TRISNAKE          equ 0x08
+// nothing          equ 0x09
+G_LIGHTTORDP        equ 0x0a
+G_RELSEGMENT        equ 0x0b
 
 
 G_BRANCH_Z equ G_BRANCH_WZ

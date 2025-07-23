@@ -546,8 +546,6 @@ numLightsxSize:
 
 // RDP/Immediate Command Mini Table
 // 1 byte per entry, after << 2 points to an addr in first 1/4 of IMEM
-miniTableEntry G_LIGHTTORDP_handler
-miniTableEntry G_RELSEGMENT_handler
 miniTableEntry G_FLUSH_handler
 miniTableEntry G_MEMSET_handler
 miniTableEntry G_DMA_IO_handler
@@ -602,6 +600,9 @@ miniTableEntry G_TRI1_handler
 miniTableEntry G_TRI2_handler
 miniTableEntry G_QUAD_handler
 miniTableEntry G_TRISNAKE_handler
+miniTableEntry G_SPNOOP_handler // no command mapped to 0x09
+miniTableEntry G_LIGHTTORDP_handler
+miniTableEntry G_RELSEGMENT_handler
 
 
 // The maximum number of generated vertices in a clip polygon. In reality, this
@@ -1269,7 +1270,6 @@ G_MODIFYVTX_handler:
     j       do_moveword  // Moveword adds cmd_w0 to $10 for final addr
      lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx, bit 15 clear
 
-
 // Index = bits 1-6; direction flag = bit 0; end flag = bit 7
 // CM 02 01 03 04 05 06 07
 //               [bb^cc]   Indices b and c
@@ -1285,13 +1285,12 @@ tri_snake_loop_from_input_buffer:
     li      $ra, tri_snake_loop          // For tri_main
     bltz    $3, tri_snake_end            // Upper bit of real index b set = done
      andi   $11, $3, 1                   // Get direction flag from index c
-    beqz    inputBufferPos, tri_snake_over_input_buffer // == 0 at end of input buffer
+    beqz    inputBufferPos, tris_end // TODO tri_snake_over_input_buffer // == 0 at end of input buffer
      andi   $3, $3, 0x7E                 // Mask out flags from index c
     sb      $3, rdpHalf1Val + 1          // Store index c as vertex 1
     sb      $2, (rdpHalf1Val + 2)($11)   // Store old v1 as 2 if dir clear or 3 if set
     j       tri_main
      addi   inputBufferPos, inputBufferPos, 1  // Increment indices being read
-    
 
 // H = highest on screen = lowest Y value; then M = mid, L = low
 tHAtF equ $v5
@@ -2943,6 +2942,18 @@ G_RDPHALF_2_handler: // 7
     j       G_RDP_handler
      sdv    $v29[0], -8(rdpCmdBufPtr)
 
+/* This is a crazy optimization, and it was completely accidental!
+When G_RELSEGMENT was implemented, we did not notice the G_MOVEWORD behavior of
+subtracting (G_MOVEWORD << 8) from the movewordTable address in order to remove
+the command byte. Since the command byte is G_RELSEGMENT, not G_MOVEWORD, the
+final address is completely wrong. However, DMEM wraps at 4 KiB--only the lowest
+4 bits of any address are significant. And, G_RELSEGMENT **happened** to end in
+0xB, the same as G_MOVEWORD! So the wrong address aliases to the correct one!
+I only noticed this when I tried to move G_RELSEGMENT to a different command
+byte and got crashes. */
+.if (G_RELSEGMENT & 0xF) != (G_MOVEWORD & 0xF)
+.error "Crazy relsegment optimization broken, don't change command byte assignments"
+.endif
 G_RELSEGMENT_handler: // 9
     jal     segmented_to_physical    // Resolve new segment address relative to existing segment
 G_MOVEWORD_handler:
