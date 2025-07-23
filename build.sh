@@ -23,7 +23,7 @@ for ucode in "${UCODES[@]}"; do
     cp build/$ucode/$ucode.data ../../Mods/HackerOoT/data/F3DEX3/$ucode.data
 done
 
-make -C ../../Mods/HackerOoT -j12
+make -C ../../Mods/HackerOoT -j32
 #cp ../../Mods/HackerOoT/HackerOoT.z64 /media/`whoami`/SOME2/
 ../../Flashcarts/SummerCart64/sw/deployer/target/release/sc64deployer upload ../../Mods/HackerOoT/HackerOoT.z64
 printf "\n====\nDone\n====\n"

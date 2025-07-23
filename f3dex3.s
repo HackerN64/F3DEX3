@@ -1315,10 +1315,10 @@ G_TRI1_handler:
     li      $ra, tris_end                // After done with this tri, exit tri processing
     sw      cmd_w0, rdpHalf1Val          // Store first tri indices
 tri_main:
-    lpv     $v27[4], 0(rdpHalf1Val)      // To vector unit in elems 5-7
-    lbu     $1, 1(rdpHalf1Val)
-    lbu     $2, 2(rdpHalf1Val)
-    lbu     $3, 3(rdpHalf1Val)
+    lpv     $v27[4], (rdpHalf1Val)($zero) // To vector unit in elems 5-7
+    lbu     $1, rdpHalf1Val + 1
+    lbu     $2, rdpHalf1Val + 2
+    lbu     $3, rdpHalf1Val + 3
     vclr    vZero
     lhu     $1, (vertexTable)($1)
     vmudn   $v29, vOne, vTRC_VB    // Address of vertex buffer

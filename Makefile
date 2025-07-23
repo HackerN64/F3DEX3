@@ -7,6 +7,10 @@ MAKEFLAGS += --no-builtin-variables
 
 default: F3DEX3_BrZ F3DEX3_BrW
 
+# The F3DEX3 version letter is incremented when there are major, GBI-breaking
+# changes. This goes in the microcode ID string so HLE can detect the version.
+VERSION = _B
+
 # List of all compile-time options supported by the microcode source.
 ALL_OPTIONS := \
   CFG_G_BRANCH_W \
@@ -175,7 +179,7 @@ $(eval $(call reset_vars))
 define rule_builder_final
   NAME := F3DEX3$(NAME_FINAL)
   DESCRIPTION := Will make you want to finally ditch HLE ($(OPTIONS_FINAL))
-  ID_STR := F3DEX3$(NAME_FINAL) by Sauraen & Yoshitaka Yasumoto/Nintendo
+  ID_STR := F3DEX3$(NAME_FINAL)$(VERSION) by Sauraen & Yoshitaka Yasumoto/Nintendo
   OPTIONS := $(OPTIONS_FINAL)
   $$(eval $$(call ucode_rule))
 endef

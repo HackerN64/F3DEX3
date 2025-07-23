@@ -2679,12 +2679,16 @@ _DW({                                                                   \
 }
 
 /**
- * Make the triangle snake turn left before drawing this triangle.
+ * Make the triangle snake turn left before drawing this triangle. In other
+ * words, build the new triangle off the newest and middle-age vertices of the
+ * last triangle.
  * @see gSPTriSnake
  */
 #define G_SNAKE_LEFT  0
 /**
- * Make the triangle snake turn right before drawing this triangle.
+ * Make the triangle snake turn right before drawing this triangle. In other
+ * words, build the new triangle off the newest and oldest vertices of the last
+ * triangle.
  * @see gSPTriSnake
  */
 #define G_SNAKE_RIGHT 1
