@@ -45,6 +45,7 @@ even to an odd number of lights adds a different time than vice versa.
 | 1st tri to occluded        | Can't  | Can't      | 50     |
 | Only/2nd tri to draw       | 172    | 159        | 162    |
 | 1st tri to draw            | 173    | 160        | 163    |
+| Extra per tri from snake   | Can't  | 10         | 10     |
 | Vtx before DMA start       | 16     | 17         | 17     |
 | Vtx pair, no lighting      | 54     | 54         | 70     |
 | Vtx pair, 0 dir lts        | Can't  | 65         | 81     |
