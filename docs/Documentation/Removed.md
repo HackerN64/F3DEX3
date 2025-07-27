@@ -123,3 +123,12 @@ By setting this to -2 and drawing an opaque tri, the tri would appear like a
 decal, but with no Z-fighting. This has been removed and replaced with the decal
 fix, which is automatic and does not require any special setup in the display
 list.
+
+## `SPTriStrip` and `SPTriFan`
+
+These commands are still supported in the GBI, but as special cases of
+`SPTriSnake` with specific sets of directions. In addition to covering both of
+these commands, the `SPTriSnake` command can draw the mirror-imaged 4-triangle
+strip which `SPTriStrip` could not (without inefficiency), as well as
+arbitrarily long triangle strips, fans, and other snake shapes via
+`SPContinueSnake`.

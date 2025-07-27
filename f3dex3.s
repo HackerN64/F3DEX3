@@ -1285,7 +1285,7 @@ tri_snake_loop_from_input_buffer:
     li      $ra, tri_snake_loop          // For tri_main
     bltz    $3, tri_snake_end            // Upper bit of real index b set = done
      andi   $11, $3, 1                   // Get direction flag from index c
-    beqz    inputBufferPos, tris_end // TODO tri_snake_over_input_buffer // == 0 at end of input buffer
+    beqz    inputBufferPos, tri_snake_over_input_buffer // == 0 at end of input buffer
      andi   $3, $3, 0x7E                 // Mask out flags from index c
     sb      $3, rdpHalf1Val + 1          // Store index c as vertex 1
     sb      $2, (rdpHalf1Val + 2)($11)   // Store old v1 as 2 if dir clear or 3 if set
@@ -2604,7 +2604,7 @@ tris_end:
 
 tri_snake_end:
     addi    inputBufferPos, inputBufferPos, 7 // Round up to whole input command
-    addi    $11, $zero, 0xFFF8           // Sign-extend; andi is zero-extend!
+    addi    $11, $zero, 0xFFF8               // Sign-extend; andi is zero-extend!
     j       tris_end
      and    inputBufferPos, inputBufferPos, $11 // inputBufferPos has to be negative
 

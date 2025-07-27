@@ -83,11 +83,11 @@ all at the same time!
   loads. If this system incorrectly culls supposedly repeated texture loads
   which actually differ due to segment manipulation, you can locally disable it
   using the new `SPDontSkipTexLoadsAcross` command.
-- New `SPTriangleStrip` and `SPTriangleFan` commands **pack up to 5 tris** into
-  one 64-bit GBI command (up from 2 tris in F3DEX2). In any given object, most
-  tris can be drawn with these commands, with only a few at the end drawn with
-  `SP2Triangles` or `SP1Triangle`. So, this cuts the triangle portion of display
-  lists roughly in half, saving DRAM traffic and ROM space.
+- New `SPTriSnake` command provides a flexible, generalized triangle strip
+  primitive, which can better leverage the vertex cache than a traditional
+  triangle strip. This packs up to 8 tris per display list command, for up to
+  4x less memory bandwidth for loading tris; typical meshes should see a **2-3x
+  memory bandwidth reduction** for this step.
 - New `SPAlphaCompareCull` command enables culling of triangles whose computed
   shade alpha values are all below or above a settable threshold. This
   **substantially reduces the performance penalty of cel shading**--only tris

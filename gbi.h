@@ -2327,9 +2327,6 @@ _DW({                                                   \
  * gSPVertex(glistp++, v, 3, 2);
  * ```
  * 
- * @note
- * Because the RSP geometry transformation engine uses a vertex list with triangle list architecture, it is quite powerful. A simple one-triangle macro retains least performance compared to @ref gSP2Triangles or the new 5 tris commands in EX3 (@ref gSPTriStrip, @ref gSPTriFan).
- * 
  * @param v is the pointer to the vertex list (segment address)
  * @param n is the number of vertices
  * @param v0 is the load vertex by index vo(0~55) in vertex buffer
@@ -2681,19 +2678,19 @@ _DW({                                                                   \
 }
 
 /**
- * Make the triangle snake turn left before drawing this triangle. In other
+ * Make the triangle snake turn right before drawing this triangle. In other
  * words, build the new triangle off the newest and middle-age vertices of the
  * last triangle.
  * @see gSPTriSnake
  */
-#define G_SNAKE_LEFT  0
+#define G_SNAKE_RIGHT  0
 /**
- * Make the triangle snake turn right before drawing this triangle. In other
+ * Make the triangle snake turn left before drawing this triangle. In other
  * words, build the new triangle off the newest and oldest vertices of the last
  * triangle.
  * @see gSPTriSnake
  */
-#define G_SNAKE_RIGHT 1
+#define G_SNAKE_LEFT 1
 /**
  * Logical-OR this into a triangle index to mark it as the last triangle of the
  * snake. In other words, this gets OR'd into the last valid index, not the
@@ -2706,16 +2703,16 @@ _DW({                                                                   \
  */
 #define G_SNAKE_LAST  0x40
 
-#define _gSPTriSnakeW0(i1, i2, i3)         \
-    (_SHIFTL(G_TRISNAKE,          24, 8) | \
-     _SHIFTL((i2)*2,              16, 8) | \
-     _SHIFTL((i1)*2,               8, 8) | \
-     _SHIFTL((i3)*2|G_SNAKE_RIGHT, 0, 8))
+#define _gSPTriSnakeW0(i1, i2, i3)        \
+    (_SHIFTL(G_TRISNAKE,         24, 8) | \
+     _SHIFTL((i2)*2,             16, 8) | \
+     _SHIFTL((i1)*2,              8, 8) | \
+     _SHIFTL((i3)*2|G_SNAKE_LEFT, 0, 8))
 #define _gSPTriSnakeW1(i4, i4d, i5, i5d, i6, i6d, i7, i7d) \
-    (_SHIFTL((i4)*2|(i4d),        24, 8) |                 \
-     _SHIFTL((i5)*2|(i5d),        16, 8) |                 \
-     _SHIFTL((i6)*2|(i6d),         8, 8) |                 \
-     _SHIFTL((i7)*2|(i7d),         0, 8))
+    (_SHIFTL((i4)*2|(i4d),       24, 8) |                  \
+     _SHIFTL((i5)*2|(i5d),       16, 8) |                  \
+     _SHIFTL((i6)*2|(i6d),        8, 8) |                  \
+     _SHIFTL((i7)*2|(i7d),        0, 8))
 
 /**
  * Triangle snake is F3DEX3's accelerated triangles command. It is a generalized
@@ -2728,31 +2725,31 @@ _DW({                                                                   \
  * The drawing algorithm is:
  * - Initialize 3 bytes of stored triangle indices, A-B-C, to i3-i1-i2, and draw
  *   this triangle. (This initialization and draw is actually implemented by
- *   storing i2-i1-i3 and then running the algorithm below with G_SNAKE_RIGHT,
+ *   storing i2-i1-i3 and then running the algorithm below with G_SNAKE_LEFT,
  *   which ends up storing i2 to C and i3 to A, ultimately creating i3-i1-i2.)
  * - Loop:
  *     - If the index in A has G_SNAKE_LAST or'd into it, exit.
  *     - Increment the input pointer, and read the next index and its direction
  *       flag (currently i4 and i4d).
- *     - If the direction flag is G_SNAKE_LEFT, copy A to B; else
- *       (G_SNAKE_RIGHT), copy A to C.
+ *     - If the direction flag is G_SNAKE_RIGHT, copy A to B; else
+ *       (G_SNAKE_LEFT), copy A to C.
  *     - Store the new index (currently i4) to A.
  *     - Draw the triangle A-B-C and repeat the loop.
  *
  * For example, after drawing the first triangle i3-i1-i2, if i4 is
- * G_SNAKE_LEFT, the snake turns left and draws i4-i3-i2:
- *             4 -->-- 3
- *              \'    /'\              (winding order and
- *               \   /   \            first vertex for flat
- *                \ /     \            shading are marked)
- *                 2 --<-- 1
- * Conversely, after the first triangle i3-i1-i2, if i4 is G_SNAKE_RIGHT, the
- * snake turns right and draws i4-i1-i3:
- *                     3 -->-- 4
- *                    /'\    '/
- *                   /   \   /
- *                  /     \ /
- *                 2 --<-- 1
+ * G_SNAKE_RIGHT, the snake turns right and draws i4-i3-i2:
+ *                     3 --<-- 4
+ *                    /'\    '/            (winding order and
+ *                   /   \   /            first vertex for flat
+ *                  /     \ /              shading are marked)
+ *                 1 -->-- 2
+ * Conversely, after the first triangle i3-i1-i2, if i4 is G_SNAKE_LEFT, the
+ * snake turns left and draws i4-i1-i3:
+ *             4 --<-- 3
+ *              \'    /'\
+ *               \   /   \
+ *                \ /     \
+ *                 1 -->-- 2
  * If the snake turns in the same direction repeatedly, it will coil up, forming
  * a triangle fan. If it slithers left and right alternately, this will form a
  * triangle strip. Any combination of these is also possible. In particular, a
@@ -2761,6 +2758,11 @@ _DW({                                                                   \
  * This shape can cover almost all tris of a typical surface with a single
  * snake, except for tris which have two unconnected edges which can only be the
  * first or last tris of the snake.
+ * 
+ * Logical-OR G_SNAKE_LAST into the last valid index of the snake. This index
+ * still needs a valid G_SNAKE_LEFT or G_SNAKE_RIGHT for its direction. However,
+ * for all indices after this, you can fill the index and direction parameters
+ * with 0s.
  * 
  * @see gSPContinueSnake to extend the snake to more than 5 triangles.
  */
@@ -2802,7 +2804,7 @@ _DW({                                                                  \
 #define gsSPContinueSnake(i0, i0d, i1, i1d, i2, i2d, i3, i3d, \
                           i4, i4d, i5, i5d, i6, i6d, i7, i7d) \
 {                                                             \
-    _gSPTriSnakeW1(i0, i0d, i1, i1d, i2, i2d, i3, i3d)        \
+    _gSPTriSnakeW1(i0, i0d, i1, i1d, i2, i2d, i3, i3d),       \
     _gSPTriSnakeW1(i4, i4d, i5, i5d, i6, i6d, i7, i7d)        \
 }
 
@@ -2823,25 +2825,25 @@ _DW({                                                                  \
  * @note One of the two handednesses of a 4 tri strip cannot be drawn directly
  * with gSPTriStrip, unless v1 and v2 are set to the same vertex to create a
  * degenerate triangle, which costs a little performance. However, now this
- * shape can be drawn with gSPTriSnake (directions right-left-right).
+ * shape can be drawn with gSPTriSnake (directions left-right-left).
  */
-#define gSPTriStrip(pkt, v1, v2, v3, v4, v5, v6, v7)          \
-    gSPTriSnake(pkt, v1, v2,                                  \
-        v3 | ((v4 & 0x80) ? G_SNAKE_LAST : 0),                \
-        v4 | ((v5 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT,  \
-        v5 | ((v6 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
-        v6 | ((v7 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT,  \
-        v7, G_SNAKE_RIGHT)
+#define gSPTriStrip(pkt, v1, v2, v3, v4, v5, v6, v7)              \
+    gSPTriSnake(pkt, v1, v2,                                      \
+        (v3) | (((v4) & 0x80) ? G_SNAKE_LAST : 0),                \
+        (v4) | (((v5) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
+        (v5) | (((v6) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT,  \
+        (v6) | (((v7) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
+        (v7) | G_SNAKE_LAST, G_SNAKE_LEFT)
 /**
  * @copydetails gSPTriStrip
  */
-#define gsSPTriStrip(v1, v2, v3, v4, v5, v6, v7)              \
-    gsSPTriSnake(v1, v2,                                      \
-        v3 | ((v4 & 0x80) ? G_SNAKE_LAST : 0),                \
-        v4 | ((v5 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT,  \
-        v5 | ((v6 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
-        v6 | ((v7 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT,  \
-        v7, G_SNAKE_RIGHT)
+#define gsSPTriStrip(v1, v2, v3, v4, v5, v6, v7)                  \
+    gsSPTriSnake(v1, v2,                                          \
+        (v3) | (((v4) & 0x80) ? G_SNAKE_LAST : 0),                \
+        (v4) | (((v5) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
+        (v5) | (((v6) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT,  \
+        (v6) | (((v7) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
+        (v7) | G_SNAKE_LAST, G_SNAKE_LEFT)
 /**
  * 5 Triangles in fan arrangement. Draws the following tris:
  * v3-v1-v2, v4-v1-v3, v5-v1-v4, v6-v1-v5, v7-v1-v6
@@ -2849,23 +2851,23 @@ _DW({                                                                  \
  * 
  * @deprecated Use gSPTriSnake directly.
  */
-#define gSPTriFan(pkt, v1, v2, v3, v4, v5, v6, v7) \
-    gSPTriSnake(pkt, v1, v2,                                  \
-        v3 | ((v4 & 0x80) ? G_SNAKE_LAST : 0),                \
-        v4 | ((v5 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
-        v5 | ((v6 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
-        v6 | ((v7 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
-        v7, G_SNAKE_RIGHT)
+#define gSPTriFan(pkt, v1, v2, v3, v4, v5, v6, v7)               \
+    gSPTriSnake(pkt, v1, v2,                                     \
+        (v3) | (((v4) & 0x80) ? G_SNAKE_LAST : 0),               \
+        (v4) | (((v5) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT, \
+        (v5) | (((v6) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT, \
+        (v6) | (((v7) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT, \
+        (v7) | G_SNAKE_LAST, G_SNAKE_LEFT)
 /**
  * @copydetails gSPTriFan
  */
-#define gsSPTriFan(v1, v2, v3, v4, v5, v6, v7) \
-    gsSPTriSnake(v1, v2,                                      \
-        v3 | ((v4 & 0x80) ? G_SNAKE_LAST : 0),                \
-        v4 | ((v5 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
-        v5 | ((v6 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
-        v6 | ((v7 & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_RIGHT, \
-        v7, G_SNAKE_RIGHT)
+#define gsSPTriFan(v1, v2, v3, v4, v5, v6, v7)                   \
+    gsSPTriSnake(v1, v2,                                         \
+        (v3) | (((v4) & 0x80) ? G_SNAKE_LAST : 0),               \
+        (v4) | (((v5) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT, \
+        (v5) | (((v6) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT, \
+        (v6) | (((v7) & 0x80) ? G_SNAKE_LAST : 0), G_SNAKE_LEFT, \
+        (v7) | G_SNAKE_LAST, G_SNAKE_LEFT)
 
 
 /*
