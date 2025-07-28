@@ -87,7 +87,7 @@ all at the same time!
   primitive, which can better leverage the vertex cache than a traditional
   triangle strip. This packs up to 8 tris per display list command, for up to
   4x less memory bandwidth for loading tris; typical meshes should see a **2-3x
-  memory bandwidth reduction** for this step.
+  memory bandwidth reduction** in the triangle portion of display lists.
 - New `SPAlphaCompareCull` command enables culling of triangles whose computed
   shade alpha values are all below or above a settable threshold. This
   **substantially reduces the performance penalty of cel shading**--only tris
@@ -179,6 +179,7 @@ Other contributors:
 - Tharo: relative segment resolution feature, other feature discussions
 - Kaze Emanuar: several feature suggestions, testing
 - thecozies: Fresnel feature suggestion
+- aglab: tri strip discussion / suggestions which led to tri snake development
 - Rasky: memset feature suggestion
 - HailToDodongo: packed normals encoding
 - coco875: Doxygen / GitHub Pages setup

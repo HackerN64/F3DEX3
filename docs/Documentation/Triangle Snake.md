@@ -102,8 +102,8 @@ needed is 4. But the entire region can be drawn with a single triangle snake
 sections of meshes will be loaded, which does not exploit the "2D" spatial
 locality of the vertex cache. This is especially inefficient if the export tool
 always reloads vertices instead of keeping them in the cache: in the case
-pictured, the entire bottom row of selected vertices will be immediately
-reloaded when rendering the next strip down.*
+pictured, the entire top row of selected vertices will be immediately
+reloaded when rendering the next strip up.*
 
 ## What about yielding?
 
@@ -120,18 +120,87 @@ RDP command buffer in DMEM to be flushed to the FIFO in RDRAM. If the latter is
 full, the command will wait until space is available. In an extreme case, the
 RDP may have to clear the framebuffer and depth buffer before making progress
 and opening up space in the FIFO, which can take several ms. Thus, the
-processing of most display list commands could cause the RSP to wait--delaying
-the yield--by several ms. This specific case is rare, but triangle draws do fill
-the buffer faster than small RDP commands, so a many-triangles RSP command does
-provide more chances to hit the FIFO-full case before the yield.
+processing of most display list commands could theoretically cause the RSP to
+wait--delaying the yield--by several ms.
 
-So, if a triangle snake can be of unlimited length, and puts pressure on the RDP
-FIFO, doesn't this mean the yield can be delayed in a way that violates the
-expectations of libultra?
+The triangle snake command, or any hypothetical command capable of drawing many
+triangles which cannot be interrupted by yields, can trigger a similar situation
+in a somewhat wider range of conditions. Suppose the following occurs:
+- Earlier on in the frame, 100 large tris were enqueued, where each one will
+take 0.1 ms to draw on the RDP.
+- The RSP fills up the RDRAM FIFO while the RDP is getting up to the 100 large
+tris.
+- The RSP begins a 100-triangle long snake, with the FIFO full, right as the RDP
+begins rendering the 100 large tris.
+- Immediately after the snake starts, the CPU requests that the RSP yield.
 
+Since each pair of tris drawn in the snake require a buffer flush, and the tris
+the RSP is enqueuing are the same data size as the tris the RDP is rendering,
+the RSP will have to wait after each pair of tris in the snake for capacity in
+the RDP buffer before it can continue with the snake. In other words, the snake
+speed is limited by the RDP drawing speed for tris much earlier in the frame. In
+this example, the RSP will not finish the snake and respond to the yield for 10
+ms, delaying the audio microcode too long and causing audio corruption.
 
+This is still an unlikely case though:
+- If your game has 100 consecutive tris which take a total of 10 ms of RDP time,
+this is probably poorly optimized to begin with.
+- When the FIFO fills up, this means wasted RSP time, even if this happens not
+to conflict with a yield. If the FIFO fills up often and RSP peformance is
+imporant in your game (either for audio or because the graphics are RSP bound),
+you should expand the FIFO.
+- A snake this long is rare in typical low-poly N64 meshes. And, the export tool
+could limit the maximum snake length generated.
+
+A future version of F3DEX3 could allow the snake command to yield in the middle.
+This has not been implemented yet because it is very difficult to validate.
+Yields are rare relative to display list commands (typically 1-2 of the former
+and many thousands of the latter per frame). And, until we have a robust F3DEX3
+mesh optimizer and a game where most things are drawn with snakes (i.e. few
+vanilla assets left), snakes will also be rare in the display list. So it will
+be hard to know whether the yield-during-snake codepath is even being run, let
+alone whether it is correct in all cases.
 
 ## Comparison with Tiny3D
 
 [Tiny3D](https://github.com/HailToDodongo/tiny3d), the homebrew microcode, uses
-triangle strips as its accelerated triangles command. 
+triangle strips as its accelerated triangles command. F3DEX3 triangle snakes
+have several advantages compared to Tiny3D's triangle strips:
+- Tiny3D uses 16-bit indices (raw DMEM addresses) in triangle strips, which
+saves a multiply-add / table lookup for each index, but doubles the required
+memory bandwidth compared to 8-bit indices in the F3D family (including F3DEX3).
+- Any triangle strip is a special case of a triangle snake. So if triangle
+strips happen to be the most efficient way of rendering a particular mesh,
+F3DEX3 can directly use the same approach.
+- Triangle snakes better exploit the 2D spatial locality of the vertex cache
+than triangle strips, as discussed above. This leads to both fewer commands and
+fewer vertex loads.
+- There is no limit to the length of a triangle snake, because it uses the input
+buffer and its data is loaded as needed like other commands. This also means it
+does not share resources with anything else. In contrast, each Tiny3D triangle
+strip occupies slots in the vertex cache and is loaded all at once, so it is
+limited in length. The mesh format uses a clever approach where space becomes
+available in the vertex cache as tris are drawn, allowing increasingly long
+triangle strips. And, Tiny3D's vertex cache holds 70 vertices, up from 56 in
+F3DEX3, so Tiny3D could dedicate plenty of space to tri strips and still have
+the same vertex cache size as F3DEX3. Still, in the best case, F3DEX3 can load
+the whole vertex cache and then draw a single snake that uses all the vertices,
+while Tiny3D will draw a few separated tris and then a couple tri strips.
+
+There is one advantage of the Tiny3D approach: similar to how F3DEX3 encodes
+a direction flag with each index for the snake, Tiny3D encodes a restart marker,
+which signals the start of a new strip without wasting any indices. Conversely,
+in F3DEX3, if a triangle snake ends early in the `SPContinueSnake` macro, the
+remaining bytes in that macro are wasted--the next snake cannot start until the
+next 8 byte aligned command. However:
+- If 6, 7, or 8 indices are occupied in the macro, this is already at least as
+efficient as "wasting" up to two indices when starting a new strip/snake. And,
+if only 1 or 2 indices are occupied in the macro, there is no advantage to
+drawing those tris in the same snake as opposed to as separate tris. So it is
+only the 3, 4, and 5 indices cases where this constraint introduces
+inefficiency.
+- This can be mitigated during mesh export, to favor snakes whose lengths more
+closely match the 8 byte boundaries.
+- The memory bandwidth penalty of wasting these couple of bytes after each snake
+is much lower than the memory bandwidth penalty of having all the indices be
+16-bit in Tiny3D.

@@ -130,3 +130,7 @@ texture are unaffected of course.
   drawing tris with those verts will lead to incorrect fog values for those
   tris. In F3DEX2, the fog settings at vertex load time would always be used,
   even if they were changed before drawing tris.
+- Drawing tris overwrites the 4 bytes stored with `G_RDPHALF_1`, which is used
+  to hold state during some display list macros which are actually two 8-byte
+  commands. This change is not noticeable when using standard GBI commands, only
+  if something highly custom has been set up.

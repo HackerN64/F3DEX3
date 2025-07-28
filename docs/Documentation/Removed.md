@@ -131,4 +131,4 @@ These commands are still supported in the GBI, but as special cases of
 these commands, the `SPTriSnake` command can draw the mirror-imaged 4-triangle
 strip which `SPTriStrip` could not (without inefficiency), as well as
 arbitrarily long triangle strips, fans, and other snake shapes via
-`SPContinueSnake`.
+`SPContinueSnake` .
