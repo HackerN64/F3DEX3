@@ -26,13 +26,13 @@ var NAVTREE =
 [
   [ "F3DEX3", "index.html", [
     [ "F3DEX3", "md_README.html", [
-      [ "Features", "md_README.html#autotoc_md5", [
-        [ "New visual features", "md_README.html#autotoc_md6", null ],
-        [ "Performance improvements", "md_README.html#autotoc_md7", null ],
-        [ "Miscellaneous", "md_README.html#autotoc_md8", null ],
-        [ "Profiling", "md_README.html#autotoc_md9", null ]
+      [ "Features", "md_README.html#autotoc_md6", [
+        [ "New visual features", "md_README.html#autotoc_md7", null ],
+        [ "Performance improvements", "md_README.html#autotoc_md8", null ],
+        [ "Miscellaneous", "md_README.html#autotoc_md9", null ],
+        [ "Profiling", "md_README.html#autotoc_md10", null ]
       ] ],
-      [ "Credits", "md_README.html#autotoc_md10", null ]
+      [ "Credits", "md_README.html#autotoc_md11", null ]
     ] ],
     [ "Code", "md_docs_2code.html", "md_docs_2code" ],
     [ "Documentation", "md_docs_2documentation.html", "md_docs_2documentation" ],
@@ -58,7 +58,8 @@ var NAVTREE =
 
 var NAVTREEINDEX =
 [
-"annotated.html"
+"annotated.html",
+"structVtx__tn.html#adb51f166e83cc0968c316d7e54fcf29c"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronisation';

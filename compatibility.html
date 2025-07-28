@@ -103,29 +103,353 @@ $(function(){initNavTree('compatibility.html',''); initResizable(true); });
   <div class="headertitle"><div class="title">Backwards Compatibility with F3DEX2</div></div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><h1><a class="anchor" id="autotoc_md13"></a>
+<div class="textblock"><h1><a class="anchor" id="autotoc_md14"></a>
 Backwards Compatibility with F3DEX2</h1>
-<h2><a class="anchor" id="autotoc_md14"></a>
-C GBI Compatibility</h2>
-<p>F3DEX3 is backwards compatible with F3DEX2 at the C GBI level for all features and commands except:</p>
-<ul>
-<li>The viewport Y scale has been negated, and <code>G_MAXZ</code> has been renamed as its value has changed. See the comment near <code>G_MAXZ</code> in the GBI.</li>
-<li>For the same reason, in <code>BrZ</code> configuration, any Z threshold values in <code>SPBranchLessZ*</code> which are hard-coded into display lists (not based on <code>G_MAXZ</code>) must be multiplied by 0x20.</li>
-<li>The <code>G_SPECIAL_*</code> command IDs have been removed. <code>G_SPECIAL_2</code> and <code>G_SPECIAL_3</code> were no-ops in F3DEX2, and <code>G_SPECIAL_1</code> was a trigger to recalculate the MVP matrix. There is no MVP matrix in F3DEX3 so this is useless.</li>
-<li><code>G_LINE3D</code> (and <code>Gfx.line</code>) has been removed. This command did not actually work in F3DEX2 (it behaved as a no-op).</li>
-<li><code>G_MW_CLIP</code> has been removed, and <code>SPClipRatio</code> has been converted into a no-op. Clipping is handled differently in F3DEX3 and the clip ratio cannot be changed from 2.</li>
-<li><code>G_MV_MATRIX</code>, <code>G_MW_MATRIX</code>, and <code>G_MW_FORCEMTX</code> have been removed, and <code>SPForceMatrix</code> has been converted into a no-op. This is because there is no MVP matrix in F3DEX3.</li>
-<li><code>G_MV_POINT</code> has been removed. This was not used in any command; it would have likely been used for debugging to copy vertices from DMEM to examine them. This does not affect <code>SPModifyVertex</code>, which is still supported.</li>
-<li><code>G_MW_PERSPNORM</code> has been removed; <code>SPPerspNormalize</code> is still supported but is encoded differently, no longer using this define.</li>
-<li><code>G_MVO_LOOKATX</code> and <code>G_MVO_LOOKATY</code> have been removed, and <code>SPLookAtX</code> and <code>SPLookAtY</code> are deprecated. <code>SPLookAtX</code> has been changed to set both directions and <code>SPLookAtY</code> has been converted to a no-op. To set the lookat directions, use <code>SPLookAt</code>. The lookat directions are now in one 8-byte DMA word, so they must always be set at the same time as each other. Most of the non-functional fields (e.g. color) of <code>LookAt</code> and its sub-types have been removed, so code which accesses these fields needs to change. Code which only accesses lookat directions should be compatible with no changes.</li>
-<li>As discussed above, the <code>pad1</code> field of <code><a class="el" href="structLight__t.html">Light_t</a></code> is renamed to <code>type</code> and must be set to zero.</li>
-<li>If you do not raise the maximum number of lights from 7 to 9, the lighting GBI commands are backwards compatible. However, if you do raise the number of lights, you must use <code>SPAmbient</code> to write the ambient light, as discussed above. Note that you can now load all your lights with one command, <code>SPSetLights</code>, so it is not usually necessary to use <code>SPLight</code> and <code>SPAmbient</code> at all.</li>
-</ul>
+<p>F3DEX3 is backwards compatible with F3DEX2 at the C GBI level for almost all features and commands. See <a class="el" href="porting.html">Porting Your Romhack Codebase to F3DEX3</a> for the relatively small list of code changes you have to make to your romhack codebase to move from F3DEX2 to F3DEX3. Also, some relatively obscure internal GBI definitions have been removed.</p>
+<p>F3DEX3 is generally binary backwards compatible with OoT-style display lists for objects, scenes, etc. <b>It is not binary compatible with vanilla SM64-style display lists which encode object colors as light colors</b>, as all the command encodings related to lighting have changed.</p>
 <h2><a class="anchor" id="autotoc_md15"></a>
-Binary Display List Compatibility</h2>
-<p>F3DEX3 is generally binary backwards compatible with OoT-style display lists for objects, scenes, etc. <b>It is not compatible at the binary level with SM64-style display lists which encode object colors as light colors</b>, as all the command encodings related to lighting have changed. Of course, if you recompile these display lists with the new <code><a class="el" href="gbi_8h.html" title="Modded GBI for use with F3DEX3 custom microcode.">gbi.h</a></code>, it can run them.</p>
-<p>The deprecated commands mentioned above in the C GBI section have had their encodings changed (the original encodings will do bad things / crash). In addition, all lighting-related commands&ndash;e.g. <code>gdSPDefLights*</code>, <code>SPNumLights</code>, <code>SPLight</code>, <code>SPLightColor</code>, <code>SPLookAt</code>&ndash;have had their encodings changed, making them binary incompatible. The lighting data structures, e.g. <code><a class="el" href="structLight__t.html">Light_t</a></code>, <code>PosLight_t</code>, <code>LookAt_t</code>, <code>Lightsn</code>, <code>Lights*</code>, <code>PosLights*</code>, etc., have also changed&ndash;generally only slightly, so most code is compatible with no changes.</p>
-<p><code>SPSegment</code> has been given a different command id (<code>G_RELSEGMENT</code> vs. <code>G_MOVEWORD</code>) to facilitate relative segmented address translation. The original binary encoding is still valid, but does not support relative translation like the new encoding. However, recompiling with the C GBI will always use the new encoding. </p>
+GBI Changes Reference</h2>
+<p>This is a reference if you run into GBI-related problems when building your romhack after porting it to F3DEX3, or for HLE emulator authors implementing changes from F3DEX2 to F3DEX3. The "Bin" and "C" columns indicate whether there have been changes from F3DEX2 to F3DEX3 in binary encoding and C GBI usage respectively. The "Perf" column indicates whether the performance of this command (or the overall game performace if this command is used properly) has significantly increased or decreased relative to F3DEX2 in a way that the programmer should be aware of. The <code>g</code>,<code>gs</code>, or <code>gd</code> prefixes are all omitted, e.g. <code>SPMatrix</code> refers to <code>gSPMatrix</code> and <code>gsSPMatrix</code>. <code>*</code> means wildcard.</p>
+<h3><a class="anchor" id="autotoc_md16"></a>
+RDP Commands</h3>
+<table class="markdownTable">
+<tr class="markdownTableHead">
+<th class="markdownTableHeadNone">Command   </th><th class="markdownTableHeadNone">Bin   </th><th class="markdownTableHeadNone">C   </th><th class="markdownTableHeadNone">Perf   </th><th class="markdownTableHeadNone">Notes    </th></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>DPLoadTLUT*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">Load is not sent to RDP if repeated in auto-batched rendering. See the GBI comment near <code>SPDontSkipTexLoadsAcross</code>. This is a performance optimization only and doesn't affect on-screen output unless the game is buggy / misusing the feature, so this behavior need not be emulated in HLE.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>DPLoadBlock*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">Same as <code>DPLoadTLUT*</code> above.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>DPLoadTile*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">Same as <code>DPLoadTLUT*</code> above.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPSetOtherMode</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone">All other <code>DP*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Microcode generally can't change RDP command behavior.   </td></tr>
+</table>
+<h3><a class="anchor" id="autotoc_md17"></a>
+Main Drawing</h3>
+<table class="markdownTable">
+<tr class="markdownTableHead">
+<th class="markdownTableHeadNone">Command   </th><th class="markdownTableHeadNone">Bin   </th><th class="markdownTableHeadNone">C   </th><th class="markdownTableHeadNone">Perf   </th><th class="markdownTableHeadNone">Notes    </th></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPVertex</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">Vertex buffer size in F3DEX3 is 56, up from 32 in F3DEX2. Also, many of the new features in F3DEX3 (new lighting, occlusion plane, etc.) are during <code>SPVertex</code> processing.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code><a class="el" href="structVtx__t.html">Vtx_t</a></code> / <code><a class="el" href="unionVtx.html">Vtx</a></code>   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Generally the same, but packed normals go in the <code>flag</code> field if enabled.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPModifyVertex</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MWO_POINT_RGBA</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MWO_POINT_ST</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MWO_POINT_XYSCREEN</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MWO_POINT_ZSCREEN</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MV_POINT</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed because the internal vertex format is no longer a multiple of 8 (DMA word).    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPTexture</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPTextureL</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">HW V1 workaround; long since deprecated.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SP1Triangle</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">Some of the new features in F3DEX3 (occlusion plane, alpha compare culling, decal fix) are during triangle processing.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SP2Triangles</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">Same as <code>SP1Triangle</code> above.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SP1Quadrangle</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">Same as <code>SP1Triangle</code> above.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPTriStrip</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">New command that draws 5 tris from 7 indexes, see GBI.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPTriFan</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">New command that draws 5 tris from 7 indexes, see GBI.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPMemset</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">New command that memsets a RDRAM region faster than the RDP can, for framebuffer or Z-buffer clear.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_LINE3D</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed; was a no-op in F3DEX2.   </td></tr>
+</table>
+<h3><a class="anchor" id="autotoc_md18"></a>
+Control Logic</h3>
+<table class="markdownTable">
+<tr class="markdownTableHead">
+<th class="markdownTableHeadNone">Command   </th><th class="markdownTableHeadNone">Bin   </th><th class="markdownTableHeadNone">C   </th><th class="markdownTableHeadNone">Perf   </th><th class="markdownTableHeadNone">Notes    </th></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPNoOp</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPDisplayList*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Hints are encoded into previously unused bits, but this is a performance optimization only and will never affect on-screen output, so the hints encoding can be ignored by HLE.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_DL_PUSH</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPBranchList*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Same as <code>SPDisplayList*</code> above.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_DL_NOPUSH</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPEndDisplayList*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Same as <code>SPDisplayList*</code> above.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPCullDisplayList</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPBranchLess*</code>   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">In <code>BrZ</code> configuration, Z threshold values which are hard-coded into display lists (not based on <code>G_MAXZ</code>) must be multiplied by 0x20. See <code>G_MAXZ</code> below.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPLoadUcode*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Note that F3DEX3_PC (CFG_PROFILING_C) may have compatibility problems with other microcodes. It is specially designed to work with S2DEX for OoT but other microcodes are not guaranteed to work. This is not a limitation in other F3DEX3 variants.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPDma*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">Down   </td><td class="markdownTableBodyNone">Moved to Overlay 3 (slower) as it is rarely used. HLE can't emulate this by definition so must treat it as a no-op; games therefore use it for HLE/LLE detection.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPSegment</code>   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">F3DEX3 supports F3DEX2 binary encoding for SPSegment, but this does not have the relative segment resolution behavior. The new behavior is obtained with the new command encoding with <code>G_RELSEGMENT</code>.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MW_SEGMENT</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MWO_SEGMENT_*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">These were never needed.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPFlush</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">This is a performance optimization only and can't be HLE emulated, so it should be treated as a no-op.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G*</code> (<code><a class="el" href="unionGfx.html">Gfx</a></code> subtypes)   </td><td class="markdownTableBodyNone">?   </td><td class="markdownTableBodyNone">?   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Deprecated. These did not fully reflect the bits usage in actual commands even in F3DEX2. Almost none of these have been updated for F3DEX3.   </td></tr>
+</table>
+<h3><a class="anchor" id="autotoc_md19"></a>
+3D Space</h3>
+<table class="markdownTable">
+<tr class="markdownTableHead">
+<th class="markdownTableHeadNone">Command   </th><th class="markdownTableHeadNone">Bin   </th><th class="markdownTableHeadNone">C   </th><th class="markdownTableHeadNone">Perf   </th><th class="markdownTableHeadNone">Notes    </th></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>Mtx</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPMatrix</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone">Encoding changed due to multiple flags below changing.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MTX_PUSH</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">Down   </td><td class="markdownTableBodyNone"><code>SPMatrix</code> processing with <code>G_MTX_PUSH</code> set is moved to Overlay 3 (slower) as games generally should not use the RSP matrix stack for accuracy and performance reasons (see GBI).    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MTX_NOPUSH</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MTX_LOAD</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encoding inverted (in SPMatrix, not in the definition of <code>G_MTX_LOAD</code>).    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MTX_MUL</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encoding inverted (in SPMatrix, not in the definition of <code>G_MTX_MUL</code>).    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MTX_MODEL</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New name for <code>G_MTX_MODELVIEW</code> as the view matrix must be multiplied into the projection matrix stack in F3DEX3.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MTX_VIEWPROJECTION</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New name for <code>G_MTX_PROJECTION</code> as the view matrix must be multiplied into the projection matrix stack in F3DEX3.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MV_MMTX</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encoding changed.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MV_TEMPMTX0</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encoding changed.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MV_VPMTX</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New name for <code>G_MV_PMTX</code>, encoding changed.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MV_TEMPMTX1</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encoding changed.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPPopMatrix*</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">Down   </td><td class="markdownTableBodyNone">Moved to Overlay 3 (slower) as games generally should not use the RSP matrix stack for accuracy and performance reasons (see GBI). Encoding is changed due to <code>G_MV_MMTX</code> changing.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPForceMatrix</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Converted into no-op.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MV_MATRIX</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MW_MATRIX</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MW_FORCEMTX</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPViewport</code>   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Command itself is the same, but see <code>Vp</code> below.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code><a class="el" href="structVp__t.html">Vp_t</a></code> / <code>Vp</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">The Y scale is now negated, and the Z values are different due to the change from <code>G_MAXZ</code> to <code>G_NEW_MAXZ</code>.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MAXZ</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Replaced with <code>G_NEW_MAXZ</code>. The name change is to force you to update your code&ndash;especially viewport definitions with hardcoded constants which are NOT defined in terms of <code>G_MAXZ</code>.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_NEW_MAXZ</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">The equivalent of <code>G_MAXZ</code> constant used in viewport calculations.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MV_VIEWPORT</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPPerspNormalize</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encoding changed.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MW_PERSPNORM</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed. The perspective normalization factor is set via <code>G_MW_FX</code> with the changed encoding of <code>SPPerspNormalize</code>.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MWO_PERSPNORM</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPClipRatio</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Converted into no-op. It is not possible to change the clip ratio from 2 in F3DEX3. Changing the clip ratio was rarely used in production games.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MW_CLIP</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed. See <code>SPClipRatio</code> above.   </td></tr>
+</table>
+<h3><a class="anchor" id="autotoc_md20"></a>
+Lighting</h3>
+<table class="markdownTable">
+<tr class="markdownTableHead">
+<th class="markdownTableHeadNone">Command   </th><th class="markdownTableHeadNone">Bin   </th><th class="markdownTableHeadNone">C   </th><th class="markdownTableHeadNone">Perf   </th><th class="markdownTableHeadNone">Notes    </th></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code><a class="el" href="structLight__t.html">Light_t</a></code>, <code>Light</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"><code>type</code> field must be set to 0 (<code>LIGHT_TYPE_DIR</code>) to indicate directional light. <code>size</code> field for specular added. Otherwise the same, though note that now there is not an extra 8 bytes of padding between lights (the offset between them is 16, not 24).    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>LIGHT_TYPE_DIR</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New macro, but the encoding is the same as in F3DEX2_PL.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code><a class="el" href="structPointLight__t.html">PointLight_t</a></code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Same changes as <code><a class="el" href="structLight__t.html">Light_t</a></code>. Also the <code>kq</code> field is now interpreted as an E3M5 floating-point number.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>LIGHT_TYPE_POINT</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New macro, but the encoding is the same as in F3DEX2_PL.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code><a class="el" href="structAmbient__t.html">Ambient_t</a></code>, <code>Ambient</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Note that you must use <code>Ambient</code>, not <code>Light</code>, for the ambient light if you have 9 directional/point lights.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>Lights1</code>, <code>Lights2</code>, ...   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">The ambient light is at the end, not the beginning. The data layout matches the RSP internal data layout to enable <code>SPSetLights</code>.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>Lightsn</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Same as <code>Lights1</code> etc. Also, now 9 directional/point lights.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>Lights0</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Now only contains Ambient (no Light) because F3DEX3 properly supports zero directional/point lights.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPDefLights*</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Matches changes in <code>Lights*</code>. Also, there is no need for these in a game with a real lighting engine.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPDefPointLights*</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Matches changes in <code>Lights*</code>. Also, there is no need for these in a game with a real lighting engine.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPNumLights</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encoding changed. <code>ENABLE_POINT_LIGHTS</code> can now be included. Zero lights is properly supported unlike in F3DEX2. The maximum number of point/directional lights is 9, up from 7.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MW_NUMLIGHT</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MWO_NUMLIGHT</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>NUML</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encoding changed.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>NUMLIGHTS_*</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Deprecated as these are just defined equal to their number, because F3DEX3 supports zero lights.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>LIGHT_*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Deprecated and were not useful in F3DEX2 either.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPLight</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encoding changed. Note that you must use <code>SPAmbient</code>, not <code>SPLight</code>, for the ambient light if you have 9 directional/point lights. Also note that you should usually use <code>SPSetLights</code> unless you need to set individual lights without affecting the others.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPAmbient</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New command to upload the ambient light. If you have 0-8 directional/point lights, you can also use <code>SPLight</code> for this (slightly slower), but if you have 9 directional/point lights you must use <code>SPAmbient</code>.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPLightColor*</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encoding changed.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MW_LIGHTCOL</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MV_LIGHT</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPSetLights*</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">Implementation completely different from F3DEX2, uses one DMA transaction regardless of the number of lights. In C, you can/should use dynamically allocated memory for the <code>Lights*</code> struct being uploaded, as opposed to <code>SPDefLights*</code>, but you need to dereference the pointer passed to <code>SPSetLights*</code>.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MWO_aLIGHT_*</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encodings changed. No longer needed.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MWO_bLIGHT_*</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encodings changed. No longer needed.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MVO_L*</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPCameraWorld</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New command to set the camera position for Fresnel.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>PlainVtx</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">For <code>SPCameraWorld</code>.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPLookAt</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Replaces <code>SPLookAtX</code> and <code>SPLookAtY</code>.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPLookAtX</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Encoding changed; in an attempt at backwards compatibility, defined as <code>SPLookAt</code>, which works with basic usage.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPLookAtY</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Converted to no-op.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MVO_LOOKAT*</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed with <code>SPLookAt</code> changes.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>LookAt_t</code>, <code>LookAt</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">The size is different and most of the non-functional fields have been removed. Code which only accesses the functional fields does not need to change.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>Hilite_t</code>, <code>Hilite</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPFog*</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MW_FOG</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MWO_FOG</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+</table>
+<h3><a class="anchor" id="autotoc_md21"></a>
+Geometry Mode and New Effect Parameters</h3>
+<table class="markdownTable">
+<tr class="markdownTableHead">
+<th class="markdownTableHeadNone">Command   </th><th class="markdownTableHeadNone">Bin   </th><th class="markdownTableHeadNone">C   </th><th class="markdownTableHeadNone">Perf   </th><th class="markdownTableHeadNone">Notes    </th></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SP*GeometryMode*</code>   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone">*   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Commands themselves are the same, but many new geometry mode flags, see below.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_ZBUFFER</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_TEXTURE_ENABLE</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Very old (F3D / HW v1) display lists with this bit set will crash on F3DEX2, but not on F3DEX3.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_SHADE</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_ATTROFFSET_ST_ENABLE</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New geometry mode bit that enables ST attribute offsets, usually for smooth scrolling.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPAttrOffsetST</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New command which writes ST attribute offsets using <code>G_MWO_ATTR_OFFSET_*</code>.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MWO_ATTR_OFFSET_S</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MWO_ATTR_OFFSET_T</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_AMBOCCLUSION</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPAmbOcclusion*</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New commands which write ambient occlusion parameters using <code>G_MWO_AO_*</code>.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MWO_AO_AMBIENT</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MWO_AO_DIRECTIONAL</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MWO_AO_POINT</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_CULL_NEITHER</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_CULL_FRONT</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_CULL_BACK</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_CULL_BOTH</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_PACKED_NORMALS</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New geometry mode bit that enables packed normals (simultaneous lighting and vertex colors).    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_LIGHTTOALPHA</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New geometry mode bit that moves the maximum of the three light color channels to shade alpha, usually for cel shading.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_LIGHTING_SPECULAR</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New geometry mode bit that changes lighting from diffuse to specular.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_FRESNEL_COLOR</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New geometry mode bit that computes Fresnel and places it in all three shade color channels.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_FRESNEL_ALPHA</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New geometry mode bit that computes Fresnel and places it in shade alpha.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPFresnel*</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New commands which write Fresnel parameters using <code>G_MWO_FRESNEL_*</code>.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MWO_FRESNEL_SCALE</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MWO_FRESNEL_OFFSET</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_FOG</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_LIGHTING</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_TEXTURE_GEN</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_TEXTURE_GEN_LINEAR</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_LOD</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Ignored by all F3DEX* variants.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_SHADING_SMOOTH</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_LIGHTING_POSITIONAL</code>   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone">Chg   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">This bit is ignored by F3DEX3&ndash;both in order to allow point lighting on all vanilla geometry, and because the F3DEX2_PL design of having this as a property of an object/model rather than a property of the lights state is poor design. In F3DEX3, whether point lights are present or not is determined by the <code>ENABLE_POINT_LIGHTS</code> flag in <code>SPNumLights</code> and <code>SPSetLights*</code>.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_CLIPPING</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Ignored by all F3DEX* variants.   </td></tr>
+</table>
+<h3><a class="anchor" id="autotoc_md22"></a>
+Miscellaneous</h3>
+<table class="markdownTable">
+<tr class="markdownTableHead">
+<th class="markdownTableHeadNone">Command   </th><th class="markdownTableHeadNone">Bin   </th><th class="markdownTableHeadNone">C   </th><th class="markdownTableHeadNone">Perf   </th><th class="markdownTableHeadNone">Notes    </th></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPOcclusionPlane</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New command that uploads the occlusion plane coefficients.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>OcclusionPlane*</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Structs for occlusion plane.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPLightToRDP</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New command that copies RSP light color to RDP color, see GBI.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPLightToPrimColor</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Same as <code>SPLightToRDP</code> above.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>SPLightToFogColor</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Same as <code>SPLightToRDP</code> above.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPDontSkipTexLoadsAcross</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">New command which locally cancels auto-batched rendering by writing an invalid address to <code>G_MWO_LAST_MAT_DL_ADDR</code>.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MWO_LAST_MAT_DL_ADDR</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>SPAlphaCompareCull</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">Up   </td><td class="markdownTableBodyNone">New command which enables culling of tris based on shade alpha values, for cel shading. Normal use of this command in cel shading is a performance optimization only and doesn't affect on-screen output, so it can be treated as a no-op by an initial HLE implementation. But it is easy to write a display list where it does affect on-screen output, so a good HLE implementation should emulate it.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_ALPHA_COMPARE_CULL_*</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Settings for <code>SPAlphaCompareCull</code>.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_MWO_ALPHA_COMPARE_CULL</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>MoveWd</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Regular/valid encodings are the same.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>MoveHalfwd</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Like <code>MoveWd</code> but writes 2 bytes instead of 4.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_MW_FX</code>   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone">New   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">New moveword table index for base address for many parameters.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_SPECIAL_1</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed; in F3DEX2, triggered MVP matrix recalculation.    </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyNone"><code>G_SPECIAL_2</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed; was a no-op in F3DEX2.    </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyNone"><code>G_SPECIAL_3</code>   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone">Rem   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Removed; was a no-op in F3DEX2.   </td></tr>
+</table>
 </div></div><!-- contents -->
 </div><!-- PageDoc -->
 </div><!-- doc-content -->

@@ -187,7 +187,7 @@ $(function(){initNavTree('counters.html',''); initResizable(true); });
 <div class="line">    u32 ucode; /* Not a perf counter, can ignore */</div>
 <div class="line">} F3DEX3YieldDataFooter;</div>
 </div><!-- fragment --><p>In variables.h with the ENABLE_SPEEDMETER section: </p><div class="fragment"><div class="line">extern volatile F3DEX3YieldDataFooter gRSPProfilingResults;</div>
-</div><!-- fragment --><p>In the true codepath of Sched_TaskComplete: </p><div class="fragment"><div class="line">#ifdef ENABLE_SPEEDMETER</div>
+</div><!-- fragment --><p>In the <code>true</code> codepath of Sched_TaskComplete: </p><div class="fragment"><div class="line">#ifdef ENABLE_SPEEDMETER</div>
 <div class="line">    /* Fetch number of primitives drawn from yield data */</div>
 <div class="line">    if(task-&gt;list.t.type == M_GFXTASK){</div>
 <div class="line">        F3DEX3YieldDataFooter* footer = (F3DEX3YieldDataFooter*)(</div>
@@ -195,10 +195,13 @@ $(function(){initNavTree('counters.html',''); initResizable(true); });
 <div class="line">            OS_YIELD_DATA_SIZE - sizeof(F3DEX3YieldDataFooter));</div>
 <div class="line">        osInvalDCache(footer, sizeof(F3DEX3YieldDataFooter));</div>
 <div class="line">        bcopy(footer, &amp;gRSPProfilingResults, sizeof(F3DEX3YieldDataFooter));</div>
+<div class="line">        /* The second invalidate is to get the footer out of the CPU cache,</div>
+<div class="line">        because it could get written back and overwrite newer data in RAM */</div>
+<div class="line">        osInvalDCache(footer, sizeof(F3DEX3YieldDataFooter));</div>
 <div class="line">    }</div>
 <div class="line">#endif</div>
 </div><!-- fragment --><p>In speed_meter.c: </p><div class="fragment"><div class="line">volatile F3DEX3YieldDataFooter gRSPProfilingResults;</div>
-</div><!-- fragment --><p>You can display them on screen however you wish. Here is an example, in SpeedMeter_DrawTimeEntries </p><div class="fragment"><div class="line">GfxPrint printer;</div>
+</div><!-- fragment --><p>You can display them on screen however you wish. Here is an example, in SpeedMeter_DrawTimeEntries: </p><div class="fragment"><div class="line">GfxPrint printer;</div>
 <div class="line">Gfx* opaStart;</div>
 <div class="line">Gfx* gfx;</div>
 <div class="line"> </div>

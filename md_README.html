@@ -103,24 +103,24 @@ $(function(){initNavTree('md_README.html',''); initResizable(true); });
   <div class="headertitle"><div class="title">F3DEX3</div></div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><p><a class="anchor" id="autotoc_md4"></a> Modern graphics microcode for N64 romhacks. Will make you want to finally ditch HLE. Heavily modified version of F3DEX2, with all vertex and lighting code rewritten from scratch.</p>
-<p><b>F3DEX3 is in alpha. It is not guaranteed to be bug-free, and updates may bring breaking changes.</b></p>
+<div class="textblock"><p><a class="anchor" id="autotoc_md5"></a> Modern graphics microcode for N64 romhacks. Will make you want to finally ditch HLE. Heavily modified version of F3DEX2, with all vertex and lighting code rewritten from scratch.</p>
+<p><b>F3DEX3 is in beta. The GBI should be relatively stable but may change if there is a good reason.</b></p>
 <p><a href="https://hackern64.github.io/F3DEX3/">View the documentation here</a> (or just look through the docs folder).</p>
 <p><a href="https://www.youtube.com/playlist?list=PLU2OUGtyQi6QswDQOXWIMaYFUcgQ9Psvm">Sauraen's videos on F3DEX3</a></p>
-<h1><a class="anchor" id="autotoc_md5"></a>
+<h1><a class="anchor" id="autotoc_md6"></a>
 Features</h1>
 <p>Compared to F3DEX2 or any other F3D family microcode, F3DEX3 is...</p><ul>
 <li>faster on the RDP</li>
-<li>in <code>LVP_NOC</code> configuration (<a href="https://hackern64.github.io/F3DEX3/configuration.html">see docs</a>), <a href="https://hackern64.github.io/F3DEX3/performance.html">also faster on the RSP</a></li>
+<li>in (<a href="https://hackern64.github.io/F3DEX3/configuration.html"><code>NOC</code> configuration</a>) and/or when using point lights, <a href="https://hackern64.github.io/F3DEX3/performance.html">also faster on the RSP</a></li>
 <li>more accurate</li>
 <li>full of new visual features</li>
 <li><a href="https://hackern64.github.io/F3DEX3/counters.html">measurable in performance</a></li>
 </ul>
 <p>all at the same time!</p>
-<h2><a class="anchor" id="autotoc_md6"></a>
+<h2><a class="anchor" id="autotoc_md7"></a>
 New visual features</h2>
 <ul>
-<li>New geometry mode bit <code>G_PACKED_NORMALS</code> enables <b>simultaneous vertex colors and normals/lighting on the same mesh</b>, by encoding the normals in the unused 2 bytes of each vertex using a variant of <a href="https://knarkowicz.wordpress.com/2014/04/16/octahedron-normal-vector-encoding/">octahedral encoding</a>. The normals are effectively as precise as with the vanilla method of replacing vertex RGB with normal XYZ.</li>
+<li>New geometry mode bit <code>G_PACKED_NORMALS</code> enables <b>simultaneous vertex colors and normals/lighting on the same mesh</b>, by encoding the normals in the unused 2 bytes of each vertex using the 5-6-5 bit encoding by HailToDodongo from <a href="https://github.com/HailToDodongo/tiny3d">Tiny3D</a>. Model-space precision of the normals is reduced, but this is rarely noticeable, and the performance is nearly identical to vanilla normals (without simultaneous vertex colors).</li>
 <li>New geometry mode bit <code>G_AMBOCCLUSION</code> enables <b>ambient occlusion</b> for opaque materials. Paint the shadow map into the vertex alpha channel; separate factors (set with <code>SPAmbOcclusion</code>) control how much this affects the ambient light, all directional lights, and all point lights.</li>
 <li>New geometry mode bit <code>G_LIGHTTOALPHA</code> moves light intensity (maximum of R, G, and B of what would normally be the shade color after lighting) to shade alpha. Then, if <code>G_PACKED_NORMALS</code> is also enabled, the shade RGB is set to the vertex RGB. Together with alpha compare and some special display lists from fast64 which draw triangles two or more times with different CC settings, this enables <b>cel shading</b>. Besides cel shading, <code>G_LIGHTTOALPHA</code> can also be used for <a href="https://renderu.com/en/spookyiluhablog/post/23631">bump mapping</a> or other unusual CC effects (e.g. texture minus vertex color times lighting).</li>
 <li>New geometry mode bits <code>G_FRESNEL_COLOR</code> or <code>G_FRESNEL_ALPHA</code> enable <b>Fresnel</b>. The dot product between a vertex normal and the vector from the vertex to the camera is computed; this is then scaled and offset with settable factors. The resulting value is then stored to shade color or shade alpha. This is useful for:<ul>
@@ -132,30 +132,35 @@ New visual features</h2>
 <li>New geometry mode bit <code>G_LIGHTING_SPECULAR</code> changes lighting computation from diffuse to <b>specular</b>. If enabled, the vertex normal for lighting is replaced with the reflection of the vertex-to-camera vector over the vertex normal. Also, a new size value for each light controls how large the light reflection appears to be. This technique is lower fidelity in some ways than the vanilla <code>hilite</code> system, as it is per-vertex rather than per-pixel, but it allows the material to be textured normally. Plus, it supports all scene lights (including point) with different dynamic colors, whereas the vanilla system supports up to two directional lights and more than one dynamic color is difficult.</li>
 <li>New geometry mode bit <code>G_ATTROFFSET_ST_ENABLE</code> applies a settable offset to vertex ST (<code>SPAttrOffsetST</code>) after the texture scale. This enables <b>UV scrolling</b> without CPU intervention.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md7"></a>
+<h2><a class="anchor" id="autotoc_md8"></a>
 Performance improvements</h2>
 <ul>
 <li><b>56 verts</b> can fit into DMEM at once, up from 32 verts in F3DEX2, and only 13% below the 64 verts of reject microcodes. This reduces DRAM traffic and RSP time as fewer verts have to be reloaded and re-transformed, and also makes display lists shorter.</li>
-<li>New <b>occlusion plane</b> system allows the placement of a 3D quadrilateral where objects behind this plane in screen space are culled. This can dramatically improve RDP performance by reducing overdraw in scenes with walls in the middle, such as a city or an indoor scene.</li>
+<li>New <b>occlusion plane</b> system allows the placement of a 3D quadrilateral where triangles behind this plane in screen space are culled. This can dramatically improve RDP performance by reducing overdraw in scenes with walls in the middle, such as a city or an indoor scene.</li>
 <li>If a material display list being drawn is the same as the last material, the texture loads in the material are skipped (the second time). This effectively results in <b>auto-batched rendering</b> of repeated objects, as long as each only uses one material. This system supports multitexture and all types of loads. If this system incorrectly culls supposedly repeated texture loads which actually differ due to segment manipulation, you can locally disable it using the new <code>SPDontSkipTexLoadsAcross</code> command.</li>
-<li>New <code>SPTriangleStrip</code> and <code>SPTriangleFan</code> commands <b>pack up to 5 tris</b> into one 64-bit GBI command (up from 2 tris in F3DEX2). In any given object, most tris can be drawn with these commands, with only a few at the end drawn with <code>SP2Triangles</code> or <code>SP1Triangle</code>. So, this cuts the triangle portion of display lists roughly in half, saving DRAM traffic and ROM space.</li>
-<li>New <code>SPAlphaCompareCull</code> command enables culling of triangles whose computed shade alpha values are all below or above a settable threshold. This <b>substantially reduces the performance penalty of cel shading</b>&ndash;only tris which "straddle" the cel threshold are drawn twice, the others are only drawn once.</li>
+<li>New <code>SPTriSnake</code> command provides a flexible, generalized triangle strip primitive, which can better leverage the vertex cache than a traditional triangle strip. This packs up to 8 tris per display list command, for up to 4x less memory bandwidth for loading tris; typical meshes should see a <b>2-3x memory bandwidth reduction</b> in the triangle portion of display lists.</li>
+<li>New <code>SPAlphaCompareCull</code> command enables culling of triangles whose computed shade alpha values are all below or above a settable threshold. This <b>substantially reduces the performance penalty of cel shading</b>&ndash;only tris which "straddle" the cel threshold are drawn twice, the others are only drawn once. This can also be used to <b>cull tris which are fully in fog</b>, replacing far clipping which is removed in F3DEX3.</li>
 <li>A new "hints" system encodes the expected size of the target display list into call, branch, and return DL commands. This allows only the needed number of DL commands in the next DL to be fetched, rather than always fetching full buffers, <b>saving some DRAM traffic</b> (maybe around 100 us per frame). The bits used for this are ignored by HLE.</li>
+<li><b>Point lighting is much faster</b> than in F3DEX2: F3DEX3 takes 77 cycles per point light per vertex pair, while F3DEX2_PL takes 144. This is still much slower than directional lighting, where both microcodes take about 7 cycles per directional light per vertex pair.</li>
 <li>Segment addresses are now resolved relative to other segments (feature by Tharo). This enables a strategy for <b>skipping repeated material DLs</b>: call a segment to run the material, remap the segment in the material to a display list that immediately returns, and so if the material is called again it won't run.</li>
 <li>New <code>SPMemset</code> command fills a specified RDRAM region with a repeated 16-bit value. This can be used for clearing the Z buffer or filling the framebuffer or the letterbox with a solid color <b>faster than the RDP can in fill mode</b>. Practical performance may vary due to scheduling constraints.</li>
-</ul>
-<h2><a class="anchor" id="autotoc_md8"></a>
-Miscellaneous</h2>
-<ul>
-<li><b>Z-fighting of decals has been nearly eliminated</b>, with only a modest increase in overdraw of very close occluding geometry. This is based on a technique developed by SGI, neglected and removed by Nintendo, and re-added by Rare; the F3DEX3 version improves upon it by choosing optimal parameters and automatically enabling it for all decals with no code or DL changes. In addition, the reduction in Z buffer precision from F3DEX(1) to F3DEX2 has been reversed, and additional Z buffer precision beyond F3DEX(1) has been added.</li>
-<li><b>Point lighting</b> has been redesigned. The appearance when a light is close to an object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where a Z component was accidentally doubled in the point lighting calculations. The quadratic point light attenuation factor is now an E3M5 floating-point number. The performance penalty for using large numbers of point lights has been reduced.</li>
-<li>Maximum number of directional / point <b>lights raised from 7 to 9</b>. Minimum number of directional / point lights lowered from 1 to 0 (F3DEX2 required at least one). Also supports loading all lights in one DMA transfer (<code>SPSetLights</code>), rather than one per light.</li>
-<li>New <code>SPLightToRDP</code> family of commands (e.g. <code>SPLightToPrimColor</code>) writes a selectable RDP command (e.g. <code>DPSetPrimColor</code>) with the RGB color of a selectable light (any including ambient). The alpha channel and any other parameters are encoded in the command. With some limitations, this allows the tint colors of cel shading to <b>match scene lighting</b> with no code intervention. Also useful for other lighting-dependent effects.</li>
+<li>New <code>SPFlush</code> command can ensure that the RDP starts clearing the framebuffer as soon as possible during the frame, instead of waiting a short time for further RSP processing.</li>
+<li>The key codepaths for command dispatch, triangle draw, and vertex processing (assuming lighting enabled and the occlusion plane disabled with the <code>NOC</code> configuration) are <b>slightly faster than in F3DEX2</b>.</li>
 </ul>
 <h2><a class="anchor" id="autotoc_md9"></a>
+Miscellaneous</h2>
+<ul>
+<li><b>Z-fighting of decals has been nearly eliminated</b>, with only a modest increase in overdraw onto the decal of very close occluding geometry. This is based on a technique developed by SGI, neglected and removed by Nintendo, and re-added by Rare; the F3DEX3 version improves upon it by choosing optimal parameters and automatically enabling it for all decals with no code or DL changes.</li>
+<li>The reduction in Z buffer precision from F3DEX(1) to F3DEX2 has been reversed, and <b>additional Z buffer precision</b> beyond F3DEX(1) has been added.</li>
+<li><b>Point lighting</b> has been redesigned. The appearance when a light is close to an object has been improved. Fixed a bug in F3DEX2/ZEX point lighting where a Z component was accidentally doubled in the point lighting calculations. The quadratic point light attenuation factor is now an E3M5 floating-point number for a wider representable range.</li>
+<li>Maximum number of directional / point lights <b>raised from 7 to 9</b>. Minimum number of directional / point lights lowered from 1 to 0 (F3DEX2 required at least one). Also supports loading all lights in one DMA transfer (<code>SPSetLights</code>), rather than one per light.</li>
+<li>New <code>SPLightToRDP</code> family of commands (e.g. <code>SPLightToPrimColor</code>) writes a selectable RDP command (e.g. <code>DPSetPrimColor</code>) with the RGB color of a selectable light (any including ambient). The alpha channel and any other parameters are encoded in the command. With some limitations, this allows the tint colors of cel shading to <b>match scene lighting</b> with no code intervention. Also useful for other lighting-dependent effects.</li>
+<li>The microcode automatically switches between <b>two lighting implementations</b> depending on which visual features are selected in the particular material. The "basic lighting" codepath&ndash;which is roughly the same speed as F3DEX2&ndash; supports all F3DEX2 features (directional lights, texgen), plus packed normals, ambient occlusion, and light-to-alpha. The "advanced lighting" codepath adds support for point lights, specular, and Fresnel, but is slower (though still much faster than F3DEX2 point lighting). You only pay the performance penalty for the objects which use these advanced features.</li>
+</ul>
+<h2><a class="anchor" id="autotoc_md10"></a>
 Profiling</h2>
-<p>F3DEX3 introduces a suite of performance profiling capabilities. These take the form of performance counters, which report cycle counts for various operations or the number of items processed of a given type. There are a total of 21 performance counters across multiple microcode versions. See the Profiling section below.</p>
-<h1><a class="anchor" id="autotoc_md10"></a>
+<p>F3DEX3 introduces a suite of performance profiling capabilities. These take the form of performance counters, which report cycle counts for various operations or the number of items processed of a given type. There are a total of 21 performance counters across multiple microcode versions. See the Performance Counters page in the docs.</p>
+<h1><a class="anchor" id="autotoc_md11"></a>
 Credits</h1>
 <p>F3DEX3 modifications from F3DEX2 are by Sauraen and are dedicated to the public domain. <code>cpu/</code> C code is entirely by Sauraen and also dedicated to the public domain.</p>
 <p>If you use F3DEX3 in a romhack, please credit "F3DEX3 Microcode - Sauraen" in your project's in-game Staff Roll or wherever other contributors to your project are credited.</p>
@@ -164,7 +169,9 @@ Credits</h1>
 <li>Tharo: relative segment resolution feature, other feature discussions</li>
 <li>Kaze Emanuar: several feature suggestions, testing</li>
 <li>thecozies: Fresnel feature suggestion</li>
+<li>aglab: tri strip discussion / suggestions which led to tri snake development</li>
 <li>Rasky: memset feature suggestion</li>
+<li>HailToDodongo: packed normals encoding</li>
 <li>coco875: Doxygen / GitHub Pages setup</li>
 <li>ThePerfectLuigi64: CI build setup</li>
 <li>neoshaman: feature discussions </li>

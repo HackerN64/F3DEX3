@@ -103,14 +103,14 @@ $(function(){initNavTree('porting.html',''); initResizable(true); });
   <div class="headertitle"><div class="title">Porting Your Romhack Codebase to F3DEX3</div></div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><h1><a class="anchor" id="autotoc_md35"></a>
+<div class="textblock"><h1><a class="anchor" id="autotoc_md39"></a>
 Porting Your Romhack Codebase to F3DEX3</h1>
 <p>For an OoT codebase, only a few minor changes are required to use F3DEX3. However, more changes are recommended to increase performance and enable new features.</p>
-<p>How to modify the microcode in your HackerOoT based romhack (steps may be similar for other games):</p><ul>
+<p>How to modify the microcode in your HackerOoT based romhack (note that this is already done in HackerOoT, so this is provided as a guide for other games):</p><ul>
 <li>Replace <code>include/ultra64/gbi.h</code> in your romhack with <code><a class="el" href="gbi_8h.html" title="Modded GBI for use with F3DEX3 custom microcode.">gbi.h</a></code> from this repo.</li>
 <li>Make the "Required Changes" listed below.</li>
 <li>Build this repo: install the latest version of <code>armips</code>, then <code>make F3DEX3_BrZ</code> or <code>make F3DEX3_BrW</code>.</li>
-<li>Copy the microcode binaries (<code>build/F3DEX3_X/F3DEX3_X.code</code> and <code>build/F3DEX3_X/F3DEX3_X.data</code>) to somewhere in your romhack repo, e.g. <code>data</code>.</li>
+<li>Copy the microcode binaries (<code>build/F3DEX3_X/F3DEX3_X.code</code> and <code>build/F3DEX3_X/F3DEX3_X.data</code>) to <code>data</code> in your romhack repo.</li>
 <li>In <code>data/rsp.rodata.s</code>, change the line between <code>fifoTextStart</code> and <code>fifoTextEnd</code> to <code>.incbin "data/F3DEX3_X.code"</code> (or wherever you put the binary), and similarly change the line between <code>fifoDataStart</code> and <code>fifoDataEnd</code> to <code>.incbin "data/F3DEX3_X.data"</code>. After both the <code>fifoTextEnd</code> and <code>fifoDataEnd</code> labels, add a line <code>.balign 16</code>.</li>
 <li>If you are planning to ever update the microcode binaries in the future, add the following to the Makefile of your romhack, after the section starting with <code>build/data/%.o</code> (i.e. two lines after that, with a blank line before and after): <code>build/data/rsp.rodata.o: data/F3DEX3_X.code data/F3DEX3_X.data</code>. It is not a mistake that this new line you are adding won't have a second indented line after it; it is like the <code>message_data_static</code> lines below that. This will tell <code>make</code> to rebuild <code>rsp.rodata.o</code>, which includes the microcode binaries, whenever they are changed.</li>
 <li>Clean and build your romhack (<code>make clean</code>, <code>make</code>).</li>
@@ -119,47 +119,47 @@ Porting Your Romhack Codebase to F3DEX3</h1>
 <li>If you start using new features in F3DEX3, make the "Changes required for new
   features" listed below.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md36"></a>
+<h2><a class="anchor" id="autotoc_md40"></a>
 Required Changes</h2>
 <p>Both OoT and SM64:</p>
 <ul>
-<li>In any place where your game creates a viewport (whether statically or dynamically) (search for <code>Vp</code> case-sensitive, <code>SPViewport</code>, and <code>G_MAXZ</code>), change the maximum Z value from <code>G_MAXZ</code> to <code>G_NEW_MAXZ</code> and negate the Y scale. For more information, see the comment next to <code>G_MAXZ</code> in the GBI. Note that your romhack codebase may have the constant hardcoded, usually as <code>511</code> which is supposed to be <code>(G_MAXZ/2)</code>, instead of actually writing <code>G_MAXZ</code>; you need to change these too, there are several of these in SM64.</li>
+<li>In any place where your game creates a viewport (whether statically or dynamically) (search for <code>Vp</code> case-sensitive, <code>SPViewport</code>, and <code>G_MAXZ</code>), change the maximum Z value from <code>G_MAXZ</code> to <code>G_NEW_MAXZ</code> and negate the Y scale. For more information, see the comment next to <code>G_MAXZ</code> in the GBI. Note that your romhack codebase may have the constant hardcoded (usually as <code>511</code> which is supposed to be <code>(G_MAXZ/2)</code>), instead of actually writing an expression containing <code>G_MAXZ</code>; you need to change these too, there are several of these in SM64. Fortunately, it is easy to notice if you have failed to update a Y scale, as anything drawn using that viewport will be upside down.</li>
 <li>Remove uses of internal GBI features which have been removed in F3DEX3 (see <a class="el" href="compatibility.html">Backwards Compatibility with F3DEX2</a> for full list). In OoT, the only changes needed are:<ul>
 <li>In <code>src/code/ucode_disas.c</code>, remove the switch statement cases for <code>G_LINE3D</code>, <code>G_MW_CLIP</code>, <code>G_MV_MATRIX</code>, <code>G_MVO_LOOKATX</code>, <code>G_MVO_LOOKATY</code>, and <code>G_MW_PERSPNORM</code>.</li>
 <li>In <code>src/libultra/gu/lookathil.c</code>, remove the lines which set the <code>col</code>, <code>colc</code>, and <code>pad</code> fields.</li>
-<li>In each place <code>G_MAXZ</code> is used, a compiler error will be generated; negate the Y scale in each related viewport and change to <code>G_NEW_MAXZ</code>.</li>
+<li>As mentioned above, in each place <code>G_MAXZ</code> is used, a compiler error will be generated; negate the Y scale in each related viewport and change the Z scale and offset to use <code>G_NEW_MAXZ</code>.</li>
 </ul>
 </li>
-<li>Change your game engine lighting code to set the <code>type</code> (formerly <code>pad1</code>) field to 0 in the initialization of any directional light (<code><a class="el" href="structLight__t.html">Light_t</a></code> and derived structs like <code>Light</code> or <code>Lightsn</code>). F3DEX3 ignores the state of the <code>G_LIGHTING_POSITIONAL</code> geometry mode bit in all display lists, meaning both directional and point lights are supported for all display lists (including vanilla). The light is identified as directional if <code>type</code> == 0 or point if <code>kc</code> &gt; 0 (<code>kc</code> and <code>type</code> are the same byte). This change is required because otherwise garbage nonzero values may be put in the padding byte, leading directional lights to be misinterpreted as point lights.<ul>
+<li>Change your game engine lighting code to set the <code>type</code> (formerly <code>pad1</code>) field to 0 in the initialization of any directional light (<code><a class="el" href="structLight__t.html">Light_t</a></code> and derived structs like <code>Light</code> or <code>Lightsn</code>). This change is required because otherwise garbage nonzero values may be put in this byte, which was a padding byte for a non-point-light microcode but is used to identify the light as point or directional in a point light microcode.<ul>
 <li>The change needed in OoT is: in <code>src/code/z_lights.c</code>, in <code>Lights_BindPoint</code>, <code>Lights_BindDirectional</code>, and <code>Lights_NewAndDraw</code>, set <code>l.type</code> to 0 right before setting <code>l.col</code>.</li>
 </ul>
 </li>
+<li>If your game already had point lighting, use <code>ENABLE_POINT_LIGHTS</code> instead of <code>G_LIGHTING_POSITIONAL</code> to indicate that point lights are currently active. (Static uses of <code>G_LIGHTING_POSITIONAL</code> in display lists need not be removed as this bit is ignored.)</li>
 </ul>
 <p>SM64 only:</p>
 <ul>
-<li>If you are using the vanilla lighting system where light directions are always fixed, the vanilla permanent light direction of <code>{0x28, 0x28, 0x28}</code> must be changed to <code>{0x49, 0x49, 0x49}</code>, or everything will be too dark. The former vector is not properly normalized, but F3D through F3DEX2 normalize light directions in the microcode, so it doesn't matter with those microcodes. In contrast, F3DEX3 normalizes vertex normals (after transforming them), but assumes light directions have already been normalized.</li>
-<li>Matrix stack fix (world space lighting / view matrix in VP instead of in M) is basically required. If you <em>really</em> want camera space lighting, use matrix stack fix, transform the fixed camera space light direction by V inverse each frame, and send that to the RSP. This will be faster than the alternative (not using matrix stack fix and enabling <code>G_NORMALS_MODE_AUTO</code> to correct the matrix).</li>
+<li>If you are using the vanilla lighting system where light directions are always fixed, the vanilla permanent light direction of <code>{0x28, 0x28, 0x28}</code> must be changed to <code>{0x49, 0x49, 0x49}</code>, or everything will be too dark. The former vector is not properly normalized, but F3D through F3DEX2 normalize light directions in the microcode, so it doesn't matter with those microcodes. The two lighting codepaths in F3DEX3 treat light directions and vertex normals differently: the fast one works like F3DEX2, but the slow one normalizes vertex normals after transforming them and does not modify light directions. Thus in this case, the light directions must already be normalized.</li>
+<li>Matrix stack fix (world space lighting / view matrix in VP instead of in M) is basically required. If you <em>really</em> want camera space lighting, use matrix stack fix, transform the fixed camera space light direction by V inverse each frame, and send that to the RSP.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md37"></a>
+<h2><a class="anchor" id="autotoc_md41"></a>
 Recommended Changes (Non-Lighting)</h2>
 <ul>
 <li>Clean up any code using the deprecated, hacky <code>SPLookAtX</code> and <code>SPLookAtY</code> to use <code>SPLookAt</code> instead (this is only a few lines change). Also remove any code which writes <code>SPClipRatio</code> or <code>SPForceMatrix</code>&ndash;these are now no-ops, so you might as well not write them.</li>
-<li>Avoid using <code>G_MTX_MUL</code> in <code>SPMatrix</code>. That is, make sure your game engine computes a matrix stack on the CPU and sends the final matrix for each object / limb to the RSP, rather than multiplying matrices on the RSP. OoT already usually does the former for precision / accuracy reasons and only uses <code>G_MTX_MUL</code> in a couple places (e.g. view * perspective matrix); it is okay to leave those. This change is recommended because the <code>G_MTX_MUL</code> mode of <code>SPMatrix</code> has been moved to Overlay 4 in F3DEX3 (see below), making it substantially slower than it was in F3DEX2. It still functions the same though so you can use it if it's really needed.</li>
-<li>Re-export as many display lists (scenes, objects, skeletons, etc.) as possible with fast64 set to F3DEX3 mode, to take advantage of the substantially larger vertex buffer, triangle packing commands, "hints" system, etc.</li>
+<li>Avoid using <code>G_MTX_MUL</code> and <code>G_MTX_PUSH</code> in <code>SPMatrix</code>, and <code>SPPopMatrix*</code>, for performance and accuracy reasons. See the GBI for more information. If these are only used in a couple non-critical places such as for GUIs, that's okay.</li>
+<li>Re-export as many display lists (scenes, objects, skeletons, etc.) as possible with fast64 set to F3DEX3 mode, to take advantage of the substantially larger vertex buffer (and eventually when supported by community tools, the triangle packing commands and "hints" system).</li>
 <li><code>#define REQUIRE_SEMICOLONS_AFTER_GBI_COMMANDS</code> (at the top of, or before including, the GBI) for a more modern, OoT-style codebase where uses of GBI commands require semicolons after them. SM64 omits the semicolons sometimes, e.g. <code>gSPDisplayList(gfx++, foo) gSPEndDisplayList(gfx++);</code>. If you are using <code>-Wpedantic</code>, using this define is required.</li>
 <li>Once everything in your romhack is ported to F3DEX3 and everything is stable, <code>#define NO_SYNCS_IN_TEXTURE_LOADS</code> (at the top of, or before including, the GBI) and fix any crashes or graphical issues that arise. Display lists exported from fast64 already do not contain these syncs, but vanilla display lists or custom ones using the texture loading multi-command macros do. Disabling the syncs saves a few percent of RDP cycles for each material setup; what percentage this is of the total RDP time depends on how many triangles are typically drawn between each material change. For more information, see the GBI documentation near this define.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md38"></a>
+<h2><a class="anchor" id="autotoc_md42"></a>
 Recommended Changes (Lighting)</h2>
 <ul>
 <li>Change your game engine lighting code to load all lights in one DMA transfer with <code>SPSetLights</code>, instead of one-at-a-time with repeated <code>SPLight</code> commands. Note that if you are using a pointer (dynamically allocated) rather than a direct variable (statically allocated), you need to dereference it; see the docstring for this macro in the GBI.</li>
 <li>If you still need to use <code>SPLight</code> somewhere after this, use <code>SPLight</code> only for directional / point lights and use <code>SPAmbient</code> for ambient lights. Directional / point lights are 16 bytes and ambient are 8, and the first 8 bytes are the same for both types, so normally it's okay to use <code>SPLight</code> instead of <code>SPAmbient</code> to write ambient lights too. However, the memory space reserved for lights in the microcode is 16*9+8 bytes, so if you have 9 directional / point lights and then use <code>SPLight</code> to write the ambient light, it will overflow the buffer by 8 bytes and corrupt memory.</li>
 <li>Once you have made the above change for <code>SPAmbient</code>, increase the maximum number of lights in your engine from 7 to 9.</li>
 <li>Consider setting lights once before rendering a scene and all actors, rather than setting lights before rendering each actor. OoT does the latter to emulate point lights in a scene with a directional light recomputed per actor. You can now just send those to the RSP as real point lights, regardless of whether the display lists are vanilla or new.</li>
-<li>If you are porting a game which already had point lighting (e.g. Majora's Mask), note that the point light kc, kl, and kq factors have been changed, so you will need to redesign how game engine light parameters (e.g. "light
-  radius") map to these parameters.</li>
+<li>If your game already had point lighting, note that the point light kc, kl, and kq factors have been changed, so you will need to redesign how game engine light parameters (e.g. "light radius") map to these parameters.</li>
 </ul>
-<h2><a class="anchor" id="autotoc_md39"></a>
+<h2><a class="anchor" id="autotoc_md43"></a>
 Changes Required for New Features</h2>
 <p>Each of these changes is required if you want to use the respective new feature, but is not necessary if you are not using it.</p>
 <ul>
