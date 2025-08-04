@@ -786,6 +786,7 @@ $ra   return address, sometimes sign bit is flag -------------------------------
 */
 
 // Global scalar regs:
+vGeomMid       equ $5    // Middle two bytes of geometry mode in lower 16 bits
 perfCounterD   equ $12   // Performance counter D (functions depend on config)
 altBaseReg     equ $13   // Alternate base address register for vector loads
 rdpCmdBufEndP1 equ $22   // Pointer to one command word past "end" (middle) of RDP command buf
@@ -799,7 +800,6 @@ perfCounterC   equ $30   // Performance counter C (functions depend on config)
 // Vertex write:
 vtxLeft        equ $1    // Number of vertices left to process * 0x10
 vLoopRet       equ $3    // Return address at end of vtx loop = top of loop or misc lighting
-vGeomMid       equ $5    // Middle two bytes of geometry mode
 fogFlag        equ $7    // 8 if fog enabled, else 0
 outVtx2        equ $8    // Pointer to second or dummy (= outVtx1) transformed vert
 inVtx          equ $14   // Pointer to loaded vertex to transform; < 0 means from clipping.
@@ -1098,6 +1098,7 @@ finish_setup:
     sw      $11, startCounterTime
 .endif
     sh      $zero, mvpValid  // and dirLightsXfrmValid
+    lhu     vGeomMid, geometryModeLabel + 1
     li      inputBufferPos, 0
     li      cmd_w1_dram, orga(ovl1_start)
     j       load_overlays_0_1
@@ -1277,20 +1278,20 @@ G_MODIFYVTX_handler:
 //                  cmd_w0 + inputBufferEnd
 G_TRISNAKE_handler:
     sw      cmd_w0, rdpHalf1Val          // Store indices a, b, c
-    addi    inputBufferPos, inputBufferPos, -5 // Point to byte 3, index c of 1st tri
+    addi    inputBufferPos, inputBufferPos, -6 // Point to byte 2, index b of 1st tri
+    li      $ra, tri_snake_loop          // For tri_main
 tri_snake_loop:
-    lh      $3, (inputBufferEnd - 1)(inputBufferPos) // Load indices b and c
+    lh      $3, (inputBufferEnd)(inputBufferPos) // Load indices b and c
+    addi    inputBufferPos, inputBufferPos, 1  // Increment indices being read
 tri_snake_loop_from_input_buffer:
     lb      $2, rdpHalf1Val + 1          // Old v1; == index b, except when bridging between old and new load
-    li      $ra, tri_snake_loop          // For tri_main
     bltz    $3, tri_snake_end            // Upper bit of real index b set = done
      andi   $11, $3, 1                   // Get direction flag from index c
     beqz    inputBufferPos, tri_snake_over_input_buffer // == 0 at end of input buffer
      andi   $3, $3, 0x7E                 // Mask out flags from index c
     sb      $3, rdpHalf1Val + 1          // Store index c as vertex 1
-    sb      $2, (rdpHalf1Val + 2)($11)   // Store old v1 as 2 if dir clear or 3 if set
     j       tri_main
-     addi   inputBufferPos, inputBufferPos, 1  // Increment indices being read
+     sb     $2, (rdpHalf1Val + 2)($11)   // Store old v1 as 2 if dir clear or 3 if set
 
 // H = highest on screen = lowest Y value; then M = mid, L = low
 tHAtF equ $v5
@@ -1317,128 +1318,130 @@ tri_main:
     lpv     $v27[4], (rdpHalf1Val)($zero) // To vector unit in elems 5-7
     lbu     $1, rdpHalf1Val + 1
     lbu     $2, rdpHalf1Val + 2
-    lbu     $3, rdpHalf1Val + 3
     vclr    vZero
-    lhu     $1, (vertexTable)($1)
+    lbu     $3, rdpHalf1Val + 3
     vmudn   $v29, vOne, vTRC_VB    // Address of vertex buffer
-    lhu     $2, (vertexTable)($2)
+    lhu     $1, (vertexTable)($1)
     vmadl   $v27, $v27, vTRC_VS    // Plus vtx indices times length
+    lhu     $2, (vertexTable)($2)
+    vmadl   $v6, $v31, $v31[2]    // 0; vtx 1 addr in $v6 elem 5
     lhu     $3, (vertexTable)($3)
-    vmadl   $v4, $v31, $v31[2]    // 0; vtx 2 addr in $v4 elem 6
 .if !ENABLE_PROFILING
+    // vnop
     addi    perfCounterB, perfCounterB, 0x4000  // Increment number of tris requested
-    move    $4, $1                // Save original vertex 1 addr (pre-shuffle) for flat shading
 .endif
 tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vnxor   tHAtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
+    vmov    $v4[5], $v27[6]         // elem 5 of v4 = vertex 2 addr
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
-    vnxor   tMAtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
+    vmov    $v8[5], $v27[7]         // elem 5 of v8 = vertex 3 addr
     llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
-    vmov    $v6[6], $v27[5]         // elem 6 of v6 = vertex 1 addr
+    vnxor   tMAtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
     vnxor   tLAtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
     lhu     $16, VTX_CLIP($1)
-    vmov    $v8[6], $v27[7]         // elem 6 of v8 = vertex 3 addr
-    lhu     $7, VTX_CLIP($2)
-    // vnop
-    lhu     $8, VTX_CLIP($3)
     vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
-    andi    $11, $16, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
+    lhu     $7, VTX_CLIP($2)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
-    and     $11, $11, $7
+    lhu     $8, VTX_CLIP($3)
     vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
-    and     $11, $11, $8
+    andi    $11, $16, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
     vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
+    and     $11, $11, $7
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
+    and     $11, $11, $8
+    vmrg    tHPos, $v6, $v4   // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     bnez    $11, return_and_end_mat // Then the whole tri is offscreen, cull
-     // 22 cycles (for tri2 first tri; tri1/only subtract 1 from counts)
-     vmrg   tHPos, $v6, $v4   // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
-    vmudh   $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
-    lhu     $24, activeClipPlanes
+     // 21 cycles (for tri2 first tri; tri1/only subtract 1 from counts)
+     vmudh  $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
     vmadh   $v26, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
-    lw      $6, geometryModeLabel // Load full geometry mode word
+    lhu     $24, activeClipPlanes
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
-    or      $10, $16, $7
+    sll     $20, vGeomMid, 29 // Original bit 10 (now bit 2) in the sign bit, for facing cull
     vmrg    tLPos, $v6, $v4   // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
-    or      $10, $10, $8      // $10 = all clip bits which are true for any verts
+    or      $10, $16, $7
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
-    and     $10, $10, $24     // If clipping is enabled, check clip flags
+    or      $10, $10, $8      // $10 = all clip bits which are true for any verts
     vmrg    $v4, tHPos, $v8   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     mfc2    $9, $v26[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    tHPos, $v8, tHPos // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
-    bnez    $10, ovl234_clipmisc_entrypoint // Facing info and occlusion may be garbage if need to clip
-     // 30 cycles
-     sll    $20, $6, 21       // Bit 10 in the sign bit, for facing cull
+    and     $10, $10, $24     // If clipping is enabled, check clip flags
     vlt     $v29, $v6, $v2    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
-    srl     $11, $9, 31       // = 0 if x prod positive (back facing), 1 if x prod negative (front facing)
+    bnez    $10, ovl234_clipmisc_entrypoint // Facing info and occlusion may be garbage if need to clip
+     // 29 cycles
+     srl    $11, $9, 31       // = 0 if x prod positive (back facing), 1 if x prod negative (front facing)
     vmudh   $v3, vOne, $v31[5] // 0x4000; some rounding factor
     sllv    $11, $20, $11     // Sign bit = bit 10 of geom mode if back facing, bit 9 if front facing
     vmrg    tMPos, $v4, tLPos // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     bltz    $11, return_and_end_mat // Cull if bit is set (culled based on facing)
-     // 34 cycles
+     // 32 cycles
      vmrg   tLPos, tLPos, $v4 // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
 tSubPxHF equ $v4
 tSubPxHI equ $v26
     vmudn   tSubPxHF, tHPos, $v31[5] // 0x4000
     beqz    $9, return_and_end_mat  // If cross product is 0, tri is degenerate (zero area), cull.
-     // 36 cycles
-     mfc2   $1, tHPos[12]     // tHPos = lowest Y value = highest on screen (x, y, addr)
+     // 34 cycles
+.if !CFG_NO_OCCLUSION_PLANE
+     and    $16, $16, $7
+.endif
+     vsub   tPosMmH, tMPos, tHPos
+.if !CFG_NO_OCCLUSION_PLANE
+    and     $16, $16, $8
+.endif
+    vsub    tPosLmH, tLPos, tHPos
+.if !CFG_NO_OCCLUSION_PLANE
+    andi    $16, $16, CLIP_OCCLUDED
+    bnez    $16, tri_culled_by_occlusion_plane // Cull if all verts occluded
+     // 38 cycles
+.endif
+     mfc2   $1, tHPos[10]     // tHPos = lowest Y value = highest on screen (x, y, addr)
+    // 36 cycles if NOC (39 if occlusion plane)
+    vsub    tPosHmM, tHPos, tMPos
+    mfc2    $2, tMPos[10]     // tMPos = mid vertex (x, y, addr)
 tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
 tPosCatF equ $v25
-    vsub    tPosMmH, tMPos, tHPos
-    mfc2    $2, tMPos[12]     // tMPos = mid vertex (x, y, addr)
-    vsub    tPosLmH, tLPos, tHPos
-.if !ENABLE_PROFILING
-    sll     $11, $6, 10       // Moves the value of G_SHADING_SMOOTH into the sign bit
-.endif
-    vsub    tPosHmM, tHPos, tMPos
-    andi    $6, $6, (G_SHADE | G_ZBUFFER)
     vsub    tPosCatI, tLPos, tMPos
-    mfc2    $3, tLPos[12]     // tLPos = highest Y value = lowest on screen (x, y, addr)
-    vmov    tPosCatI[2], tPosMmH[0]
-.if !CFG_NO_OCCLUSION_PLANE
-    and     $16, $16, $7
-    and     $16, $16, $8
-    andi    $16, $16, CLIP_OCCLUDED
+.if !ENABLE_PROFILING
+    andi    $11, vGeomMid, G_SHADING_SMOOTH >> 8
 .endif
-tXPF equ $v16 // Triangle cross product
-tXPI equ $v17
-tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
-tXPRcpI equ $v24
+    vmov    tPosCatI[2], tPosMmH[0]
+    lbu     $6, geometryModeLabel + 3 // Load lowest byte for G_SHADE, G_ZBUFFER. Also has G_ATTROFFSET_ST_ENABLE, but G_TRI_FILL will get OR'd into it and force that set.
+    vmudh   $v29, tPosMmH, tPosLmH[0]
+    mfc2    $3, tLPos[10]     // tLPos = highest Y value = lowest on screen (x, y, addr)
 t1WI equ $v13 // elems 0, 4, 6
 t1WF equ $v14
-    vmudh   $v29, tPosMmH, tPosLmH[0]
-.if !CFG_NO_OCCLUSION_PLANE
-    bnez    $16, tri_culled_by_occlusion_plane // Cull if all verts occluded
-.endif
-    llv     t1WI[0], VTX_INV_W_VEC($1)
     vmadh   $v29, tPosLmH, tPosHmM[0]
-    lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
+    llv     t1WI[0], VTX_INV_W_VEC($1)
+tXPF equ $v16 // Triangle cross product
+tXPI equ $v17
     vreadacc tXPI, ACC_UPPER
-    lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
+    lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vreadacc tXPF, ACC_MIDDLE
-    lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
-    vrcp    $v20[0], tPosCatI[1]
-.if !ENABLE_PROFILING
-    lpv     $v25[0], VTX_COLOR_VEC($4)  // Load RGB from vertex 4 (flat shading vtx)
-.endif
-    vmov    tPosCatI[3], tPosLmH[0]
     llv     t1WI[8], VTX_INV_W_VEC($2)
-    vrcph   $v22[0], tXPI[1]
+    vrcp    $v20[0], tPosCatI[1]
+    lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
+    vmov    tPosCatI[3], tPosLmH[0]
     llv     t1WI[12], VTX_INV_W_VEC($3)
+    vrcph   $v22[0], tXPI[1]
+    lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
+tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
+tXPRcpI equ $v24
     vrcpl   tXPRcpF[1], tXPF[1]
 .if !ENABLE_PROFILING
     bltz    $11, tri_skip_flat_shading  // Branch if G_SHADING_SMOOTH is set
 .endif
      vrcph  tXPRcpI[1], $v31[2]            // 0
 .if !ENABLE_PROFILING
+    lbu     $10, rdpHalf1Val + 1         // Original vertex 1
+    lhu     $10, (vertexTable)($10)
+    lpv     $v25[0], VTX_COLOR_VEC($10)  // Load RGB from vertex 4 (flat shading vtx)
     vlt     $v29, $v31, $v31[3]         // Set vcc to 11100000
     vmrg    tHAtI, $v25, tHAtI        // RGB from $4, alpha from $1
     vmrg    tMAtI, $v25, tMAtI        // RGB from $4, alpha from $2
     vmrg    tLAtI, $v25, tLAtI        // RGB from $4, alpha from $3
 tri_skip_flat_shading:
 .endif
-    // 52 cycles
+    // 49 cycles
     vrcp    $v20[2], tPosMmH[1]
     lb      $20, (alphaCompareCullMode)($zero)
     vrcph   $v22[2], tPosMmH[1]
@@ -1471,7 +1474,7 @@ tri_skip_flat_shading:
     xor     $24, $24, $20 // invert sign bit if other cond. Sign bit set -> cull
     bltz    $24, return_and_end_mat // if max < thresh or if min >= thresh.
 tri_skip_alpha_compare_cull:
-    // 63 cycles
+    // 60 cycles
     vmudm   tPosCatF, tPosCatI, vTRC_1000
     // no nop if tri_skip_alpha_compare_cull was unaligned
     vmadn   tPosCatI, $v31, $v31[2] // 0
@@ -1494,7 +1497,7 @@ tMx1W equ $v27
     vmadm   $v29, tXPRcpI, tXPF
     mfc2    $16, tXPI[1]
     vmadn   tXPF, tXPRcpF, tXPI
-    lbu     $7, textureSettings1 + 2
+
     vmadh   tXPI, tXPRcpI, tXPI
     lsv     tMAtI[14], VTX_SCR_Z($2)
     vand    $v22, $v20, vTRC_FFF8
@@ -1504,11 +1507,8 @@ tMx1W equ $v27
     vmudh   $v29, vOne, $v31[4] // 4
     lsv     tLAtF[14], VTX_SCR_Z_FRAC($3)
     vmadn   tXPF, tXPF, $v31[0] // -4
-    ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
     vmadh   tXPI, tXPI, $v31[0] // -4
-    or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
     vmudn   $v29, $v3, tHPos[0]
-    sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
     vmadl   $v29, $v22, tSubPxHF[1]
     ssv     tLPos[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
     vmadm   $v29, tPosCatI, tSubPxHF[1]
@@ -1516,17 +1516,17 @@ tMx1W equ $v27
     vmadn   $v2, $v22, tSubPxHI[1]
     ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vmadh   $v3, tPosCatI, tSubPxHI[1]
-    lw      $19, otherMode1
+    ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
 tMnWI equ $v27
 tMnWF equ $v10
     vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
-    andi    $10, $16, 0x0080 // Extract the left major flag from $16
+    or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
     vrcpl   tMnWF[0], tMx1W[1]
-    or      $10, $10, $7 // Combine the left major flag with the level and tile from the texture settings
+    lbu     $7, textureSettings1 + 2
     vmudh   t1WF, vOne, t1WI[1q]
-    sb      $10, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
+    sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
     vrcph   tMnWI[0], $v31[2]     // 0
-    sb      $zero, materialCullMode // This covers tri write out
+    lw      $19, otherMode1
 tSTWHMI equ $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
 tSTWHMF equ $v25
     vmudh   tSTWHMI, vOne, $v31[7]  // 0x7FFF
@@ -1550,8 +1550,11 @@ tSTWLF equ $v13
     vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
     ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
     vmadn   tSTWHMF, $v31, $v31[2]  // 0
+    andi    $10, $16, 0x0080 // Extract the left major flag from $16
     vmudm   $v29, tSTWLI, t1WF[6]  // (S, T, 7FFF) * (1 or <1) for L
+    or      $10, $10, $7 // Combine the left major flag with the level and tile from the texture settings
     vmadh   tSTWLI, tSTWLI, t1WI[6]
+    sb      $10, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
     vmadn   tSTWLF, $v31, $v31[2]  // 0
     sdv     tSTWHMI[0], 0x0020(rdpCmdBufPtr) // Move S, T, W Hi Int to temp mem
     vmrg    tMAtI, tMAtI, tSTWHMI // Merge S, T, W Mid into elems 4-6
@@ -1564,7 +1567,7 @@ tSTWLF equ $v13
 .if !ENABLE_PROFILING
     addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
 .endif
-    // 106 cycles
+    // 103 cycles
     vmudl   $v29, tXPF, tXPRcpF
     lsv     tHAtF[14], VTX_SCR_Z_FRAC($1)
     vmadm   $v29, tXPI, tXPRcpF
@@ -1574,14 +1577,15 @@ tSTWLF equ $v13
     vmadh   tXPRcpI, tXPI, tXPRcpI
     addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
     vmudh   tPosLmH, tPosLmH, $v31[0h] // e1 LmHY * -4 = 4*HmLY; e456 MmHY,LmHX,HmMX *= 4
+    andi    $3, $6, G_SHADE
 tAtLmHF equ $v10
 tAtLmHI equ $v9
 tAtMmHF equ $v13
 tAtMmHI equ $v7
     vsubc   tAtLmHF, tLAtF, tHAtF
-    andi    $3, $6, G_SHADE
-    vsub    tAtLmHI, tLAtI, tHAtI
     sll     $1, $1, 14
+    vsub    tAtLmHI, tLAtI, tHAtI
+    sb      $zero, materialCullMode // This covers tri write out
     vsubc   tAtMmHF, tMAtF, tHAtF
     sw      $1, 0x0008(rdpCmdBufPtr)         // Store XL edge coefficient
     vsub    tAtMmHI, tMAtI, tHAtI
@@ -1636,7 +1640,7 @@ tDaDyI equ $v7
 // DaDe = DaDx * factor
 tDaDeF equ $v8
 tDaDeI equ $v9
-    // 135 cycles
+    // 132 cycles
     vmadl   $v29, tDaDxF, $v20[3]
     sdv     tDaDxF[8], 0x0018($1)   // Store DsDx, DtDx, DwDx texture coefficients (fractional)
     vmadm   $v29, tDaDxI, $v20[3]
@@ -1677,7 +1681,7 @@ tri_return_from_decal_fix_z:
     slv     tDaDeI[12], 0x08($10)  // DzDeI:F
     bltz    dmemAddr, return_and_end_mat     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
      slv    $v10[12], 0x00($10)   // ZI:F
-     // 156 cycles
+     // 153 cycles
 flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAddr = large neg num -> only wait and set DPC_END
     mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
     lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
@@ -2140,7 +2144,6 @@ vtx_after_dma:
 vtx_constants_for_clip:
     // Sets up constants needed for vertex loop, including during clipping.
     // Results fill vPerm1:4. Uses misc temps.
-    lhu     vGeomMid, geometryModeLabel + 1       // Load middle 2 bytes of geom mode
 .if CFG_NO_OCCLUSION_PLANE
     llv     sFOG[0], (fogFactor - altBase)(altBaseReg) // Load fog multiplier 0 and offset 1
     ldv     sVPO[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
@@ -2612,6 +2615,7 @@ tri_snake_over_input_buffer:
     j       displaylist_dma_tri_snake    // inputBufferPos is now 0; load whole buffer
      li     nextRA, tri_snake_ret_from_input_buffer
 tri_snake_ret_from_input_buffer:
+    li      $ra, tri_snake_loop          // Clobbered by DMA. Putting this in the loop saves an instruction but loop takes 1 more cycle per tri.
     j       tri_snake_loop_from_input_buffer // inputBufferPos pointing to first byte loaded
      lbu    $3, (inputBufferEnd)(inputBufferPos) // Load c; clear real index b sign bit -> don't exit
 
@@ -2913,12 +2917,13 @@ G_SETSCISSOR_handler:  // $1 is 0 if jumped here
     j       G_RDP_handler                // Send the command to the RDP
      sw     cmd_w1_dram, (scissorBottomRight)($1) // otherMode1 = scissorBottomRight + 8
 
-G_GEOMETRYMODE_handler: // 5; $7 = G_GEOMETRYMODE (as negative) if jumped here
-    lw      $11, (geometryModeLabel + (0x100 - G_GEOMETRYMODE))($7) // load the geometry mode value
+G_GEOMETRYMODE_handler:
+    lw      $11, geometryModeLabel  // load the geometry mode value
     and     $11, $11, cmd_w0        // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
     or      $11, $11, cmd_w1_dram   // sets the flags in cmd_w1_dram (set in g*SPSetGeometryMode)
+    sw      $11, geometryModeLabel  // update the geometry mode value
     j       run_next_DL_command     // run the next DL command
-     sw     $11, (geometryModeLabel + (0x100 - G_GEOMETRYMODE))($7)  // update the geometry mode value
+     lsr    vGeomMid, $11, 8        // Middle 2 bytes of geom mode to lower 16 bits
 
 G_TEXTURE_handler: // 4
     li      $11, textureSettings1 - (texrectWord1 - G_TEXRECTFLIP_handler)  // Calculate the offset from texrectWord1 and $11 for saving to textureSettings

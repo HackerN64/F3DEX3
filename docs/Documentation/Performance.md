@@ -18,8 +18,8 @@ into account, but in some cases it is assumed to be optimal.
 All numbers assume default profiling configuration. Tri numbers assume texture,
 shade, and Z, and not flushing the buffer. Tri numbers are measured from the
 first cycle of the command handler inclusive, to the first cycle of whatever is
-after $ra exclusive; this is in order to capture the extra latency and stalls in
-F3DEX2.
+after $ra exclusive; this is in order to capture an extra stall cycle in F3DEX2
+when finishing a triangle and going to the next command.
 
 Vertex numbers assume no extra F3DEX3 features (packed normals, ambient
 occlusion, etc.). These features are listed below as the number of extra cycles
@@ -33,19 +33,19 @@ even to an odd number of lights adds a different time than vice versa.
 |----------------------------|--------|------------|--------|
 | Command dispatch           | 12     | 12         | 12     |
 | Small RDP command          | 14     | 5          | 5      |
-| Only/2nd tri to offscreen  | 27     | 26         | 26     |
-| 1st tri to offscreen       | 28     | 27         | 27     |
-| Only/2nd tri to clip       | 32     | 31         | 31     |
-| 1st tri to clip            | 33     | 32         | 32     |
-| Only/2nd tri to backface   | 38     | 38         | 38     |
-| 1st tri to backface        | 39     | 39         | 39     |
-| Only/2nd tri to degenerate | 42     | 40         | 40     |
-| 1st tri to degenerate      | 43     | 41         | 41     |
-| Only/2nd tri to occluded   | Can't  | Can't      | 49     |
-| 1st tri to occluded        | Can't  | Can't      | 50     |
-| Only/2nd tri to draw       | 172    | 159        | 162    |
-| 1st tri to draw            | 173    | 160        | 163    |
-| Extra per tri from snake   | Can't  | 10         | 10     |
+| Only/2nd tri to offscreen  | 27     | 25         | 25     |
+| 1st tri to offscreen       | 28     | 26         | 26     |
+| Only/2nd tri to clip       | 32     | 30         | 30     |
+| 1st tri to clip            | 33     | 31         | 31     |
+| Only/2nd tri to backface   | 38     | 36         | 36     |
+| 1st tri to backface        | 39     | 37         | 37     |
+| Only/2nd tri to degenerate | 42     | 38         | 38     |
+| 1st tri to degenerate      | 43     | 39         | 39     |
+| Only/2nd tri to occluded   | Can't  | Can't      | 42     |
+| 1st tri to occluded        | Can't  | Can't      | 43     |
+| Only/2nd tri to draw       | 172    | 156        | 159    |
+| 1st tri to draw            | 173    | 157        | 160    |
+| Extra per tri from snake   | Can't  | 9          | 9      |
 | Vtx before DMA start       | 16     | 17         | 17     |
 | Vtx pair, no lighting      | 54     | 54         | 70     |
 | Vtx pair, 0 dir lts        | Can't  | 65         | 81     |
