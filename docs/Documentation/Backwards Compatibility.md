@@ -155,7 +155,7 @@ e.g. `SPMatrix` refers to `gSPMatrix` and `gsSPMatrix`. `*` means wildcard.
 |--------------------------|-----|-----|------|-------|
 | `SP*GeometryMode*`       | *   | *   |      | Commands themselves are the same, but many new geometry mode flags, see below. |
 | `G_ZBUFFER`              | =   | =   |      |  |
-| `G_TEXTURE_ENABLE`       | =   | =   |      | Very old (F3D / HW v1) display lists with this bit set will crash on F3DEX2, but not on F3DEX3. |
+| `G_TEXTURE_ENABLE`       | =   | =   |      | Same behavior as F3DEX2: if actual value of 2 is set in the geometry mode but textures disabled with `SPTexture`, will crash. So GBI defines it to 0. |
 | `G_SHADE`                | =   | =   |      |  |
 | `G_ATTROFFSET_ST_ENABLE` | New | New |      | New geometry mode bit that enables ST attribute offsets, usually for smooth scrolling. |
 | `SPAttrOffsetST`         | New | New |      | New command which writes ST attribute offsets using `G_MWO_ATTR_OFFSET_*`. |

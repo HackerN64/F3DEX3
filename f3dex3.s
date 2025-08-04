@@ -1391,39 +1391,45 @@ tSubPxHI equ $v26
     vsub    tPosLmH, tLPos, tHPos
 .if !CFG_NO_OCCLUSION_PLANE
     andi    $16, $16, CLIP_OCCLUDED
+.endif
+    vsub    tPosHmM, tHPos, tMPos
+.if !CFG_NO_OCCLUSION_PLANE
     bnez    $16, tri_culled_by_occlusion_plane // Cull if all verts occluded
      // 38 cycles
 .endif
      mfc2   $1, tHPos[10]     // tHPos = lowest Y value = highest on screen (x, y, addr)
-    // 36 cycles if NOC (39 if occlusion plane)
-    vsub    tPosHmM, tHPos, tMPos
-    mfc2    $2, tMPos[10]     // tMPos = mid vertex (x, y, addr)
+    // 37 cycles if NOC (39 if occlusion plane)
 tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
 tPosCatF equ $v25
     vsub    tPosCatI, tLPos, tMPos
+    mfc2    $2, tMPos[10]     // tMPos = mid vertex (x, y, addr)
+    vmov    tPosCatI[2], tPosMmH[0]
 .if !ENABLE_PROFILING
     andi    $11, vGeomMid, G_SHADING_SMOOTH >> 8
 .endif
-    vmov    tPosCatI[2], tPosMmH[0]
-    lbu     $6, geometryModeLabel + 3 // Load lowest byte for G_SHADE, G_ZBUFFER. Also has G_ATTROFFSET_ST_ENABLE, but G_TRI_FILL will get OR'd into it and force that set.
     vmudh   $v29, tPosMmH, tPosLmH[0]
-    mfc2    $3, tLPos[10]     // tLPos = highest Y value = lowest on screen (x, y, addr)
+.if !ENABLE_PROFILING
+    lbu     $10, rdpHalf1Val + 1        // Original vertex 1 before shuffle and clipping
+.endif
 t1WI equ $v13 // elems 0, 4, 6
-t1WF equ $v14
     vmadh   $v29, tPosLmH, tPosHmM[0]
-    llv     t1WI[0], VTX_INV_W_VEC($1)
+    mfc2    $3, tLPos[10]     // tLPos = highest Y value = lowest on screen (x, y, addr)
 tXPF equ $v16 // Triangle cross product
 tXPI equ $v17
     vreadacc tXPI, ACC_UPPER
     lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vreadacc tXPF, ACC_MIDDLE
-    llv     t1WI[8], VTX_INV_W_VEC($2)
+.if !ENABLE_PROFILING
+    lhu     $10, (vertexTable)($10)
+.endif
     vrcp    $v20[0], tPosCatI[1]
     lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
     vmov    tPosCatI[3], tPosLmH[0]
-    llv     t1WI[12], VTX_INV_W_VEC($3)
-    vrcph   $v22[0], tXPI[1]
     lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
+    vrcph   $v22[0], tXPI[1]
+.if !ENABLE_PROFILING
+    lpv     $v25[0], VTX_COLOR_VEC($10)  // Load RGB from vertex 4 (flat shading vtx)
+.endif
 tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
 tXPRcpI equ $v24
     vrcpl   tXPRcpF[1], tXPF[1]
@@ -1432,9 +1438,6 @@ tXPRcpI equ $v24
 .endif
      vrcph  tXPRcpI[1], $v31[2]            // 0
 .if !ENABLE_PROFILING
-    lbu     $10, rdpHalf1Val + 1         // Original vertex 1
-    lhu     $10, (vertexTable)($10)
-    lpv     $v25[0], VTX_COLOR_VEC($10)  // Load RGB from vertex 4 (flat shading vtx)
     vlt     $v29, $v31, $v31[3]         // Set vcc to 11100000
     vmrg    tHAtI, $v25, tHAtI        // RGB from $4, alpha from $1
     vmrg    tMAtI, $v25, tMAtI        // RGB from $4, alpha from $2
@@ -1443,21 +1446,21 @@ tri_skip_flat_shading:
 .endif
     // 49 cycles
     vrcp    $v20[2], tPosMmH[1]
-    lb      $20, (alphaCompareCullMode)($zero)
-    vrcph   $v22[2], tPosMmH[1]
-    lw      $16, VTX_INV_W_VEC($1) // $16, $7, $8 = 1/W for H, M, L
-    vrcp    $v20[3], tPosLmH[1]
-    lw      $7, VTX_INV_W_VEC($2)
-    vrcph   $v22[3], tPosLmH[1]
-    lw      $8, VTX_INV_W_VEC($3)
-    vmudl   tHAtI, tHAtI, vTRC_0100 // vertex color 1 >>= 8
-    lbu     $9, textureSettings1 + 3
-    vmudl   tMAtI, tMAtI, vTRC_0100 // vertex color 2 >>= 8
-    sub     $11, $16, $7  // Four instr: $16 = max($16, $7)
-    vmudl   tLAtI, tLAtI, vTRC_0100 // vertex color 3 >>= 8
-    sra     $10, $11, 31
-    vmudl   $v29, $v20, vTRC_0020
     // no nop if tri_skip_flip_facing was unaligned
+    vrcph   $v22[2], tPosMmH[1]
+    llv     t1WI[0], VTX_INV_W_VEC($1)
+    vrcp    $v20[3], tPosLmH[1]
+    llv     t1WI[8], VTX_INV_W_VEC($2)
+    vrcph   $v22[3], tPosLmH[1]
+    llv     t1WI[12], VTX_INV_W_VEC($3)
+    vmudl   tHAtI, tHAtI, vTRC_0100 // vertex color 1 >>= 8
+    lb      $20, (alphaCompareCullMode)($zero)
+    vmudl   tMAtI, tMAtI, vTRC_0100 // vertex color 2 >>= 8
+    lw      $16, VTX_INV_W_VEC($1) // $16, $7, $8 = 1/W for H, M, L
+    vmudl   tLAtI, tLAtI, vTRC_0100 // vertex color 3 >>= 8
+    lw      $7, VTX_INV_W_VEC($2)
+    vmudl   $v29, $v20, vTRC_0020
+    lw      $8, VTX_INV_W_VEC($3)
     vmadm   $v22, $v22, vTRC_0020
     beqz    $20, tri_skip_alpha_compare_cull
      vmadn  $v20, $v31, $v31[2] // 0
@@ -1478,53 +1481,58 @@ tri_skip_alpha_compare_cull:
     vmudm   tPosCatF, tPosCatI, vTRC_1000
     // no nop if tri_skip_alpha_compare_cull was unaligned
     vmadn   tPosCatI, $v31, $v31[2] // 0
-    and     $11, $11, $10
+    sub     $11, $16, $7  // Four instr: $16 = max($16, $7)
     vsubc   tSubPxHF, vZero, tSubPxHF
-    sub     $16, $16, $11
-    vsub    tSubPxHI, vZero, vZero
-    sub     $11, $16, $8  // Four instr: $16 = max($16, $8)
-    vmudm   $v29, tPosCatF, $v20
     sra     $10, $11, 31
-    vmadl   $v29, tPosCatI, $v20
+    vsub    tSubPxHI, vZero, vZero
     and     $11, $11, $10
-    vmadn   $v20, tPosCatI, $v22
+    vmudm   $v29, tPosCatF, $v20
     sub     $16, $16, $11
+    vmadl   $v29, tPosCatI, $v20
+    sub     $11, $16, $8  // Four instr: $16 = max($16, $8)
+    vmadn   $v20, tPosCatI, $v22
+    sra     $10, $11, 31
     vmadh   tPosCatI, tPosCatF, $v22
-    sw      $16, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W to temp mem
+    and     $11, $11, $10
     vmudl   $v29, tXPRcpF, tXPF
-tMx1W equ $v27
-    llv     tMx1W[0], 0x0010(rdpCmdBufPtr) // Load max of three verts' 1/W
+    sub     $16, $16, $11
     vmadm   $v29, tXPRcpI, tXPF
-    mfc2    $16, tXPI[1]
+    mfc2    $7, tXPI[1]
     vmadn   tXPF, tXPRcpF, tXPI
-
+    lbu     $6, geometryModeLabel + 3 // Load lowest byte for G_SHADE, G_ZBUFFER. Also has G_ATTROFFSET_ST_ENABLE, but G_TRI_FILL will get OR'd into it and force that set.
     vmadh   tXPI, tXPRcpI, tXPI
-    lsv     tMAtI[14], VTX_SCR_Z($2)
+    lbu     $9, textureSettings1 + 3 // Texture enabled = 0x2
     vand    $v22, $v20, vTRC_FFF8
-    lsv     tLAtI[14], VTX_SCR_Z($3)
+    lsv     tMAtI[14], VTX_SCR_Z($2)
     vcr     tPosCatI, tPosCatI, vTRC_0100
-    lsv     tMAtF[14], VTX_SCR_Z_FRAC($2)
+    lsv     tLAtI[14], VTX_SCR_Z($3)
     vmudh   $v29, vOne, $v31[4] // 4
-    lsv     tLAtF[14], VTX_SCR_Z_FRAC($3)
-    vmadn   tXPF, tXPF, $v31[0] // -4
-    vmadh   tXPI, tXPI, $v31[0] // -4
-    vmudn   $v29, $v3, tHPos[0]
-    vmadl   $v29, $v22, tSubPxHF[1]
-    ssv     tLPos[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
-    vmadm   $v29, tPosCatI, tSubPxHF[1]
-    ssv     tMPos[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
-    vmadn   $v2, $v22, tSubPxHI[1]
-    ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
-    vmadh   $v3, tPosCatI, tSubPxHI[1]
     ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
-tMnWI equ $v27
-tMnWF equ $v10
-    vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
+    vmadn   tXPF, tXPF, $v31[0] // -4
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
+    vmadh   tXPI, tXPI, $v31[0] // -4
+    sw      $16, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W (upper) to temp mem
+tMx1W equ $v27
+    vmudn   $v29, $v3, tHPos[0]
+    llv     tMx1W[0], 0x0010(rdpCmdBufPtr) // Load max of three verts' 1/W
+    vmadl   $v29, $v22, tSubPxHF[1]
+    ssv     tMPos[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
+    vmadm   $v29, tPosCatI, tSubPxHF[1]
+    lsv     tMAtF[14], VTX_SCR_Z_FRAC($2)
+// $v2 <- tMPos
+    vmadn   $v2, $v22, tSubPxHI[1]
+    ssv     tLPos[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
+    vmadh   $v3, tPosCatI, tSubPxHI[1]
+    lsv     tLAtF[14], VTX_SCR_Z_FRAC($3)
+    vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
+    ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
+tMnWF equ $v10 // <- tLPos
     vrcpl   tMnWF[0], tMx1W[1]
-    lbu     $7, textureSettings1 + 2
+    lbu     $10, textureSettings1 + 2  // Level and tile
+t1WF equ $v14 // <- tHPos
     vmudh   t1WF, vOne, t1WI[1q]
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
+tMnWI equ $v27 // <- tMx1W
     vrcph   tMnWI[0], $v31[2]     // 0
     lw      $19, otherMode1
 tSTWHMI equ $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
@@ -1550,11 +1558,11 @@ tSTWLF equ $v13
     vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
     ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
     vmadn   tSTWHMF, $v31, $v31[2]  // 0
-    andi    $10, $16, 0x0080 // Extract the left major flag from $16
+    andi    $7, $7, 0x0080 // Extract the left major flag from $7
     vmudm   $v29, tSTWLI, t1WF[6]  // (S, T, 7FFF) * (1 or <1) for L
-    or      $10, $10, $7 // Combine the left major flag with the level and tile from the texture settings
+    or      $7, $7, $10 // Combine the left major flag with the level and tile from the texture settings
     vmadh   tSTWLI, tSTWLI, t1WI[6]
-    sb      $10, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
+    sb      $7, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
     vmadn   tSTWLF, $v31, $v31[2]  // 0
     sdv     tSTWHMI[0], 0x0020(rdpCmdBufPtr) // Move S, T, W Hi Int to temp mem
     vmrg    tMAtI, tMAtI, tSTWHMI // Merge S, T, W Mid into elems 4-6
@@ -2921,9 +2929,9 @@ G_GEOMETRYMODE_handler:
     lw      $11, geometryModeLabel  // load the geometry mode value
     and     $11, $11, cmd_w0        // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
     or      $11, $11, cmd_w1_dram   // sets the flags in cmd_w1_dram (set in g*SPSetGeometryMode)
-    sw      $11, geometryModeLabel  // update the geometry mode value
+    srl     vGeomMid, $11, 8        // Middle 2 bytes of geom mode to lower 16 bits. Ordered this way to avoid stalls.
     j       run_next_DL_command     // run the next DL command
-     lsr    vGeomMid, $11, 8        // Middle 2 bytes of geom mode to lower 16 bits
+     sw     $11, geometryModeLabel  // Update the geometry mode value
 
 G_TEXTURE_handler: // 4
     li      $11, textureSettings1 - (texrectWord1 - G_TEXRECTFLIP_handler)  // Calculate the offset from texrectWord1 and $11 for saving to textureSettings

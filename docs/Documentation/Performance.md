@@ -43,8 +43,8 @@ even to an odd number of lights adds a different time than vice versa.
 | 1st tri to degenerate      | 43     | 39         | 39     |
 | Only/2nd tri to occluded   | Can't  | Can't      | 42     |
 | 1st tri to occluded        | Can't  | Can't      | 43     |
-| Only/2nd tri to draw       | 172    | 156        | 159    |
-| 1st tri to draw            | 173    | 157        | 160    |
+| Only/2nd tri to draw       | 172    | 156        | 158    |
+| 1st tri to draw            | 173    | 157        | 159    |
 | Extra per tri from snake   | Can't  | 9          | 9      |
 | Vtx before DMA start       | 16     | 17         | 17     |
 | Vtx pair, no lighting      | 54     | 54         | 70     |
