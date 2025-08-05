@@ -75,7 +75,7 @@ ACC_LOWER equ 2
 // perfCounterC:
 //     cycles RSP was stalled because RDP FIFO was full
 // perfCounterD:
-//     cycles RSP spent processing triangle commands, NOT including buffer flushes
+//     cycles RSP spent processing triangle commands, not including FIFO stalls
 .if CFG_PROFILING_A
 .if CFG_PROFILING_B || CFG_PROFILING_C
 .error "At most one CFG_PROFILING_ option can be enabled at a time"
@@ -651,9 +651,9 @@ INPUT_BUFFER_CMDS equ 21
 INPUT_BUFFER_SIZE_BYTES equ (INPUT_BUFFER_CMDS * 8)
 INPUT_BUFFER_CLOBBER_OSTASK_AMT equ 0x10 // Input buffer overwrites beginning of OSTask, see rsp_defs.inc
 OSTASK_ORIG_SIZE equ 0x40
-OSTASK_CLOBBERED_SIZE equ (OSTASK_ORIG_SIZE - INPUT_BUFFER_CLOBBER_OSTASK_AMT)
+OSTASK_SIZE_AFTER_CLOBBER equ (OSTASK_ORIG_SIZE - INPUT_BUFFER_CLOBBER_OSTASK_AMT)
 
-END_VARIABLE_LEN_DMEM equ (0x1000 - OSTASK_CLOBBERED_SIZE - INPUT_BUFFER_SIZE_BYTES - (2 * RDP_CMD_BUFSIZE_TOTAL) - (2 * CLIP_POLY_SIZE_BYTES) - CLIP_TEMP_VERTS_SIZE_BYTES - VERTEX_BUFFER_SIZE_BYTES)
+END_VARIABLE_LEN_DMEM equ (0x1000 - OSTASK_SIZE_AFTER_CLOBBER - INPUT_BUFFER_SIZE_BYTES - (2 * RDP_CMD_BUFSIZE_TOTAL) - (2 * CLIP_POLY_SIZE_BYTES) - CLIP_TEMP_VERTS_SIZE_BYTES - VERTEX_BUFFER_SIZE_BYTES)
 
 startFreeDmem:
 .org END_VARIABLE_LEN_DMEM
@@ -727,7 +727,7 @@ OSTask:
 inputBufferEnd:
 inputBufferEndSgn equ -(0x1000 - inputBufferEnd) // Underflow DMEM address
 // rest of OSTask
-    .skip OSTASK_CLOBBERED_SIZE
+    .skip OSTASK_SIZE_AFTER_CLOBBER
 
 .if . != 0x1000
     .error "DMEM organization incorrect"
@@ -755,7 +755,7 @@ $zero ---------------------- Hardwired zero ------------------------------------
 $1    v1 texptr   <------------- vtxLeft ------------------------------>  temp, init 0
 $2    v2 shdptr   clipVNext -------> <----- lbPostAo   laPtr                  temp
 $3    v3 shdflg   clipVLastOfsc  vLoopRet ---------> laVtxLeft                temp
-$4    flat shading vtx or (perf) initial FIFO stall time -----------------------------
+$4                                        ~ unused! ~
 $5    <------------------------ vGeomMid ------------------------------>  
 $6    geom mode   clipMaskIdx -----> <-- lbTexgenOrRet laSTKept
 $7    v2flag tile <------------- fogFlag ---------->  laPacked  mtx valid   cmd byte
@@ -1225,11 +1225,11 @@ run_next_DL_command:
 .if CFG_PROFILING_A
     mfc0    $10, DPC_CLOCK
 .endif
-.if COUNTER_B_LOWER_CMD_COUNT
+.if COUNTER_B_LOWER_CMD_COUNT  // A or C
     addi    perfCounterB, perfCounterB, 1               // Count commands
 .endif
 .if CFG_PROFILING_A
-    move    $4, perfCounterC                            // Save initial FIFO stall time
+    add     perfCounterD, perfCounterD, perfCounterC    // Add initial FIFO stall time to tri time; will subtract final FIFO time later
     sw      $10, startCounterTime
 .endif
     jr      $11                                         // Jump to handler
@@ -1439,9 +1439,9 @@ tXPRcpI equ $v24
      vrcph  tXPRcpI[1], $v31[2]            // 0
 .if !ENABLE_PROFILING
     vlt     $v29, $v31, $v31[3]         // Set vcc to 11100000
-    vmrg    tHAtI, $v25, tHAtI        // RGB from $4, alpha from $1
-    vmrg    tMAtI, $v25, tMAtI        // RGB from $4, alpha from $2
-    vmrg    tLAtI, $v25, tLAtI        // RGB from $4, alpha from $3
+    vmrg    tHAtI, $v25, tHAtI        // RGB from original vtx 1, alpha from $1
+    vmrg    tMAtI, $v25, tMAtI        // RGB from original vtx 1, alpha from $2
+    vmrg    tLAtI, $v25, tLAtI        // RGB from original vtx 1, alpha from $3
 tri_skip_flat_shading:
 .endif
     // 49 cycles
@@ -2070,8 +2070,8 @@ clip_draw_tris_loop:
     lhu     $1, (clipPoly - 6)(clipPolySelect)
     lhu     $2, (clipPoly - 4)(clipPolySelect)
     lhu     $3, (clipPoly - 2)(clipPolyWrite)
-    mtc2    $1, $v27[10]              // Addresses go in vector regs too
-    mtc2    $2, $v4[12]
+    mtc2    $1, $v6[10]              // Addresses go in vector regs too
+    mtc2    $2, $v27[12]
     jal     tri_noinit
      mtc2   $3, $v27[14]
     bne     clipPolyWrite, clipPolySelect, clip_draw_tris_loop
@@ -2604,10 +2604,9 @@ tris_end:
     beqz    $ra, run_next_DL_command         // $ra != 0 if from tri cmds
      add    perfCounterA, perfCounterA, $11  // Add to vert cycles perf counter
     sub     perfCounterA, perfCounterA, $11  // From tris, undo add to vert perf counter
-    sub     $10, perfCounterC, $4            // How long we stalled for RDP FIFO during this cmd
-    sub     $11, $11, $10                    // Subtract that from the tri cycles
+    add     perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
     j       run_next_DL_command
-     add    perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
+     sub    perfCounterD, perfCounterD, perfCounterC // Subtract final RDP FIFO stall time; ends up subtracting any FIFO stall time during these tris
 .else
     j       run_next_DL_command
      lqv    vTRC, (vTRCValue)($zero)         // Restore value overwritten by matrix

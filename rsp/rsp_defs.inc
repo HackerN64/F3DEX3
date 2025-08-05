@@ -19,7 +19,7 @@ OSTask_ucode            equ 0x0010 // used in F3D, S2D, and boot
 OSTask_ucode_size       equ 0x0014 //                      EX3: startCounterTime
 OSTask_ucode_data       equ 0x0018 // used in boot only.   EX3: xfrmLookatDirs ^
 OSTask_ucode_data_size  equ 0x001C // used in boot only                        v
-OSTask_dram_stack       equ 0x0020 // used in F3D and S2D at first startup
+OSTask_dram_stack       equ 0x0020 // used in F3D and S2D
 OSTask_dram_stack_size  equ 0x0024
 OSTask_output_buff      equ 0x0028 // used in F3D and S2D
 OSTask_output_buff_size equ 0x002C // used in F3D and S2D; actually end pointer not size
