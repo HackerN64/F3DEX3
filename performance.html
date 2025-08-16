@@ -109,7 +109,7 @@ Performance Results</h1>
 <h2><a class="anchor" id="autotoc_md38"></a>
 Cycle Counts</h2>
 <p>These are cycle counts for many key paths in the microcode. Lower numbers are better. The timings are hand-counted taking into account all pipeline stalls and all dual-issue conditions. Instruction alignment after branches is usually taken into account, but in some cases it is assumed to be optimal.</p>
-<p>All numbers assume default profiling configuration. <a class="el" href="structTri.html">Tri</a> numbers assume texture, shade, and Z, and not flushing the buffer. <a class="el" href="structTri.html">Tri</a> numbers are measured from the first cycle of the command handler inclusive, to the first cycle of whatever is after $ra exclusive; this is in order to capture the extra latency and stalls in F3DEX2.</p>
+<p>All numbers assume default profiling configuration. <a class="el" href="structTri.html">Tri</a> numbers assume texture, shade, and Z, and not flushing the buffer. <a class="el" href="structTri.html">Tri</a> numbers are measured from the first cycle of the command handler inclusive, to the first cycle of whatever is after $ra exclusive; this is in order to capture an extra stall cycle in F3DEX2 when finishing a triangle and going to the next command.</p>
 <p>Vertex numbers assume no extra F3DEX3 features (packed normals, ambient occlusion, etc.). These features are listed below as the number of extra cycles the feature costs per vertex pair. ltbasic is the codepath when point lighting, specular, and Fresnel are disabled; ltadv is the codepath with any of these enabled. The reason timings are listed separately for each number of lights is because some implementations are pipelined for two lights, so going from an even to an odd number of lights adds a different time than vice versa.</p>
 <table class="markdownTable">
 <tr class="markdownTableHead">
@@ -119,31 +119,31 @@ Cycle Counts</h2>
 <tr class="markdownTableRowEven">
 <td class="markdownTableBodyNone">Small RDP command   </td><td class="markdownTableBodyNone">14   </td><td class="markdownTableBodyNone">5   </td><td class="markdownTableBodyNone">5    </td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">Only/2nd tri to offscreen   </td><td class="markdownTableBodyNone">27   </td><td class="markdownTableBodyNone">26   </td><td class="markdownTableBodyNone">26    </td></tr>
+<td class="markdownTableBodyNone">Only/2nd tri to offscreen   </td><td class="markdownTableBodyNone">27   </td><td class="markdownTableBodyNone">25   </td><td class="markdownTableBodyNone">25    </td></tr>
 <tr class="markdownTableRowEven">
-<td class="markdownTableBodyNone">1st tri to offscreen   </td><td class="markdownTableBodyNone">28   </td><td class="markdownTableBodyNone">27   </td><td class="markdownTableBodyNone">27    </td></tr>
+<td class="markdownTableBodyNone">1st tri to offscreen   </td><td class="markdownTableBodyNone">28   </td><td class="markdownTableBodyNone">26   </td><td class="markdownTableBodyNone">26    </td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">Only/2nd tri to clip   </td><td class="markdownTableBodyNone">32   </td><td class="markdownTableBodyNone">31   </td><td class="markdownTableBodyNone">31    </td></tr>
+<td class="markdownTableBodyNone">Only/2nd tri to clip   </td><td class="markdownTableBodyNone">32   </td><td class="markdownTableBodyNone">30   </td><td class="markdownTableBodyNone">30    </td></tr>
 <tr class="markdownTableRowEven">
-<td class="markdownTableBodyNone">1st tri to clip   </td><td class="markdownTableBodyNone">33   </td><td class="markdownTableBodyNone">32   </td><td class="markdownTableBodyNone">32    </td></tr>
+<td class="markdownTableBodyNone">1st tri to clip   </td><td class="markdownTableBodyNone">33   </td><td class="markdownTableBodyNone">31   </td><td class="markdownTableBodyNone">31    </td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">Only/2nd tri to backface   </td><td class="markdownTableBodyNone">38   </td><td class="markdownTableBodyNone">38   </td><td class="markdownTableBodyNone">38    </td></tr>
+<td class="markdownTableBodyNone">Only/2nd tri to backface   </td><td class="markdownTableBodyNone">38   </td><td class="markdownTableBodyNone">36   </td><td class="markdownTableBodyNone">36    </td></tr>
 <tr class="markdownTableRowEven">
-<td class="markdownTableBodyNone">1st tri to backface   </td><td class="markdownTableBodyNone">39   </td><td class="markdownTableBodyNone">39   </td><td class="markdownTableBodyNone">39    </td></tr>
+<td class="markdownTableBodyNone">1st tri to backface   </td><td class="markdownTableBodyNone">39   </td><td class="markdownTableBodyNone">37   </td><td class="markdownTableBodyNone">37    </td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">Only/2nd tri to degenerate   </td><td class="markdownTableBodyNone">42   </td><td class="markdownTableBodyNone">40   </td><td class="markdownTableBodyNone">40    </td></tr>
+<td class="markdownTableBodyNone">Only/2nd tri to degenerate   </td><td class="markdownTableBodyNone">42   </td><td class="markdownTableBodyNone">38   </td><td class="markdownTableBodyNone">38    </td></tr>
 <tr class="markdownTableRowEven">
-<td class="markdownTableBodyNone">1st tri to degenerate   </td><td class="markdownTableBodyNone">43   </td><td class="markdownTableBodyNone">41   </td><td class="markdownTableBodyNone">41    </td></tr>
+<td class="markdownTableBodyNone">1st tri to degenerate   </td><td class="markdownTableBodyNone">43   </td><td class="markdownTableBodyNone">39   </td><td class="markdownTableBodyNone">39    </td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">Only/2nd tri to occluded   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">49    </td></tr>
+<td class="markdownTableBodyNone">Only/2nd tri to occluded   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">42    </td></tr>
 <tr class="markdownTableRowEven">
-<td class="markdownTableBodyNone">1st tri to occluded   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">50    </td></tr>
+<td class="markdownTableBodyNone">1st tri to occluded   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">43    </td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">Only/2nd tri to draw   </td><td class="markdownTableBodyNone">172   </td><td class="markdownTableBodyNone">159   </td><td class="markdownTableBodyNone">162    </td></tr>
+<td class="markdownTableBodyNone">Only/2nd tri to draw   </td><td class="markdownTableBodyNone">172   </td><td class="markdownTableBodyNone">156   </td><td class="markdownTableBodyNone">158    </td></tr>
 <tr class="markdownTableRowEven">
-<td class="markdownTableBodyNone">1st tri to draw   </td><td class="markdownTableBodyNone">173   </td><td class="markdownTableBodyNone">160   </td><td class="markdownTableBodyNone">163    </td></tr>
+<td class="markdownTableBodyNone">1st tri to draw   </td><td class="markdownTableBodyNone">173   </td><td class="markdownTableBodyNone">157   </td><td class="markdownTableBodyNone">159    </td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">Extra per tri from snake   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">10   </td><td class="markdownTableBodyNone">10    </td></tr>
+<td class="markdownTableBodyNone">Extra per tri from snake   </td><td class="markdownTableBodyNone">Can't   </td><td class="markdownTableBodyNone">9   </td><td class="markdownTableBodyNone">9    </td></tr>
 <tr class="markdownTableRowEven">
 <td class="markdownTableBodyNone"><a class="el" href="unionVtx.html">Vtx</a> before DMA start   </td><td class="markdownTableBodyNone">16   </td><td class="markdownTableBodyNone">17   </td><td class="markdownTableBodyNone">17    </td></tr>
 <tr class="markdownTableRowOdd">

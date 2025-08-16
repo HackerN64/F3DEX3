@@ -350,7 +350,7 @@ Geometry Mode and New Effect Parameters</h3>
 <tr class="markdownTableRowEven">
 <td class="markdownTableBodyNone"><code>G_ZBUFFER</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone"><code>G_TEXTURE_ENABLE</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Very old (F3D / HW v1) display lists with this bit set will crash on F3DEX2, but not on F3DEX3.    </td></tr>
+<td class="markdownTableBodyNone"><code>G_TEXTURE_ENABLE</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone">Same behavior as F3DEX2: if actual value of 2 is set in the geometry mode but textures disabled with <code>SPTexture</code>, will crash. So GBI defines it to 0.    </td></tr>
 <tr class="markdownTableRowEven">
 <td class="markdownTableBodyNone"><code>G_SHADE</code>   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone">=   </td><td class="markdownTableBodyNone"></td><td class="markdownTableBodyNone"></td></tr>
 <tr class="markdownTableRowOdd">
