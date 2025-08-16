@@ -755,8 +755,8 @@ $zero ---------------------- Hardwired zero ------------------------------------
 $1    v1 texptr   <------------- vtxLeft ------------------------------>  temp, init 0
 $2    v2 shdptr   clipVNext -------> <----- lbPostAo   laPtr                  temp
 $3    v3 shdflg   clipVLastOfsc  vLoopRet ---------> laVtxLeft                temp
-$4                                        ~ unused! ~
-$5    <------------------------ vGeomMid ------------------------------>  
+$4                                    ~ unused! ~
+$5    ------------------------- vGeomMid ---------------------------------------------
 $6    geom mode   clipMaskIdx -----> <-- lbTexgenOrRet laSTKept
 $7    v2flag tile <------------- fogFlag ---------->  laPacked  mtx valid   cmd byte
 $8    v3flag      <------------- outVtx2 ---------->  laSpecular outVtx2
@@ -1238,18 +1238,37 @@ run_next_DL_command:
     // $7 must retain the command byte for load_mtx and overlay 3 stuff
     // $11 must contain the handler called for several handlers
 
-G_SETxIMG_handler: // 10
-    lb      $3, materialCullMode            // Get current mode
-    jal     segmented_to_physical           // Convert image to physical address
-     lw     $2, lastMatDLPhyAddr            // Get last material physical addr
-    bnez    $3, G_RDP_handler               // If not in normal mode (0), exit
-     add    $10, taskDataPtr, inputBufferPos // Current material physical addr
-    beq     $10, $2, @@skip                 // Branch if we are executing the same mat again
-     sw     $10, lastMatDLPhyAddr           // Store material physical addr
-    li      $7, 1                           // > 0: in material first time
-@@skip:                                     // Otherwise $7 was < 0: cull mode (in mat second time)
-    j       G_RDP_handler
-     sb     $7, materialCullMode
+/* This is a crazy optimization, and it was completely accidental!
+When G_RELSEGMENT was implemented, we did not notice the G_MOVEWORD behavior of
+subtracting (G_MOVEWORD << 8) from the movewordTable address in order to remove
+the command byte. Since the command byte is G_RELSEGMENT, not G_MOVEWORD, the
+final address is completely wrong. However, DMEM wraps at 4 KiB--only the lowest
+4 bits of any address are significant. And, G_RELSEGMENT **happened** to end in
+0xB, the same as G_MOVEWORD! So the wrong address aliases to the correct one!
+I only noticed this when I tried to move G_RELSEGMENT to a different command
+byte and got crashes. */
+.if (G_RELSEGMENT & 0xF) != (G_MOVEWORD & 0xF)
+.error "Crazy relsegment optimization broken, don't change command byte assignments"
+.endif
+G_RELSEGMENT_handler: // 9
+    jal     segmented_to_physical    // Resolve new segment address relative to existing segment
+G_MOVEWORD_handler:
+     srl    $2, cmd_w0, 16           // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
+    lhu     $10, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
+do_moveword:
+    sll     $11, cmd_w0, 16          // Sign bit = upper bit of offset
+    add     $10, $10, cmd_w0         // Offset + base; only lower 12 bits matter
+    bltz    $11, run_next_DL_command // If upper bit of offset is set, exit after halfword
+     sh     cmd_w1_dram, ($10)       // Store value from cmd into halfword
+    j       run_next_DL_command
+     sw     cmd_w1_dram, ($10)       // Store value from cmd into word (offset + moveword_table[index])
+
+G_LOAD_UCODE_handler: // 4
+    j       load_overlay_0_and_enter         // Delay slot is harmless
+G_MODIFYVTX_handler:
+     lhu    $10, (vertexTable)(cmd_w0)       // Byte 3 = vtx being modified
+    j       do_moveword  // Moveword adds cmd_w0 to $10 for final addr
+     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx, bit 15 clear
 
 .if !ENABLE_PROFILING
 G_LIGHTTORDP_handler: // 9
@@ -1263,13 +1282,6 @@ G_LIGHTTORDP_handler: // 9
     j       G_RDP_handler                // Send to RDP
      or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
 .endif
-
-G_LOAD_UCODE_handler: // 4
-    j       load_overlay_0_and_enter         // Delay slot is harmless
-G_MODIFYVTX_handler:
-     lhu    $10, (vertexTable)(cmd_w0)       // Byte 3 = vtx being modified
-    j       do_moveword  // Moveword adds cmd_w0 to $10 for final addr
-     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx, bit 15 clear
 
 // Index = bits 1-6; direction flag = bit 0; end flag = bit 7
 // CM 02 01 03 04 05 06 07
@@ -1434,7 +1446,7 @@ tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
 tXPRcpI equ $v24
     vrcpl   tXPRcpF[1], tXPF[1]
 .if !ENABLE_PROFILING
-    bltz    $11, tri_skip_flat_shading  // Branch if G_SHADING_SMOOTH is set
+    bnez    $11, tri_skip_flat_shading  // Branch if G_SHADING_SMOOTH is set
 .endif
      vrcph  tXPRcpI[1], $v31[2]            // 0
 .if !ENABLE_PROFILING
@@ -1762,6 +1774,20 @@ tri_culled_by_occlusion_plane:
 return_and_end_mat:
     jr      $ra
      sb     $zero, materialCullMode // This covers all tri early exits except clipping
+
+tri_snake_over_input_buffer:
+    j       displaylist_dma_tri_snake    // inputBufferPos is now 0; load whole buffer
+     li     nextRA, tri_snake_ret_from_input_buffer
+tri_snake_ret_from_input_buffer:
+    li      $ra, tri_snake_loop          // Clobbered by DMA. Putting this in the loop saves an instruction but loop takes 1 more cycle per tri.
+    j       tri_snake_loop_from_input_buffer // inputBufferPos pointing to first byte loaded
+     lbu    $3, (inputBufferEnd)(inputBufferPos) // Load c; clear real index b sign bit -> don't exit
+
+tri_snake_end:
+    addi    inputBufferPos, inputBufferPos, 7 // Round up to whole input command
+    addi    $11, $zero, 0xFFF8               // Sign-extend; andi is zero-extend!
+    j       tris_end
+     and    inputBufferPos, inputBufferPos, $11 // inputBufferPos has to be negative
 
 align_with_warning 8, "One instruction of padding before ovl234"
 
@@ -2139,6 +2165,16 @@ ovl3_padded_end:
 
 .orga max(max(ovl2_padded_end - ovl2_start, ovl4_padded_end - ovl4_start) + orga(ovl3_start), orga())
 ovl234_end:
+
+// Converts the segmented address in cmd_w1_dram to the corresponding physical address
+segmented_to_physical: // 7
+    srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
+    andi    $11, $11, 0x3C                // Clear the bottom 2 bits that remained during the shift
+    lw      $11, (segmentTable)($11)      // Get the current address of the segment
+    sll     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address to the left so that the top 8 bits are shifted out
+    srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
+    jr      $ra
+     add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
 vtx_after_dma:
     srl     $2, cmd_w0, 11                     // n << 1
@@ -2612,30 +2648,6 @@ tris_end:
      lqv    vTRC, (vTRCValue)($zero)         // Restore value overwritten by matrix
 .endif
 
-tri_snake_end:
-    addi    inputBufferPos, inputBufferPos, 7 // Round up to whole input command
-    addi    $11, $zero, 0xFFF8               // Sign-extend; andi is zero-extend!
-    j       tris_end
-     and    inputBufferPos, inputBufferPos, $11 // inputBufferPos has to be negative
-
-tri_snake_over_input_buffer:
-    j       displaylist_dma_tri_snake    // inputBufferPos is now 0; load whole buffer
-     li     nextRA, tri_snake_ret_from_input_buffer
-tri_snake_ret_from_input_buffer:
-    li      $ra, tri_snake_loop          // Clobbered by DMA. Putting this in the loop saves an instruction but loop takes 1 more cycle per tri.
-    j       tri_snake_loop_from_input_buffer // inputBufferPos pointing to first byte loaded
-     lbu    $3, (inputBufferEnd)(inputBufferPos) // Load c; clear real index b sign bit -> don't exit
-
-// Converts the segmented address in cmd_w1_dram to the corresponding physical address
-segmented_to_physical: // 7
-    srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
-    andi    $11, $11, 0x3C                // Clear the bottom 2 bits that remained during the shift
-    lw      $11, (segmentTable)($11)      // Get the current address of the segment
-    sll     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address to the left so that the top 8 bits are shifted out
-    srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
-    jr      $ra
-     add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
-
 load_overlay_0_and_enter:
     li      nextRA, 0x1000                  // Sets up return address
     li      cmd_w1_dram, orga(ovl0_start)   // Sets up ovl0 table address
@@ -2924,7 +2936,7 @@ G_SETSCISSOR_handler:  // $1 is 0 if jumped here
     j       G_RDP_handler                // Send the command to the RDP
      sw     cmd_w1_dram, (scissorBottomRight)($1) // otherMode1 = scissorBottomRight + 8
 
-G_GEOMETRYMODE_handler:
+G_GEOMETRYMODE_handler: // 6
     lw      $11, geometryModeLabel  // load the geometry mode value
     and     $11, $11, cmd_w0        // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
     or      $11, $11, cmd_w1_dram   // sets the flags in cmd_w1_dram (set in g*SPSetGeometryMode)
@@ -2954,30 +2966,18 @@ G_RDPHALF_2_handler: // 7
     j       G_RDP_handler
      sdv    $v29[0], -8(rdpCmdBufPtr)
 
-/* This is a crazy optimization, and it was completely accidental!
-When G_RELSEGMENT was implemented, we did not notice the G_MOVEWORD behavior of
-subtracting (G_MOVEWORD << 8) from the movewordTable address in order to remove
-the command byte. Since the command byte is G_RELSEGMENT, not G_MOVEWORD, the
-final address is completely wrong. However, DMEM wraps at 4 KiB--only the lowest
-4 bits of any address are significant. And, G_RELSEGMENT **happened** to end in
-0xB, the same as G_MOVEWORD! So the wrong address aliases to the correct one!
-I only noticed this when I tried to move G_RELSEGMENT to a different command
-byte and got crashes. */
-.if (G_RELSEGMENT & 0xF) != (G_MOVEWORD & 0xF)
-.error "Crazy relsegment optimization broken, don't change command byte assignments"
-.endif
-G_RELSEGMENT_handler: // 9
-    jal     segmented_to_physical    // Resolve new segment address relative to existing segment
-G_MOVEWORD_handler:
-     srl    $2, cmd_w0, 16           // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
-    lhu     $10, (movewordTable - (G_MOVEWORD << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
-do_moveword:
-    sll     $11, cmd_w0, 16          // Sign bit = upper bit of offset
-    add     $10, $10, cmd_w0         // Offset + base; only lower 12 bits matter
-    bltz    $11, run_next_DL_command // If upper bit of offset is set, exit after halfword
-     sh     cmd_w1_dram, ($10)       // Store value from cmd into halfword
-    j       run_next_DL_command
-     sw     cmd_w1_dram, ($10)       // Store value from cmd into word (offset + moveword_table[index])
+G_SETxIMG_handler: // 10
+    lb      $3, materialCullMode            // Get current mode
+    jal     segmented_to_physical           // Convert image to physical address
+     lw     $2, lastMatDLPhyAddr            // Get last material physical addr
+    bnez    $3, G_RDP_handler               // If not in normal mode (0), exit
+     add    $10, taskDataPtr, inputBufferPos // Current material physical addr
+    beq     $10, $2, @@skip                 // Branch if we are executing the same mat again
+     sw     $10, lastMatDLPhyAddr           // Store material physical addr
+    li      $7, 1                           // > 0: in material first time
+@@skip:                                     // Otherwise $7 was < 0: cull mode (in mat second time)
+    j       G_RDP_handler
+     sb     $7, materialCullMode
 
 ovl1_end:
 align_with_warning 8, "One instruction of padding at end of ovl1"
