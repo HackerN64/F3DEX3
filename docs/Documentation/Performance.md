@@ -45,7 +45,7 @@ even to an odd number of lights adds a different time than vice versa.
 | 1st tri to occluded        | Can't  | Can't      | 43     |
 | Only/2nd tri to draw       | 172    | 156        | 158    |
 | 1st tri to draw            | 173    | 157        | 159    |
-| Extra per tri from snake   | Can't  | 9          | 9      |
+| Tri snake                  | Can't  | *          | *      |
 | Vtx before DMA start       | 16     | 17         | 17     |
 | Vtx pair, no lighting      | 54     | 54         | 70     |
 | Vtx pair, 0 dir lts        | Can't  | 65         | 81     |
@@ -88,3 +88,113 @@ even to an odd number of lights adds a different time than vice versa.
 | Light dir xfrm, 7 dir lts  | 375    | 170        | 170    |
 | Light dir xfrm, 8 dir lts  | Can't  | 171        | 171    |
 | Light dir xfrm, 9 dir lts  | Can't  | 196        | 196    |
+
+## Triangle Snake Cycle Counts
+
+### Very Long Snakes
+
+For this section, we assume almost all tris are contained in very long snakes,
+so the overhead of starting and ending snakes is negligible. This overhead is
+discussed in the next section.
+
+We are assuming that the same set of tris is being drawn with or without snakes.
+Thus, cycles from `tri_main_from_snake` through the instruction after the return
+exclusive are not counted here, as they are the same regardless of which method
+is being used.
+
+For a pair of tris drawn without snakes, i.e. with a single `SP2Triangles`
+command, the cycles are:
+- Command dispatch: 12
+- First tri up to `tri_main_from_snake`: 5
+- Second tri up to `tri_main_from_snake`: 4
+- Total: 21
+
+For a pair of tris which are part of a long snake, the cycles are:
+- Each tri up to `tri_main_from_snake`: 11
+- Total: 22
+
+However, there's also the memory bandwidth savings. The `SP2Triangles` command
+is 8 bytes and the two tris in a long snake are 2 bytes, so switching to snake
+saves 6 bytes of bandwidth. Testing has shown that RSP DMAs on average transfer
+about 2.2 bytes per cycle, though it depends on the length. So this is a savings
+of about 2.7 cycles of RDRAM / RDP time. Since the DMAs loading this data are
+input buffer loads, and the RSP stalls waiting for input buffer loads (it does
+not do useful work during this time), this is also 2.7 cycles of RSP time. This
+offsets the 1 extra cycle of processing the tri pair above.
+
+Therefore, switching to snake (assuming very long snakes) saves about 2.7
+cycles of RDRAM / RDP time and 1.7 cycles of RSP time per two tris, or about
+0.9 RSP cycles and 1.4 RDRAM cycles per tri.
+
+### Starting a Snake
+
+Since a `SPTriSnake` command encodes 5 triangles, for comparison to
+`SP2Triangles` we will consider the overhead for 10 triangles total / two snake
+starts.
+
+For `SPTriSnake`, this is 2 x (12 cycles command dispatch + 4 cycles snake
+initialization + 5 tris x 11 cycles per tri as discussed above) = 142 RSP
+cycles. And it is 16 bytes of loads = 7.3 cycles of RDRAM / RDP time and stall
+RSP time. So the total cost is 149.3 RSP and 7.3 RDRAM cycles.
+
+For `SP2Triangles`, this is 5 x (21 cycles as discussed above) = 105 RSP cycles.
+And it is 40 bytes of loads = 18.2 cycles of RDRAM / RDP time and stall RSP
+time. So the total cost is 123.2 RSP and 18.2 RDRAM cycles.
+
+But drawing those 10 tris as part of very long snakes would have saved 13.5
+RDRAM cycles and 8.5 RSP cycles. So the relative cost of drawing these tris as
+two start-of-snakes instead of in very long snakes is 34.6 RSP cycles and 2.6
+RDRAM cycles. Thus the cost of each start-of-snake relative to long snakes is
+17.3 RSP cycles and 1.3 RDRAM cycles.
+
+### Ending a Snake
+
+Ending a snake costs 12 cycles of RSP time and has no direct impact on memory
+traffic. However, calculating the overall performance is more complicated: the
+snake can end after 1-8 bytes of the `SPContinueSnake` command, and the
+remaining bytes are "wasted" in that they do not contribute to drawing tris
+with memory bandwidth savings.
+
+From a mesh optimization standpoint, this is not an issue. If you have a snake
+which has filled 8 bytes of the previous `SPContinueSnake` command, and you have
+another triangle to draw, there are only two cases. If that tri can't be
+appended to the snake, you have to draw it with a `SP1Triangle` command either
+way, so there is no performance difference. If it can be appended to the snake,
+doing so will take 8 bytes of memory traffic--the same as the `SP1Triangle`
+command. The snake end penalty will have to be paid whether before or after this
+tri. And it's 11 RSP cycles to draw one more tri in an existing snake, whereas
+the command dispatch plus second tri code for `SP1Triangle` is 16 cycles. So
+it's better to continue a snake than to stop it early and use non-snake
+commands, even if this leads to a mostly empty `SPContinueSnake` command. Of
+course, if you can fill up even more tris in the command, the performance
+benefit increases.
+
+Assuming snake lengths are uniformly distributed, on average a snake will end
+after 4.5 bytes (the same number of triangles) of a `SPContinueSnake` command.
+In this case, the command will take 4.5 tris x 11 cycles per tri + 12 cycle end
+snake penalty = 61.5 RSP cycles, and 8 bytes of memory traffic = 3.6 RDRAM
+cycles. If these 4.5 tris were instead drawn with `SP2Triangles` commands, that
+would be 2.25 commands = 47.3 RSP cycles and 18 bytes = 8.2 RDRAM cycles. Thus
+on average, the snake end costs 14.2 RSP cycles and saves 4.6 RDRAM cycles
+compared to `SP2Triangles` commands. But drawing those 4.5 tris as part of very
+long snakes would have saved 3.9 RSP cycles and 6.1 RDRAM cycles. So the average
+cost of ending a snake relative to very long snakes is 18.1 RSP and 1.5 RDRAM
+cycles.
+
+### Example
+
+Suppose there are 4000 tris on screen. Suppose that 90% of them have been
+encoded with snakes--the rest are disconnected single tris or tri pairs (quads).
+That 10% are then encoded with `SP2Triangles` commands, which is the same
+performance with or without snakes, so we ignore those tris, and there are
+3600 "snakeable" tris in the scene.
+
+Suppose that the average snake length is 16, to account for some objects with
+more contiguous tris with the same material, and others with smaller disjoint
+parts. Thus, for 3600 tris, there are 225 snakes.
+
+Switching the 3600 tris from `SP2Triangles` commands to long snakes saves
+4860 RDRAM cycles and 3060 RSP cycles. However, the 225 snake starts and ends
+cost 630 RDRAM and 7965 RSP cycles relative to this. So the total performance
+change of switching to snakes in this case is that the RDRAM / RDP goes faster
+by 4230 cycles = 68 us, but the RSP goes slower by 4905 cycles = 78 us.

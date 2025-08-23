@@ -755,7 +755,7 @@ $zero ---------------------- Hardwired zero ------------------------------------
 $1    v1 texptr   <------------- vtxLeft ------------------------------>  temp, init 0
 $2    v2 shdptr   clipVNext -------> <----- lbPostAo   laPtr                  temp
 $3    v3 shdflg   clipVLastOfsc  vLoopRet ---------> laVtxLeft                temp
-$4                                    ~ unused! ~
+$4    <--------- origV1Idx -------->
 $5    ------------------------- vGeomMid ---------------------------------------------
 $6    geom mode   clipMaskIdx -----> <-- lbTexgenOrRet laSTKept
 $7    v2flag tile <------------- fogFlag ---------->  laPacked  mtx valid   cmd byte
@@ -797,6 +797,12 @@ perfCounterA   equ $28   // Performance counter A (functions depend on config)
 perfCounterB   equ $29   // Performance counter B (functions depend on config)
 perfCounterC   equ $30   // Performance counter C (functions depend on config)
 
+// Tri write:
+origV1Idx      equ $4    // Original / current vertex 1 index (not address)
+
+// Vertex init:
+viLtFlag       equ $9    // Holds pointLightFlag or dirLightsXfrmValid
+
 // Vertex write:
 vtxLeft        equ $1    // Number of vertices left to process * 0x10
 vLoopRet       equ $3    // Return address at end of vtx loop = top of loop or misc lighting
@@ -826,7 +832,7 @@ laSpecFres     equ $16   // Nonzero if doing ltadv_normal_to_vertex for specular
 laL2A          equ $19   // Nonzero if light-to-alpha (cel shading) enabled
 laTexgen       equ $20   // Nonzero if texgen enabled
 
-// Clipping
+// Clipping:
 clipVNext      equ $2    // Next vertex (vertex at forward end of current edge)
 clipVLastOfsc  equ $3    // Last vertex / offscreen vertex
 clipVOnsc      equ $19   // Onscreen vertex
@@ -837,10 +843,7 @@ clipPolyRead   equ $17   // Read pointer within current polygon being clipped
 clipPolySelect equ $18   // Clip poly double buffer selection
 clipPolyWrite  equ $21   // Write pointer within current polygon being clipped
 
-// Vertex init
-viLtFlag       equ $9    // Holds pointLightFlag or dirLightsXfrmValid
-
-// Misc
+// Misc:
 nextRA         equ $10   // Address to return to after overlay load
 ovlInitClock   equ $16   // Temp for profiling
 dmaLen         equ $19   // DMA length in bytes minus 1
@@ -1292,18 +1295,24 @@ G_TRISNAKE_handler:
     sw      cmd_w0, rdpHalf1Val          // Store indices a, b, c
     addi    inputBufferPos, inputBufferPos, -6 // Point to byte 2, index b of 1st tri
     li      $ra, tri_snake_loop          // For tri_main
+    lbu     origV1Idx, rdpHalf1Val + 1   // Initial value, normally carried over
 tri_snake_loop:
     lh      $3, (inputBufferEnd)(inputBufferPos) // Load indices b and c
     addi    inputBufferPos, inputBufferPos, 1  // Increment indices being read
-tri_snake_loop_from_input_buffer:
-    lb      $2, rdpHalf1Val + 1          // Old v1; == index b, except when bridging between old and new load
-    bltz    $3, tri_snake_end            // Upper bit of real index b set = done
-     andi   $11, $3, 1                   // Get direction flag from index c
     beqz    inputBufferPos, tri_snake_over_input_buffer // == 0 at end of input buffer
-     andi   $3, $3, 0x7E                 // Mask out flags from index c
-    sb      $3, rdpHalf1Val + 1          // Store index c as vertex 1
-    j       tri_main
-     sb     $2, (rdpHalf1Val + 2)($11)   // Store old v1 as 2 if dir clear or 3 if set
+tri_snake_loop_from_input_buffer:
+     andi   $11, $3, 1                   // Get direction flag from index c
+    bltz    $3, tri_snake_end            // Upper bit of real index b set = done
+     sb     origV1Idx, (rdpHalf1Val + 2)($11) // Store old v1 as 2 if dir clear or 3 if set
+    andi    origV1Idx, $3, 0x7E          // New v1 = mask out flags from index c
+    sb      origV1Idx, rdpHalf1Val + 1   // Store index c as vertex 1
+    j       tri_main_from_snake          // Repeat next instr so we can skip lbu origV1Idx
+     lpv    $v27[4], (rdpHalf1Val)($zero) // To vector unit in elems 5-7
+
+tri_snake_ret_from_input_buffer:
+    li      $ra, tri_snake_loop          // Clobbered by DMA. Not in the loop to save a cycle.
+    j       tri_snake_loop_from_input_buffer // inputBufferPos pointing to first byte loaded
+     lbu    $3, (inputBufferEnd)(inputBufferPos) // Load c; clear real index b sign bit -> don't exit
 
 // H = highest on screen = lowest Y value; then M = mid, L = low
 tHAtF equ $v5
@@ -1319,6 +1328,8 @@ tPosMmH equ $v6
 tPosLmH equ $v8
 tPosHmM equ $v11
 
+align_with_warning 8, "One instruction of padding before tris"
+
 G_TRI2_handler:
 G_QUAD_handler:
     jal     tri_main                     // Send second tri; return here for first tri
@@ -1328,12 +1339,13 @@ G_TRI1_handler:
     sw      cmd_w0, rdpHalf1Val          // Store first tri indices
 tri_main:
     lpv     $v27[4], (rdpHalf1Val)($zero) // To vector unit in elems 5-7
-    lbu     $1, rdpHalf1Val + 1
+    lbu     origV1Idx, rdpHalf1Val + 1
+tri_main_from_snake:
     lbu     $2, rdpHalf1Val + 2
     vclr    vZero
     lbu     $3, rdpHalf1Val + 3
     vmudn   $v29, vOne, vTRC_VB    // Address of vertex buffer
-    lhu     $1, (vertexTable)($1)
+    lhu     $1, (vertexTable)(origV1Idx)
     vmadl   $v27, $v27, vTRC_VS    // Plus vtx indices times length
     lhu     $2, (vertexTable)($2)
     vmadl   $v6, $v31, $v31[2]    // 0; vtx 1 addr in $v6 elem 5
@@ -1420,9 +1432,7 @@ tPosCatF equ $v25
     andi    $11, vGeomMid, G_SHADING_SMOOTH >> 8
 .endif
     vmudh   $v29, tPosMmH, tPosLmH[0]
-.if !ENABLE_PROFILING
-    lbu     $10, rdpHalf1Val + 1        // Original vertex 1 before shuffle and clipping
-.endif
+    // nop
 t1WI equ $v13 // elems 0, 4, 6
     vmadh   $v29, tPosLmH, tPosHmM[0]
     mfc2    $3, tLPos[10]     // tLPos = highest Y value = lowest on screen (x, y, addr)
@@ -1432,7 +1442,7 @@ tXPI equ $v17
     lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vreadacc tXPF, ACC_MIDDLE
 .if !ENABLE_PROFILING
-    lhu     $10, (vertexTable)($10)
+    lhu     $10, (vertexTable)(origV1Idx)
 .endif
     vrcp    $v20[0], tPosCatI[1]
     lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
@@ -1776,13 +1786,8 @@ return_and_end_mat:
      sb     $zero, materialCullMode // This covers all tri early exits except clipping
 
 tri_snake_over_input_buffer:
-    j       displaylist_dma_tri_snake    // inputBufferPos is now 0; load whole buffer
-     li     nextRA, tri_snake_ret_from_input_buffer
-tri_snake_ret_from_input_buffer:
-    li      $ra, tri_snake_loop          // Clobbered by DMA. Putting this in the loop saves an instruction but loop takes 1 more cycle per tri.
-    j       tri_snake_loop_from_input_buffer // inputBufferPos pointing to first byte loaded
-     lbu    $3, (inputBufferEnd)(inputBufferPos) // Load c; clear real index b sign bit -> don't exit
-
+    bgez    $3, displaylist_dma_tri_snake // If $3 < 0, last tri flag set, proceed to end
+     li     nextRA, tri_snake_ret_from_input_buffer // inputBufferPos is now 0; load whole buffer
 tri_snake_end:
     addi    inputBufferPos, inputBufferPos, 7 // Round up to whole input command
     addi    $11, $zero, 0xFFF8               // Sign-extend; andi is zero-extend!
