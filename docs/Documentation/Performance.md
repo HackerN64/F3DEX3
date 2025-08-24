@@ -75,7 +75,7 @@ even to an odd number of lights adds a different time than vice versa.
 | Light-to-alpha, ltadv      | Can't  | 6          | 6      |
 | Ambient occlusion, ltadv   | Can't  | 0          | 0      |
 | Specular or fresnel        | Can't  | 47         | 47     |
-| + Fresnel                  | Can't  | 27         | 27     |
+| + Fresnel                  | Can't  | 23         | 23     |
 | + Specular per dir lt      | Can't  | 13         | 13     |
 | + Specular per point lt    | Can't  | 13         | 13     |
 | Light dir xfrm, 0 dir lts  | Can't  | 92         | 92     |

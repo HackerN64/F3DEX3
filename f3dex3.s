@@ -1291,10 +1291,13 @@ G_LIGHTTORDP_handler: // 9
 //               [bb^cc]   Indices b and c
 //                  |
 //                  cmd_w0 + inputBufferEnd
+tri_snake_ret_from_input_buffer:
+    lbu     $3, (inputBufferEnd)(inputBufferPos) // Load c; clear real index b sign bit -> don't exit
+    j       tri_snake_loop_from_input_buffer // inputBufferPos pointing to first byte loaded
 G_TRISNAKE_handler:
+     li     $ra, tri_snake_loop          // For both init and above (clobbered by DMA).
     sw      cmd_w0, rdpHalf1Val          // Store indices a, b, c
     addi    inputBufferPos, inputBufferPos, -6 // Point to byte 2, index b of 1st tri
-    li      $ra, tri_snake_loop          // For tri_main
     lbu     origV1Idx, rdpHalf1Val + 1   // Initial value, normally carried over
 tri_snake_loop:
     lh      $3, (inputBufferEnd)(inputBufferPos) // Load indices b and c
@@ -1307,16 +1310,11 @@ tri_snake_loop_from_input_buffer:
     andi    origV1Idx, $3, 0x7E          // New v1 = mask out flags from index c
     sb      origV1Idx, rdpHalf1Val + 1   // Store index c as vertex 1
     j       tri_main_from_snake          // Repeat next instr so we can skip lbu origV1Idx
-     lpv    $v27[4], (rdpHalf1Val)($zero) // To vector unit in elems 5-7
-
-tri_snake_ret_from_input_buffer:
-    li      $ra, tri_snake_loop          // Clobbered by DMA. Not in the loop to save a cycle.
-    j       tri_snake_loop_from_input_buffer // inputBufferPos pointing to first byte loaded
-     lbu    $3, (inputBufferEnd)(inputBufferPos) // Load c; clear real index b sign bit -> don't exit
+     lpv    $v7[4], (rdpHalf1Val)($zero) // To vector unit in elems 5-7
 
 // H = highest on screen = lowest Y value; then M = mid, L = low
 tHAtF equ $v5
-tMAtF equ $v7
+tMAtF equ $v27
 tLAtF equ $v9
 tHAtI equ $v18
 tMAtI equ $v19
@@ -1327,6 +1325,15 @@ tLPos equ $v10
 tPosMmH equ $v6
 tPosLmH equ $v8
 tPosHmM equ $v11
+tDaDyI equ $v27
+
+tri_decal_fix_z:
+    // Valid range of tHAtI = 0 to 7FFF, but most of the scene is large values
+    vmudh   $v29, vOne, vTRC_DO  // accum all elems = -DM/2
+    vmadm   $v25, tHAtI, vTRC_DM // elem 7 = (0 to DM/2-1) - DM/2 = -DM/2 to -1
+    vcr     tDaDyI, tDaDyI, $v25[7] // Clamp DzDyI (6) to <= -val or >= val; clobbers DzDyF (7)
+    j       tri_return_from_decal_fix_z
+     set_vcc_11110001 // Clobbered by vcr
 
 align_with_warning 8, "One instruction of padding before tris"
 
@@ -1338,15 +1345,15 @@ G_TRI1_handler:
     li      $ra, tris_end                // After done with this tri, exit tri processing
     sw      cmd_w0, rdpHalf1Val          // Store first tri indices
 tri_main:
-    lpv     $v27[4], (rdpHalf1Val)($zero) // To vector unit in elems 5-7
+    lpv     $v7[4], (rdpHalf1Val)($zero) // To vector unit in elems 5-7
     lbu     origV1Idx, rdpHalf1Val + 1
 tri_main_from_snake:
     lbu     $2, rdpHalf1Val + 2
     vclr    vZero
     lbu     $3, rdpHalf1Val + 3
-    vmudn   $v29, vOne, vTRC_VB    // Address of vertex buffer
+    vmudn   $v29, vOne, vTRC_VB   // Address of vertex buffer
     lhu     $1, (vertexTable)(origV1Idx)
-    vmadl   $v27, $v27, vTRC_VS    // Plus vtx indices times length
+    vmadl   $v7, $v7, vTRC_VS     // Plus vtx indices times length. e5 (v1) kept through clipping
     lhu     $2, (vertexTable)($2)
     vmadl   $v6, $v31, $v31[2]    // 0; vtx 1 addr in $v6 elem 5
     lhu     $3, (vertexTable)($3)
@@ -1356,9 +1363,9 @@ tri_main_from_snake:
 .endif
 tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vnxor   tHAtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
-    vmov    $v4[5], $v27[6]         // elem 5 of v4 = vertex 2 addr
+    vmov    $v4[5], $v7[6]         // elem 5 of v4 = vertex 2 addr
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
-    vmov    $v8[5], $v27[7]         // elem 5 of v8 = vertex 3 addr
+    vmov    $v8[5], $v7[7]         // elem 5 of v8 = vertex 3 addr
     llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
     vnxor   tMAtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
@@ -1424,7 +1431,6 @@ tSubPxHI equ $v26
      mfc2   $1, tHPos[10]     // tHPos = lowest Y value = highest on screen (x, y, addr)
     // 37 cycles if NOC (39 if occlusion plane)
 tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
-tPosCatF equ $v25
     vsub    tPosCatI, tLPos, tMPos
     mfc2    $2, tMPos[10]     // tMPos = mid vertex (x, y, addr)
     vmov    tPosCatI[2], tPosMmH[0]
@@ -1439,18 +1445,18 @@ t1WI equ $v13 // elems 0, 4, 6
 tXPF equ $v16 // Triangle cross product
 tXPI equ $v17
     vreadacc tXPI, ACC_UPPER
-    lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
-    vreadacc tXPF, ACC_MIDDLE
 .if !ENABLE_PROFILING
-    lhu     $10, (vertexTable)(origV1Idx)
+    mfc2    $10, $v7[10]  // Original vertex 1 address (before clipping)
 .endif
+    vreadacc tXPF, ACC_MIDDLE
+    lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vrcp    $v20[0], tPosCatI[1]
     lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
     vmov    tPosCatI[3], tPosLmH[0]
     lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
     vrcph   $v22[0], tXPI[1]
 .if !ENABLE_PROFILING
-    lpv     $v25[0], VTX_COLOR_VEC($10)  // Load RGB from vertex 4 (flat shading vtx)
+    lpv     $v25[0], VTX_COLOR_VEC($10)  // Load RGB from orig vtx 1 for flat shading
 .endif
 tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
 tXPRcpI equ $v24
@@ -1489,10 +1495,10 @@ tri_skip_flat_shading:
     // Alpha compare culling
     vge     $v26, tHAtI, tMAtI
     lbu     $19, alphaCompareCullThresh
-    vlt     $v27, tHAtI, tMAtI
+    vlt     $v25, tHAtI, tMAtI
     bgtz    $20, @@skip1
      vge    $v26, $v26, tLAtI // If alphaCompareCullMode > 0, $v26 = max of 3 verts
-    vlt     $v26, $v27, tLAtI // else if < 0, $v26 = min of 3 verts
+    vlt     $v26, $v25, tLAtI // else if < 0, $v26 = min of 3 verts
 @@skip1: // $v26 elem 3 has max or min alpha value
     mfc2    $24, $v26[6]
     sub     $24, $24, $19 // sign bit set if (max/min) < thresh
@@ -1500,6 +1506,7 @@ tri_skip_flat_shading:
     bltz    $24, return_and_end_mat // if max < thresh or if min >= thresh.
 tri_skip_alpha_compare_cull:
     // 60 cycles
+tPosCatF equ $v25
     vmudm   tPosCatF, tPosCatI, vTRC_1000
     // no nop if tri_skip_alpha_compare_cull was unaligned
     vmadn   tPosCatI, $v31, $v31[2] // 0
@@ -1534,7 +1541,7 @@ tri_skip_alpha_compare_cull:
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
     vmadh   tXPI, tXPI, $v31[0] // -4
     sw      $16, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W (upper) to temp mem
-tMx1W equ $v27
+tMx1W equ $v25 // <- tPosCatF
     vmudn   $v29, $v3, tHPos[0]
     llv     tMx1W[0], 0x0010(rdpCmdBufPtr) // Load max of three verts' 1/W
     vmadl   $v29, $v22, tSubPxHF[1]
@@ -1554,11 +1561,10 @@ tMnWF equ $v10 // <- tLPos
 t1WF equ $v14 // <- tHPos
     vmudh   t1WF, vOne, t1WI[1q]
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
-tMnWI equ $v27 // <- tMx1W
+tMnWI equ $v25 // <- tMx1W
     vrcph   tMnWI[0], $v31[2]     // 0
     lw      $19, otherMode1
 tSTWHMI equ $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
-tSTWHMF equ $v25
     vmudh   tSTWHMI, vOne, $v31[7]  // 0x7FFF
     ssv     tPosMmH[2], 0x0030(rdpCmdBufPtr) // MmHY -> first short (temp mem)
     vmudm   $v29, t1WI, tMnWF[0] // 1/W each vtx * min W = 1 for one of the verts, < 1 for others
@@ -1579,6 +1585,7 @@ tSTWLF equ $v13
     addi    $19, $19, -ZMODE_DEC  // Check if equal to decal mode
     vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
     ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
+tSTWHMF equ $v25 // <- tMnWI
     vmadn   tSTWHMF, $v31, $v31[2]  // 0
     andi    $7, $7, 0x0080 // Extract the left major flag from $7
     vmudm   $v29, tSTWLI, t1WF[6]  // (S, T, 7FFF) * (1 or <1) for L
@@ -1590,6 +1597,7 @@ tSTWLF equ $v13
     vmrg    tMAtI, tMAtI, tSTWHMI // Merge S, T, W Mid into elems 4-6
     sdv     tSTWHMF[0], 0x0028(rdpCmdBufPtr) // Move S, T, W Hi Frac to temp mem
     vmrg    tMAtF, tMAtF, tSTWHMF // Merge S, T, W Mid into elems 4-6
+// $v25 <- tSTWHMF
     ldv     tHAtI[8], 0x0020(rdpCmdBufPtr) // Move S, T, W Hi Int from temp mem
     vmrg    tLAtI, tLAtI, tSTWLI // Merge S, T, W Low into elems 4-6
     ldv     tHAtF[8], 0x0028(rdpCmdBufPtr) // Move S, T, W Hi Frac from temp mem
@@ -1611,7 +1619,7 @@ tSTWLF equ $v13
 tAtLmHF equ $v10
 tAtLmHI equ $v9
 tAtMmHF equ $v13
-tAtMmHI equ $v7
+tAtMmHI equ $v27
     vsubc   tAtLmHF, tLAtF, tHAtF
     sll     $1, $1, 14
     vsub    tAtLmHI, tLAtI, tHAtI
@@ -1637,7 +1645,7 @@ tDaDxI equ $v3
     ssv     tPosCatI[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
 // DaDy = (v2 - v1) * factor + (v3 - v1) * factor
 tDaDyF equ $v6
-tDaDyI equ $v7
+// tDaDyI <- $v27
     vmudn   $v29, tAtMmHF, tPosLmH[5] // LmHX * 4
     ssv     $v20[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
     vmadh   $v29, tAtMmHI, tPosLmH[5] // LmHX * 4
@@ -1768,14 +1776,6 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
     xori    rdpCmdBufEndP1, rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word ^ rdpCmdBuffer2EndPlus1Word // Swap between the two RDP command buffers
     j       dma_read_write
      addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
-
-tri_decal_fix_z:
-    // Valid range of tHAtI = 0 to 7FFF, but most of the scene is large values
-    vmudh   $v29, vOne, vTRC_DO  // accum all elems = -DM/2
-    vmadm   $v25, tHAtI, vTRC_DM // elem 7 = (0 to DM/2-1) - DM/2 = -DM/2 to -1
-    vcr     tDaDyI, tDaDyI, $v25[7] // Clamp DzDyI (6) to <= -val or >= val; clobbers DzDyF (7)
-    j       tri_return_from_decal_fix_z
-     set_vcc_11110001 // Clobbered by vcr
 
 tri_culled_by_occlusion_plane:
 .if CFG_PROFILING_B
@@ -1946,8 +1946,8 @@ cDiffF    equ $v2
 cDiffI    equ $v3
 cRRF      equ $v4  // Range Reduction frac
 cRRI      equ $v5  // Range Reduction int
-cFadeOf   equ $v6
-cFadeOn   equ $v7
+cFadeOf   equ $v4
+cFadeOn   equ $v5
     /*
     Five clip conditions (these are in a different order from vanilla):
            cBaseI/cBaseF[3]       cDiffI/cDiffF[3]
@@ -2102,9 +2102,9 @@ clip_draw_tris_loop:
     lhu     $2, (clipPoly - 4)(clipPolySelect)
     lhu     $3, (clipPoly - 2)(clipPolyWrite)
     mtc2    $1, $v6[10]              // Addresses go in vector regs too
-    mtc2    $2, $v27[12]
+    mtc2    $2, $v7[12]
     jal     tri_noinit
-     mtc2   $3, $v27[14]
+     mtc2   $3, $v7[14]
     bne     clipPolyWrite, clipPolySelect, clip_draw_tris_loop
      addi   clipPolySelect, clipPolySelect, 2
 clip_done:
@@ -3614,16 +3614,14 @@ ltadv_post:
     andi    $11, vGeomMid, G_FRESNEL_COLOR >> 8
     vmudh   $v29, vOne, aParam[7]      // Fresnel offset
     // vnop; vnop
-    vmacf   aOAFrs, aOAFrs, aParam[6]  // + factor * scale
-    beqz    $11, @@skip
+    vmacu   aOAFrs, aOAFrs, aParam[6]  // + factor * scale, clamp to >= 0.
+    beqz    $11, @@skip                // vmacu bad oflow bhv @ 7FFF is OK b/c here max values should be about 0200.
      // vnop; vnop; vnop
      vmudh  aOAFrs, aOAFrs, aAOF[0]    // Result * 0x0100, clamped to 0x7FFF
     veq     $v29, $v31, $v31[3h]       // Set VCC to 00010001 if G_FRESNEL_COLOR
 @@skip:
     // vnop; vnop
     vmrg    vpRGBA, vpRGBA, aOAFrs[0h] // Replace color or alpha with fresnel
-    // vnop; vnop; vnop
-    vge     vpRGBA, vpRGBA, $v31[2]    // Clamp to >= 0 for fresnel; doesn't affect others
     // vnop; vnop
 
 .endif // CFG_DEBUG_NORMALS
