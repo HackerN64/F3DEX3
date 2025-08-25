@@ -738,6 +738,7 @@ inputBufferEndSgn equ -(0x1000 - inputBufferEnd) // Underflow DMEM address
 // See rsp_defs.inc about why these are not used and we can reuse them.
 startCounterTime equ (OSTask + OSTask_ucode_size)
 xfrmLookatDirs equ -(0x1000 - (OSTask + OSTask_ucode_data)) // and OSTask_ucode_data_size
+dumpDmemBuffer equ (OSTask + OSTask_yield_data_size)
 
 memsetBufferStart equ ((vertexBuffer + 0xF) & 0xFF0)
 memsetBufferMaxEnd equ (rdpCmdBuffer1 & 0xFF0)
@@ -1286,6 +1287,14 @@ G_LIGHTTORDP_handler: // 9
      or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
 .endif
 
+load_overlay_0_and_enter:
+    li      nextRA, 0x1000                  // Sets up return address
+    li      cmd_w1_dram, orga(ovl0_start)   // Sets up ovl0 table address
+load_overlays_0_1:
+    li      dmaLen, ovl01_end - 0x1000 - 1
+    j       load_overlay_inner
+     li     dmemAddr, 0x1000
+
 // Index = bits 1-6; direction flag = bit 0; end flag = bit 7
 // CM 02 01 03 04 05 06 07
 //               [bb^cc]   Indices b and c
@@ -1326,14 +1335,6 @@ tPosMmH equ $v6
 tPosLmH equ $v8
 tPosHmM equ $v11
 tDaDyI equ $v27
-
-tri_decal_fix_z:
-    // Valid range of tHAtI = 0 to 7FFF, but most of the scene is large values
-    vmudh   $v29, vOne, vTRC_DO  // accum all elems = -DM/2
-    vmadm   $v25, tHAtI, vTRC_DM // elem 7 = (0 to DM/2-1) - DM/2 = -DM/2 to -1
-    vcr     tDaDyI, tDaDyI, $v25[7] // Clamp DzDyI (6) to <= -val or >= val; clobbers DzDyF (7)
-    j       tri_return_from_decal_fix_z
-     set_vcc_11110001 // Clobbered by vcr
 
 align_with_warning 8, "One instruction of padding before tris"
 
@@ -1777,6 +1778,14 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
     j       dma_read_write
      addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
 
+tri_decal_fix_z:
+    // Valid range of tHAtI = 0 to 7FFF, but most of the scene is large values
+    vmudh   $v29, vOne, vTRC_DO  // accum all elems = -DM/2
+    vmadm   $v25, tHAtI, vTRC_DM // elem 7 = (0 to DM/2-1) - DM/2 = -DM/2 to -1
+    vcr     tDaDyI, tDaDyI, $v25[7] // Clamp DzDyI (6) to <= -val or >= val; clobbers DzDyF (7)
+    j       tri_return_from_decal_fix_z
+     set_vcc_11110001 // Clobbered by vcr
+
 tri_culled_by_occlusion_plane:
 .if CFG_PROFILING_B
     addi    perfCounterB, perfCounterB, 0x4000
@@ -1919,7 +1928,7 @@ clip_edgelooptop: // Loop over edges connecting verts, possibly subdivide the ed
 clip_find_unused_loop:
     lhu     $11, (VTX_CLIP - vtxSize)(outVtxBase)
     addi    $10, outVtxBase, -clipTempVerts    // This is within the loop rather than before b/c delay after lhu
-    blez    $10, clip_done                     // If can't find one (should never happen), give up
+    blez    $10, clip_err_no_unused            // If can't find one (should never happen), give up
      andi   $11, $11, CLIP_VTX_USED
     bnez    $11, clip_find_unused_loop
      addi   outVtxBase, outVtxBase, -vtxSize
@@ -1989,7 +1998,7 @@ clip_skipxy:
     vrcph   cRRI[3], cDiffI[3]
     addi    $11, $11, 6 - ((MAX_CLIP_POLY_VERTS) * 2) // Write ptr to last zero slot
     vrcpl   cRRF[3], cDiffF[3]              // 1 / (x+y+z+w), vtx on screen - vtx off screen
-    bgez    $11, clip_done                  // If so, give up
+    bgez    $11, clip_err_oflow_gen         // If so, give up
      vrcph  cRRI[3], $v31[2]                // 0; get int result of reciprocal
     vabs    cTemp, cTemp, $v31[3]           // 2; cTemp = +/- 2 based on sum positive (incl. zero) or negative
     lhu     $11, VTX_CLIP(clipVLastOfsc)    // Load clip flags for off screen vert
@@ -2071,7 +2080,7 @@ clip_nextedge:
      move   clipVLastOfsc, clipVNext      // Move what was the end of the edge to be the new start of the edge
     sub     $11, clipPolyWrite, clipPolySelect // Make sure we are not overflowing
     addi    $11, $11, 6 - ((MAX_CLIP_POLY_VERTS) * 2) // Write ptr to last zero slot
-    bgez    $11, clip_done                // If so, give up
+    bgez    $11, clip_err_oflow_copy      // If so, give up
      sh     clipVLastOfsc, (clipPoly)(clipPolyWrite) // Former V2 was on screen,
     j       clip_edgelooptop              // so add it to the output polygon
      addi   clipPolyWrite, clipPolyWrite, 2
@@ -2083,7 +2092,7 @@ clip_w:
 
 clip_nextcond:
     sub     $11, clipPolyWrite, clipPolySelect // Are there less than 3 verts in the output polygon?
-    bltz    $11, clip_done                    // If so, degenerate result, quit
+    bltz    $11, clip_degenerate              // If so, degenerate result, quit
      sh     $zero, (clipPoly)(clipPolyWrite)  // Terminate the output polygon with a 0
     lhu     clipVLastOfsc, (clipPoly - 2)(clipPolyWrite) // Initialize edge start to the last vert
     beqz    clipMaskIdx, clip_draw_tris
@@ -2093,6 +2102,18 @@ clip_nextcond:
     j       clip_condlooptop
      addi   clipMaskIdx, clipMaskIdx, -1
     
+.if CFG_PROFILING_B
+clip_err_oflow_gen:
+clip_err_oflow_copy:
+clip_err_no_unused:
+    sh      clipPolySelect, texrectWord1
+    sh      clipPolyRead,   texrectWord1 + 2
+    sh      clipPolyWrite,  texrectWord1 + 4
+    sh      clipMaskIdx,    texrectWord1 + 6
+    j       dump_dmem
+     li     nextRA, clip_done
+.endif
+
 clip_draw_tris:
     sh      $zero, activeClipPlanes
 // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
@@ -2107,6 +2128,12 @@ clip_draw_tris_loop:
      mtc2   $3, $v7[14]
     bne     clipPolyWrite, clipPolySelect, clip_draw_tris_loop
      addi   clipPolySelect, clipPolySelect, 2
+.if !CFG_PROFILING_B
+clip_err_oflow_gen:
+clip_err_oflow_copy:
+clip_err_no_unused:
+.endif
+clip_degenerate:
 clip_done:
     li      $11, CLIP_SCAL_NPXY | CLIP_CAMPLANE
     sh      $11, activeClipPlanes
@@ -2653,14 +2680,6 @@ tris_end:
      lqv    vTRC, (vTRCValue)($zero)         // Restore value overwritten by matrix
 .endif
 
-load_overlay_0_and_enter:
-    li      nextRA, 0x1000                  // Sets up return address
-    li      cmd_w1_dram, orga(ovl0_start)   // Sets up ovl0 table address
-load_overlays_0_1:
-    li      dmaLen, ovl01_end - 0x1000 - 1
-    j       load_overlay_inner
-     li     dmemAddr, 0x1000
-
 load_overlays_2_3_4:
     addi    nextRA, $ra, -8  // Got here with jal, but want to return to addr of jal itself
     li      dmaLen, ovl234_end - ovl234_start - 1
@@ -2696,7 +2715,16 @@ dma_read_write:
     bnez    $11, dma_read_write
      addi   perfCounterD, perfCounterD, 6  // 3 instr + 2 after mfc + 1 taken branch
     j       dma_read_write_not_full
-     // $11 load in delay slot is harmless.
+     nop
+.endif
+
+.if CFG_PROFILING_B
+dump_dmem:
+    jal     segmented_to_physical
+     lw     cmd_w1_dram, dumpDmemBuffer
+    li      dmemAddr, 0x8000 // address 0, negative = write
+    j       dma_and_wait_goto_next_ra
+     li     dmaLen, 0x1000 - 1 // all of DMEM, DMA lengths always minus 1
 .endif
 
 endFreeImemAddr equ 0x1FC4

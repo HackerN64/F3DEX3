@@ -26,7 +26,7 @@ OSTask_output_buff_size equ 0x002C // used in F3D and S2D; actually end pointer 
 OSTask_data_ptr         equ 0x0030 // used in F3D and S2D
 OSTask_data_size        equ 0x0034
 OSTask_yield_data_ptr   equ 0x0038 // used in F3D and S2D
-OSTask_yield_data_size  equ 0x003C
+OSTask_yield_data_size  equ 0x003C //                      EX3: dumpDmemBuffer (CFG_PROFILING_B only)
 // Unlabeled members are never used. In particular, boot does NOT use OSTask_ucode_size,
 // it always fills all of IMEM after start.
 // A hypothetical other microcode could use OSTask_dram_stack_size or OSTask_data_size
