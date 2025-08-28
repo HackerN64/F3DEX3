@@ -630,15 +630,8 @@ MAX_CLIP_GEN_VERTS equ 7
 // which are portions of the 3 original edges plus portions of 5 edges along the
 // 5 clip planes. But the edge portion along the no-nearclipping plane is at
 // infinity, so that edge can't be on screen.
-// It is rare but possible for these assumptions to be violated and a polygon
-// with more than 7 verts to be generated. For example, numerical precision
-// issues could cause the polygon to be slightly non-convex at one of the clip
-// planes, causing the plane to cut off more than one tip. However, this
-// implementation checks for an imminent overflow and aborts clipping (draws no
-// tris) if this occurs. Because this is caused by extreme/degenerate cases like
-// the camera exactly on a tri, not drawing anything is an okay result.
-MAX_CLIP_POLY_VERTS equ 7
-CLIP_POLY_SIZE_BYTES equ (MAX_CLIP_POLY_VERTS+1) * 2
+CLIP_POLY_VERTS equ 8
+CLIP_POLY_SIZE_BYTES equ CLIP_POLY_VERTS * 2
 CLIP_TEMP_VERTS_SIZE_BYTES equ (MAX_CLIP_GEN_VERTS * vtxSize)
 
 VERTEX_BUFFER_SIZE_BYTES equ (G_MAX_VERTS * vtxSize)
@@ -690,11 +683,10 @@ tempMatrix:
 .org (clipTempVerts + CLIP_TEMP_VERTS_SIZE_BYTES)
 clipTempVertsEnd:
 
+    .skip 8 // TODO
 clipPoly:
-    .skip CLIP_POLY_SIZE_BYTES  // 3   5   7 + term 0
-clipPoly2:                      //  \ / \ / \
-    .skip CLIP_POLY_SIZE_BYTES  //   4   6   7 + term 0
-
+    .skip CLIP_POLY_SIZE_BYTES
+    .skip 8 // TODO
     
 // First RDP Command Buffer
 rdpCmdBuffer1:
@@ -1894,23 +1886,80 @@ clip_after_constants:
 .if CFG_PROFILING_B
     addi    perfCounterB, perfCounterB, 1  // Increment clipped (input) tris count
 .endif
-    // Clear all temp vertex slots used.
-    li      $11, (MAX_CLIP_GEN_VERTS - 1) * vtxSize
-clip_init_used_loop:
-    sh      $zero, (VTX_CLIP + clipTempVerts)($11)
-    bgtz    $11, clip_init_used_loop
-     addi   $11, $11, -vtxSize
     li      clipMaskIdx, 4                     // 4=screen, 3=+x, 2=-x, 1=+y, 0=-y
     li      clipMask, CLIP_CAMPLANE            // Initial clip mask for screen clipping
-    li      clipPolySelect, 6  // Everything being indexed from 6 saves one instruction at the end of the loop
-    sh      $1, (clipPoly - 6 + 0)(clipPolySelect) // Write the current three verts
-    sh      $2, (clipPoly - 6 + 2)(clipPolySelect) // as the initial polygon
-    sh      $3, (clipPoly - 6 + 4)(clipPolySelect) // Initial state $3 = clipVLastOfsc
-    sh      $zero, (clipPoly)(clipPolySelect)  // nullptr to mark end of polygon
+    li      $11, clipPoly
+    sqv     vZero[0], (0)($11)   // Clear whole polygon
+    sh      $1, clipPoly + 0     // Write the current three verts
+    sh      $2, clipPoly + 2     // as the initial write polygon
+    sh      $3, clipPoly + 4     //
     sb      $zero, materialCullMode            // In case only/all tri(s) clip then offscreen
 // Available locals here: $11, $1, $7, $20, $24, $10
 clip_condlooptop:
-    lhu     clipFlags, VTX_CLIP(clipVLastOfsc) // Load flags for final vertex of the last polygon
+    
+    li      clipProcCount, 0x10
+    li      clipProcHandler, clip_handler_find_onscr
+    j       clip_proc_loop
+     li     clipIdx, 0
+    
+clip_handler_find_onscr:
+    bnez    $10, clip_proc_loop_continue // Nonzero = offscreen
+     nop
+    li      clipProcHandler, clip_handler_find_on_to_off
+clip_proc_loop_continue:
+    move    clipLastVtx, clipCurVtx
+clip_proc_loop_skip_vtx:
+    addi    clipProcCount, clipProcCount, -1
+    bltz    clipProcCount, clip_degenerate // Could be error too
+     addi   clipIdx, clipIdx, 2
+    andi    clipIdx, clipIdx, 0xE
+clip_proc_loop:
+    lhu     clipCurVtx, (clipPoly)(clipIdx)
+    beqz    clipCurVtx, clip_proc_loop_skip_vtx // Vertex addr = 0 -> skip
+     lhu    $10, VTX_CLIP(clipCurVtx)
+    jr      clipProcHandler
+     andi   $10, $10, clipMask
+
+clip_handler_find_on_to_off:
+    beqz    $10, clip_proc_loop_continue // Zero = on screen, keep searching
+     sh     clipLastVtx, (clipTempOnToOffOn)(TODO)
+    sh      clipCurVtx,  (clipTempOnToOffOff)(TODO)
+    // Insert a space here. The zeros are always on the right, regardless of the
+    // circular buffer rotation.
+    li      $10, 0xC
+clip_insert_loop:
+    lhu     $11, (clipPoly + 0)($10)
+    sh      $11, (clipPoly + 2)($10)
+    bne     $10, clipIdx, clip_insert_loop
+     addi   $10, $10, -2
+    addi    clipIdx, clipIdx, 2 // Advance following offscreen vtx. Don't need to & E yet.
+    jal     clip_temp_alloc // Allocate a temp vertex for the generated on-to-off vertex
+     move   clipOffToOnIdx, clipIdx // Index to write later off-to-on gen vtx to
+    sh      clipTempVtx, (clipPoly - 2)(clipIdx) // Original index of offscreen vtx
+    sh      clipTempVtx, (clipTempOnToOffGen)(TODO)
+    j       clip_proc_loop_continue // Continues from vertex after the offscreen vtx.
+     li     clipProcHandler, clip_handler_find_off_to_on // Offscreen vtx will become clipLastVtx permanently
+
+clip_handler_find_off_to_on:
+    beqz    $10, clip_found_off_to_on
+    // Another offscreen vertex. Remove it.
+     addi   $10, clipIdx, -0xC
+clip_remove_loop:
+    lhu     $11, (clipPoly + 0xC + 2)($10)
+    sh      $11, (clipPoly + 0xC + 0)($10)
+    bltz    $10, clip_remove_loop
+     addi   $10, $10, 2
+    j       clip_proc_loop  // Don't increment clip_idx or update clipLastVtx
+     sh     $zero, (clipPoly + 0xE)
+
+clip_found_off_to_on:
+    addi    $11, clipLastVtx, -clipTempVerts // If >= 0, prev generated, else real vtx
+    bltzal  clip_temp_alloc  // If was real vtx, allocate a new temp vtx
+     move   clipTempVtx, clipLastVtx // Otherwise overwrite prev generated vtx
+    sh      clipTempVtx, (clipPoly)(clipOffToOnIdx) // Store to poly at idx of first offscreen vtx
+    // Perform the two subdivisions.
+
+
     addi    clipPolyRead,   clipPolySelect, -6 // Start reading at the beginning of the old polygon
     xori    clipPolySelect, clipPolySelect, 6 ^ ((clipPoly2 - clipPoly) + 6) // Swap to the other polygon memory
     addi    clipPolyWrite,  clipPolySelect, -6 // Start writing at the beginning of the new polygon
