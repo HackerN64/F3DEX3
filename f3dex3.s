@@ -521,10 +521,10 @@ afterMovememRaTable:
     .dh G_MTX_multiply_end
 
 clipCondShifts:
-    .db CLIP_SCAL_NY_SHIFT // Constants for clipping algorithm
-    .db CLIP_SCAL_PY_SHIFT
-    .db CLIP_SCAL_NX_SHIFT
-    .db CLIP_SCAL_PX_SHIFT
+    .db (31 - CLIP_SCAL_NY_SHIFT) // Constants for clipping algorithm
+    .db (31 - CLIP_SCAL_PY_SHIFT)
+    .db (31 - CLIP_SCAL_NX_SHIFT)
+    .db (31 - CLIP_SCAL_PX_SHIFT)
     
 mvpValid:
     .db 0   // Nonzero if the MVP matrix is valid, 0 if it needs to be recomputed.
@@ -747,7 +747,7 @@ Scalar regs:
 $zero ---------------------- Hardwired zero ------------------------------------------
 $1    v1 texptr   <------------- vtxLeft ------------------------------>  temp, init 0
 $2    v2 shdptr   clipVNext -------> <----- lbPostAo   laPtr                  temp
-$3    v3 shdflg   clipVLastOfsc  vLoopRet ---------> laVtxLeft                temp
+$3    v3 shdflg   clipVOffsc  vLoopRet ---------> laVtxLeft                temp
 $4    <--------- origV1Idx -------->
 $5    ------------------------- vGeomMid ---------------------------------------------
 $6    geom mode   clipMaskIdx -----> <-- lbTexgenOrRet laSTKept
@@ -827,7 +827,7 @@ laTexgen       equ $20   // Nonzero if texgen enabled
 
 // Clipping:
 clipVNext      equ $2    // Next vertex (vertex at forward end of current edge)
-clipVLastOfsc  equ $3    // Last vertex / offscreen vertex
+clipVOffsc  equ $3    // Last vertex / offscreen vertex
 clipVOnsc      equ $19   // Onscreen vertex
 clipMaskIdx    equ $6    // Clip mask index 4-0
 clipMask       equ $9    // Current clip mask (one bit)
@@ -1001,6 +1001,7 @@ tempVpRGBA            equ 0x00        // Only used during loop
 tempXfrmLt            equ tempVpRGBA  // ltbasic only used during init
 tempVtx1ST            equ tempVpRGBA  // ltadv only during init
 tempAmbient           equ 0x10        // ltbasic set during init, used during loop
+tempClipPtrs          equ tempAmbient // set during clipping, kept through vtx write
 tempPrevInvalVtxStart equ 0x20
 tempPrevInvalVtx      equ (tempPrevInvalVtxStart + vtxSize) // 0x46; fog writes here
 tempPrevInvalVtxEnd   equ (tempPrevInvalVtx + vtxSize)      // 0x6C; rest of vtx writes here
@@ -1887,106 +1888,88 @@ clip_after_constants:
     addi    perfCounterB, perfCounterB, 1  // Increment clipped (input) tris count
 .endif
     li      clipMaskIdx, 4                     // 4=screen, 3=+x, 2=-x, 1=+y, 0=-y
-    li      clipMask, CLIP_CAMPLANE            // Initial clip mask for screen clipping
-    li      $11, clipPoly
-    sqv     vZero[0], (0)($11)   // Clear whole polygon
+    li      clipMaskShift, (31 - CLIP_CAMPLANE_SHIFT) // Initial clip mask for screen clipping
+    li      clipAlloc, 0                  // Initial allocation: no temp verts allocated
+    sqv     vZero[0], (clipPoly)($zero)   // Clear whole polygon
     sh      $1, clipPoly + 0     // Write the current three verts
     sh      $2, clipPoly + 2     // as the initial write polygon
     sh      $3, clipPoly + 4     //
     sb      $zero, materialCullMode            // In case only/all tri(s) clip then offscreen
-// Available locals here: $11, $1, $7, $20, $24, $10
+// Available locals here: $11, $10, $1, $7, $20, $24
 clip_condlooptop:
-    
-    li      clipProcCount, 0x10
-    li      clipProcHandler, clip_handler_find_onscr
+    addi    clipPtrs, rdpCmdBufEndP1, tempClipPtrs // Temp mem in output buffer for vtx ptrs
+CLIP_PTR_ONSCR equ 0
+CLIP_PTR_OFFSCR equ 2
+CLIP_PTR_GEN equ 4
+CLIP_PTR_COUNT equ 6
+    li      clipProcCount, 0x10 // Give up if loop traversed the polygon twice
+    li      clipProcPhase, 1 // 1 = find on; then -1 = find on to off; then 0 = find off to on
     j       clip_proc_loop
      li     clipIdx, 0
     
-clip_handler_find_onscr:
-    bnez    $10, clip_proc_loop_continue // Nonzero = offscreen
-     nop
-    li      clipProcHandler, clip_handler_find_on_to_off
-clip_proc_loop_continue:
-    move    clipLastVtx, clipCurVtx
-clip_proc_loop_skip_vtx:
-    addi    clipProcCount, clipProcCount, -1
-    bltz    clipProcCount, clip_degenerate // Could be error too
-     addi   clipIdx, clipIdx, 2
-    andi    clipIdx, clipIdx, 0xE
-clip_proc_loop:
-    lhu     clipCurVtx, (clipPoly)(clipIdx)
-    beqz    clipCurVtx, clip_proc_loop_skip_vtx // Vertex addr = 0 -> skip
-     lhu    $10, VTX_CLIP(clipCurVtx)
-    jr      clipProcHandler
-     andi   $10, $10, clipMask
+clip_w:
+    vcopy   cBaseF, cPosOnOfF             // Result is just W
+    j       clip_skipxy
+     vcopy  cBaseI, cPosOnOfI
 
-clip_handler_find_on_to_off:
-    beqz    $10, clip_proc_loop_continue // Zero = on screen, keep searching
-     sh     clipLastVtx, (clipTempOnToOffOn)(TODO)
-    sh      clipCurVtx,  (clipTempOnToOffOff)(TODO)
-    // Insert a space here. The zeros are always on the right, regardless of the
-    // circular buffer rotation.
-    li      $10, 0xC
-clip_insert_loop:
-    lhu     $11, (clipPoly + 0)($10)
-    sh      $11, (clipPoly + 2)($10)
-    bne     $10, clipIdx, clip_insert_loop
-     addi   $10, $10, -2
-    addi    clipIdx, clipIdx, 2 // Advance following offscreen vtx. Don't need to & E yet.
-    jal     clip_temp_alloc // Allocate a temp vertex for the generated on-to-off vertex
-     move   clipOffToOnIdx, clipIdx // Index to write later off-to-on gen vtx to
-    sh      clipTempVtx, (clipPoly - 2)(clipIdx) // Original index of offscreen vtx
-    sh      clipTempVtx, (clipTempOnToOffGen)(TODO)
-    j       clip_proc_loop_continue // Continues from vertex after the offscreen vtx.
-     li     clipProcHandler, clip_handler_find_off_to_on // Offscreen vtx will become clipLastVtx permanently
-
-clip_handler_find_off_to_on:
-    beqz    $10, clip_found_off_to_on
-    // Another offscreen vertex. Remove it.
+clip_found_on:
+    li      clipProcPhase, -1 // Change to find on to off
+clip_proc_loop_top:
+    bnez    clipPhase, clip_proc_loop_continue
+     // Phase 0 = find off to on. This is an offscreen vertex, so remove it.
      addi   $10, clipIdx, -0xC
 clip_remove_loop:
     lhu     $11, (clipPoly + 0xC + 2)($10)
     sh      $11, (clipPoly + 0xC + 0)($10)
     bltz    $10, clip_remove_loop
      addi   $10, $10, 2
-    j       clip_proc_loop  // Don't increment clip_idx or update clipLastVtx
-     sh     $zero, (clipPoly + 0xE)
-
-clip_found_off_to_on:
-    addi    $11, clipLastVtx, -clipTempVerts // If >= 0, prev generated, else real vtx
-    bltzal  clip_temp_alloc  // If was real vtx, allocate a new temp vtx
-     move   clipTempVtx, clipLastVtx // Otherwise overwrite prev generated vtx
-    sh      clipTempVtx, (clipPoly)(clipOffToOnIdx) // Store to poly at idx of first offscreen vtx
-    // Perform the two subdivisions.
-
-
-    addi    clipPolyRead,   clipPolySelect, -6 // Start reading at the beginning of the old polygon
-    xori    clipPolySelect, clipPolySelect, 6 ^ ((clipPoly2 - clipPoly) + 6) // Swap to the other polygon memory
-    addi    clipPolyWrite,  clipPolySelect, -6 // Start writing at the beginning of the new polygon
-    and     clipFlags, clipFlags, clipMask     // Mask last flags to current clip condition
-clip_edgelooptop: // Loop over edges connecting verts, possibly subdivide the edge
-    lhu     clipVNext, (clipPoly)(clipPolyRead) // Read next vertex (farther end of edge)
-    addi    clipPolyRead, clipPolyRead, 0x0002 // Increment read pointer
-    beqz    clipVNext, clip_nextcond           // If next vtx is nullptr, done with input polygon
-     lhu    $11, VTX_CLIP(clipVNext)           // Load flags for next vtx
-    and     $11, $11, clipMask                 // Mask next flags to current clip condition
-    beq     $11, clipFlags, clip_nextedge      // Both set or both clear = both off screen or both on screen, no subdivision
-     move   clipFlags, $11                     // clipFlags = masked next vtx's flags
-    // Going to subdivide this edge. Find available temp vertex slot.
-    li      outVtxBase, clipTempVertsEnd
-clip_find_unused_loop:
-    lhu     $11, (VTX_CLIP - vtxSize)(outVtxBase)
-    addi    $10, outVtxBase, -clipTempVerts    // This is within the loop rather than before b/c delay after lhu
-    blez    $10, clip_err_no_unused            // If can't find one (should never happen), give up
-     andi   $11, $11, CLIP_VTX_USED
-    bnez    $11, clip_find_unused_loop
-     addi   outVtxBase, outVtxBase, -vtxSize
-    beqz    clipFlags, clip_skipswap23         // Next vtx flag is clear / on screen,
-     move   clipVOnsc, clipVNext               // therefore last vtx is set / off screen
-    move    clipVOnsc, clipVLastOfsc           // Otherwise swap; note we are overwriting
-    move    clipVLastOfsc, clipVNext           // clipVLastOfsc but not clipVNext
-clip_skipswap23:
-    // Interpolate between clipVLastOfsc and clipVOns; create a new vertex which is on the
+    sh      $zero, (clipPoly + 0xE)
+    // Deallocate it. The first iteration is for if it's in the main vertex buffer.
+    lui     $11, 0xBFFF // 10111111111...
+    addi    $10, clipCurVtx, -(clipTempVerts - vtxSize)
+clip_deallocate_loop:
+    addi    $10, $10, vtxSize
+    bgez    $10, clip_deallocate_loop // First iter: loops if in clipTempVerts
+     sra    $11, $11, 1               // First iter: else, clears 1101111111...
+    and     clipAlloc, clipAlloc, $11
+    addi    clipIdx, clipIdx, -2 // Re-process same vertex
+clip_proc_loop_continue:
+    move    clipLastVtx, clipCurVtx
+clip_proc_loop_skip_vtx:
+    addi    clipProcCount, clipProcCount, -1
+    bltz    clipProcCount, clip_degenerate TODO // need to check phase, timeout in find on is degenerate, timeout in find on to off is all onscreen, timeout in find off to on is error
+     addi   clipIdx, clipIdx, 2
+    andi    clipIdx, clipIdx, 0xE
+clip_proc_loop:
+    lhu     clipCurVtx, (clipPoly)(clipIdx)
+    beqz    clipCurVtx, clip_proc_loop_skip_vtx // Vertex addr = 0 -> skip
+     lhu    $10, VTX_CLIP(clipCurVtx)
+    sllv    $10, $10, clipMaskShift // Put clipping bit in sign bit
+    xor     $10, $10, clipProcPhase // Invert the sign bit for phase -1
+    bltz    $10, clip_proc_loop_top // Nonzero clipping bit = offscreen. Phase 1 and 0, continue if offscreen.
+     sh     clipLastVtx, (CLIP_PTR_ONSCR)(clipPtrs) // For on to off
+    bgtz    clipProcPhase, clip_found_on
+     li     $10, 0xC  // Insert a space here. The zeros are always on the right,
+clip_insert_loop:     // regardless of the circular buffer rotation.
+    lhu     $11, (clipPoly + 0)($10)
+    bltz    $10, clip_degenerate // Error, exit instead of corrupting memory
+     sh     $11, (clipPoly + 2)($10)
+    bne     $10, clipIdx, clip_insert_loop
+     addi   $10, $10, -2
+    // Allocate a temp vertex
+    TODO
+    sh      clipTempVtx, (clipPoly)(clipIdx)
+    sh      clipTempVtx, (CLIP_PTR_GEN)(clipPtrs)
+    sh      clipCurVtx, (CLIP_PTR_OFFSCR)(clipPtrs) // For on to off only
+    addi    clipPtrs, clipPtrs, CLIP_PTR_COUNT
+    bltz    clipProcPhase, clip_proc_loop_continue // Currently on to off
+     li     clipProcPhase, 0 // Change to find off to on (nop if done)
+    sh      clipLastVtx, (CLIP_PTR_OFFSCR - CLIP_PTR_COUNT)(clipPtrs) // Swapped for off to on
+    sh      clipCurVtx, (CLIP_PTR_ONSCR - CLIP_PTR_COUNT)(clipPtrs) // Swapped for off to on
+clip_do_subdivision:
+    lhu     clipVOnsc, (CLIP_PTR_ONSCR - 2 * CLIP_PTR_COUNT)(clipPtrs)
+    lhu     clipVOffsc, (CLIP_PTR_OFFSCR - 2 * CLIP_PTR_COUNT)(clipPtrs)
+    // Interpolate between clipVOffsc and clipVOns; create a new vertex which is on the
     // clipping boundary (e.g. at the screen edge)
 cPosOnOfF equ vpClpF
 cPosOnOfI equ vpClpI
@@ -2021,9 +2004,9 @@ cFadeOn   equ $v5
     ldv     cPosOnOfI[0], VTX_INT_VEC (clipVOnsc)
     vmrg    cTemp, vOne, $v31[1]         // elem 0 is 1 if W or neg cond, -1 if pos cond
     andi    $11, clipMaskIdx, 4          // W condition and screen clipping
-    ldv     cPosOnOfF[8], VTX_FRAC_VEC(clipVLastOfsc) // Off screen to elems 4-7
+    ldv     cPosOnOfF[8], VTX_FRAC_VEC(clipVOffsc) // Off screen to elems 4-7
     bnez    $11, clip_w                  // If so, use 1 or -1
-     ldv    cPosOnOfI[8], VTX_INT_VEC (clipVLastOfsc)
+     ldv    cPosOnOfI[8], VTX_INT_VEC (clipVOffsc)
     vmudh   cTemp, cTemp, $v31[3]        // elem 0 is (1 or -1) * 2 (clip ratio)
     andi    $11, clipMaskIdx, 2          // Conditions 2 (-x) or 3 (+x)
     vmudm   cBaseF, vOne, cPosOnOfF[0h]  // Set accumulator (care about 3, 7) to X
@@ -2043,32 +2026,25 @@ clip_skipxy:
     // Then the reciprocal of cDiffI:F is computed with a Newton-Raphson iteration
     // and multiplied by cBaseI:F. Finally scale down the result (numerator) by cRRF.
     vor     cTemp, cDiffI, vOne[0]  // Round up int sum to odd; this ensures the value is not 0, otherwise vabs result will be 0 instead of +/- 2
-    sub     $11, clipPolyWrite, clipPolySelect // Make sure we are not overflowing
     vrcph   cRRI[3], cDiffI[3]
-    addi    $11, $11, 6 - ((MAX_CLIP_POLY_VERTS) * 2) // Write ptr to last zero slot
     vrcpl   cRRF[3], cDiffF[3]              // 1 / (x+y+z+w), vtx on screen - vtx off screen
-    bgez    $11, clip_err_oflow_gen         // If so, give up
-     vrcph  cRRI[3], $v31[2]                // 0; get int result of reciprocal
+    vrcph   cRRI[3], $v31[2]                // 0; get int result of reciprocal
     vabs    cTemp, cTemp, $v31[3]           // 2; cTemp = +/- 2 based on sum positive (incl. zero) or negative
-    lhu     $11, VTX_CLIP(clipVLastOfsc)    // Load clip flags for off screen vert
     vmudn   cRRF, cRRF, cTemp[3]            // multiply reciprocal by +/- 2
-    sh      outVtxBase, (clipPoly)(clipPolyWrite) // Write pointer to generated vertex to polygon
     vmadh   cRRI, cRRI, cTemp[3]
-    addi    clipPolyWrite, clipPolyWrite, 2 // Increment write ptr
     veq     cRRI, cRRI, $v31[2]             // 0; if RR int part is 0
-    andi    $11, $11, ~CLIP_VTX_USED        // Clear used flag from off screen vert
     vmrg    cRRF, cRRF, $v31[1]             // keep RR frac, otherwise set frac to 0xFFFF (max)
-    sh      $11, VTX_CLIP(clipVLastOfsc)    // Store modified clip flags for off screen vert
+    lhu     outVtxBase, (CLIP_PTR_GEN - 2 * CLIP_PTR_COUNT)(clipPtrs)
     vmudl   $v29, cDiffF, cRRF[3]           // Multiply clDiffI:F by RR frac*frac
-    ldv     cPosOfF[0], VTX_FRAC_VEC (clipVLastOfsc) // Off screen loaded above, but need
+    ldv     cPosOfF[0], VTX_FRAC_VEC (clipVOffsc) // Off screen loaded above, but need
     vmadm   cDiffI, cDiffI, cRRF[3]         // int*frac, int out
-    ldv     cPosOfI[0], VTX_INT_VEC  (clipVLastOfsc) // it in elems 0-3 for interp
+    ldv     cPosOfI[0], VTX_INT_VEC  (clipVOffsc) // it in elems 0-3 for interp
     vmadn   cDiffF, $v31, $v31[2]           // 0; get frac out
-    luv     cRGBAOf[0], VTX_COLOR_VEC(clipVLastOfsc)
+    luv     cRGBAOf[0], VTX_COLOR_VEC(clipVOffsc)
     vrcph   sRTI[3], cDiffI[3]              // Reciprocal of new scaled cDiff (discard)
     luv     cRGBAOn[0], VTX_COLOR_VEC(clipVOnsc)
     vrcpl   sRTF[3], cDiffF[3]              // frac part
-    llv     cSTOf[0],   VTX_TC_VEC   (clipVLastOfsc)
+    llv     cSTOf[0],   VTX_TC_VEC   (clipVOffsc)
     vrcph   sRTI[3], $v31[2]                // 0; int part
     llv     cSTOn[0],   VTX_TC_VEC   (clipVOnsc) // Must be before vtx_final_setup_for_clip
     vmudl   $v29, sRTF, cDiffF              // D*R (see Newton-Raphson explanation)
@@ -2086,6 +2062,7 @@ clip_skipxy:
     vmadn   cDiffF, sRTF, cDiffI
     li      vLoopRet, vtx_loop_no_lighting
     vmadh   cDiffI, sRTI, cDiffI
+    addi    clipPtrs, clipPtrs, CLIP_PTR_COUNT
     vmudh   $v29, vOne, $v31[4]             // 4; 4 - 4 * (D*R)
     vmadn   cDiffF, cDiffF, $v31[0]         // -4
     vmadh   cDiffI, cDiffI, $v31[0]         // -4
@@ -2121,53 +2098,18 @@ clip_after_final_setup: // This is here because otherwise 3 cycle stall here.
     j       vtx_store_for_clip
      vmadn  vpClpF, $v31, $v31[2]           // 0; load resulting frac pos
 clip_after_vtx_store:
-    ori     flagsV1, flagsV1, CLIP_VTX_USED   // Mark generated vtx as used
-    slv     sSTS[0], (VTX_TC_VEC   )(outVtx1) // Store not-twice-scaled ST
-    sh      flagsV1, (VTX_CLIP     )(outVtx1) // Store generated vertex flags
-clip_nextedge:
-    bnez    clipFlags, clip_edgelooptop   // Discard V2 if it was off screen (whether inserted vtx or not)
-     move   clipVLastOfsc, clipVNext      // Move what was the end of the edge to be the new start of the edge
-    sub     $11, clipPolyWrite, clipPolySelect // Make sure we are not overflowing
-    addi    $11, $11, 6 - ((MAX_CLIP_POLY_VERTS) * 2) // Write ptr to last zero slot
-    bgez    $11, clip_err_oflow_copy      // If so, give up
-     sh     clipVLastOfsc, (clipPoly)(clipPolyWrite) // Former V2 was on screen,
-    j       clip_edgelooptop              // so add it to the output polygon
-     addi   clipPolyWrite, clipPolyWrite, 2
-
-clip_w:
-    vcopy   cBaseF, cPosOnOfF             // Result is just W
-    j       clip_skipxy
-     vcopy  cBaseI, cPosOnOfI
-
-clip_nextcond:
-    sub     $11, clipPolyWrite, clipPolySelect // Are there less than 3 verts in the output polygon?
-    bltz    $11, clip_degenerate              // If so, degenerate result, quit
-     sh     $zero, (clipPoly)(clipPolyWrite)  // Terminate the output polygon with a 0
-    lhu     clipVLastOfsc, (clipPoly - 2)(clipPolyWrite) // Initialize edge start to the last vert
-    beqz    clipMaskIdx, clip_draw_tris
-     lbu    $11, (clipCondShifts - 1)(clipMaskIdx) // Load next clip condition shift amount
-    li      clipMask, 1
-    sllv    clipMask, clipMask, $11
-    j       clip_condlooptop
-     addi   clipMaskIdx, clipMaskIdx, -1
-    
-.if CFG_PROFILING_B
-clip_err_oflow_gen:
-clip_err_oflow_copy:
-clip_err_no_unused:
-    sh      clipPolySelect, texrectWord1
-    sh      clipPolyRead,   texrectWord1 + 2
-    sh      clipPolyWrite,  texrectWord1 + 4
-    sh      clipMaskIdx,    texrectWord1 + 6
-    j       dump_dmem
-     li     nextRA, clip_done
-.endif
-
-clip_draw_tris:
+    addi    $11, rdpCmdBufEndP1, tempClipPtrs + 3 * CLIP_PTR_COUNT
+    beq     $11, clipPtrs, clip_do_subdivision // Do one more subdivision
+     slv    sSTS[0], (VTX_TC_VEC   )(outVtx1) // Store not-twice-scaled ST
+    // Next clip condition
+    addi    clipMaskIdx, clipMaskIdx, -1
+    bgez    clipMaskIdx, clip_condlooptop
+     lbu    clipMaskShift, (clipCondShifts)(clipMaskIdx) // Load next clip condition shift amount
     sh      $zero, activeClipPlanes
 // Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
 // Draws verts in pattern like 0-1-4, 1-2-4, 2-3-4
 clip_draw_tris_loop:
+    TODO
     lhu     $1, (clipPoly - 6)(clipPolySelect)
     lhu     $2, (clipPoly - 4)(clipPolySelect)
     lhu     $3, (clipPoly - 2)(clipPolyWrite)
@@ -2177,13 +2119,7 @@ clip_draw_tris_loop:
      mtc2   $3, $v7[14]
     bne     clipPolyWrite, clipPolySelect, clip_draw_tris_loop
      addi   clipPolySelect, clipPolySelect, 2
-.if !CFG_PROFILING_B
-clip_err_oflow_gen:
-clip_err_oflow_copy:
-clip_err_no_unused:
-.endif
 clip_degenerate:
-clip_done:
     li      $11, CLIP_SCAL_NPXY | CLIP_CAMPLANE
     sh      $11, activeClipPlanes
     lh      $ra, tempTriRA
@@ -2525,10 +2461,8 @@ vtx_epilogue:
     ssv     sCLZ[12], (VTX_SCR_Z      )(outVtx2)
     slv     vpScrI[0],  (VTX_SCR_VEC    )(outVtx1)
     ssv     vpScrF[12], (VTX_SCR_Z_FRAC )(outVtx2)
-    bltz    inVtx, clip_after_vtx_store  // inVtx < 0 means from clipping
-     slv    vpScrF[2],  (VTX_SCR_Z      )(outVtx1)
-    sh      flagsV1,  (VTX_CLIP       )(outVtx1) // Store first vertex flags
-    // Fallthrough (across the versions boundary) to vtx_end
+    slv     vpScrF[2],  (VTX_SCR_Z      )(outVtx1)
+    // Fallthrough (across the versions boundary)
 
 .else // not CFG_NO_OCCLUSION_PLANE
     
@@ -2704,13 +2638,12 @@ vtx_store_loop_entry:
      // vnop in land slot
      
 vtx_epilogue:
-    bltz    inVtx, clip_after_vtx_store  // inVtx < 0 means from clipping
-     sh     flagsV1,            (VTX_CLIP      )(outVtx1) // Store first vertex flags
-    // Fallthrough to vtx_end
+    // Fallthrough (across the versions boundary)
      
 .endif
 
-vtx_end:
+    bltz    inVtx, clip_after_vtx_store  // inVtx < 0 means from clipping
+     sh     flagsV1, (VTX_CLIP)(outVtx1) // Store first vertex flags
 .if CFG_PROFILING_A
     li      $ra, 0                           // Flag for coming from vtx
     lqv     vTRC, (vTRCValue)($zero)         // Restore value overwritten by matrix
