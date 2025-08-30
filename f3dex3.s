@@ -630,7 +630,10 @@ MAX_CLIP_GEN_VERTS equ 7
 // Put another way, if there are 8 verts in the final polygon, there are 8 edges,
 // which are portions of the 3 original edges plus portions of 5 edges along the
 // 5 clip planes. But the edge portion along the no-nearclipping plane is at
-// infinity, so that edge can't be on screen.
+// infinity, so that edge can't be on screen. So an actual polygon can contain
+// up to 7 verts. However, we are relying on 8 verts for circular addressing,
+// and the current implementation temporarily inserts a vertex when moving from
+// on to offscreen, so it can be 8 valid vertices momentarily.
 CLIP_POLY_VERTS equ 8
 CLIP_POLY_SIZE_BYTES equ CLIP_POLY_VERTS * 2
 CLIP_TEMP_VERTS_SIZE_BYTES equ (MAX_CLIP_GEN_VERTS * vtxSize)
@@ -643,11 +646,10 @@ RDP_CMD_BUFSIZE_TOTAL equ (RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS)
 
 INPUT_BUFFER_CMDS equ 21
 INPUT_BUFFER_SIZE_BYTES equ (INPUT_BUFFER_CMDS * 8)
-INPUT_BUFFER_CLOBBER_OSTASK_AMT equ 0x10 // Input buffer overwrites beginning of OSTask, see rsp_defs.inc
-OSTASK_ORIG_SIZE equ 0x40
-OSTASK_SIZE_AFTER_CLOBBER equ (OSTASK_ORIG_SIZE - INPUT_BUFFER_CLOBBER_OSTASK_AMT)
 
-END_VARIABLE_LEN_DMEM equ (0x1000 - OSTASK_SIZE_AFTER_CLOBBER - INPUT_BUFFER_SIZE_BYTES - (2 * RDP_CMD_BUFSIZE_TOTAL) - (2 * CLIP_POLY_SIZE_BYTES) - CLIP_TEMP_VERTS_SIZE_BYTES - VERTEX_BUFFER_SIZE_BYTES)
+OSTASK_ORIG_SIZE equ 0x40 // First CLIP_POLY_SIZE_BYTES (0x10) of this is clipPoly.
+
+END_VARIABLE_LEN_DMEM equ (0x1000 - OSTASK_ORIG_SIZE - INPUT_BUFFER_SIZE_BYTES - (2 * RDP_CMD_BUFSIZE_TOTAL) - CLIP_TEMP_VERTS_SIZE_BYTES - VERTEX_BUFFER_SIZE_BYTES)
 
 startFreeDmem:
 .org END_VARIABLE_LEN_DMEM
@@ -683,11 +685,6 @@ tempMatrix:
 .endif
 .org (clipTempVerts + CLIP_TEMP_VERTS_SIZE_BYTES)
 clipTempVertsEnd:
-
-    .skip 8 // TODO
-clipPoly:
-    .skip CLIP_POLY_SIZE_BYTES
-    .skip 8 // TODO
     
 // First RDP Command Buffer
 rdpCmdBuffer1:
@@ -713,14 +710,16 @@ rdpCmdBuffer2EndPlus1Word:
 
 // Input buffer. After RDP cmd buffers so it can be vector addressed from end.
 inputBuffer:
-    .skip INPUT_BUFFER_SIZE_BYTES - INPUT_BUFFER_CLOBBER_OSTASK_AMT
-// 0x0FC0-0x1000: OSTask
-OSTask:
-    .skip INPUT_BUFFER_CLOBBER_OSTASK_AMT
+    .skip INPUT_BUFFER_SIZE_BYTES
 inputBufferEnd:
-inputBufferEndSgn equ -(0x1000 - inputBufferEnd) // Underflow DMEM address
+inputBufferEndSgn equ (-(0x1000 - inputBufferEnd)) // Underflow DMEM address
+// 0x0FC0-0x1000: OSTask; 0x0FC0-0x0FD0: clipPoly
+OSTask:
+clipPoly: // This is here for alignment and vector addressing, see rsp_defs.inc
+clipPolySgn equ (-(0x1000 - clipPoly)) // Underflow DMEM address
+    .skip CLIP_POLY_SIZE_BYTES
 // rest of OSTask
-    .skip OSTASK_SIZE_AFTER_CLOBBER
+    .skip (OSTASK_ORIG_SIZE - CLIP_POLY_SIZE_BYTES)
 
 .if . != 0x1000
     .error "DMEM organization incorrect"
@@ -1896,7 +1895,7 @@ clip_after_constants:
 .endif
     li      clipMaskIdx, 5                // Will sub 1; 4=screen, 3=+x, 2=-x, 1=+y, 0=-y
     li      clipAlloc, 0                  // Init to no temp verts allocated
-    sqv     vZero[0], (clipPoly)($zero)   // Clear whole polygon
+    sqv     vZero[0], (clipPolySgn)($zero) // Clear whole polygon
     sh      $1, clipPoly + 0     // Write the current three verts
     sh      $2, clipPoly + 2     // as the initial write polygon
     sh      $3, clipPoly + 4     //
@@ -1915,19 +1914,10 @@ CLIP_PTR_COUNT equ 6
     j       clip_walk_loop
      li     clipIdx, 0
 
-clip_timeout:
-    bltz    clipWalkPhase, clip_next_cond // Timed out in find on to off: all onscreen, nothing to do for this cond
-     nop                                  // Timed out in find on: all offscreen, discard tri
-    j       clip_done                     // Timed out in find off to on: error, give up
-clip_w:
-     vcopy  cBaseF, cPosOnOfF             // Result is just W
-    j       clip_skipxy
-     vcopy  cBaseI, cPosOnOfI
-
 clip_found_on:
     li      clipWalkPhase, -1 // Change to find on to off
 clip_walk_loop_top:
-    bnez    clipPhase, clip_walk_loop_continue
+    bnez    clipWalkPhase, clip_walk_loop_continue
      // Phase 0 = find off to on. This is an offscreen vertex, so remove it.
      addi   $10, clipIdx, -0xC
 clip_remove_loop:
@@ -2134,11 +2124,19 @@ clip_draw_tris_loop:
     lhu     $3, (clipPoly + 4)(clipDrawPtr)
     beqz    $3, clip_done // Off the end of the output polygon. Also covers <= 2 verts
      mtc2   $1, $v6[10]   // Vertex addresses to vector regs
-    ldv     $v7[10], (-(0x1000 - clipPoly))(clipDrawPtr) // $2 to elem 6, $3 to elem 7
+    ldv     $v7[10], (clipPolySgn)(clipDrawPtr) // $2 to elem 6, $3 to elem 7
     j       tri_noinit
      addi   clipDrawPtr, clipDrawPtr, 2
+
+clip_w:
+    vcopy   cBaseF, cPosOnOfF             // Result is just W
+    j       clip_skipxy
+     vcopy  cBaseI, cPosOnOfI
+
+clip_timeout: // Timed out in find on: all offscreen, discard tri. In find off to on: error, give up
+    bltz    clipWalkPhase, clip_next_cond // Timed out in find on to off: all onscreen, nothing to do for this cond
 clip_done:
-    li      $11, CLIP_SCAL_NPXY | CLIP_CAMPLANE
+     li     $11, CLIP_SCAL_NPXY | CLIP_CAMPLANE
     sh      $11, activeClipPlanes
     lh      $ra, tempTriRA
 fill_vertex_table:

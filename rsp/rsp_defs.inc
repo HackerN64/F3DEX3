@@ -11,10 +11,10 @@ YDF_OFFSET_TASKDATAPTR  equ 0x10
 YDF_OFFSET_UCODE        equ 0x14
 
 // OSTask data member offsets
-OSTask_type             equ 0x0000 //                      EX3: end of      ^
-OSTask_flags            equ 0x0004 // see note below            inputBuffer |
-OSTask_ucode_boot       equ 0x0008 //                                       |
-OSTask_ucode_boot_size  equ 0x000C //                                       v
+OSTask_type             equ 0x0000 //                      EX3: clipPoly ^
+OSTask_flags            equ 0x0004 // see note below                     |
+OSTask_ucode_boot       equ 0x0008 //                                    |
+OSTask_ucode_boot_size  equ 0x000C //                                    v
 OSTask_ucode            equ 0x0010 // used in F3D, S2D, and boot
 OSTask_ucode_size       equ 0x0014 //                      EX3: startCounterTime
 OSTask_ucode_data       equ 0x0018 // used in boot only.   EX3: xfrmLookatDirs ^
@@ -36,8 +36,8 @@ OSTask_yield_data_size  equ 0x003C //                      EX3: dumpDmemBuffer (
 // - In boot to check if the task should wait until the RDP is finished with its
 //   previous command buffer
 // F3DEX3 now zeroes OSTask_flags when loading another ucode. As a result, the first
-// 0x10 bytes of OSTask are unused temp memory (not kept at yield), so we overlap
-// the end of inputBuffer into this space.
+// 0x10 bytes of OSTask are unused temp memory (not kept at yield), so we put
+// clipPoly there.
 
 // flags
 OS_TASK_YIELDED equ 0x0001
