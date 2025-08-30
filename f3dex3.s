@@ -525,6 +525,7 @@ clipCondShifts:
     .db (31 - CLIP_SCAL_PY_SHIFT)
     .db (31 - CLIP_SCAL_NX_SHIFT)
     .db (31 - CLIP_SCAL_PX_SHIFT)
+    .db (31 - CLIP_CAMPLANE_SHIFT)
     
 mvpValid:
     .db 0   // Nonzero if the MVP matrix is valid, 0 if it needs to be recomputed.
@@ -743,39 +744,39 @@ memsetBufferSize equ (memsetBufferMaxSize > 0x800 ? 0x800 : memsetBufferMaxSize)
 
 /*
 Scalar regs:
-      Tri write   Clip VW       Vtx write   ltbasic    ltadv    V/L init  Cmd dispatch
-$zero ---------------------- Hardwired zero ------------------------------------------
-$1    v1 texptr   <------------- vtxLeft ------------------------------>  temp, init 0
-$2    v2 shdptr   clipVNext -------> <----- lbPostAo   laPtr                  temp
-$3    v3 shdflg   clipVOffsc  vLoopRet ---------> laVtxLeft                temp
-$4    <--------- origV1Idx -------->
-$5    ------------------------- vGeomMid ---------------------------------------------
-$6    geom mode   clipMaskIdx -----> <-- lbTexgenOrRet laSTKept
-$7    v2flag tile <------------- fogFlag ---------->  laPacked  mtx valid   cmd byte
-$8    v3flag      <------------- outVtx2 ---------->  laSpecular outVtx2
-$9    xp texenab  clipMask --------> <----- curLight ---------> viLtFlag
-$10   -------------------------- temp2 -----------------------------------------------
-$11   --------------------------- temp -----------------------------------------------
-$12   ----------------------- perfCounterD -------------------------------------------
-$13   ------------------------ altBaseReg --------------------------------------------
-$14               <-------------- inVtx ------------------------------->
-$15               <------------ outVtxBase ---------------------------->
-$16   v1flag lmaj clipFlags -------> <----- lbFakeAmb laSpecFres          ovlInitClock
-$17               clipPolyRead ---->
-$18   <---------- clipPolySelect -->
-$19      temp     clipVOnsc      outVtx1 ---------->    laL2A   <---------   dmaLen
-$20      temp     <------------- flagsV1 ---------->   laTexgen <---------  dmemAddr
-$21   <---------- clipPolyWrite ---> <----- ambLight             ambLight
-$22   ---------------------- rdpCmdBufEndP1 ------------------------------------------
-$23   ----------------------- rdpCmdBufPtr -------------------------------------------
-$24      temp     <------------- flagsV2 ---------->   fp temp  <--------- cmd_w1_dram
-$25     cmd_w0 --------------------> <----- lbAfter             <---------   cmd_w0
-$26   ------------------------ taskDataPtr -------------------------------------------
-$27   ---------------------- inputBufferPos ------------------------------------------
-$28   ----------------------- perfCounterA -------------------------------------------
-$29   ----------------------- perfCounterB -------------------------------------------
-$30   ----------------------- perfCounterC -------------------------------------------
-$ra   return address, sometimes sign bit is flag -------------------------------------
+      Tri write   Clip walk    Clip VW      Vtx write   ltbasic    ltadv    V/L init  Cmd dispatch
+$zero ---------------------------------- Hardwired zero ------------------------------------------
+$1    v1 texptr    clipIdx    <------------- vtxLeft ------------------------------>  temp, init 0
+$2    v2 shdptr   <---------- clipAlloc -------> <----- lbPostAo   laPtr                  temp
+$3    v3 shdflg   clipTempVtx <------------- vLoopRet ---------> laVtxLeft                temp
+$4    <--------------- origV1Idx -------------->
+$5    ------------------------------------- vGeomMid ---------------------------------------------
+$6    geom mode   <---------- clipPtrs --------> <-- lbTexgenOrRet laSTKept
+$7    v2flag tile clipWalkCount <----------- fogFlag ---------->  laPacked  mtx valid   cmd byte
+$8    v3flag      clipLastVtx <------------- outVtx2 ---------->  laSpecular outVtx2
+$9    xp texenab                                 <----- curLight ---------> viLtFlag
+$10   -------------------------------------- temp2 -----------------------------------------------
+$11   --------------------------------------- temp -----------------------------------------------
+$12   ----------------------------------- perfCounterD -------------------------------------------
+$13   ------------------------------------ altBaseReg --------------------------------------------
+$14               <-------------------------- inVtx ------------------------------->
+$15                           <------------ outVtxBase ---------------------------->
+$16   v1flag lmaj                                <----- lbFakeAmb laSpecFres          ovlInitClock
+$17   
+$18   
+$19      temp     clipCurVtx  <------------- outVtx1 ---------->    laL2A   <---------   dmaLen
+$20      temp   clipMaskShift clipVOnscr <-- flagsV1 ---------->   laTexgen <---------  dmemAddr
+$21   <----- clipMaskIdx / clipDrawPtr -------> <----- ambLight             ambLight
+$22   ---------------------------------- rdpCmdBufEndP1 ------------------------------------------
+$23   ----------------------------------- rdpCmdBufPtr -------------------------------------------
+$24      temp   clipWalkPhase clipVOffscr <- flagsV2 ---------->   fp temp  <--------- cmd_w1_dram
+$25     cmd_w0 --------------------------------> <----- lbAfter             <---------   cmd_w0
+$26   ------------------------------------ taskDataPtr -------------------------------------------
+$27   ---------------------------------- inputBufferPos ------------------------------------------
+$28   ----------------------------------- perfCounterA -------------------------------------------
+$29   ----------------------------------- perfCounterB -------------------------------------------
+$30   ----------------------------------- perfCounterC -------------------------------------------
+$ra   return address, sometimes sign bit is flag -------------------------------------------------
 */
 
 // Global scalar regs:
@@ -825,16 +826,22 @@ laSpecFres     equ $16   // Nonzero if doing ltadv_normal_to_vertex for specular
 laL2A          equ $19   // Nonzero if light-to-alpha (cel shading) enabled
 laTexgen       equ $20   // Nonzero if texgen enabled
 
-// Clipping:
-clipVNext      equ $2    // Next vertex (vertex at forward end of current edge)
-clipVOffsc  equ $3    // Last vertex / offscreen vertex
-clipVOnsc      equ $19   // Onscreen vertex
-clipMaskIdx    equ $6    // Clip mask index 4-0
-clipMask       equ $9    // Current clip mask (one bit)
-clipFlags      equ $16   // Current clipping flags being checked
-clipPolyRead   equ $17   // Read pointer within current polygon being clipped
-clipPolySelect equ $18   // Clip poly double buffer selection
-clipPolyWrite  equ $21   // Write pointer within current polygon being clipped
+// Clipping across walk - vertex write - tri write:
+clipAlloc      equ $2    // Whether each temp vtx is in use, during VW
+clipPtrs       equ $6    // On-off-gen vtx ptrs for each subdivision, during VW
+clipMaskIdx    equ $21   // Selects clipping plane / mask index, 4 -> 0
+clipDrawPtr    equ $21   // Pointer to output clip polygon during tri draw
+clipVOnsc      equ $20   // Onscreen vertex, only during setup for vtx write
+clipVOffsc     equ $24   // Offscreen vertex, only during setup for vtx write
+
+// Clip walk only:
+clipIdx        equ $1    // Current index within polygon memory, 0 -> E
+clipTempVtx    equ $3    // Allocated temporary vertex address
+clipWalkCount  equ $7    // How many steps taken around polygon; if too many, timeout
+clipLastVtx    equ $8    // Last vertex address on polygon
+clipCurVtx     equ $19   // Current vertex address on polygon
+clipMaskShift  equ $20   // Amount to left shift clip flags to put current condition bit in sign bit
+clipWalkPhase  equ $24   // Current action on walk: e.g. looking for onscreen-to-offscreen transition
 
 // Misc:
 nextRA         equ $10   // Address to return to after overlay load
@@ -1887,9 +1894,8 @@ clip_after_constants:
 .if CFG_PROFILING_B
     addi    perfCounterB, perfCounterB, 1  // Increment clipped (input) tris count
 .endif
-    li      clipMaskIdx, 4                     // 4=screen, 3=+x, 2=-x, 1=+y, 0=-y
-    li      clipMaskShift, (31 - CLIP_CAMPLANE_SHIFT) // Initial clip mask for screen clipping
-    li      clipAlloc, 0                  // Initial allocation: no temp verts allocated
+    li      clipMaskIdx, 5                // Will sub 1; 4=screen, 3=+x, 2=-x, 1=+y, 0=-y
+    li      clipAlloc, 0                  // Init to no temp verts allocated
     sqv     vZero[0], (clipPoly)($zero)   // Clear whole polygon
     sh      $1, clipPoly + 0     // Write the current three verts
     sh      $2, clipPoly + 2     // as the initial write polygon
@@ -1897,25 +1903,31 @@ clip_after_constants:
     sb      $zero, materialCullMode            // In case only/all tri(s) clip then offscreen
 // Available locals here: $11, $10, $1, $7, $20, $24
 clip_condlooptop:
+    addi    clipMaskIdx, clipMaskIdx, -1
+    lbu     clipMaskShift, (clipCondShifts)(clipMaskIdx)
     addi    clipPtrs, rdpCmdBufEndP1, tempClipPtrs // Temp mem in output buffer for vtx ptrs
 CLIP_PTR_ONSCR equ 0
 CLIP_PTR_OFFSCR equ 2
 CLIP_PTR_GEN equ 4
 CLIP_PTR_COUNT equ 6
-    li      clipProcCount, 0x10 // Give up if loop traversed the polygon twice
-    li      clipProcPhase, 1 // 1 = find on; then -1 = find on to off; then 0 = find off to on
-    j       clip_proc_loop
+    li      clipWalkCount, 0x18 // Give up if loop traversed the polygon 3x
+    li      clipWalkPhase, 1 // 1 = find on; then -1 = find on to off; then 0 = find off to on
+    j       clip_walk_loop
      li     clipIdx, 0
-    
+
+clip_timeout:
+    bltz    clipWalkPhase, clip_next_cond // Timed out in find on to off: all onscreen, nothing to do for this cond
+     nop                                  // Timed out in find on: all offscreen, discard tri
+    j       clip_done                     // Timed out in find off to on: error, give up
 clip_w:
-    vcopy   cBaseF, cPosOnOfF             // Result is just W
+     vcopy  cBaseF, cPosOnOfF             // Result is just W
     j       clip_skipxy
      vcopy  cBaseI, cPosOnOfI
 
 clip_found_on:
-    li      clipProcPhase, -1 // Change to find on to off
-clip_proc_loop_top:
-    bnez    clipPhase, clip_proc_loop_continue
+    li      clipWalkPhase, -1 // Change to find on to off
+clip_walk_loop_top:
+    bnez    clipPhase, clip_walk_loop_continue
      // Phase 0 = find off to on. This is an offscreen vertex, so remove it.
      addi   $10, clipIdx, -0xC
 clip_remove_loop:
@@ -1924,46 +1936,55 @@ clip_remove_loop:
     bltz    $10, clip_remove_loop
      addi   $10, $10, 2
     sh      $zero, (clipPoly + 0xE)
-    // Deallocate it. The first iteration is for if it's in the main vertex buffer.
-    lui     $11, 0xBFFF // 10111111111...
+    // Deallocate it. The first iteration is for if it's in the main vertex buffer,
+    // in which case the deallocation is a no-op.
+    li      $11, 0xFEFF // 0b...111011111111 (8 set to the right of the 0)
     addi    $10, clipCurVtx, -(clipTempVerts - vtxSize)
 clip_deallocate_loop:
     addi    $10, $10, vtxSize
     bgez    $10, clip_deallocate_loop // First iter: loops if in clipTempVerts
-     sra    $11, $11, 1               // First iter: else, clears 1101111111...
-    and     clipAlloc, clipAlloc, $11
+     sra    $11, $11, 1               // First iter: else, clears ...11101111111 (7)
+    and     clipAlloc, clipAlloc, $11 // Clear vertex allocation bit
     addi    clipIdx, clipIdx, -2 // Re-process same vertex
-clip_proc_loop_continue:
+clip_walk_loop_continue:
     move    clipLastVtx, clipCurVtx
-clip_proc_loop_skip_vtx:
-    addi    clipProcCount, clipProcCount, -1
-    bltz    clipProcCount, clip_degenerate TODO // need to check phase, timeout in find on is degenerate, timeout in find on to off is all onscreen, timeout in find off to on is error
+clip_walk_loop_skip_vtx:
+    addi    clipWalkCount, clipWalkCount, -1
+    bltz    clipWalkCount, clip_timeout
      addi   clipIdx, clipIdx, 2
     andi    clipIdx, clipIdx, 0xE
-clip_proc_loop:
+clip_walk_loop:
     lhu     clipCurVtx, (clipPoly)(clipIdx)
-    beqz    clipCurVtx, clip_proc_loop_skip_vtx // Vertex addr = 0 -> skip
+    beqz    clipCurVtx, clip_walk_loop_skip_vtx // Vertex addr = 0 -> skip
      lhu    $10, VTX_CLIP(clipCurVtx)
     sllv    $10, $10, clipMaskShift // Put clipping bit in sign bit
-    xor     $10, $10, clipProcPhase // Invert the sign bit for phase -1
-    bltz    $10, clip_proc_loop_top // Nonzero clipping bit = offscreen. Phase 1 and 0, continue if offscreen.
+    xor     $10, $10, clipWalkPhase // Invert the sign bit for phase -1
+    bltz    $10, clip_walk_loop_top // Nonzero clipping bit = offscreen. Phase 1 and 0, continue if offscreen.
      sh     clipLastVtx, (CLIP_PTR_ONSCR)(clipPtrs) // For on to off
-    bgtz    clipProcPhase, clip_found_on
+    bgtz    clipWalkPhase, clip_found_on
      li     $10, 0xC  // Insert a space here. The zeros are always on the right,
 clip_insert_loop:     // regardless of the circular buffer rotation.
     lhu     $11, (clipPoly + 0)($10)
-    bltz    $10, clip_degenerate // Error, exit instead of corrupting memory
+    bltz    $10, clip_done // Error, exit instead of corrupting memory
      sh     $11, (clipPoly + 2)($10)
     bne     $10, clipIdx, clip_insert_loop
      addi   $10, $10, -2
     // Allocate a temp vertex
-    TODO
+    li      $11, 0x0080 // 7 zeros to the right
+    li      clipTempVtx, clipTempVerts - vtxSize
+clip_allocate_loop:
+    srl     $11, $11, 1 // First iter: 6 zeros to the right, at first temp vtx
+    and     $10, $11, clipAlloc
+    bnez    $10, clip_allocate_loop // First iter: branch if first temp vtx already allocated
+     addi   clipTempVtx, clipTempVtx, vtxSize // First iter: clipTempVtx = clipTempVerts
+    beqz    $11, clip_done // Error, shifted the 1 all the way off, no vtx avail
+     or     clipAlloc, clipAlloc, $11 // Mark the vertex allocated
     sh      clipTempVtx, (clipPoly)(clipIdx)
     sh      clipTempVtx, (CLIP_PTR_GEN)(clipPtrs)
     sh      clipCurVtx, (CLIP_PTR_OFFSCR)(clipPtrs) // For on to off only
     addi    clipPtrs, clipPtrs, CLIP_PTR_COUNT
-    bltz    clipProcPhase, clip_proc_loop_continue // Currently on to off
-     li     clipProcPhase, 0 // Change to find off to on (nop if done)
+    bltz    clipWalkPhase, clip_walk_loop_continue // Currently on to off
+     li     clipWalkPhase, 0 // Change to find off to on (nop if done)
     sh      clipLastVtx, (CLIP_PTR_OFFSCR - CLIP_PTR_COUNT)(clipPtrs) // Swapped for off to on
     sh      clipCurVtx, (CLIP_PTR_ONSCR - CLIP_PTR_COUNT)(clipPtrs) // Swapped for off to on
 clip_do_subdivision:
@@ -2101,25 +2122,22 @@ clip_after_vtx_store:
     addi    $11, rdpCmdBufEndP1, tempClipPtrs + 3 * CLIP_PTR_COUNT
     beq     $11, clipPtrs, clip_do_subdivision // Do one more subdivision
      slv    sSTS[0], (VTX_TC_VEC   )(outVtx1) // Store not-twice-scaled ST
-    // Next clip condition
-    addi    clipMaskIdx, clipMaskIdx, -1
-    bgez    clipMaskIdx, clip_condlooptop
-     lbu    clipMaskShift, (clipCondShifts)(clipMaskIdx) // Load next clip condition shift amount
-    sh      $zero, activeClipPlanes
-// Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
-// Draws verts in pattern like 0-1-4, 1-2-4, 2-3-4
+clip_next_cond:
+    bgtz    clipMaskIdx, clip_condlooptop // Currently 0 = continue to draw
+     sh     $zero, activeClipPlanes // Only matters if we need to draw
+// clipDrawPtr <- clipMaskIdx; currently at 0
+// Draws verts in pattern like 0-1-2, 0-2-3, 0-3-4
+    li      $ra, clip_draw_tris_loop
 clip_draw_tris_loop:
-    TODO
-    lhu     $1, (clipPoly - 6)(clipPolySelect)
-    lhu     $2, (clipPoly - 4)(clipPolySelect)
-    lhu     $3, (clipPoly - 2)(clipPolyWrite)
-    mtc2    $1, $v6[10]              // Addresses go in vector regs too
-    mtc2    $2, $v7[12]
-    jal     tri_noinit
-     mtc2   $3, $v7[14]
-    bne     clipPolyWrite, clipPolySelect, clip_draw_tris_loop
-     addi   clipPolySelect, clipPolySelect, 2
-clip_degenerate:
+    lhu     $1, (clipPoly + 0)($zero)
+    lhu     $2, (clipPoly + 2)(clipDrawPtr)
+    lhu     $3, (clipPoly + 4)(clipDrawPtr)
+    beqz    $3, clip_done // Off the end of the output polygon. Also covers <= 2 verts
+     mtc2   $1, $v6[10]   // Vertex addresses to vector regs
+    ldv     $v7[10], (-(0x1000 - clipPoly))(clipDrawPtr) // $2 to elem 6, $3 to elem 7
+    j       tri_noinit
+     addi   clipDrawPtr, clipDrawPtr, 2
+clip_done:
     li      $11, CLIP_SCAL_NPXY | CLIP_CAMPLANE
     sh      $11, activeClipPlanes
     lh      $ra, tempTriRA
