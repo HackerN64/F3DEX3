@@ -1780,7 +1780,7 @@ tri_decal_fix_z:
 
 tri_culled_by_occlusion_plane:
 .if CFG_PROFILING_B
-    //addi    perfCounterB, perfCounterB, 0x4000
+    addi    perfCounterB, perfCounterB, 0x4000
 .endif
 return_and_end_mat:
     jr      $ra
@@ -1799,8 +1799,8 @@ align_with_warning 8, "One instruction of padding before ovl234"
 
 vtx_select_lighting:
 .if CFG_PROFILING_B
-    // srl     $11, vtxLeft, 4                  // Vertex count
-    // add     perfCounterA, perfCounterA, $11  // Add to number of lit vertices
+    srl     $11, vtxLeft, 4                  // Vertex count
+    add     perfCounterA, perfCounterA, $11  // Add to number of lit vertices
 .endif
     bltz    viLtFlag, ovl234_ltadv_entrypoint  // Advanced lighting if have point lights
      andi   $10, vGeomMid, (G_LIGHTING_SPECULAR | G_FRESNEL_COLOR | G_FRESNEL_ALPHA) >> 8
@@ -1878,22 +1878,22 @@ clip_after_constants:
 .if CFG_PROFILING_B
     addi    perfCounterB, perfCounterB, 1  // Increment clipped (input) tris count
 .endif
-    li      clipMaskIdx, 5                // Will sub 1; 4=screen, 3=+x, 2=-x, 1=+y, 0=-y
-    li      clipAlloc, 0                  // Init to no temp verts allocated
     sqv     vZero[0], (clipPolySgn)($zero) // Clear whole polygon
     sh      $1, clipPoly + 0     // Write the current three verts
     sh      $2, clipPoly + 2     // as the initial write polygon
     sh      $3, clipPoly + 4     //
     sb      $zero, materialCullMode            // In case only/all tri(s) clip then offscreen
+    li      clipMaskIdx, 5                // Will sub 1; 4=screen, 3=+x, 2=-x, 1=+y, 0=-y
+    li      clipAlloc, 0                  // Init to no temp verts allocated
 // Available locals here: $11, $10, $1, $7, $20, $24
 clip_condlooptop:
     addi    clipMaskIdx, clipMaskIdx, -1
     lbu     clipMaskShift, (clipCondShifts)(clipMaskIdx)
     addi    clipPtrs, rdpCmdBufEndP1, tempClipPtrs // Temp mem in output buffer for vtx ptrs
-CLIP_PTR_ONSCR equ 0
-CLIP_PTR_OFFSCR equ 2
-CLIP_PTR_GEN equ 4
-CLIP_PTR_COUNT equ 6
+CLIP_PTR_ONSCR equ 0  // Two of these sets of three pointers
+CLIP_PTR_OFFSCR equ 2 // These are the inputs to the subdivision. There's always
+CLIP_PTR_GEN equ 4    // two subdivisions, onscreen to offscreen then offscreen to
+CLIP_PTR_COUNT equ 6  // onscreen.
     li      clipWalkCount, 0x18 // Give up if loop traversed the polygon 3x
     li      clipWalkPhase, 1 // 1 = find on; then -1 = find on to off; then 0 = find off to on
     j       clip_walk_loop
@@ -1935,9 +1935,10 @@ clip_walk_loop:
     sllv    $10, $10, clipMaskShift // Put clipping bit in sign bit
     xor     $10, $10, clipWalkPhase // Invert the sign bit for phase -1
     bltz    $10, clip_walk_loop_top // Nonzero clipping bit = offscreen. Phase 1 and 0, continue if offscreen.
-     sh     clipLastVtx, (CLIP_PTR_ONSCR)(clipPtrs) // For on to off
+     sh     clipLastVtx, (CLIP_PTR_ONSCR)(clipPtrs) // For on to off only
     bgtz    clipWalkPhase, clip_found_on
-     li     $10, 0xC  // Insert a space here. The zeros are always on the right,
+     sh     clipCurVtx, (CLIP_PTR_OFFSCR)(clipPtrs) // For on to off only
+    li      $10, 0xC  // Insert a space here. The zeros are always on the right,
 clip_insert_loop:     // regardless of the circular buffer rotation.
     lhu     $11, (clipPoly + 0)($10)
     bltz    $10, clip_err_insert
@@ -1956,7 +1957,6 @@ clip_allocate_loop:
      or     clipAlloc, clipAlloc, $11 // Mark the vertex allocated
     sh      clipTempVtx, (clipPoly)(clipIdx)
     sh      clipTempVtx, (CLIP_PTR_GEN)(clipPtrs)
-    sh      clipCurVtx, (CLIP_PTR_OFFSCR)(clipPtrs) // For on to off only
     addi    clipPtrs, clipPtrs, CLIP_PTR_COUNT
     bltz    clipWalkPhase, clip_walk_loop_continue // Currently on to off
      li     clipWalkPhase, 0 // Change to find off to on (nop if done)
@@ -2115,20 +2115,10 @@ clip_draw_tris_loop:
 
 clip_timeout:
     bltz    clipWalkPhase, clip_next_cond // Timed out in find on to off: all onscreen, nothing to do for this cond
-.if CFG_PROFILING_B
-     nop
-    bgtz    clipWalkPhase, clip_done // Timed out in find on: all offscreen, discard tri.
-     nop
-clip_err_timeout:
-    j       clip_done        // Timed out in find off to on: error, give up
-     addi   perfCounterB, perfCounterB, 0x4000 // "occ" counter
+    // bgtz    clipWalkPhase, clip_done // Timed out in find on: all offscreen, discard tri.
+    // j       clip_done        // Timed out in find off to on: error, give up
 clip_err_alloc:
 clip_err_insert:
-    addi    perfCounterA, perfCounterA, 1 // "lit" counter
-.else
-clip_err_alloc:
-clip_err_insert:
-.endif
 clip_done:    // Delay slot is harmless if branched
      li     $11, CLIP_SCAL_NPXY | CLIP_CAMPLANE
     sh      $11, activeClipPlanes
@@ -2377,11 +2367,11 @@ vtx_store_for_clip:
     ldv     sTCL[8],   (VTX_IN_TC + 3 * inputVtxSize)(inVtx) // ST in 4:5, RGBA in 6:7
 // sST2 <- vpScrI
     vmadh   sST2, vOne, $v30          // + 1 * ST offset; elems 0, 1, 4, 5
-    suv     vpRGBA[4],   (VTX_COLOR_VEC )(outVtx2) // Store RGBA for second vtx
+    suv     vpRGBA[4],  (VTX_COLOR_VEC )(outVtx2) // Store RGBA for second vtx
     vmudl   $v29, s1WF, sRTF[2h]
     lsv     vpClpI[14], (VTX_Z_INT     )(outVtx2) // load Z into W slot, will be for fog below
     vmadm   $v29, s1WI, sRTF[2h]
-    suv     vpRGBA[0],   (VTX_COLOR_VEC )(outVtx1) // Store RGBA for first vtx
+    suv     vpRGBA[0],  (VTX_COLOR_VEC )(outVtx1) // Store RGBA for first vtx
     vmadn   s1WF, s1WF, sRTI[3h]
     lsv     vpClpI[6],  (VTX_Z_INT     )(outVtx1) // load Z into W slot, will be for fog below
     vmadh   s1WI, s1WI, sRTI[3h]
@@ -2691,7 +2681,7 @@ dma_read_write:
      nop
 .endif
 
-.if CFG_PROFILING_B
+.if 0
 dump_dmem:
     jal     segmented_to_physical
      lw     cmd_w1_dram, dumpDmemBuffer
