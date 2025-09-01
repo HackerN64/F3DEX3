@@ -2103,13 +2103,19 @@ clip_next_cond:
 // clipDrawPtr <- clipMaskIdx; currently at 0
 // Draws verts in pattern like 0-1-2, 0-2-3, 0-3-4
     li      $ra, clip_draw_tris_loop
+    li      $17, 0xE
+clip_draw_find_end_loop:
+    lhu     $11, (clipPolySgn)($17)
+    beqz    $11, clip_draw_find_end_loop
+     addi   $17, $17, -2 // End: points one vtx behind last valid vertex
 clip_draw_tris_loop:
-    lhu     $1, (clipPoly + 0)($zero)
-    lhu     $2, (clipPoly + 2)(clipDrawPtr)
-    lhu     $3, (clipPoly + 4)(clipDrawPtr)
-    beqz    $3, clip_done // Off the end of the output polygon. Also covers <= 2 verts
+    sub     $11, clipDrawPtr, $17
+    bgez    $11, clip_done // Last drawn tri is with clipDrawPtr one vtx behind $17
+     lhu    $1, (clipPolySgn + 2)($17) // Last valid vertex
+    lhu     $2, (clipPolySgn + 0)(clipDrawPtr)
+    lhu     $3, (clipPolySgn + 2)(clipDrawPtr)
      mtc2   $1, $v6[10]   // Vertex addresses to vector regs
-    ldv     $v7[10], (clipPolySgn)(clipDrawPtr) // $2 to elem 6, $3 to elem 7
+    llv     $v7[12], (clipPolySgn)(clipDrawPtr) // $2 to elem 6, $3 to elem 7
     j       tri_noinit
      addi   clipDrawPtr, clipDrawPtr, 2
 
