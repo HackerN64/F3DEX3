@@ -1874,43 +1874,52 @@ g_memset_ovl3:
     jr      $ra
      addi   $2, $11, memsetBufferSize
     
+// Each clip condition (clipping plane bit being checked) has three phases that
+// occur in this order: find an onscreen vertex, then find the transition from an
+// onscreen to offscreen vertex, then find the transition from an offscreen to an
+// onscreen vertex. The latter two are the edges which must be subdivided.
+CLIP_PHASE_FIND_ON        equ  1  // These are these values so that we can use branch
+CLIP_PHASE_FIND_ON_TO_OFF equ -1  // instructions to check them, and so that the sign
+CLIP_PHASE_FIND_OFF_TO_ON equ  0  // bit represents which condition (on/off) to continue.
+// The clipping walk finds the two edges to be subdivided and stores them in temp
+// memory at these offsets. There are two of these sets of three pointers contiguously.
+CLIP_PTR_ONSCR  equ 0  // Onscreen vertex at the end of the edge
+CLIP_PTR_OFFSCR equ 2  // Offscreen vertex at the other end of the edge
+CLIP_PTR_GEN    equ 4  // Generated vertex, where to write the results
+CLIP_PTR_COUNT  equ 6
+
 clip_after_constants:
 .if CFG_PROFILING_B
     addi    perfCounterB, perfCounterB, 1  // Increment clipped (input) tris count
 .endif
     sqv     vZero[0], (clipPolySgn)($zero) // Clear whole polygon
-    sh      $1, clipPoly + 0     // Write the current three verts
-    sh      $2, clipPoly + 2     // as the initial write polygon
-    sh      $3, clipPoly + 4     //
-    sb      $zero, materialCullMode            // In case only/all tri(s) clip then offscreen
-    li      clipMaskIdx, 5                // Will sub 1; 4=screen, 3=+x, 2=-x, 1=+y, 0=-y
-    li      clipAlloc, 0                  // Init to no temp verts allocated
-// Available locals here: $11, $10, $1, $7, $20, $24
+    sh      $1, clipPoly + 0xA       // Initial polygon is right-justified
+    sh      $2, clipPoly + 0xC
+    sh      $3, clipPoly + 0xE
+    sb      $zero, materialCullMode  // In case only/all tri(s) clip then offscreen
+    li      clipMaskIdx, 5           // Will sub 1; 4=screen, 3=+x, 2=-x, 1=+y, 0=-y
+    li      clipAlloc, 0             // Init to no temp verts allocated
 clip_condlooptop:
     addi    clipMaskIdx, clipMaskIdx, -1
     lbu     clipMaskShift, (clipCondShifts)(clipMaskIdx)
     addi    clipPtrs, rdpCmdBufEndP1, tempClipPtrs // Temp mem in output buffer for vtx ptrs
-CLIP_PTR_ONSCR equ 0  // Two of these sets of three pointers
-CLIP_PTR_OFFSCR equ 2 // These are the inputs to the subdivision. There's always
-CLIP_PTR_GEN equ 4    // two subdivisions, onscreen to offscreen then offscreen to
-CLIP_PTR_COUNT equ 6  // onscreen.
     li      clipWalkCount, 0x18 // Give up if loop traversed the polygon 3x
-    li      clipWalkPhase, 1 // 1 = find on; then -1 = find on to off; then 0 = find off to on
+    li      clipWalkPhase, CLIP_PHASE_FIND_ON
     j       clip_walk_loop
-     li     clipIdx, 0
+     li     clipIdx, 0xA // Start pos doesn't matter, cause first actual op at on-to-off, and there should be only one of these.
 
 clip_found_on:
-    li      clipWalkPhase, -1 // Change to find on to off
+    li      clipWalkPhase, CLIP_PHASE_FIND_ON_TO_OFF
 clip_walk_loop_top:
-    bnez    clipWalkPhase, clip_walk_loop_continue
-     // Phase 0 = find off to on. This is an offscreen vertex, so remove it.
-     addi   $10, clipIdx, -0xC
+    bnez    clipWalkPhase, clip_walk_loop_continue // find on, or find on to off
+     // 0 = find off to on. This is an offscreen vertex, so remove it.
+    addi    $10, clipIdx, -2
 clip_remove_loop:
-    lhu     $11, (clipPoly + 0xC + 2)($10)
-    sh      $11, (clipPoly + 0xC + 0)($10)
-    bltz    $10, clip_remove_loop
-     addi   $10, $10, 2
-    sh      $zero, (clipPoly + 0xE)
+    lhu     $11, (clipPoly + 0)($10)
+    sh      $11, (clipPoly + 2)($10)
+    bgtz    $10, clip_remove_loop
+     addi   $10, $10, -2
+    sh      $zero, (clipPoly + 0)
     // Deallocate it. The first iteration is for if it's in the main vertex buffer,
     // in which case the deallocation is a no-op.
     li      $11, 0xFEFF // 0b...111011111111 (8 set to the right of the 0)
@@ -1920,14 +1929,13 @@ clip_deallocate_loop:
     bgez    $10, clip_deallocate_loop // First iter: loops if in clipTempVerts
      sra    $11, $11, 1               // First iter: else, clears ...11101111111 (7)
     and     clipAlloc, clipAlloc, $11 // Clear vertex allocation bit
-    addi    clipIdx, clipIdx, -2 // Re-process same vertex
 clip_walk_loop_continue:
     move    clipLastVtx, clipCurVtx
 clip_walk_loop_skip_vtx:
     addi    clipWalkCount, clipWalkCount, -1
     bltz    clipWalkCount, clip_timeout
      addi   clipIdx, clipIdx, 2
-    andi    clipIdx, clipIdx, 0xE
+    andi    clipIdx, clipIdx, 0xE  // Circular addressing
 clip_walk_loop:
     lhu     clipCurVtx, (clipPoly)(clipIdx)
     beqz    clipCurVtx, clip_walk_loop_skip_vtx // Vertex addr = 0 -> skip
@@ -1936,15 +1944,17 @@ clip_walk_loop:
     xor     $10, $10, clipWalkPhase // Invert the sign bit for phase -1
     bltz    $10, clip_walk_loop_top // Nonzero clipping bit = offscreen. Phase 1 and 0, continue if offscreen.
      sh     clipLastVtx, (CLIP_PTR_ONSCR)(clipPtrs) // For on to off only
-    bgtz    clipWalkPhase, clip_found_on
+    bgtz    clipWalkPhase, clip_found_on // 1 = find on
      sh     clipCurVtx, (CLIP_PTR_OFFSCR)(clipPtrs) // For on to off only
-    li      $10, 0xC  // Insert a space here. The zeros are always on the right,
-clip_insert_loop:     // regardless of the circular buffer rotation.
-    lhu     $11, (clipPoly + 0)($10)
-    bltz    $10, clip_err_insert
-     sh     $11, (clipPoly + 2)($10)
+    // Insert a space here. The zeros are always on the left.
+    blez    clipIdx, clip_err_insert // Would crash if continued with clipIdx == 0
+     li     $10, 2
+clip_insert_loop:
+    lhu     $11, (clipPoly - 0)($10) // Last iter, unecessarily copies clipIdx left one
+    sh      $11, (clipPoly - 2)($10) // but this is harmless & handles case clipIdx == 2
     bne     $10, clipIdx, clip_insert_loop
-     addi   $10, $10, -2
+     addi   $10, $10, 2
+    addi    clipIdx, clipIdx, -2 // For temp vtx, then reprocess current vtx. Checked clipIdx > 0 above.
     // Allocate a temp vertex
     li      $11, 0x0080 // 7 zeros to the right
     li      clipTempVtx, clipTempVerts - vtxSize
@@ -1958,8 +1968,8 @@ clip_allocate_loop:
     sh      clipTempVtx, (clipPoly)(clipIdx)
     sh      clipTempVtx, (CLIP_PTR_GEN)(clipPtrs)
     addi    clipPtrs, clipPtrs, CLIP_PTR_COUNT
-    bltz    clipWalkPhase, clip_walk_loop_continue // Currently on to off
-     li     clipWalkPhase, 0 // Change to find off to on (nop if done)
+    bltz    clipWalkPhase, clip_walk_loop_continue // -1 = on to off
+     li     clipWalkPhase, CLIP_PHASE_FIND_OFF_TO_ON // (nop if done)
     sh      clipLastVtx, (CLIP_PTR_OFFSCR - CLIP_PTR_COUNT)(clipPtrs) // Swapped for off to on
     sh      clipCurVtx, (CLIP_PTR_ONSCR - CLIP_PTR_COUNT)(clipPtrs) // Swapped for off to on
 clip_do_subdivision:
@@ -2078,7 +2088,7 @@ clip_skipxy:
     vmrg    cDiffF, cDiffF, $v31[1]         // keep frac part of factor, else set to 0xFFFF (max val)
     vsubc   $v29, cDiffF, vOne[0]           // frac part - 1 for carry
     vge     cDiffI, cDiffI, $v31[2]         // 0; If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
-    j       vtx_final_setup_for_clip        // Clobbers vcc and accum in !NOC config.
+    j       vtx_final_setup_for_clip        // TODO can merge this with vtx_store_for_clip Clobbers vcc and accum in !NOC config.
      vmrg   cFadeOf, cDiffF, vOne[0]        // keep frac part of factor, else set to 1 (min val)
 clip_after_final_setup: // This is here because otherwise 3 cycle stall here.
     vmudn   cFadeOn, cFadeOf, $v31[1]       // signed x * -1 = 0xFFFF - unsigned x! Fade factor for on screen vert
@@ -2101,23 +2111,17 @@ clip_next_cond:
     bgtz    clipMaskIdx, clip_condlooptop // Currently 0 = continue to draw
      sh     $zero, activeClipPlanes // Only matters if we need to draw
 // clipDrawPtr <- clipMaskIdx; currently at 0
-// Draws verts in pattern like 0-1-2, 0-2-3, 0-3-4
+// Draws verts in pattern like 4-2-3, 4-1-2, 4-0-1
     li      $ra, clip_draw_tris_loop
-    li      $17, 0xE
-clip_draw_find_end_loop:
-    lhu     $11, (clipPolySgn)($17)
-    beqz    $11, clip_draw_find_end_loop
-     addi   $17, $17, -2 // End: points one vtx behind last valid vertex
 clip_draw_tris_loop:
-    sub     $11, clipDrawPtr, $17
-    bgez    $11, clip_done // Last drawn tri is with clipDrawPtr one vtx behind $17
-     lhu    $1, (clipPolySgn + 2)($17) // Last valid vertex
-    lhu     $2, (clipPolySgn + 0)(clipDrawPtr)
-    lhu     $3, (clipPolySgn + 2)(clipDrawPtr)
-     mtc2   $1, $v6[10]   // Vertex addresses to vector regs
-    llv     $v7[12], (clipPolySgn)(clipDrawPtr) // $2 to elem 6, $3 to elem 7
+    lhu     $2,      (clipPolySgn + 0xA)(clipDrawPtr)
+    lhu     $3,      (clipPolySgn + 0xC)(clipDrawPtr)
+    lhu     $1,      (clipPolySgn + 0xE)($zero)
+    beqz    $2, clip_done
+     lsv    $v6[10], (clipPolySgn + 0xE)($zero)       // +E ($1) to elem 5
+    ldv     $v7[10], (clipPolySgn + 0x8)(clipDrawPtr) // +A ($2) to elem 6, +C ($3) to elem 7
     j       tri_noinit
-     addi   clipDrawPtr, clipDrawPtr, 2
+     addi   clipDrawPtr, clipDrawPtr, -2
 
 clip_timeout:
     bltz    clipWalkPhase, clip_next_cond // Timed out in find on to off: all onscreen, nothing to do for this cond
