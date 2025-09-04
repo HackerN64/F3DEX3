@@ -34,31 +34,25 @@ ifeq ($(PARENT_OUTPUT_DIR),.)
 endif
 
 # Find the N64 toolchain, for creating object files.
-ifneq (, $(shell which mips64-linux-gnuabi64-as))
-  AS := mips64-linux-gnuabi64-as
-else
-ifneq (, $(shell which mips64-linux-gnu-as))
-  AS := mips64-linux-gnu-as
-else
-ifneq (, $(shell which mips64-ultra-elf-as))
-  AS := mips64-ultra-elf-as
-else
-ifneq (, $(shell which mips64-elf-as))
-  AS := mips64-elf-as
-else
-ifneq (, $(shell which mips64-as))
-  AS := mips64-as
-else
-ifneq (, $(shell which mips-linux-gnu-as))
-  AS := mips-linux-gnu-as
+ifneq (, $(shell which mips64-elf-ld)
+  CROSS := mips64-elf-
+else ifneq (, $(shell which mips-n64-ld)
+  CROSS := mips-n64-
+else ifneq (, $(shell which mips64-ld)
+  CROSS := mips64-
+else ifneq (, $(shell which mips-linux-gnu-ld)
+  CROSS := mips-linux-gnu-
+else ifneq (, $(shell which mips64-linux-gnu-ld)
+  CROSS := mips64-linux-gnu-
+else ifneq (, $(shell which mips-ld)
+  CROSS := mips-
+else ifneq (, $(shell which mips64-linux-gnuabi64-ld)
+  CROSS := mips64-linux-gnuabi64-
+else ifneq (, $(shell which mips64-ultra-elf-ld)
+  CROSS := mips64-ultra-elf-
 else
   $(warning Could not find N64 linker, not building object files)
   AS := 
-endif
-endif
-endif
-endif
-endif
 endif
 
 NO_COL := \033[0m
