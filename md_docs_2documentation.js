@@ -34,25 +34,31 @@ var md_docs_2documentation =
       ] ]
     ] ],
     [ "Removed Features", "removed.html", [
-      [ "Removed Features", "removed.html#autotoc_md44", [
-        [ "Legacy Vertex Pipeline (LVP) Configuration", "removed.html#autotoc_md45", null ],
-        [ "Octahedral Encoding for Packed Normals", "removed.html#autotoc_md46", null ],
-        [ "Clipping minimal scanlines algorithm", "removed.html#autotoc_md47", null ],
-        [ "Z attribute offsets", "removed.html#autotoc_md48", null ],
-        [ "SPTriStrip and SPTriFan", "removed.html#autotoc_md49", null ]
+      [ "Removed Features", "removed.html#autotoc_md49", [
+        [ "Legacy Vertex Pipeline (LVP) Configuration", "removed.html#autotoc_md50", null ],
+        [ "Octahedral Encoding for Packed Normals", "removed.html#autotoc_md51", null ],
+        [ "Clipping minimal scanlines algorithm", "removed.html#autotoc_md52", null ],
+        [ "Z attribute offsets", "removed.html#autotoc_md53", null ],
+        [ "SPTriStrip and SPTriFan", "removed.html#autotoc_md54", null ]
       ] ]
     ] ],
     [ "Performance Results", "performance.html", [
       [ "Performance Results", "performance.html#autotoc_md37", [
-        [ "Cycle Counts", "performance.html#autotoc_md38", null ]
+        [ "Cycle Counts", "performance.html#autotoc_md38", null ],
+        [ "Triangle Snake Cycle Counts", "performance.html#autotoc_md39", [
+          [ "Very Long Snakes", "performance.html#autotoc_md40", null ],
+          [ "Starting a Snake", "performance.html#autotoc_md41", null ],
+          [ "Ending a Snake", "performance.html#autotoc_md42", null ],
+          [ "Example", "performance.html#autotoc_md43", null ]
+        ] ]
       ] ]
     ] ],
     [ "Porting Your Romhack Codebase to F3DEX3", "porting.html", [
-      [ "Porting Your Romhack Codebase to F3DEX3", "porting.html#autotoc_md39", [
-        [ "Required Changes", "porting.html#autotoc_md40", null ],
-        [ "Recommended Changes (Non-Lighting)", "porting.html#autotoc_md41", null ],
-        [ "Recommended Changes (Lighting)", "porting.html#autotoc_md42", null ],
-        [ "Changes Required for New Features", "porting.html#autotoc_md43", null ]
+      [ "Porting Your Romhack Codebase to F3DEX3", "porting.html#autotoc_md44", [
+        [ "Required Changes", "porting.html#autotoc_md45", null ],
+        [ "Recommended Changes (Non-Lighting)", "porting.html#autotoc_md46", null ],
+        [ "Recommended Changes (Lighting)", "porting.html#autotoc_md47", null ],
+        [ "Changes Required for New Features", "porting.html#autotoc_md48", null ]
       ] ]
     ] ],
     [ "Triangle Snake", "snake.html", null ]

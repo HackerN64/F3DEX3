@@ -125,11 +125,11 @@ Coiled snake forming triangle fan</div></div>
 Snake with mixed shape</div></div>
     <p><em>The snake need not be constrained to either shape; it can turn left or right in any combination. This can be thought of as concatenating triangle strips and fans. (Original photo by Al d'Vilas, free-use licensed)</em></p>
 <p>A snake can be arbitrarily long. It starts with a <code>SPTriSnake</code> command, which may be followed by one or more <code>SPContinueSnake</code> macros which encode continued indices. The latter are not commands (there's no command byte)&ndash;they are just more index data sequentially in the display list. In other words, the display list input buffer is the storage for the indices data. The microcode correctly handles the case when the snake runs off the end of the input buffer and the input buffer needs to be refilled. The refilled data starts from the start of the input buffer, as if it were regular commands; this matters for the hints system.</p>
-<h2><a class="anchor" id="autotoc_md50"></a>
+<h2><a class="anchor" id="autotoc_md55"></a>
 Memory Bandwidth</h2>
 <p>The goal of any accelerated triangles system in a microcode is to reduce the memory bandwidth used for loading triangle indices. The actual tris drawn are the same regardless of how their indices are encoded in the display list, so we do not consider the performance of actually drawing the tris, only loading their indices.</p>
 <p>An <code>SPTriSnake</code> command by itself contains 7 vertices and draws 5 triangles (because the first triangle needs two extra vertices to start itself). An <code>SPContinueSnake</code> macro contains 8 vertices and draws 8 tris, in each case continuing the existing snake. The F3D family microcodes before F3DEX3 only provided <code>SP1Triangle</code> and <code>SP2Triangle</code> commands, so any snake of 3 or more tris is more efficient than F3DEX2 and older microcodes. The efficiency gain is up to 4x (2 tris -&gt; 8 tris per 8-byte macro), though in typical meshes the gain is expected to be 2-3x.</p>
-<h2><a class="anchor" id="autotoc_md51"></a>
+<h2><a class="anchor" id="autotoc_md56"></a>
 Vertex Cache Locality</h2>
 <p>The key advantage of a triangle snake over a traditional triangle strip is that it better exploits the vertex cache.</p>
 <p>In any microcode, the vertex cache is of a fixed size, and any continuous subset of it can be reloaded. Loading a vertex costs 16 bytes of memory throughput plus some RSP time to perform transformation and lighting. So, the goal of vertex cache optimization is to reduce the number of vertices reloaded (loaded a second time when they had been loaded in the past but are no longer loaded). A secondary goal is to reduce the number of vertices kept in the cache between loads, as doing so increases the average load size, which decreases the relative overhead of the loads.</p>
@@ -145,7 +145,7 @@ Part of a mesh showing subdivision into 4 strips or 1 snake</div></div>
 <div class="caption">
 The same mesh but with a long, thin set of tris</div></div>
     <p><em>If vertex loads are optimized for rendering with triangle strips, long "1D" sections of meshes will be loaded, which does not exploit the "2D" spatial locality of the vertex cache. This is especially inefficient if the export tool always reloads vertices instead of keeping them in the cache: in the case pictured, the entire top row of selected vertices will be immediately reloaded when rendering the next strip up.</em></p>
-<h2><a class="anchor" id="autotoc_md52"></a>
+<h2><a class="anchor" id="autotoc_md57"></a>
 What about yielding?</h2>
 <p>Microcodes compatible with libultra&ndash;including the F3D family, S2DEX, JPEG decoder, etc.&ndash;are required to listen for a flag from the CPU, and if it is set, to save their state and stop executing. This allows the higher-priority audio microcode to be swapped in and run, which must occur soon after every VI. The audio microcode may take a few ms to run, so if it is delayed by more than a few ms, there is a risk of audio corruption.</p>
 <p>Any command which results in RDP commands being enqueued&ndash;triangle or rectangle draws, texture loads, CC setting changes, etc.&ndash;can cause the current temporary RDP command buffer in DMEM to be flushed to the FIFO in RDRAM. If the latter is full, the command will wait until space is available. In an extreme case, the RDP may have to clear the framebuffer and depth buffer before making progress and opening up space in the FIFO, which can take several ms. Thus, the processing of most display list commands could theoretically cause the RSP to wait&ndash;delaying the yield&ndash;by several ms.</p>
@@ -162,7 +162,7 @@ What about yielding?</h2>
 <li>A snake this long is rare in typical low-poly N64 meshes. And, the export tool could limit the maximum snake length generated.</li>
 </ul>
 <p>A future version of F3DEX3 could allow the snake command to yield in the middle. This has not been implemented yet because it is very difficult to validate. Yields are rare relative to display list commands (typically 1-2 of the former and many thousands of the latter per frame). And, until we have a robust F3DEX3 mesh optimizer and a game where most things are drawn with snakes (i.e. few vanilla assets left), snakes will also be rare in the display list. So it will be hard to know whether the yield-during-snake codepath is even being run, let alone whether it is correct in all cases.</p>
-<h2><a class="anchor" id="autotoc_md53"></a>
+<h2><a class="anchor" id="autotoc_md58"></a>
 Comparison with Tiny3D</h2>
 <p><a href="https://github.com/HailToDodongo/tiny3d">Tiny3D</a>, the homebrew microcode, uses triangle strips as its accelerated triangles command. F3DEX3 triangle snakes have several advantages compared to Tiny3D's triangle strips:</p><ul>
 <li>Tiny3D uses 16-bit indices (raw DMEM addresses) in triangle strips, which saves a multiply-add / table lookup for each index, but doubles the required memory bandwidth compared to 8-bit indices in the F3D family (including F3DEX3).</li>
