@@ -521,10 +521,11 @@ afterMovememRaTable:
     .dh G_MTX_multiply_end
 
 clipCondShifts:
-    .db CLIP_SCAL_NY_SHIFT // Constants for clipping algorithm
-    .db CLIP_SCAL_PY_SHIFT
-    .db CLIP_SCAL_NX_SHIFT
-    .db CLIP_SCAL_PX_SHIFT
+    .db (31 - CLIP_SCAL_NY_SHIFT) // Constants for clipping algorithm
+    .db (31 - CLIP_SCAL_PY_SHIFT)
+    .db (31 - CLIP_SCAL_NX_SHIFT)
+    .db (31 - CLIP_SCAL_PX_SHIFT)
+    .db (31 - CLIP_CAMPLANE_SHIFT)
     
 mvpValid:
     .db 0   // Nonzero if the MVP matrix is valid, 0 if it needs to be recomputed.
@@ -629,16 +630,12 @@ MAX_CLIP_GEN_VERTS equ 7
 // Put another way, if there are 8 verts in the final polygon, there are 8 edges,
 // which are portions of the 3 original edges plus portions of 5 edges along the
 // 5 clip planes. But the edge portion along the no-nearclipping plane is at
-// infinity, so that edge can't be on screen.
-// It is rare but possible for these assumptions to be violated and a polygon
-// with more than 7 verts to be generated. For example, numerical precision
-// issues could cause the polygon to be slightly non-convex at one of the clip
-// planes, causing the plane to cut off more than one tip. However, this
-// implementation checks for an imminent overflow and aborts clipping (draws no
-// tris) if this occurs. Because this is caused by extreme/degenerate cases like
-// the camera exactly on a tri, not drawing anything is an okay result.
-MAX_CLIP_POLY_VERTS equ 7
-CLIP_POLY_SIZE_BYTES equ (MAX_CLIP_POLY_VERTS+1) * 2
+// infinity, so that edge can't be on screen. So an actual polygon can contain
+// up to 7 verts. However, we are relying on 8 verts for circular addressing,
+// and the current implementation temporarily inserts a vertex when moving from
+// on to offscreen, so it can be 8 valid vertices momentarily.
+CLIP_POLY_VERTS equ 8
+CLIP_POLY_SIZE_BYTES equ CLIP_POLY_VERTS * 2
 CLIP_TEMP_VERTS_SIZE_BYTES equ (MAX_CLIP_GEN_VERTS * vtxSize)
 
 VERTEX_BUFFER_SIZE_BYTES equ (G_MAX_VERTS * vtxSize)
@@ -649,11 +646,10 @@ RDP_CMD_BUFSIZE_TOTAL equ (RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS)
 
 INPUT_BUFFER_CMDS equ 21
 INPUT_BUFFER_SIZE_BYTES equ (INPUT_BUFFER_CMDS * 8)
-INPUT_BUFFER_CLOBBER_OSTASK_AMT equ 0x10 // Input buffer overwrites beginning of OSTask, see rsp_defs.inc
-OSTASK_ORIG_SIZE equ 0x40
-OSTASK_SIZE_AFTER_CLOBBER equ (OSTASK_ORIG_SIZE - INPUT_BUFFER_CLOBBER_OSTASK_AMT)
 
-END_VARIABLE_LEN_DMEM equ (0x1000 - OSTASK_SIZE_AFTER_CLOBBER - INPUT_BUFFER_SIZE_BYTES - (2 * RDP_CMD_BUFSIZE_TOTAL) - (2 * CLIP_POLY_SIZE_BYTES) - CLIP_TEMP_VERTS_SIZE_BYTES - VERTEX_BUFFER_SIZE_BYTES)
+OSTASK_ORIG_SIZE equ 0x40 // First CLIP_POLY_SIZE_BYTES (0x10) of this is clipPoly.
+
+END_VARIABLE_LEN_DMEM equ (0x1000 - OSTASK_ORIG_SIZE - INPUT_BUFFER_SIZE_BYTES - (2 * RDP_CMD_BUFSIZE_TOTAL) - CLIP_TEMP_VERTS_SIZE_BYTES - VERTEX_BUFFER_SIZE_BYTES)
 
 startFreeDmem:
 .org END_VARIABLE_LEN_DMEM
@@ -689,12 +685,6 @@ tempMatrix:
 .endif
 .org (clipTempVerts + CLIP_TEMP_VERTS_SIZE_BYTES)
 clipTempVertsEnd:
-
-clipPoly:
-    .skip CLIP_POLY_SIZE_BYTES  // 3   5   7 + term 0
-clipPoly2:                      //  \ / \ / \
-    .skip CLIP_POLY_SIZE_BYTES  //   4   6   7 + term 0
-
     
 // First RDP Command Buffer
 rdpCmdBuffer1:
@@ -720,14 +710,16 @@ rdpCmdBuffer2EndPlus1Word:
 
 // Input buffer. After RDP cmd buffers so it can be vector addressed from end.
 inputBuffer:
-    .skip INPUT_BUFFER_SIZE_BYTES - INPUT_BUFFER_CLOBBER_OSTASK_AMT
-// 0x0FC0-0x1000: OSTask
-OSTask:
-    .skip INPUT_BUFFER_CLOBBER_OSTASK_AMT
+    .skip INPUT_BUFFER_SIZE_BYTES
 inputBufferEnd:
-inputBufferEndSgn equ -(0x1000 - inputBufferEnd) // Underflow DMEM address
+inputBufferEndSgn equ (-(0x1000 - inputBufferEnd)) // Underflow DMEM address
+// 0x0FC0-0x1000: OSTask; 0x0FC0-0x0FD0: clipPoly
+OSTask:
+clipPoly: // This is here for alignment and vector addressing, see rsp_defs.inc
+clipPolySgn equ (-(0x1000 - clipPoly)) // Underflow DMEM address
+    .skip CLIP_POLY_SIZE_BYTES
 // rest of OSTask
-    .skip OSTASK_SIZE_AFTER_CLOBBER
+    .skip (OSTASK_ORIG_SIZE - CLIP_POLY_SIZE_BYTES)
 
 .if . != 0x1000
     .error "DMEM organization incorrect"
@@ -738,6 +730,7 @@ inputBufferEndSgn equ -(0x1000 - inputBufferEnd) // Underflow DMEM address
 // See rsp_defs.inc about why these are not used and we can reuse them.
 startCounterTime equ (OSTask + OSTask_ucode_size)
 xfrmLookatDirs equ -(0x1000 - (OSTask + OSTask_ucode_data)) // and OSTask_ucode_data_size
+dumpDmemBuffer equ (OSTask + OSTask_yield_data_size)
 
 memsetBufferStart equ ((vertexBuffer + 0xF) & 0xFF0)
 memsetBufferMaxEnd equ (rdpCmdBuffer1 & 0xFF0)
@@ -750,39 +743,39 @@ memsetBufferSize equ (memsetBufferMaxSize > 0x800 ? 0x800 : memsetBufferMaxSize)
 
 /*
 Scalar regs:
-      Tri write   Clip VW       Vtx write   ltbasic    ltadv    V/L init  Cmd dispatch
-$zero ---------------------- Hardwired zero ------------------------------------------
-$1    v1 texptr   <------------- vtxLeft ------------------------------>  temp, init 0
-$2    v2 shdptr   clipVNext -------> <----- lbPostAo   laPtr                  temp
-$3    v3 shdflg   clipVLastOfsc  vLoopRet ---------> laVtxLeft                temp
-$4                                    ~ unused! ~
-$5    ------------------------- vGeomMid ---------------------------------------------
-$6    geom mode   clipMaskIdx -----> <-- lbTexgenOrRet laSTKept
-$7    v2flag tile <------------- fogFlag ---------->  laPacked  mtx valid   cmd byte
-$8    v3flag      <------------- outVtx2 ---------->  laSpecular outVtx2
-$9    xp texenab  clipMask --------> <----- curLight ---------> viLtFlag
-$10   -------------------------- temp2 -----------------------------------------------
-$11   --------------------------- temp -----------------------------------------------
-$12   ----------------------- perfCounterD -------------------------------------------
-$13   ------------------------ altBaseReg --------------------------------------------
-$14               <-------------- inVtx ------------------------------->
-$15               <------------ outVtxBase ---------------------------->
-$16   v1flag lmaj clipFlags -------> <----- lbFakeAmb laSpecFres          ovlInitClock
-$17               clipPolyRead ---->
-$18   <---------- clipPolySelect -->
-$19      temp     clipVOnsc      outVtx1 ---------->    laL2A   <---------   dmaLen
-$20      temp     <------------- flagsV1 ---------->   laTexgen <---------  dmemAddr
-$21   <---------- clipPolyWrite ---> <----- ambLight             ambLight
-$22   ---------------------- rdpCmdBufEndP1 ------------------------------------------
-$23   ----------------------- rdpCmdBufPtr -------------------------------------------
-$24      temp     <------------- flagsV2 ---------->   fp temp  <--------- cmd_w1_dram
-$25     cmd_w0 --------------------> <----- lbAfter             <---------   cmd_w0
-$26   ------------------------ taskDataPtr -------------------------------------------
-$27   ---------------------- inputBufferPos ------------------------------------------
-$28   ----------------------- perfCounterA -------------------------------------------
-$29   ----------------------- perfCounterB -------------------------------------------
-$30   ----------------------- perfCounterC -------------------------------------------
-$ra   return address, sometimes sign bit is flag -------------------------------------
+      Tri write   Clip walk    Clip VW      Vtx write   ltbasic    ltadv    V/L init  Cmd dispatch
+$zero ---------------------------------- Hardwired zero ------------------------------------------
+$1    v1 texptr    clipIdx    <------------- vtxLeft ------------------------------>  temp, init 0
+$2    v2 shdptr   <---------- clipAlloc -------> <----- lbPostAo   laPtr                  temp
+$3    v3 shdflg   clipTempVtx <------------- vLoopRet --------->  laVtxLeft               temp
+$4    <--------------- origV1Idx --------------> <----- lbFakeAmb laSpecFres
+$5    ------------------------------------- vGeomMid ---------------------------------------------
+$6    v1flag temp <---------- clipPtrs --------> <-- lbTexgenOrRet laSTKept
+$7    v2flag tile clipWalkCount <----------- fogFlag ---------->  laPacked  mtx valid   cmd byte
+$8    v3flag      clipLastVtx <------------- outVtx2 ---------->  laSpecular outVtx2
+$9    xp texenab                                 <----- curLight ---------> viLtFlag
+$10   -------------------------------------- temp2 -----------------------------------------------
+$11   --------------------------------------- temp -----------------------------------------------
+$12   ----------------------------------- perfCounterD -------------------------------------------
+$13   ------------------------------------ altBaseReg --------------------------------------------
+$14   geom mode   <-------------------------- inVtx ------------------------------->
+$15                           <------------ outVtxBase ---------------------------->
+$16   
+$17   
+$18   
+$19      temp     clipCurVtx  <------------- outVtx1 ---------->   laL2A    <---------   dmaLen
+$20      temp   clipMaskShift clipVOnscr <-- flagsV1 ---------->  laTexgen  <---------  dmemAddr
+$21   <----- clipMaskIdx / clipDrawPtr -------> <----- ambLight             ambLight  ovlInitClock
+$22   ---------------------------------- rdpCmdBufEndP1 ------------------------------------------
+$23   ----------------------------------- rdpCmdBufPtr -------------------------------------------
+$24      temp   clipWalkPhase clipVOffscr <- flagsV2 ---------->   fp temp  <--------- cmd_w1_dram
+$25     cmd_w0 --------------------------------> <----- lbAfter             <---------   cmd_w0
+$26   ------------------------------------ taskDataPtr -------------------------------------------
+$27   ---------------------------------- inputBufferPos ------------------------------------------
+$28   ----------------------------------- perfCounterA -------------------------------------------
+$29   ----------------------------------- perfCounterB -------------------------------------------
+$30   ----------------------------------- perfCounterC -------------------------------------------
+$ra   return address, sometimes sign bit is flag -------------------------------------------------
 */
 
 // Global scalar regs:
@@ -797,6 +790,12 @@ perfCounterA   equ $28   // Performance counter A (functions depend on config)
 perfCounterB   equ $29   // Performance counter B (functions depend on config)
 perfCounterC   equ $30   // Performance counter C (functions depend on config)
 
+// Tri write:
+origV1Idx      equ $4    // Original / current vertex 1 index (not address)
+
+// Vertex init:
+viLtFlag       equ $9    // Holds pointLightFlag or dirLightsXfrmValid
+
 // Vertex write:
 vtxLeft        equ $1    // Number of vertices left to process * 0x10
 vLoopRet       equ $3    // Return address at end of vtx loop = top of loop or misc lighting
@@ -810,41 +809,44 @@ flagsV2        equ $24   // Clip flags for vertex 2
 
 // Lighting basic:
 lbPostAo       equ $2    // Address to return to after AO
+lbFakeAmb      equ $4    // Pointer to ambient light or to 8 bytes of zeros if AO enabled
 lbTexgenOrRet  equ $6    // ltbasic_texgen as negative if texgen, else vtx_return_from_lighting
 curLight       equ $9    // Current light pointer with offset
-lbFakeAmb      equ $16   // Pointer to ambient light or to 8 bytes of zeros if AO enabled
 ambLight       equ $21   // Ambient (top) light pointer with offset
 lbAfter        equ $25   // Address to return to after main lighting loop (vertex or extras)
 
 // Lighting advanced:
 laPtr          equ $2    // Pointer to current vertex pair being lit
 laVtxLeft      equ $3    // Count of vertices left * 0x10
+laSpecFres     equ $4    // Nonzero if doing ltadv_normal_to_vertex for specular or Fresnel
 laSTKept       equ $6    // Texture coords of vertex 1 kept through processing
 laPacked       equ $7    // Nonzero if packed normals enabled
 laSpecular     equ $8    // Sign bit set if specular enabled
-laSpecFres     equ $16   // Nonzero if doing ltadv_normal_to_vertex for specular or Fresnel
 laL2A          equ $19   // Nonzero if light-to-alpha (cel shading) enabled
 laTexgen       equ $20   // Nonzero if texgen enabled
 
-// Clipping
-clipVNext      equ $2    // Next vertex (vertex at forward end of current edge)
-clipVLastOfsc  equ $3    // Last vertex / offscreen vertex
-clipVOnsc      equ $19   // Onscreen vertex
-clipMaskIdx    equ $6    // Clip mask index 4-0
-clipMask       equ $9    // Current clip mask (one bit)
-clipFlags      equ $16   // Current clipping flags being checked
-clipPolyRead   equ $17   // Read pointer within current polygon being clipped
-clipPolySelect equ $18   // Clip poly double buffer selection
-clipPolyWrite  equ $21   // Write pointer within current polygon being clipped
+// Clipping across walk - vertex write - tri write:
+clipAlloc      equ $2    // Whether each temp vtx is in use, during VW
+clipPtrs       equ $6    // On-off-gen vtx ptrs for each subdivision, during VW
+clipMaskIdx    equ $21   // Selects clipping plane / mask index, 4 -> 0
+clipDrawPtr    equ $21   // Pointer to output clip polygon during tri draw
+clipVOnsc      equ $20   // Onscreen vertex, only during setup for vtx write
+clipVOffsc     equ $24   // Offscreen vertex, only during setup for vtx write
 
-// Vertex init
-viLtFlag       equ $9    // Holds pointLightFlag or dirLightsXfrmValid
+// Clip walk only:
+clipIdx        equ $1    // Current index within polygon memory, 0 -> E
+clipTempVtx    equ $3    // Allocated temporary vertex address
+clipWalkCount  equ $7    // How many steps taken around polygon; if too many, timeout
+clipLastVtx    equ $8    // Last vertex address on polygon
+clipCurVtx     equ $19   // Current vertex address on polygon
+clipMaskShift  equ $20   // Amount to left shift clip flags to put current condition bit in sign bit
+clipWalkPhase  equ $24   // Current action on walk: e.g. looking for onscreen-to-offscreen transition
 
-// Misc
+// Misc:
 nextRA         equ $10   // Address to return to after overlay load
-ovlInitClock   equ $16   // Temp for profiling
 dmaLen         equ $19   // DMA length in bytes minus 1
 dmemAddr       equ $20   // DMA address in DMEM or IMEM. Also = rdpCmdBufPtr - rdpCmdBufEndP1 for flush_rdp_buffer
+ovlInitClock   equ $21   // Temp for profiling. Share register with values not kept across ovl load.
 cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
 cmd_w0         equ $25   // DL command word 0, also holds next tris info
 
@@ -1005,6 +1007,7 @@ tempVpRGBA            equ 0x00        // Only used during loop
 tempXfrmLt            equ tempVpRGBA  // ltbasic only used during init
 tempVtx1ST            equ tempVpRGBA  // ltadv only during init
 tempAmbient           equ 0x10        // ltbasic set during init, used during loop
+tempClipPtrs          equ tempAmbient // set during clipping, kept through vtx write
 tempPrevInvalVtxStart equ 0x20
 tempPrevInvalVtx      equ (tempPrevInvalVtxStart + vtxSize) // 0x46; fog writes here
 tempPrevInvalVtxEnd   equ (tempPrevInvalVtx + vtxSize)      // 0x6C; rest of vtx writes here
@@ -1139,8 +1142,11 @@ G_ENDDL_handler:
     j       call_ret_common                 // has a different version in ovl1
      lw     taskDataPtr, (displayListStack)($1) // Load addr of DL to return to
 
+G_POPMTX_handler:
+G_DMA_IO_handler:
+    j       ovl234_ltbasic_entrypoint   // Delay slot is harmless
 G_BRANCH_WZ_handler:
-    lhu     $10, (vertexTable)(cmd_w0)  // Vertex addr from byte 3
+     lhu    $10, (vertexTable)(cmd_w0)  // Vertex addr from byte 3
 .if CFG_G_BRANCH_W                      // G_BRANCH_W/G_BRANCH_Z difference; this defines F3DZEX vs. F3DEX2
     lh      $10, VTX_W_INT($10)         // read the w coordinate of the vertex (f3dzex)
 .else
@@ -1180,8 +1186,6 @@ dma_and_wait_goto_next_ra:
     j       dma_read_write
      li     $ra, wait_goto_next_ra
 
-G_POPMTX_handler:
-G_DMA_IO_handler:
 G_MEMSET_handler:
     j       ovl234_clipmisc_entrypoint       // Delay slot is harmless
 load_cmds_handler:
@@ -1288,26 +1292,30 @@ G_LIGHTTORDP_handler: // 9
 //               [bb^cc]   Indices b and c
 //                  |
 //                  cmd_w0 + inputBufferEnd
+tri_snake_ret_from_input_buffer:
+    lbu     $3, (inputBufferEnd)(inputBufferPos) // Load c; clear real index b sign bit -> don't exit
+    j       tri_snake_loop_from_input_buffer // inputBufferPos pointing to first byte loaded
 G_TRISNAKE_handler:
+     li     $ra, tri_snake_loop          // For both init and above (clobbered by DMA).
     sw      cmd_w0, rdpHalf1Val          // Store indices a, b, c
     addi    inputBufferPos, inputBufferPos, -6 // Point to byte 2, index b of 1st tri
-    li      $ra, tri_snake_loop          // For tri_main
+    lbu     origV1Idx, rdpHalf1Val + 1   // Initial value, normally carried over
 tri_snake_loop:
     lh      $3, (inputBufferEnd)(inputBufferPos) // Load indices b and c
     addi    inputBufferPos, inputBufferPos, 1  // Increment indices being read
-tri_snake_loop_from_input_buffer:
-    lb      $2, rdpHalf1Val + 1          // Old v1; == index b, except when bridging between old and new load
-    bltz    $3, tri_snake_end            // Upper bit of real index b set = done
-     andi   $11, $3, 1                   // Get direction flag from index c
     beqz    inputBufferPos, tri_snake_over_input_buffer // == 0 at end of input buffer
-     andi   $3, $3, 0x7E                 // Mask out flags from index c
-    sb      $3, rdpHalf1Val + 1          // Store index c as vertex 1
-    j       tri_main
-     sb     $2, (rdpHalf1Val + 2)($11)   // Store old v1 as 2 if dir clear or 3 if set
+tri_snake_loop_from_input_buffer:
+     andi   $11, $3, 1                   // Get direction flag from index c
+    bltz    $3, tri_snake_end            // Upper bit of real index b set = done
+     sb     origV1Idx, (rdpHalf1Val + 2)($11) // Store old v1 as 2 if dir clear or 3 if set
+    andi    origV1Idx, $3, 0x7E          // New v1 = mask out flags from index c
+    sb      origV1Idx, rdpHalf1Val + 1   // Store index c as vertex 1
+    j       tri_main_from_snake          // Repeat next instr so we can skip lbu origV1Idx
+     lpv    $v7[4], (rdpHalf1Val)($zero) // To vector unit in elems 5-7
 
 // H = highest on screen = lowest Y value; then M = mid, L = low
 tHAtF equ $v5
-tMAtF equ $v7
+tMAtF equ $v27
 tLAtF equ $v9
 tHAtI equ $v18
 tMAtI equ $v19
@@ -1318,6 +1326,9 @@ tLPos equ $v10
 tPosMmH equ $v6
 tPosLmH equ $v8
 tPosHmM equ $v11
+tDaDyI equ $v27
+
+align_with_warning 8, "One instruction of padding before tris"
 
 G_TRI2_handler:
 G_QUAD_handler:
@@ -1327,14 +1338,15 @@ G_TRI1_handler:
     li      $ra, tris_end                // After done with this tri, exit tri processing
     sw      cmd_w0, rdpHalf1Val          // Store first tri indices
 tri_main:
-    lpv     $v27[4], (rdpHalf1Val)($zero) // To vector unit in elems 5-7
-    lbu     $1, rdpHalf1Val + 1
+    lpv     $v7[4], (rdpHalf1Val)($zero) // To vector unit in elems 5-7
+    lbu     origV1Idx, rdpHalf1Val + 1
+tri_main_from_snake:
     lbu     $2, rdpHalf1Val + 2
     vclr    vZero
     lbu     $3, rdpHalf1Val + 3
-    vmudn   $v29, vOne, vTRC_VB    // Address of vertex buffer
-    lhu     $1, (vertexTable)($1)
-    vmadl   $v27, $v27, vTRC_VS    // Plus vtx indices times length
+    vmudn   $v29, vOne, vTRC_VB   // Address of vertex buffer
+    lhu     $1, (vertexTable)(origV1Idx)
+    vmadl   $v7, $v7, vTRC_VS     // Plus vtx indices times length. e5 (v1) kept through clipping
     lhu     $2, (vertexTable)($2)
     vmadl   $v6, $v31, $v31[2]    // 0; vtx 1 addr in $v6 elem 5
     lhu     $3, (vertexTable)($3)
@@ -1344,20 +1356,20 @@ tri_main:
 .endif
 tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vnxor   tHAtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
-    vmov    $v4[5], $v27[6]         // elem 5 of v4 = vertex 2 addr
+    vmov    $v4[5], $v7[6]         // elem 5 of v4 = vertex 2 addr
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
-    vmov    $v8[5], $v27[7]         // elem 5 of v8 = vertex 3 addr
+    vmov    $v8[5], $v7[7]         // elem 5 of v8 = vertex 3 addr
     llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
     vnxor   tMAtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
     vnxor   tLAtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
-    lhu     $16, VTX_CLIP($1)
+    lhu     $6, VTX_CLIP($1)
     vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
     lhu     $7, VTX_CLIP($2)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
     lhu     $8, VTX_CLIP($3)
     vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
-    andi    $11, $16, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
+    andi    $11, $6, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
     vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
     and     $11, $11, $7
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
@@ -1371,7 +1383,7 @@ tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
     sll     $20, vGeomMid, 29 // Original bit 10 (now bit 2) in the sign bit, for facing cull
     vmrg    tLPos, $v6, $v4   // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
-    or      $10, $16, $7
+    or      $10, $6, $7
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
     or      $10, $10, $8      // $10 = all clip bits which are true for any verts
     vmrg    $v4, tHPos, $v8   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
@@ -1394,25 +1406,24 @@ tSubPxHI equ $v26
     beqz    $9, return_and_end_mat  // If cross product is 0, tri is degenerate (zero area), cull.
      // 34 cycles
 .if !CFG_NO_OCCLUSION_PLANE
-     and    $16, $16, $7
+     and    $6, $6, $7
 .endif
      vsub   tPosMmH, tMPos, tHPos
 .if !CFG_NO_OCCLUSION_PLANE
-    and     $16, $16, $8
+    and     $6, $6, $8
 .endif
     vsub    tPosLmH, tLPos, tHPos
 .if !CFG_NO_OCCLUSION_PLANE
-    andi    $16, $16, CLIP_OCCLUDED
+    andi    $6, $6, CLIP_OCCLUDED
 .endif
     vsub    tPosHmM, tHPos, tMPos
 .if !CFG_NO_OCCLUSION_PLANE
-    bnez    $16, tri_culled_by_occlusion_plane // Cull if all verts occluded
+    bnez    $6, tri_culled_by_occlusion_plane // Cull if all verts occluded
      // 38 cycles
 .endif
      mfc2   $1, tHPos[10]     // tHPos = lowest Y value = highest on screen (x, y, addr)
     // 37 cycles if NOC (39 if occlusion plane)
 tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
-tPosCatF equ $v25
     vsub    tPosCatI, tLPos, tMPos
     mfc2    $2, tMPos[10]     // tMPos = mid vertex (x, y, addr)
     vmov    tPosCatI[2], tPosMmH[0]
@@ -1420,27 +1431,25 @@ tPosCatF equ $v25
     andi    $11, vGeomMid, G_SHADING_SMOOTH >> 8
 .endif
     vmudh   $v29, tPosMmH, tPosLmH[0]
-.if !ENABLE_PROFILING
-    lbu     $10, rdpHalf1Val + 1        // Original vertex 1 before shuffle and clipping
-.endif
+    // nop
 t1WI equ $v13 // elems 0, 4, 6
     vmadh   $v29, tPosLmH, tPosHmM[0]
     mfc2    $3, tLPos[10]     // tLPos = highest Y value = lowest on screen (x, y, addr)
 tXPF equ $v16 // Triangle cross product
 tXPI equ $v17
     vreadacc tXPI, ACC_UPPER
-    lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
-    vreadacc tXPF, ACC_MIDDLE
 .if !ENABLE_PROFILING
-    lhu     $10, (vertexTable)($10)
+    mfc2    $10, $v7[10]  // Orig V1 addr. origV1Idx is the index (not addr), and we can't lookup in vertexTable during clipping!
 .endif
+    vreadacc tXPF, ACC_MIDDLE
+    lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vrcp    $v20[0], tPosCatI[1]
     lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
     vmov    tPosCatI[3], tPosLmH[0]
     lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
     vrcph   $v22[0], tXPI[1]
 .if !ENABLE_PROFILING
-    lpv     $v25[0], VTX_COLOR_VEC($10)  // Load RGB from vertex 4 (flat shading vtx)
+    lpv     $v25[0], VTX_COLOR_VEC($10)  // Load RGB from orig vtx 1 for flat shading
 .endif
 tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
 tXPRcpI equ $v24
@@ -1468,7 +1477,7 @@ tri_skip_flat_shading:
     vmudl   tHAtI, tHAtI, vTRC_0100 // vertex color 1 >>= 8
     lb      $20, (alphaCompareCullMode)($zero)
     vmudl   tMAtI, tMAtI, vTRC_0100 // vertex color 2 >>= 8
-    lw      $16, VTX_INV_W_VEC($1) // $16, $7, $8 = 1/W for H, M, L
+    lw      $6, VTX_INV_W_VEC($1) // $6, $7, $8 = 1/W for H, M, L
     vmudl   tLAtI, tLAtI, vTRC_0100 // vertex color 3 >>= 8
     lw      $7, VTX_INV_W_VEC($2)
     vmudl   $v29, $v20, vTRC_0020
@@ -1479,10 +1488,10 @@ tri_skip_flat_shading:
     // Alpha compare culling
     vge     $v26, tHAtI, tMAtI
     lbu     $19, alphaCompareCullThresh
-    vlt     $v27, tHAtI, tMAtI
+    vlt     $v25, tHAtI, tMAtI
     bgtz    $20, @@skip1
      vge    $v26, $v26, tLAtI // If alphaCompareCullMode > 0, $v26 = max of 3 verts
-    vlt     $v26, $v27, tLAtI // else if < 0, $v26 = min of 3 verts
+    vlt     $v26, $v25, tLAtI // else if < 0, $v26 = min of 3 verts
 @@skip1: // $v26 elem 3 has max or min alpha value
     mfc2    $24, $v26[6]
     sub     $24, $24, $19 // sign bit set if (max/min) < thresh
@@ -1490,28 +1499,29 @@ tri_skip_flat_shading:
     bltz    $24, return_and_end_mat // if max < thresh or if min >= thresh.
 tri_skip_alpha_compare_cull:
     // 60 cycles
+tPosCatF equ $v25
     vmudm   tPosCatF, tPosCatI, vTRC_1000
     // no nop if tri_skip_alpha_compare_cull was unaligned
     vmadn   tPosCatI, $v31, $v31[2] // 0
-    sub     $11, $16, $7  // Four instr: $16 = max($16, $7)
+    sub     $11, $6, $7  // Four instr: $6 = max($6, $7)
     vsubc   tSubPxHF, vZero, tSubPxHF
     sra     $10, $11, 31
     vsub    tSubPxHI, vZero, vZero
     and     $11, $11, $10
     vmudm   $v29, tPosCatF, $v20
-    sub     $16, $16, $11
+    sub     $6, $6, $11
     vmadl   $v29, tPosCatI, $v20
-    sub     $11, $16, $8  // Four instr: $16 = max($16, $8)
+    sub     $11, $6, $8  // Four instr: $6 = max($6, $8)
     vmadn   $v20, tPosCatI, $v22
     sra     $10, $11, 31
     vmadh   tPosCatI, tPosCatF, $v22
     and     $11, $11, $10
     vmudl   $v29, tXPRcpF, tXPF
-    sub     $16, $16, $11
+    sub     $6, $6, $11
     vmadm   $v29, tXPRcpI, tXPF
     mfc2    $7, tXPI[1]
     vmadn   tXPF, tXPRcpF, tXPI
-    lbu     $6, geometryModeLabel + 3 // Load lowest byte for G_SHADE, G_ZBUFFER. Also has G_ATTROFFSET_ST_ENABLE, but G_TRI_FILL will get OR'd into it and force that set.
+    lbu     $14, geometryModeLabel + 3 // Load lowest byte for G_SHADE, G_ZBUFFER. Also has G_ATTROFFSET_ST_ENABLE, but G_TRI_FILL will get OR'd into it and force that set.
     vmadh   tXPI, tXPRcpI, tXPI
     lbu     $9, textureSettings1 + 3 // Texture enabled = 0x2
     vand    $v22, $v20, vTRC_FFF8
@@ -1519,12 +1529,12 @@ tri_skip_alpha_compare_cull:
     vcr     tPosCatI, tPosCatI, vTRC_0100
     lsv     tLAtI[14], VTX_SCR_Z($3)
     vmudh   $v29, vOne, $v31[4] // 4
-    ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
+    ori     $11, $14, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
     vmadn   tXPF, tXPF, $v31[0] // -4
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
     vmadh   tXPI, tXPI, $v31[0] // -4
-    sw      $16, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W (upper) to temp mem
-tMx1W equ $v27
+    sw      $6, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W (upper) to temp mem
+tMx1W equ $v25 // <- tPosCatF
     vmudn   $v29, $v3, tHPos[0]
     llv     tMx1W[0], 0x0010(rdpCmdBufPtr) // Load max of three verts' 1/W
     vmadl   $v29, $v22, tSubPxHF[1]
@@ -1544,11 +1554,10 @@ tMnWF equ $v10 // <- tLPos
 t1WF equ $v14 // <- tHPos
     vmudh   t1WF, vOne, t1WI[1q]
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
-tMnWI equ $v27 // <- tMx1W
+tMnWI equ $v25 // <- tMx1W
     vrcph   tMnWI[0], $v31[2]     // 0
     lw      $19, otherMode1
 tSTWHMI equ $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
-tSTWHMF equ $v25
     vmudh   tSTWHMI, vOne, $v31[7]  // 0x7FFF
     ssv     tPosMmH[2], 0x0030(rdpCmdBufPtr) // MmHY -> first short (temp mem)
     vmudm   $v29, t1WI, tMnWF[0] // 1/W each vtx * min W = 1 for one of the verts, < 1 for others
@@ -1569,6 +1578,7 @@ tSTWLF equ $v13
     addi    $19, $19, -ZMODE_DEC  // Check if equal to decal mode
     vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
     ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
+tSTWHMF equ $v25 // <- tMnWI
     vmadn   tSTWHMF, $v31, $v31[2]  // 0
     andi    $7, $7, 0x0080 // Extract the left major flag from $7
     vmudm   $v29, tSTWLI, t1WF[6]  // (S, T, 7FFF) * (1 or <1) for L
@@ -1580,6 +1590,7 @@ tSTWLF equ $v13
     vmrg    tMAtI, tMAtI, tSTWHMI // Merge S, T, W Mid into elems 4-6
     sdv     tSTWHMF[0], 0x0028(rdpCmdBufPtr) // Move S, T, W Hi Frac to temp mem
     vmrg    tMAtF, tMAtF, tSTWHMF // Merge S, T, W Mid into elems 4-6
+// $v25 <- tSTWHMF
     ldv     tHAtI[8], 0x0020(rdpCmdBufPtr) // Move S, T, W Hi Int from temp mem
     vmrg    tLAtI, tLAtI, tSTWLI // Merge S, T, W Low into elems 4-6
     ldv     tHAtF[8], 0x0028(rdpCmdBufPtr) // Move S, T, W Hi Frac from temp mem
@@ -1597,11 +1608,11 @@ tSTWLF equ $v13
     vmadh   tXPRcpI, tXPI, tXPRcpI
     addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
     vmudh   tPosLmH, tPosLmH, $v31[0h] // e1 LmHY * -4 = 4*HmLY; e456 MmHY,LmHX,HmMX *= 4
-    andi    $3, $6, G_SHADE
+    andi    $3, $14, G_SHADE
 tAtLmHF equ $v10
 tAtLmHI equ $v9
 tAtMmHF equ $v13
-tAtMmHI equ $v7
+tAtMmHI equ $v27
     vsubc   tAtLmHF, tLAtF, tHAtF
     sll     $1, $1, 14
     vsub    tAtLmHI, tLAtI, tHAtI
@@ -1627,7 +1638,7 @@ tDaDxI equ $v3
     ssv     tPosCatI[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
 // DaDy = (v2 - v1) * factor + (v3 - v1) * factor
 tDaDyF equ $v6
-tDaDyI equ $v7
+// tDaDyI <- $v27
     vmudn   $v29, tAtMmHF, tPosLmH[5] // LmHX * 4
     ssv     $v20[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
     vmadh   $v29, tAtMmHI, tPosLmH[5] // LmHX * 4
@@ -1644,9 +1655,9 @@ tDaDyI equ $v7
     vmudl   $v29, tDaDxF, tXPRcpF[1]
     add     rdpCmdBufPtr, $1, $11   // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
     vmadm   $v29, tDaDxI, tXPRcpF[1]
-    andi    $6, $6, G_ZBUFFER       // Get the value of G_ZBUFFER from the current geometry mode
+    andi    $14, $14, G_ZBUFFER     // Get the value of G_ZBUFFER from the current geometry mode
     vmadn   tDaDxF, tDaDxF, tXPRcpI[1]
-    sll     $11, $6, 4              // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
+    sll     $11, $14, 4             // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
     vmadh   tDaDxI, tDaDxI, tXPRcpI[1]
     move    $10, rdpCmdBufPtr       // Write Z here
     vmudl   $v29, tDaDyF, tXPRcpF[1]
@@ -1776,13 +1787,8 @@ return_and_end_mat:
      sb     $zero, materialCullMode // This covers all tri early exits except clipping
 
 tri_snake_over_input_buffer:
-    j       displaylist_dma_tri_snake    // inputBufferPos is now 0; load whole buffer
-     li     nextRA, tri_snake_ret_from_input_buffer
-tri_snake_ret_from_input_buffer:
-    li      $ra, tri_snake_loop          // Clobbered by DMA. Putting this in the loop saves an instruction but loop takes 1 more cycle per tri.
-    j       tri_snake_loop_from_input_buffer // inputBufferPos pointing to first byte loaded
-     lbu    $3, (inputBufferEnd)(inputBufferPos) // Load c; clear real index b sign bit -> don't exit
-
+    bgez    $3, displaylist_dma_tri_snake // If $3 < 0, last tri flag set, proceed to end
+     li     nextRA, tri_snake_ret_from_input_buffer // inputBufferPos is now 0; load whole buffer
 tri_snake_end:
     addi    inputBufferPos, inputBufferPos, 7 // Round up to whole input command
     addi    $11, $zero, 0xFFF8               // Sign-extend; andi is zero-extend!
@@ -1838,297 +1844,6 @@ ovl234_clipmisc_entrypoint:
     bnez    $1, vtx_constants_for_clip     // In clipping, $1 is vtx 1 addr, never 0. Cmd dispatch, $1 = 0.
      li     inVtx, 0x8000                  // inVtx < 0 means from clipping. Inc'd each vtx write by 2 * inputVtxSize, but this is large enough it should stay negative.
     lw      cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Overwritten by overlay load
-    li      $3, (0xFF00 | G_MTX)
-    beq     $3, $7, g_mtx_push_ovl3
-     li     $11, (0xFF00 | G_MEMSET)
-    beq     $11, $7, g_memset_ovl3
-     li     $3, (0xFF00 | G_DMA_IO)
-    beq     $3, $7, g_dma_io_ovl3
-g_popmtx_ovl3:  // otherwise
-     lw     $11, matrixStackPtr             // Current matrix stack pointer
-    lw      $2, OSTask + OSTask_dram_stack  // Top of the stack
-    sub     cmd_w1_dram, $11, cmd_w1_dram   // Decrease pointer by amount in command
-    sub     $3, cmd_w1_dram, $2             // Is it still valid / within the stack?
-    bgez    $3, @@skip                      // If so, skip the failsafe
-     sh     $zero, mvpValid                 // and dirLightsXfrmValid; mark both mtx and dir lts invalid
-    move    cmd_w1_dram, $2                 // Use the top of the stack as the new pointer
-@@skip:    
-    j       do_movemem                      // Must keep $1 = 0
-     sw     cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
-
-g_mtx_push_ovl3:
-    lw      cmd_w1_dram, matrixStackPtr     // Set up the DMA from dmem to rdram at the matrix stack pointer
-    li      dmemAddr, (mMatrix | 0x8000)    // mMatrix, negative = write
-    jal     dma_read_write                  // DMA the current matrix from dmem to rdram
-     li     dmaLen, 0x0040 - 1              // Set the DMA length to the size of a matrix (minus 1 because DMA is inclusive)
-    addi    cmd_w1_dram, cmd_w1_dram, 0x40  // Increase the matrix stack pointer by the size of one matrix
-    sw      cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
-    j       load_mtx
-     lw     cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Load command word 1 again
-
-g_dma_io_ovl3:
-    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
-     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
-    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
-    li      nextRA, run_next_DL_command
-    j       dma_and_wait_goto_next_ra  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
-     // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
-     // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
-     sra    dmemAddr, dmemAddr, 2
-
-clip_after_constants:
-.if CFG_PROFILING_B
-    addi    perfCounterB, perfCounterB, 1  // Increment clipped (input) tris count
-.endif
-    // Clear all temp vertex slots used.
-    li      $11, (MAX_CLIP_GEN_VERTS - 1) * vtxSize
-clip_init_used_loop:
-    sh      $zero, (VTX_CLIP + clipTempVerts)($11)
-    bgtz    $11, clip_init_used_loop
-     addi   $11, $11, -vtxSize
-    li      clipMaskIdx, 4                     // 4=screen, 3=+x, 2=-x, 1=+y, 0=-y
-    li      clipMask, CLIP_CAMPLANE            // Initial clip mask for screen clipping
-    li      clipPolySelect, 6  // Everything being indexed from 6 saves one instruction at the end of the loop
-    sh      $1, (clipPoly - 6 + 0)(clipPolySelect) // Write the current three verts
-    sh      $2, (clipPoly - 6 + 2)(clipPolySelect) // as the initial polygon
-    sh      $3, (clipPoly - 6 + 4)(clipPolySelect) // Initial state $3 = clipVLastOfsc
-    sh      $zero, (clipPoly)(clipPolySelect)  // nullptr to mark end of polygon
-    sb      $zero, materialCullMode            // In case only/all tri(s) clip then offscreen
-// Available locals here: $11, $1, $7, $20, $24, $10
-clip_condlooptop:
-    lhu     clipFlags, VTX_CLIP(clipVLastOfsc) // Load flags for final vertex of the last polygon
-    addi    clipPolyRead,   clipPolySelect, -6 // Start reading at the beginning of the old polygon
-    xori    clipPolySelect, clipPolySelect, 6 ^ ((clipPoly2 - clipPoly) + 6) // Swap to the other polygon memory
-    addi    clipPolyWrite,  clipPolySelect, -6 // Start writing at the beginning of the new polygon
-    and     clipFlags, clipFlags, clipMask     // Mask last flags to current clip condition
-clip_edgelooptop: // Loop over edges connecting verts, possibly subdivide the edge
-    lhu     clipVNext, (clipPoly)(clipPolyRead) // Read next vertex (farther end of edge)
-    addi    clipPolyRead, clipPolyRead, 0x0002 // Increment read pointer
-    beqz    clipVNext, clip_nextcond           // If next vtx is nullptr, done with input polygon
-     lhu    $11, VTX_CLIP(clipVNext)           // Load flags for next vtx
-    and     $11, $11, clipMask                 // Mask next flags to current clip condition
-    beq     $11, clipFlags, clip_nextedge      // Both set or both clear = both off screen or both on screen, no subdivision
-     move   clipFlags, $11                     // clipFlags = masked next vtx's flags
-    // Going to subdivide this edge. Find available temp vertex slot.
-    li      outVtxBase, clipTempVertsEnd
-clip_find_unused_loop:
-    lhu     $11, (VTX_CLIP - vtxSize)(outVtxBase)
-    addi    $10, outVtxBase, -clipTempVerts    // This is within the loop rather than before b/c delay after lhu
-    blez    $10, clip_done                     // If can't find one (should never happen), give up
-     andi   $11, $11, CLIP_VTX_USED
-    bnez    $11, clip_find_unused_loop
-     addi   outVtxBase, outVtxBase, -vtxSize
-    beqz    clipFlags, clip_skipswap23         // Next vtx flag is clear / on screen,
-     move   clipVOnsc, clipVNext               // therefore last vtx is set / off screen
-    move    clipVOnsc, clipVLastOfsc           // Otherwise swap; note we are overwriting
-    move    clipVLastOfsc, clipVNext           // clipVLastOfsc but not clipVNext
-clip_skipswap23:
-    // Interpolate between clipVLastOfsc and clipVOns; create a new vertex which is on the
-    // clipping boundary (e.g. at the screen edge)
-cPosOnOfF equ vpClpF
-cPosOnOfI equ vpClpI
-cPosOfF   equ vpScrF
-cPosOfI   equ vpScrI
-cRGBAOf   equ vpLtTot
-cRGBAOn   equ vpRGBA
-cSTOf     equ vpST
-cSTOn     equ sSTS // Intentionally overwriting this kept reg. Vtx scales ST again, need to re-store unscaled value.
-// Also uses sRTF, sRTI = vTemp1, vTemp2, and vtx_final_setup_for_clip sets sOPM = vKept2
-cTemp     equ vpMdl
-cBaseF    equ vpNrmlX
-cBaseI    equ vpNrmlY
-cDiffF    equ $v2
-cDiffI    equ $v3
-cRRF      equ $v4  // Range Reduction frac
-cRRI      equ $v5  // Range Reduction int
-cFadeOf   equ $v6
-cFadeOn   equ $v7
-    /*
-    Five clip conditions (these are in a different order from vanilla):
-           cBaseI/cBaseF[3]       cDiffI/cDiffF[3]
-    4 W=0:           W1              W1  -         W2
-    3 +X :    X1 - 2*W1      (X1 - 2*W1) - (X2 - 2*W2) <- the 2 is clip ratio
-    2 -X :    X1 + 2*W1      (X1 + 2*W1) - (X2 + 2*W2)
-    1 +Y :    Y1 - 2*W1      (Y1 - 2*W1) - (Y2 - 2*W2)
-    0 -Y :    Y1 + 2*W1      (Y1 + 2*W1) - (Y2 + 2*W2)
-    */
-    xori    $11, clipMaskIdx, 1          // Invert sign of condition
-    ldv     cPosOnOfF[0], VTX_FRAC_VEC(clipVOnsc)
-    ctc2    $11, $vcc                    // Conditions 1 (+y) or 3 (+x) -> vcc[0] = 0
-    ldv     cPosOnOfI[0], VTX_INT_VEC (clipVOnsc)
-    vmrg    cTemp, vOne, $v31[1]         // elem 0 is 1 if W or neg cond, -1 if pos cond
-    andi    $11, clipMaskIdx, 4          // W condition and screen clipping
-    ldv     cPosOnOfF[8], VTX_FRAC_VEC(clipVLastOfsc) // Off screen to elems 4-7
-    bnez    $11, clip_w                  // If so, use 1 or -1
-     ldv    cPosOnOfI[8], VTX_INT_VEC (clipVLastOfsc)
-    vmudh   cTemp, cTemp, $v31[3]        // elem 0 is (1 or -1) * 2 (clip ratio)
-    andi    $11, clipMaskIdx, 2          // Conditions 2 (-x) or 3 (+x)
-    vmudm   cBaseF, vOne, cPosOnOfF[0h]  // Set accumulator (care about 3, 7) to X
-    bnez    $11, clip_skipy
-     vmadh  cBaseI, vOne, cPosOnOfI[0h]
-    vmudm   cBaseF, vOne, cPosOnOfF[1h]  // Discard that and set accumulator 3, 7 to Y
-    vmadh   cBaseI, vOne, cPosOnOfI[1h]
-clip_skipy:
-    vmadn   cBaseF, cPosOnOfF, cTemp[0]  // + W * +/- 2
-    vmadh   cBaseI, cPosOnOfI, cTemp[0]
-clip_skipxy:
-    vsubc   cDiffF, cBaseF, cBaseF[7]    // Vtx on screen - vtx off screen
-    vsub    cDiffI, cBaseI, cBaseI[7]
-    // This is computing cDiffI:F = cBaseI:F / cDiffI:F to high precision.
-    // The first step is a range reduction, where cRRF becomes a scale factor
-    // (roughly min(1.0f, abs(1.0f / cDiffI:F))) which scales down cDiffI:F (denominator)
-    // Then the reciprocal of cDiffI:F is computed with a Newton-Raphson iteration
-    // and multiplied by cBaseI:F. Finally scale down the result (numerator) by cRRF.
-    vor     cTemp, cDiffI, vOne[0]  // Round up int sum to odd; this ensures the value is not 0, otherwise vabs result will be 0 instead of +/- 2
-    sub     $11, clipPolyWrite, clipPolySelect // Make sure we are not overflowing
-    vrcph   cRRI[3], cDiffI[3]
-    addi    $11, $11, 6 - ((MAX_CLIP_POLY_VERTS) * 2) // Write ptr to last zero slot
-    vrcpl   cRRF[3], cDiffF[3]              // 1 / (x+y+z+w), vtx on screen - vtx off screen
-    bgez    $11, clip_done                  // If so, give up
-     vrcph  cRRI[3], $v31[2]                // 0; get int result of reciprocal
-    vabs    cTemp, cTemp, $v31[3]           // 2; cTemp = +/- 2 based on sum positive (incl. zero) or negative
-    lhu     $11, VTX_CLIP(clipVLastOfsc)    // Load clip flags for off screen vert
-    vmudn   cRRF, cRRF, cTemp[3]            // multiply reciprocal by +/- 2
-    sh      outVtxBase, (clipPoly)(clipPolyWrite) // Write pointer to generated vertex to polygon
-    vmadh   cRRI, cRRI, cTemp[3]
-    addi    clipPolyWrite, clipPolyWrite, 2 // Increment write ptr
-    veq     cRRI, cRRI, $v31[2]             // 0; if RR int part is 0
-    andi    $11, $11, ~CLIP_VTX_USED        // Clear used flag from off screen vert
-    vmrg    cRRF, cRRF, $v31[1]             // keep RR frac, otherwise set frac to 0xFFFF (max)
-    sh      $11, VTX_CLIP(clipVLastOfsc)    // Store modified clip flags for off screen vert
-    vmudl   $v29, cDiffF, cRRF[3]           // Multiply clDiffI:F by RR frac*frac
-    ldv     cPosOfF[0], VTX_FRAC_VEC (clipVLastOfsc) // Off screen loaded above, but need
-    vmadm   cDiffI, cDiffI, cRRF[3]         // int*frac, int out
-    ldv     cPosOfI[0], VTX_INT_VEC  (clipVLastOfsc) // it in elems 0-3 for interp
-    vmadn   cDiffF, $v31, $v31[2]           // 0; get frac out
-    luv     cRGBAOf[0], VTX_COLOR_VEC(clipVLastOfsc)
-    vrcph   sRTI[3], cDiffI[3]              // Reciprocal of new scaled cDiff (discard)
-    luv     cRGBAOn[0], VTX_COLOR_VEC(clipVOnsc)
-    vrcpl   sRTF[3], cDiffF[3]              // frac part
-    llv     cSTOf[0],   VTX_TC_VEC   (clipVLastOfsc)
-    vrcph   sRTI[3], $v31[2]                // 0; int part
-    llv     cSTOn[0],   VTX_TC_VEC   (clipVOnsc) // Must be before vtx_final_setup_for_clip
-    vmudl   $v29, sRTF, cDiffF              // D*R (see Newton-Raphson explanation)
-.if CFG_NO_OCCLUSION_PLANE
-    li      vtxLeft, -1                     // vtxLeft < 0 triggers vtx_epilogue
-.else
-    li      vtxLeft, inputVtxSize           // but trigger this on the second loop in this version
-.endif
-    vmadm   $v29, sRTI, cDiffF
-.if CFG_NO_OCCLUSION_PLANE
-    addi    outVtxBase, outVtxBase, -vtxSize // Inc'd by 2, must point to second vtx
-.else
-    addi    outVtxBase, outVtxBase, vtxSize // Not inc'd, must point to second vtx
-.endif
-    vmadn   cDiffF, sRTF, cDiffI
-    li      vLoopRet, vtx_loop_no_lighting
-    vmadh   cDiffI, sRTI, cDiffI
-    vmudh   $v29, vOne, $v31[4]             // 4; 4 - 4 * (D*R)
-    vmadn   cDiffF, cDiffF, $v31[0]         // -4
-    vmadh   cDiffI, cDiffI, $v31[0]         // -4
-    vmudl   $v29, sRTF, cDiffF              // 1/cDiff result = R * that
-    vmadm   $v29, sRTI, cDiffF
-    vmadn   sRTF, sRTF, cDiffI
-    vmadh   sRTI, sRTI, cDiffI
-    vmudl   $v29, cBaseF, sRTF              // cDiff regs = cBase / cDiff
-    vmadm   $v29, cBaseI, sRTF
-    vmadn   cDiffF, cBaseF, sRTI
-    vmadh   cDiffI, cBaseI, sRTI 
-    vmudl   $v29, cDiffF, cRRF[3]           // Scale by range reduction
-    vmadm   cDiffI, cDiffI, cRRF[3]
-    vmadn   cDiffF, $v31, $v31[2]           // Done cDiffI:F = cBaseI:F / cDiffI:F
-    // Clamp to 0x0001 to 0xFFFF range and create inverse on-screen factor
-    vlt     cDiffI, cDiffI, vOne[0]         // If integer part of factor less than 1,
-    vmrg    cDiffF, cDiffF, $v31[1]         // keep frac part of factor, else set to 0xFFFF (max val)
-    vsubc   $v29, cDiffF, vOne[0]           // frac part - 1 for carry
-    vge     cDiffI, cDiffI, $v31[2]         // 0; If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
-    j       vtx_final_setup_for_clip        // Clobbers vcc and accum in !NOC config.
-     vmrg   cFadeOf, cDiffF, vOne[0]        // keep frac part of factor, else set to 1 (min val)
-clip_after_final_setup: // This is here because otherwise 3 cycle stall here.
-    vmudn   cFadeOn, cFadeOf, $v31[1]       // signed x * -1 = 0xFFFF - unsigned x! Fade factor for on screen vert
-    // Fade between attributes for on screen and off screen vert
-    vmudm   $v29,     cRGBAOf, cFadeOf[3]
-    vmadm   vpRGBA,   cRGBAOn, cFadeOn[3]
-    vmudm   $v29,       cSTOf, cFadeOf[3]
-    vmadm   sSTS,       cSTOn, cFadeOn[3]
-    vmudl   $v29,     cPosOfF, cFadeOf[3]
-    vmadm   $v29,     cPosOfI, cFadeOf[3]
-    vmadl   $v29,   cPosOnOfF, cFadeOn[3]
-    vmadm   vpClpI, cPosOnOfI, cFadeOn[3]
-    j       vtx_store_for_clip
-     vmadn  vpClpF, $v31, $v31[2]           // 0; load resulting frac pos
-clip_after_vtx_store:
-    ori     flagsV1, flagsV1, CLIP_VTX_USED   // Mark generated vtx as used
-    slv     sSTS[0], (VTX_TC_VEC   )(outVtx1) // Store not-twice-scaled ST
-    sh      flagsV1, (VTX_CLIP     )(outVtx1) // Store generated vertex flags
-clip_nextedge:
-    bnez    clipFlags, clip_edgelooptop   // Discard V2 if it was off screen (whether inserted vtx or not)
-     move   clipVLastOfsc, clipVNext      // Move what was the end of the edge to be the new start of the edge
-    sub     $11, clipPolyWrite, clipPolySelect // Make sure we are not overflowing
-    addi    $11, $11, 6 - ((MAX_CLIP_POLY_VERTS) * 2) // Write ptr to last zero slot
-    bgez    $11, clip_done                // If so, give up
-     sh     clipVLastOfsc, (clipPoly)(clipPolyWrite) // Former V2 was on screen,
-    j       clip_edgelooptop              // so add it to the output polygon
-     addi   clipPolyWrite, clipPolyWrite, 2
-
-clip_w:
-    vcopy   cBaseF, cPosOnOfF             // Result is just W
-    j       clip_skipxy
-     vcopy  cBaseI, cPosOnOfI
-
-clip_nextcond:
-    sub     $11, clipPolyWrite, clipPolySelect // Are there less than 3 verts in the output polygon?
-    bltz    $11, clip_done                    // If so, degenerate result, quit
-     sh     $zero, (clipPoly)(clipPolyWrite)  // Terminate the output polygon with a 0
-    lhu     clipVLastOfsc, (clipPoly - 2)(clipPolyWrite) // Initialize edge start to the last vert
-    beqz    clipMaskIdx, clip_draw_tris
-     lbu    $11, (clipCondShifts - 1)(clipMaskIdx) // Load next clip condition shift amount
-    li      clipMask, 1
-    sllv    clipMask, clipMask, $11
-    j       clip_condlooptop
-     addi   clipMaskIdx, clipMaskIdx, -1
-    
-clip_draw_tris:
-    sh      $zero, activeClipPlanes
-// Current polygon starts 6 (3 verts) below clipPolySelect, ends 2 (1 vert) below clipPolyWrite
-// Draws verts in pattern like 0-1-4, 1-2-4, 2-3-4
-clip_draw_tris_loop:
-    lhu     $1, (clipPoly - 6)(clipPolySelect)
-    lhu     $2, (clipPoly - 4)(clipPolySelect)
-    lhu     $3, (clipPoly - 2)(clipPolyWrite)
-    mtc2    $1, $v6[10]              // Addresses go in vector regs too
-    mtc2    $2, $v27[12]
-    jal     tri_noinit
-     mtc2   $3, $v27[14]
-    bne     clipPolyWrite, clipPolySelect, clip_draw_tris_loop
-     addi   clipPolySelect, clipPolySelect, 2
-clip_done:
-    li      $11, CLIP_SCAL_NPXY | CLIP_CAMPLANE
-    sh      $11, activeClipPlanes
-    lh      $ra, tempTriRA
-fill_vertex_table:
-    // Create bytes 00-07
-    li      $1, 7
-@@loop1:
-    sb      $1, (vertexTable)($1)
-    bgtz    $1, @@loop1
-     addi   $1, $1, -1
-    // Load to vu and multiply by 2 to get vertex indexes. It would be more cycles
-    // to change the loop above to count by 2s than the stalls here.
-    li      $2, vertexTable
-    lpv     $v3[0], (0)($2)
-    li      $3, vertexTable + ((G_MAX_VERTS + 8) * 2) // Need 0-56 inclusive, so do 0-63
-    vmudh   $v3, $v3, $v31[3] // 2; now 0x0000, 0x0200, ..., 0x0E00
-@@loop2:
-    vmudn   $v29, vOne, vTRC_VB  // Address of vertex buffer
-    vmadl   $v4, $v3, vTRC_VS    // Plus vtx indices times length
-    vadd    $v3, $v3, vTRC_1000  // increment by 8 verts = 16
-    addi    $2, $2, 0x10
-    bne     $2, $3, @@loop2
-     sqv    $v4[0], (-0x10)($2)
-    jr      $ra
-     // Delay slot harmless
-
 g_memset_ovl3:
     llv     $v2[0], (rdpHalf1Val)($zero) // Load the memset value
     sll     cmd_w0, cmd_w0, 8           // Clear upper byte
@@ -2158,6 +1873,291 @@ g_memset_ovl3:
     and     $11, $11, $10
     jr      $ra
      addi   $2, $11, memsetBufferSize
+    
+// Each clip condition (clipping plane bit being checked) has three phases that
+// occur in this order: find an onscreen vertex, then find the transition from an
+// onscreen to offscreen vertex, then find the transition from an offscreen to an
+// onscreen vertex. The latter two are the edges which must be subdivided.
+CLIP_PHASE_FIND_ON        equ  1  // These are these values so that we can use branch
+CLIP_PHASE_FIND_ON_TO_OFF equ -1  // instructions to check them, and so that the sign
+CLIP_PHASE_FIND_OFF_TO_ON equ  0  // bit represents which condition (on/off) to continue.
+// The clipping walk finds the two edges to be subdivided and stores them in temp
+// memory at these offsets. There are two of these sets of three pointers contiguously.
+CLIP_PTR_ONSCR  equ 0  // Onscreen vertex at the end of the edge
+CLIP_PTR_OFFSCR equ 2  // Offscreen vertex at the other end of the edge
+CLIP_PTR_GEN    equ 4  // Generated vertex, where to write the results
+CLIP_PTR_COUNT  equ 6
+
+clip_after_constants:
+.if CFG_PROFILING_B
+    addi    perfCounterB, perfCounterB, 1  // Increment clipped (input) tris count
+.endif
+    sqv     vZero[0], (clipPolySgn)($zero) // Clear whole polygon
+    sh      $1, clipPoly + 0xA       // Initial polygon is right-justified
+    sh      $2, clipPoly + 0xC
+    sh      $3, clipPoly + 0xE
+    sb      $zero, materialCullMode  // In case only/all tri(s) clip then offscreen
+    li      clipMaskIdx, 5           // Will sub 1; 4=screen, 3=+x, 2=-x, 1=+y, 0=-y
+    li      clipAlloc, 0             // Init to no temp verts allocated
+clip_condlooptop:
+    addi    clipMaskIdx, clipMaskIdx, -1
+    lbu     clipMaskShift, (clipCondShifts)(clipMaskIdx)
+    addi    clipPtrs, rdpCmdBufEndP1, tempClipPtrs // Temp mem in output buffer for vtx ptrs
+    li      clipWalkCount, 0x18 // Give up if loop traversed the polygon 3x
+    li      clipWalkPhase, CLIP_PHASE_FIND_ON
+    j       clip_walk_loop
+     li     clipIdx, 0xA // Start pos doesn't matter, cause first actual op at on-to-off, and there should be only one of these.
+
+clip_found_on:
+    li      clipWalkPhase, CLIP_PHASE_FIND_ON_TO_OFF
+clip_walk_loop_top:
+    bnez    clipWalkPhase, clip_walk_loop_continue // find on, or find on to off
+     // 0 = find off to on. This is an offscreen vertex, so remove it.
+    addi    $10, clipIdx, -2
+clip_remove_loop:
+    lhu     $11, (clipPoly + 0)($10)
+    sh      $11, (clipPoly + 2)($10)
+    bgtz    $10, clip_remove_loop
+     addi   $10, $10, -2
+    sh      $zero, (clipPoly + 0)
+    // Deallocate it. The first iteration is for if it's in the main vertex buffer,
+    // in which case the deallocation is a no-op.
+    li      $11, 0xFEFF // 0b...111011111111 (8 set to the right of the 0)
+    addi    $10, clipCurVtx, -(clipTempVerts - vtxSize)
+clip_deallocate_loop:
+    addi    $10, $10, -vtxSize
+    bgez    $10, clip_deallocate_loop // First iter: loops if in clipTempVerts
+     sra    $11, $11, 1               // First iter: else, clears ...11101111111 (7)
+    and     clipAlloc, clipAlloc, $11 // Clear vertex allocation bit
+clip_walk_loop_continue:
+    move    clipLastVtx, clipCurVtx
+clip_walk_loop_skip_vtx:
+    addi    clipWalkCount, clipWalkCount, -1
+    bltz    clipWalkCount, clip_timeout
+     addi   clipIdx, clipIdx, 2
+    andi    clipIdx, clipIdx, 0xE  // Circular addressing
+clip_walk_loop:
+    lhu     clipCurVtx, (clipPoly)(clipIdx)
+    beqz    clipCurVtx, clip_walk_loop_skip_vtx // Vertex addr = 0 -> skip
+     lhu    $10, VTX_CLIP(clipCurVtx)
+    sllv    $10, $10, clipMaskShift // Put clipping bit in sign bit
+    xor     $10, $10, clipWalkPhase // Invert the sign bit for phase -1
+    bltz    $10, clip_walk_loop_top // Nonzero clipping bit = offscreen. Phase 1 and 0, continue if offscreen.
+     sh     clipLastVtx, (CLIP_PTR_ONSCR)(clipPtrs) // For on to off only
+    bgtz    clipWalkPhase, clip_found_on // 1 = find on
+     sh     clipCurVtx, (CLIP_PTR_OFFSCR)(clipPtrs) // For on to off only
+    // Insert a space here. The zeros are always on the left.
+    blez    clipIdx, clip_err_insert // Would crash if continued with clipIdx == 0
+     li     $10, 2
+clip_insert_loop:
+    lhu     $11, (clipPoly - 0)($10) // Last iter, unecessarily copies clipIdx left one
+    sh      $11, (clipPoly - 2)($10) // but this is harmless & handles case clipIdx == 2
+    bne     $10, clipIdx, clip_insert_loop
+     addi   $10, $10, 2
+    addi    clipIdx, clipIdx, -2 // For temp vtx, then reprocess current vtx. Checked clipIdx > 0 above.
+    // Allocate a temp vertex
+    li      $11, 0x0080 // 7 zeros to the right
+    li      clipTempVtx, clipTempVerts - vtxSize
+clip_allocate_loop:
+    srl     $11, $11, 1 // First iter: 6 zeros to the right, at first temp vtx
+    and     $10, $11, clipAlloc
+    bnez    $10, clip_allocate_loop // First iter: branch if first temp vtx already allocated
+     addi   clipTempVtx, clipTempVtx, vtxSize // First iter: clipTempVtx = clipTempVerts
+    beqz    $11, clip_err_alloc
+     or     clipAlloc, clipAlloc, $11 // Mark the vertex allocated
+    sh      clipTempVtx, (clipPoly)(clipIdx)
+    sh      clipTempVtx, (CLIP_PTR_GEN)(clipPtrs)
+    addi    clipPtrs, clipPtrs, CLIP_PTR_COUNT
+    bltz    clipWalkPhase, clip_walk_loop_continue // -1 = on to off
+     li     clipWalkPhase, CLIP_PHASE_FIND_OFF_TO_ON // (nop if done)
+    sh      clipLastVtx, (CLIP_PTR_OFFSCR - CLIP_PTR_COUNT)(clipPtrs) // Swapped for off to on
+    sh      clipCurVtx, (CLIP_PTR_ONSCR - CLIP_PTR_COUNT)(clipPtrs) // Swapped for off to on
+clip_do_subdivision:
+    lhu     clipVOnsc, (CLIP_PTR_ONSCR - 2 * CLIP_PTR_COUNT)(clipPtrs)
+    lhu     clipVOffsc, (CLIP_PTR_OFFSCR - 2 * CLIP_PTR_COUNT)(clipPtrs)
+    // Interpolate between clipVOffsc and clipVOns; create a new vertex which is on the
+    // clipping boundary (e.g. at the screen edge)
+cPosOnOfF equ vpClpF
+cPosOnOfI equ vpClpI
+cPosOfF   equ vpScrF
+cPosOfI   equ vpScrI
+cRGBAOf   equ vpLtTot
+cRGBAOn   equ vpRGBA
+cSTOf     equ vpST
+cSTOn     equ sSTS // Intentionally overwriting this kept reg. Vtx scales ST again, need to re-store unscaled value.
+// Also uses sRTF, sRTI = vTemp1, vTemp2, and vtx_final_setup_for_clip sets sOPM = vKept2
+cTemp     equ vpMdl
+cBaseF    equ vpNrmlX
+cBaseI    equ vpNrmlY
+cDiffF    equ $v2
+cDiffI    equ $v3
+cRRF      equ $v4  // Range Reduction frac
+cRRI      equ $v5  // Range Reduction int
+cFadeOf   equ $v4
+cFadeOn   equ $v5
+    /*
+    Five clip conditions (these are in a different order from vanilla):
+           cBaseI/cBaseF[3]       cDiffI/cDiffF[3]
+    4 W=0:           W1              W1  -         W2
+    3 +X :    X1 - 2*W1      (X1 - 2*W1) - (X2 - 2*W2) <- the 2 is clip ratio
+    2 -X :    X1 + 2*W1      (X1 + 2*W1) - (X2 + 2*W2)
+    1 +Y :    Y1 - 2*W1      (Y1 - 2*W1) - (Y2 - 2*W2)
+    0 -Y :    Y1 + 2*W1      (Y1 + 2*W1) - (Y2 + 2*W2)
+    */
+    xori    $11, clipMaskIdx, 1          // Invert sign of condition
+    ldv     cPosOnOfF[0], VTX_FRAC_VEC(clipVOnsc)
+    ctc2    $11, $vcc                    // Conditions 1 (+y) or 3 (+x) -> vcc[0] = 0
+    ldv     cPosOnOfI[0], VTX_INT_VEC (clipVOnsc)
+    vmrg    cTemp, vOne, $v31[1]         // elem 0 is 1 if W or neg cond, -1 if pos cond
+    andi    $11, clipMaskIdx, 4          // W condition and screen clipping
+    ldv     cPosOnOfF[8], VTX_FRAC_VEC(clipVOffsc) // Off screen to elems 4-7
+    bnez    $11, clip_w                  // If so, use 1 or -1
+     ldv    cPosOnOfI[8], VTX_INT_VEC (clipVOffsc)
+    vmudh   cTemp, cTemp, $v31[3]        // elem 0 is (1 or -1) * 2 (clip ratio)
+    andi    $11, clipMaskIdx, 2          // Conditions 2 (-x) or 3 (+x)
+    vmudm   cBaseF, vOne, cPosOnOfF[0h]  // Set accumulator (care about 3, 7) to X
+    bnez    $11, clip_skipy
+     vmadh  cBaseI, vOne, cPosOnOfI[0h]
+    vmudm   cBaseF, vOne, cPosOnOfF[1h]  // Discard that and set accumulator 3, 7 to Y
+    vmadh   cBaseI, vOne, cPosOnOfI[1h]
+clip_skipy:
+    vmadn   cBaseF, cPosOnOfF, cTemp[0]  // + W * +/- 2
+    vmadh   cBaseI, cPosOnOfI, cTemp[0]
+clip_skipxy:
+    vsubc   cDiffF, cBaseF, cBaseF[7]    // Vtx on screen - vtx off screen
+    vsub    cDiffI, cBaseI, cBaseI[7]
+    // This is computing cDiffI:F = cBaseI:F / cDiffI:F to high precision.
+    // The first step is a range reduction, where cRRF becomes a scale factor
+    // (roughly min(1.0f, abs(1.0f / cDiffI:F))) which scales down cDiffI:F (denominator)
+    // Then the reciprocal of cDiffI:F is computed with a Newton-Raphson iteration
+    // and multiplied by cBaseI:F. Finally scale down the result (numerator) by cRRF.
+    vor     cTemp, cDiffI, vOne[0]  // Round up int sum to odd; this ensures the value is not 0, otherwise vabs result will be 0 instead of +/- 2
+    vrcph   cRRI[3], cDiffI[3]
+    vrcpl   cRRF[3], cDiffF[3]              // 1 / (x+y+z+w), vtx on screen - vtx off screen
+    vrcph   cRRI[3], $v31[2]                // 0; get int result of reciprocal
+    vabs    cTemp, cTemp, $v31[3]           // 2; cTemp = +/- 2 based on sum positive (incl. zero) or negative
+    vmudn   cRRF, cRRF, cTemp[3]            // multiply reciprocal by +/- 2
+    vmadh   cRRI, cRRI, cTemp[3]
+    veq     cRRI, cRRI, $v31[2]             // 0; if RR int part is 0
+    vmrg    cRRF, cRRF, $v31[1]             // keep RR frac, otherwise set frac to 0xFFFF (max)
+    lhu     outVtxBase, (CLIP_PTR_GEN - 2 * CLIP_PTR_COUNT)(clipPtrs)
+    vmudl   $v29, cDiffF, cRRF[3]           // Multiply clDiffI:F by RR frac*frac
+    ldv     cPosOfF[0], VTX_FRAC_VEC (clipVOffsc) // Off screen loaded above, but need
+    vmadm   cDiffI, cDiffI, cRRF[3]         // int*frac, int out
+    ldv     cPosOfI[0], VTX_INT_VEC  (clipVOffsc) // it in elems 0-3 for interp
+    vmadn   cDiffF, $v31, $v31[2]           // 0; get frac out
+    luv     cRGBAOf[0], VTX_COLOR_VEC(clipVOffsc)
+    vrcph   sRTI[3], cDiffI[3]              // Reciprocal of new scaled cDiff (discard)
+    luv     cRGBAOn[0], VTX_COLOR_VEC(clipVOnsc)
+    vrcpl   sRTF[3], cDiffF[3]              // frac part
+    llv     cSTOf[0],   VTX_TC_VEC   (clipVOffsc)
+    vrcph   sRTI[3], $v31[2]                // 0; int part
+    llv     cSTOn[0],   VTX_TC_VEC   (clipVOnsc) // Must be before vtx_final_setup_for_clip
+    vmudl   $v29, sRTF, cDiffF              // D*R (see Newton-Raphson explanation)
+.if CFG_NO_OCCLUSION_PLANE
+    li      vtxLeft, -1                     // vtxLeft < 0 triggers vtx_epilogue
+.else
+    li      vtxLeft, inputVtxSize           // but trigger this on the second loop in this version
+.endif
+    vmadm   $v29, sRTI, cDiffF
+.if CFG_NO_OCCLUSION_PLANE
+    addi    outVtxBase, outVtxBase, -vtxSize // Inc'd by 2, must point to second vtx
+.else
+    addi    outVtxBase, outVtxBase, vtxSize // Not inc'd, must point to second vtx
+.endif
+    vmadn   cDiffF, sRTF, cDiffI
+    li      vLoopRet, vtx_loop_no_lighting
+    vmadh   cDiffI, sRTI, cDiffI
+    addi    clipPtrs, clipPtrs, CLIP_PTR_COUNT
+    vmudh   $v29, vOne, $v31[4]             // 4; 4 - 4 * (D*R)
+    vmadn   cDiffF, cDiffF, $v31[0]         // -4
+    vmadh   cDiffI, cDiffI, $v31[0]         // -4
+    vmudl   $v29, sRTF, cDiffF              // 1/cDiff result = R * that
+    vmadm   $v29, sRTI, cDiffF
+    vmadn   sRTF, sRTF, cDiffI
+    vmadh   sRTI, sRTI, cDiffI
+    vmudl   $v29, cBaseF, sRTF              // cDiff regs = cBase / cDiff
+    vmadm   $v29, cBaseI, sRTF
+    vmadn   cDiffF, cBaseF, sRTI
+    vmadh   cDiffI, cBaseI, sRTI 
+    vmudl   $v29, cDiffF, cRRF[3]           // Scale by range reduction
+    vmadm   cDiffI, cDiffI, cRRF[3]
+    vmadn   cDiffF, $v31, $v31[2]           // Done cDiffI:F = cBaseI:F / cDiffI:F
+    // Clamp to 0x0001 to 0xFFFF range and create inverse on-screen factor
+    vlt     cDiffI, cDiffI, vOne[0]         // If integer part of factor less than 1,
+    vmrg    cDiffF, cDiffF, $v31[1]         // keep frac part of factor, else set to 0xFFFF (max val)
+    vsubc   $v29, cDiffF, vOne[0]           // frac part - 1 for carry
+    vge     cDiffI, cDiffI, $v31[2]         // 0; If integer part of factor >= 0 (after carry, so overall value >= 0x0000.0001),
+    j       vtx_final_setup_for_clip        // TODO can merge this with vtx_store_for_clip Clobbers vcc and accum in !NOC config.
+     vmrg   cFadeOf, cDiffF, vOne[0]        // keep frac part of factor, else set to 1 (min val)
+clip_after_final_setup: // This is here because otherwise 3 cycle stall here.
+    vmudn   cFadeOn, cFadeOf, $v31[1]       // signed x * -1 = 0xFFFF - unsigned x! Fade factor for on screen vert
+    // Fade between attributes for on screen and off screen vert
+    vmudm   $v29,     cRGBAOf, cFadeOf[3]
+    vmadm   vpRGBA,   cRGBAOn, cFadeOn[3]
+    vmudm   $v29,       cSTOf, cFadeOf[3]
+    vmadm   sSTS,       cSTOn, cFadeOn[3]
+    vmudl   $v29,     cPosOfF, cFadeOf[3]
+    vmadm   $v29,     cPosOfI, cFadeOf[3]
+    vmadl   $v29,   cPosOnOfF, cFadeOn[3]
+    vmadm   vpClpI, cPosOnOfI, cFadeOn[3]
+    j       vtx_store_for_clip
+     vmadn  vpClpF, $v31, $v31[2]           // 0; load resulting frac pos
+clip_after_vtx_store:
+    addi    $11, rdpCmdBufEndP1, tempClipPtrs + 3 * CLIP_PTR_COUNT
+    beq     $11, clipPtrs, clip_do_subdivision // Do one more subdivision
+     slv    sSTS[0], (VTX_TC_VEC   )(outVtx1) // Store not-twice-scaled ST
+clip_next_cond:
+    bgtz    clipMaskIdx, clip_condlooptop // Currently 0 = continue to draw
+     sh     $zero, activeClipPlanes // Only matters if we need to draw
+// clipDrawPtr <- clipMaskIdx; currently at 0
+// Draws verts in pattern like 4-2-3, 4-1-2, 4-0-1
+    li      $ra, clip_draw_tris_loop
+clip_draw_tris_loop:
+    lhu     $2,      (clipPolySgn + 0xA)(clipDrawPtr)
+    lhu     $3,      (clipPolySgn + 0xC)(clipDrawPtr)
+    lhu     $1,      (clipPolySgn + 0xE)($zero)
+    beqz    $2, clip_done
+     addi   clipDrawPtr, clipDrawPtr, -2
+    llv     $v7[12], (clipPolySgn + 0xC)(clipDrawPtr) // +A ($2) to elem 6, +C ($3) to elem 7
+    j       tri_noinit                                // Can't clobber $v7[10], keeps orig v1 addr
+     lsv    $v6[10], (clipPolySgn + 0xE)($zero)       // +E ($1) to elem 5
+
+clip_timeout:
+    bltz    clipWalkPhase, clip_next_cond // Timed out in find on to off: all onscreen, nothing to do for this cond
+    // bgtz    clipWalkPhase, clip_done // Timed out in find on: all offscreen, discard tri.
+    // j       clip_done        // Timed out in find off to on: error, give up
+clip_err_alloc:
+clip_err_insert:
+clip_done:    // Delay slot is harmless if branched
+     li     $11, CLIP_SCAL_NPXY | CLIP_CAMPLANE
+    sh      $11, activeClipPlanes
+    lh      $ra, tempTriRA
+fill_vertex_table:
+    // Create bytes 00-07
+    li      $1, 7
+@@loop1:
+    sb      $1, (vertexTable)($1)
+    bgtz    $1, @@loop1
+     addi   $1, $1, -1
+    // Load to vu and multiply by 2 to get vertex indexes. It would be more cycles
+    // to change the loop above to count by 2s than the stalls here.
+    li      $2, vertexTable
+    lpv     $v3[0], (0)($2)
+    li      $3, vertexTable + ((G_MAX_VERTS + 8) * 2) // Need 0-56 inclusive, so do 0-63
+    vmudh   $v3, $v3, $v31[3] // 2; now 0x0000, 0x0200, ..., 0x0E00
+@@loop2:
+    vmudn   $v29, vOne, vTRC_VB  // Address of vertex buffer
+    vmadl   $v4, $v3, vTRC_VS    // Plus vtx indices times length
+    vadd    $v3, $v3, vTRC_1000  // increment by 8 verts = 16
+    addi    $2, $2, 0x10
+    bne     $2, $3, @@loop2
+     sqv    $v4[0], (-0x10)($2)
+    jr      $ra                  // Delay slot is harmless
+clip_w:
+     vcopy  cBaseF, cPosOnOfF    // Result is just W
+    j       clip_skipxy
+     vcopy  cBaseI, cPosOnOfI
 
 ovl3_end:
 .align 8
@@ -2377,11 +2377,11 @@ vtx_store_for_clip:
     ldv     sTCL[8],   (VTX_IN_TC + 3 * inputVtxSize)(inVtx) // ST in 4:5, RGBA in 6:7
 // sST2 <- vpScrI
     vmadh   sST2, vOne, $v30          // + 1 * ST offset; elems 0, 1, 4, 5
-    suv     vpRGBA[4],   (VTX_COLOR_VEC )(outVtx2) // Store RGBA for second vtx
+    suv     vpRGBA[4],  (VTX_COLOR_VEC )(outVtx2) // Store RGBA for second vtx
     vmudl   $v29, s1WF, sRTF[2h]
     lsv     vpClpI[14], (VTX_Z_INT     )(outVtx2) // load Z into W slot, will be for fog below
     vmadm   $v29, s1WI, sRTF[2h]
-    suv     vpRGBA[0],   (VTX_COLOR_VEC )(outVtx1) // Store RGBA for first vtx
+    suv     vpRGBA[0],  (VTX_COLOR_VEC )(outVtx1) // Store RGBA for first vtx
     vmadn   s1WF, s1WF, sRTI[3h]
     lsv     vpClpI[6],  (VTX_Z_INT     )(outVtx1) // load Z into W slot, will be for fog below
     vmadh   s1WI, s1WI, sRTI[3h]
@@ -2444,10 +2444,8 @@ vtx_epilogue:
     ssv     sCLZ[12], (VTX_SCR_Z      )(outVtx2)
     slv     vpScrI[0],  (VTX_SCR_VEC    )(outVtx1)
     ssv     vpScrF[12], (VTX_SCR_Z_FRAC )(outVtx2)
-    bltz    inVtx, clip_after_vtx_store  // inVtx < 0 means from clipping
-     slv    vpScrF[2],  (VTX_SCR_Z      )(outVtx1)
-    sh      flagsV1,  (VTX_CLIP       )(outVtx1) // Store first vertex flags
-    // Fallthrough (across the versions boundary) to vtx_end
+    slv     vpScrF[2],  (VTX_SCR_Z      )(outVtx1)
+    // Fallthrough (across the versions boundary)
 
 .else // not CFG_NO_OCCLUSION_PLANE
     
@@ -2623,13 +2621,12 @@ vtx_store_loop_entry:
      // vnop in land slot
      
 vtx_epilogue:
-    bltz    inVtx, clip_after_vtx_store  // inVtx < 0 means from clipping
-     sh     flagsV1,            (VTX_CLIP      )(outVtx1) // Store first vertex flags
-    // Fallthrough to vtx_end
+    // Fallthrough (across the versions boundary)
      
 .endif
 
-vtx_end:
+    bltz    inVtx, clip_after_vtx_store  // inVtx < 0 means from clipping
+     sh     flagsV1, (VTX_CLIP)(outVtx1) // Store first vertex flags
 .if CFG_PROFILING_A
     li      $ra, 0                           // Flag for coming from vtx
     lqv     vTRC, (vTRCValue)($zero)         // Restore value overwritten by matrix
@@ -2691,7 +2688,16 @@ dma_read_write:
     bnez    $11, dma_read_write
      addi   perfCounterD, perfCounterD, 6  // 3 instr + 2 after mfc + 1 taken branch
     j       dma_read_write_not_full
-     // $11 load in delay slot is harmless.
+     nop
+.endif
+
+.if 0
+dump_dmem:
+    jal     segmented_to_physical
+     lw     cmd_w1_dram, dumpDmemBuffer
+    li      dmemAddr, 0x8000 // address 0, negative = write
+    j       dma_and_wait_goto_next_ra
+     li     dmaLen, 0x1000 - 1 // all of DMEM, DMA lengths always minus 1
 .endif
 
 endFreeImemAddr equ 0x1FC4
@@ -2845,8 +2851,8 @@ G_MTX_handler: // 12
     addi    perfCounterC, perfCounterC, 1  // Increment matrix count
 .endif
     andi    $11, cmd_w0, G_MTX_VP_M | G_MTX_NOPUSH_PUSH
-    beqz    $11, ovl234_clipmisc_entrypoint  // Model and push: go to overlay for push
-     sh     $zero, mvpValid                  // and dirLightsXfrmValid
+    beqz    $11, ovl234_ltbasic_entrypoint   // Model and push: go to overlay for push
+     sh     $zero, mvpValid                  // Also zeroes dirLightsXfrmValid
 load_mtx:
     andi    $1, cmd_w0, G_MTX_MUL_LOAD       // Read the matrix load type into $1 (2 is multiply, 0 is load)
 G_MOVEMEM_handler:  // Otherwise $1 is 0
@@ -3028,8 +3034,10 @@ ovl234_clipmisc_entrypoint_ovl2ver:        // same IMEM address as ovl234_clipmi
      li     cmd_w1_dram, orga(ovl3_start)  // set up a load for overlay 3
 
 ltbasic_continue_setup:
-    bnez    viLtFlag, ltbasic_setup_after_xfrm  // Skip if lights were valid
+    beqz    $1, ltbasic_command_handlers
      addi   ambLight, ambLight, altBase    // Point to ambient light; stored through vtx proc
+    bnez    viLtFlag, ltbasic_setup_after_xfrm  // Skip if lights were valid
+     addi   lbFakeAmb, ambLight, ltBufOfs  // Ptr to load amb light from; normally actual ambient light
 xfrm_dir_lights:
 lpWrld  equ $v11  // light pair world direction
 lpMdl   equ $v12  // light pair model space direction (not yet normalized)
@@ -3145,7 +3153,6 @@ ltbasic_setup_after_xfrm:
     // vLTC  0xF800 Lt1 Z  AOAmb  AODir  Lt1 X  Lt1 Y  AOAmb  AODir
     // $v30  SOffs  TOffs  0/AOa  Persp  SOffs  TOffs  0x0020 0x0800
     lpv     vLTC[0], (ltBufOfs + 8 - lightSize)(ambLight) // First lt xfrmed dir in elems 4-6
-    addi    lbFakeAmb, ambLight, ltBufOfs  // Ptr to load amb light from; normally actual ambient light
     li      vLoopRet, ltbasic_start_standard
     andi    $11, vGeomMid, (G_AMBOCCLUSION | G_PACKED_NORMALS | G_LIGHTTOALPHA | G_TEXTURE_GEN) >> 8
     vmov    $v30[2], $v31[2] // 0 as AO alpha offset
@@ -3395,7 +3402,46 @@ lLkDt1 equ lDOT    // lighting Lookat Dot product 1
      vmacf  vpST, dot0, dot1        // + ST squared * (ST + ST * coeff)
 .endmacro
      texgen_lastinstr lLkDt0, lLkDt1
-    
+
+ltbasic_command_handlers:
+    lw      cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Overwritten by overlay load
+    li      $11, (0xFF00 | G_MTX)
+    beq     $11, $7, g_mtx_push_ovl2
+     li     $3, (0xFF00 | G_DMA_IO)
+    beq     $3, $7, g_dma_io_ovl2
+g_popmtx_ovl2:  // otherwise
+     lw     $11, matrixStackPtr             // Current matrix stack pointer
+    lw      $2, OSTask + OSTask_dram_stack  // Top of the stack
+    sub     cmd_w1_dram, $11, cmd_w1_dram   // Decrease pointer by amount in command
+    sub     $3, cmd_w1_dram, $2             // Is it still valid / within the stack?
+    bgez    $3, @@skip                      // If so, skip the failsafe
+     sh     $zero, mvpValid                 // and dirLightsXfrmValid; mark both mtx and dir lts invalid
+    move    cmd_w1_dram, $2                 // Use the top of the stack as the new pointer
+@@skip:    
+    j       do_movemem                      // Must keep $1 = 0
+     sw     cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
+
+g_mtx_push_ovl2:
+    lw      cmd_w1_dram, matrixStackPtr     // Set up the DMA from dmem to rdram at the matrix stack pointer
+    li      dmemAddr, (mMatrix | 0x8000)    // mMatrix, negative = write
+    jal     dma_read_write                  // DMA the current matrix from dmem to rdram
+     li     dmaLen, 0x0040 - 1              // Set the DMA length to the size of a matrix (minus 1 because DMA is inclusive)
+    addi    cmd_w1_dram, cmd_w1_dram, 0x40  // Increase the matrix stack pointer by the size of one matrix
+    sw      cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
+    j       load_mtx
+     lw     cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Load command word 1 again
+
+g_dma_io_ovl2:
+    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
+     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
+    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
+    li      nextRA, run_next_DL_command
+    j       dma_and_wait_goto_next_ra  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
+     // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
+     // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
+     sra    dmemAddr, dmemAddr, 2
+
+
 ovl2_end:
 .align 8
 ovl2_padded_end:
@@ -3609,16 +3655,14 @@ ltadv_post:
     andi    $11, vGeomMid, G_FRESNEL_COLOR >> 8
     vmudh   $v29, vOne, aParam[7]      // Fresnel offset
     // vnop; vnop
-    vmacf   aOAFrs, aOAFrs, aParam[6]  // + factor * scale
-    beqz    $11, @@skip
+    vmacu   aOAFrs, aOAFrs, aParam[6]  // + factor * scale, clamp to >= 0.
+    beqz    $11, @@skip                // vmacu bad oflow bhv @ 7FFF is OK b/c here max values should be about 0200.
      // vnop; vnop; vnop
      vmudh  aOAFrs, aOAFrs, aAOF[0]    // Result * 0x0100, clamped to 0x7FFF
     veq     $v29, $v31, $v31[3h]       // Set VCC to 00010001 if G_FRESNEL_COLOR
 @@skip:
     // vnop; vnop
     vmrg    vpRGBA, vpRGBA, aOAFrs[0h] // Replace color or alpha with fresnel
-    // vnop; vnop; vnop
-    vge     vpRGBA, vpRGBA, $v31[2]    // Clamp to >= 0 for fresnel; doesn't affect others
     // vnop; vnop
 
 .endif // CFG_DEBUG_NORMALS
