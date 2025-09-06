@@ -34,24 +34,24 @@ ifeq ($(PARENT_OUTPUT_DIR),.)
 endif
 
 # Find the N64 toolchain, for creating object files.
-ifneq (, $(shell which mips64-elf-ld)
-  CROSS := mips64-elf-
-else ifneq (, $(shell which mips-n64-ld)
-  CROSS := mips-n64-
-else ifneq (, $(shell which mips64-ld)
-  CROSS := mips64-
-else ifneq (, $(shell which mips-linux-gnu-ld)
-  CROSS := mips-linux-gnu-
-else ifneq (, $(shell which mips64-linux-gnu-ld)
-  CROSS := mips64-linux-gnu-
-else ifneq (, $(shell which mips-ld)
-  CROSS := mips-
-else ifneq (, $(shell which mips64-linux-gnuabi64-ld)
-  CROSS := mips64-linux-gnuabi64-
-else ifneq (, $(shell which mips64-ultra-elf-ld)
-  CROSS := mips64-ultra-elf-
+ifneq (, $(shell which mips64-elf-as)
+  AS := mips64-elf-as
+else ifneq (, $(shell which mips-n64-as)
+  AS := mips-n64-as
+else ifneq (, $(shell which mips64-as)
+  AS := mips64-as
+else ifneq (, $(shell which mips-linux-gnu-as)
+  AS := mips-linux-gnu-as
+else ifneq (, $(shell which mips64-linux-gnu-as)
+  AS := mips64-linux-gnu-as
+else ifneq (, $(shell which mips-as)
+  AS := mips-as
+else ifneq (, $(shell which mips64-linux-gnuabi64-as)
+  AS := mips64-linux-gnuabi64-as
+else ifneq (, $(shell which mips64-ultra-elf-as)
+  AS := mips64-ultra-elf-as
 else
-  $(warning Could not find N64 linker, not building object files)
+  $(warning Could not find N64 assembler, not building object files)
   AS := 
 endif
 
