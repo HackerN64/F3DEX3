@@ -747,10 +747,10 @@ Scalar regs:
 $zero ---------------------------------- Hardwired zero ------------------------------------------
 $1    v1 texptr    clipIdx    <------------- vtxLeft ------------------------------>  temp, init 0
 $2    v2 shdptr   <---------- clipAlloc -------> <----- lbPostAo   laPtr                  temp
-$3    v3 shdflg   clipTempVtx <------------- vLoopRet ---------> laVtxLeft                temp
-$4    <--------------- origV1Idx -------------->
+$3    v3 shdflg   clipTempVtx <------------- vLoopRet --------->  laVtxLeft               temp
+$4    <--------------- origV1Idx --------------> <----- lbFakeAmb laSpecFres
 $5    ------------------------------------- vGeomMid ---------------------------------------------
-$6    geom mode   <---------- clipPtrs --------> <-- lbTexgenOrRet laSTKept
+$6    v1flag temp <---------- clipPtrs --------> <-- lbTexgenOrRet laSTKept
 $7    v2flag tile clipWalkCount <----------- fogFlag ---------->  laPacked  mtx valid   cmd byte
 $8    v3flag      clipLastVtx <------------- outVtx2 ---------->  laSpecular outVtx2
 $9    xp texenab                                 <----- curLight ---------> viLtFlag
@@ -758,14 +758,14 @@ $10   -------------------------------------- temp2 -----------------------------
 $11   --------------------------------------- temp -----------------------------------------------
 $12   ----------------------------------- perfCounterD -------------------------------------------
 $13   ------------------------------------ altBaseReg --------------------------------------------
-$14               <-------------------------- inVtx ------------------------------->
+$14   geom mode   <-------------------------- inVtx ------------------------------->
 $15                           <------------ outVtxBase ---------------------------->
-$16   v1flag lmaj                                <----- lbFakeAmb laSpecFres          ovlInitClock
+$16   
 $17   
 $18   
-$19      temp     clipCurVtx  <------------- outVtx1 ---------->    laL2A   <---------   dmaLen
-$20      temp   clipMaskShift clipVOnscr <-- flagsV1 ---------->   laTexgen <---------  dmemAddr
-$21   <----- clipMaskIdx / clipDrawPtr -------> <----- ambLight             ambLight
+$19      temp     clipCurVtx  <------------- outVtx1 ---------->   laL2A    <---------   dmaLen
+$20      temp   clipMaskShift clipVOnscr <-- flagsV1 ---------->  laTexgen  <---------  dmemAddr
+$21   <----- clipMaskIdx / clipDrawPtr -------> <----- ambLight             ambLight  ovlInitClock
 $22   ---------------------------------- rdpCmdBufEndP1 ------------------------------------------
 $23   ----------------------------------- rdpCmdBufPtr -------------------------------------------
 $24      temp   clipWalkPhase clipVOffscr <- flagsV2 ---------->   fp temp  <--------- cmd_w1_dram
@@ -809,19 +809,19 @@ flagsV2        equ $24   // Clip flags for vertex 2
 
 // Lighting basic:
 lbPostAo       equ $2    // Address to return to after AO
+lbFakeAmb      equ $4    // Pointer to ambient light or to 8 bytes of zeros if AO enabled
 lbTexgenOrRet  equ $6    // ltbasic_texgen as negative if texgen, else vtx_return_from_lighting
 curLight       equ $9    // Current light pointer with offset
-lbFakeAmb      equ $16   // Pointer to ambient light or to 8 bytes of zeros if AO enabled
 ambLight       equ $21   // Ambient (top) light pointer with offset
 lbAfter        equ $25   // Address to return to after main lighting loop (vertex or extras)
 
 // Lighting advanced:
 laPtr          equ $2    // Pointer to current vertex pair being lit
 laVtxLeft      equ $3    // Count of vertices left * 0x10
+laSpecFres     equ $4    // Nonzero if doing ltadv_normal_to_vertex for specular or Fresnel
 laSTKept       equ $6    // Texture coords of vertex 1 kept through processing
 laPacked       equ $7    // Nonzero if packed normals enabled
 laSpecular     equ $8    // Sign bit set if specular enabled
-laSpecFres     equ $16   // Nonzero if doing ltadv_normal_to_vertex for specular or Fresnel
 laL2A          equ $19   // Nonzero if light-to-alpha (cel shading) enabled
 laTexgen       equ $20   // Nonzero if texgen enabled
 
@@ -844,9 +844,9 @@ clipWalkPhase  equ $24   // Current action on walk: e.g. looking for onscreen-to
 
 // Misc:
 nextRA         equ $10   // Address to return to after overlay load
-ovlInitClock   equ $16   // Temp for profiling
 dmaLen         equ $19   // DMA length in bytes minus 1
 dmemAddr       equ $20   // DMA address in DMEM or IMEM. Also = rdpCmdBufPtr - rdpCmdBufEndP1 for flush_rdp_buffer
+ovlInitClock   equ $21   // Temp for profiling. Share register with values not kept across ovl load.
 cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
 cmd_w0         equ $25   // DL command word 0, also holds next tris info
 
@@ -1363,13 +1363,13 @@ tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vnxor   tMAtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
     vnxor   tLAtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
-    lhu     $16, VTX_CLIP($1)
+    lhu     $6, VTX_CLIP($1)
     vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
     lhu     $7, VTX_CLIP($2)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
     lhu     $8, VTX_CLIP($3)
     vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
-    andi    $11, $16, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
+    andi    $11, $6, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
     vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
     and     $11, $11, $7
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
@@ -1383,7 +1383,7 @@ tri_noinit: // ra is next cmd, second tri in TRI2, or middle of clipping
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
     sll     $20, vGeomMid, 29 // Original bit 10 (now bit 2) in the sign bit, for facing cull
     vmrg    tLPos, $v6, $v4   // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
-    or      $10, $16, $7
+    or      $10, $6, $7
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
     or      $10, $10, $8      // $10 = all clip bits which are true for any verts
     vmrg    $v4, tHPos, $v8   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
@@ -1406,19 +1406,19 @@ tSubPxHI equ $v26
     beqz    $9, return_and_end_mat  // If cross product is 0, tri is degenerate (zero area), cull.
      // 34 cycles
 .if !CFG_NO_OCCLUSION_PLANE
-     and    $16, $16, $7
+     and    $6, $6, $7
 .endif
      vsub   tPosMmH, tMPos, tHPos
 .if !CFG_NO_OCCLUSION_PLANE
-    and     $16, $16, $8
+    and     $6, $6, $8
 .endif
     vsub    tPosLmH, tLPos, tHPos
 .if !CFG_NO_OCCLUSION_PLANE
-    andi    $16, $16, CLIP_OCCLUDED
+    andi    $6, $6, CLIP_OCCLUDED
 .endif
     vsub    tPosHmM, tHPos, tMPos
 .if !CFG_NO_OCCLUSION_PLANE
-    bnez    $16, tri_culled_by_occlusion_plane // Cull if all verts occluded
+    bnez    $6, tri_culled_by_occlusion_plane // Cull if all verts occluded
      // 38 cycles
 .endif
      mfc2   $1, tHPos[10]     // tHPos = lowest Y value = highest on screen (x, y, addr)
@@ -1439,7 +1439,7 @@ tXPF equ $v16 // Triangle cross product
 tXPI equ $v17
     vreadacc tXPI, ACC_UPPER
 .if !ENABLE_PROFILING
-    mfc2    $10, $v7[10]  // Original vertex 1 address (before clipping)
+    mfc2    $10, $v7[10]  // Orig V1 addr. origV1Idx is the index (not addr), and we can't lookup in vertexTable during clipping!
 .endif
     vreadacc tXPF, ACC_MIDDLE
     lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
@@ -1477,7 +1477,7 @@ tri_skip_flat_shading:
     vmudl   tHAtI, tHAtI, vTRC_0100 // vertex color 1 >>= 8
     lb      $20, (alphaCompareCullMode)($zero)
     vmudl   tMAtI, tMAtI, vTRC_0100 // vertex color 2 >>= 8
-    lw      $16, VTX_INV_W_VEC($1) // $16, $7, $8 = 1/W for H, M, L
+    lw      $6, VTX_INV_W_VEC($1) // $6, $7, $8 = 1/W for H, M, L
     vmudl   tLAtI, tLAtI, vTRC_0100 // vertex color 3 >>= 8
     lw      $7, VTX_INV_W_VEC($2)
     vmudl   $v29, $v20, vTRC_0020
@@ -1503,25 +1503,25 @@ tPosCatF equ $v25
     vmudm   tPosCatF, tPosCatI, vTRC_1000
     // no nop if tri_skip_alpha_compare_cull was unaligned
     vmadn   tPosCatI, $v31, $v31[2] // 0
-    sub     $11, $16, $7  // Four instr: $16 = max($16, $7)
+    sub     $11, $6, $7  // Four instr: $6 = max($6, $7)
     vsubc   tSubPxHF, vZero, tSubPxHF
     sra     $10, $11, 31
     vsub    tSubPxHI, vZero, vZero
     and     $11, $11, $10
     vmudm   $v29, tPosCatF, $v20
-    sub     $16, $16, $11
+    sub     $6, $6, $11
     vmadl   $v29, tPosCatI, $v20
-    sub     $11, $16, $8  // Four instr: $16 = max($16, $8)
+    sub     $11, $6, $8  // Four instr: $6 = max($6, $8)
     vmadn   $v20, tPosCatI, $v22
     sra     $10, $11, 31
     vmadh   tPosCatI, tPosCatF, $v22
     and     $11, $11, $10
     vmudl   $v29, tXPRcpF, tXPF
-    sub     $16, $16, $11
+    sub     $6, $6, $11
     vmadm   $v29, tXPRcpI, tXPF
     mfc2    $7, tXPI[1]
     vmadn   tXPF, tXPRcpF, tXPI
-    lbu     $6, geometryModeLabel + 3 // Load lowest byte for G_SHADE, G_ZBUFFER. Also has G_ATTROFFSET_ST_ENABLE, but G_TRI_FILL will get OR'd into it and force that set.
+    lbu     $14, geometryModeLabel + 3 // Load lowest byte for G_SHADE, G_ZBUFFER. Also has G_ATTROFFSET_ST_ENABLE, but G_TRI_FILL will get OR'd into it and force that set.
     vmadh   tXPI, tXPRcpI, tXPI
     lbu     $9, textureSettings1 + 3 // Texture enabled = 0x2
     vand    $v22, $v20, vTRC_FFF8
@@ -1529,11 +1529,11 @@ tPosCatF equ $v25
     vcr     tPosCatI, tPosCatI, vTRC_0100
     lsv     tLAtI[14], VTX_SCR_Z($3)
     vmudh   $v29, vOne, $v31[4] // 4
-    ori     $11, $6, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
+    ori     $11, $14, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
     vmadn   tXPF, tXPF, $v31[0] // -4
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
     vmadh   tXPI, tXPI, $v31[0] // -4
-    sw      $16, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W (upper) to temp mem
+    sw      $6, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W (upper) to temp mem
 tMx1W equ $v25 // <- tPosCatF
     vmudn   $v29, $v3, tHPos[0]
     llv     tMx1W[0], 0x0010(rdpCmdBufPtr) // Load max of three verts' 1/W
@@ -1608,7 +1608,7 @@ tSTWHMF equ $v25 // <- tMnWI
     vmadh   tXPRcpI, tXPI, tXPRcpI
     addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
     vmudh   tPosLmH, tPosLmH, $v31[0h] // e1 LmHY * -4 = 4*HmLY; e456 MmHY,LmHX,HmMX *= 4
-    andi    $3, $6, G_SHADE
+    andi    $3, $14, G_SHADE
 tAtLmHF equ $v10
 tAtLmHI equ $v9
 tAtMmHF equ $v13
@@ -1655,9 +1655,9 @@ tDaDyF equ $v6
     vmudl   $v29, tDaDxF, tXPRcpF[1]
     add     rdpCmdBufPtr, $1, $11   // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
     vmadm   $v29, tDaDxI, tXPRcpF[1]
-    andi    $6, $6, G_ZBUFFER       // Get the value of G_ZBUFFER from the current geometry mode
+    andi    $14, $14, G_ZBUFFER     // Get the value of G_ZBUFFER from the current geometry mode
     vmadn   tDaDxF, tDaDxF, tXPRcpI[1]
-    sll     $11, $6, 4              // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
+    sll     $11, $14, 4             // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
     vmadh   tDaDxI, tDaDxI, tXPRcpI[1]
     move    $10, rdpCmdBufPtr       // Write Z here
     vmudl   $v29, tDaDyF, tXPRcpF[1]
@@ -2118,10 +2118,10 @@ clip_draw_tris_loop:
     lhu     $3,      (clipPolySgn + 0xC)(clipDrawPtr)
     lhu     $1,      (clipPolySgn + 0xE)($zero)
     beqz    $2, clip_done
-     lsv    $v6[10], (clipPolySgn + 0xE)($zero)       // +E ($1) to elem 5
-    ldv     $v7[10], (clipPolySgn + 0x8)(clipDrawPtr) // +A ($2) to elem 6, +C ($3) to elem 7
-    j       tri_noinit
      addi   clipDrawPtr, clipDrawPtr, -2
+    llv     $v7[12], (clipPolySgn + 0xC)(clipDrawPtr) // +A ($2) to elem 6, +C ($3) to elem 7
+    j       tri_noinit                                // Can't clobber $v7[10], keeps orig v1 addr
+     lsv    $v6[10], (clipPolySgn + 0xE)($zero)       // +E ($1) to elem 5
 
 clip_timeout:
     bltz    clipWalkPhase, clip_next_cond // Timed out in find on to off: all onscreen, nothing to do for this cond
