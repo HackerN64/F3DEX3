@@ -31,20 +31,20 @@ even to an odd number of lights adds a different time than vice versa.
 
 |                            | F3DEX2 | F3DEX3_NOC | F3DEX3 |
 |----------------------------|--------|------------|--------|
-| Command dispatch           | 12     | 12         | 12     |
-| Small RDP command          | 14     | 5          | 5      |
-| Only/2nd tri to offscreen  | 27     | 25         | 25     |
-| 1st tri to offscreen       | 28     | 26         | 26     |
-| Only/2nd tri to clip       | 32     | 30         | 30     |
-| 1st tri to clip            | 33     | 31         | 31     |
-| Only/2nd tri to backface   | 38     | 36         | 36     |
-| 1st tri to backface        | 39     | 37         | 37     |
-| Only/2nd tri to degenerate | 42     | 38         | 38     |
-| 1st tri to degenerate      | 43     | 39         | 39     |
-| Only/2nd tri to occluded   | Can't  | Can't      | 42     |
-| 1st tri to occluded        | Can't  | Can't      | 43     |
-| Only/2nd tri to draw       | 172    | 156        | 158    |
-| 1st tri to draw            | 173    | 157        | 159    |
+| Command dispatch           | 12     | 10         | 10     |
+| Small RDP command          | 14     | 4          | 4      |
+| Only/2nd tri to offscreen  | 27     | 20         | 20     |
+| 1st tri to offscreen       | 28     | 21         | 21     |
+| Only/2nd tri to clip       | 32     | 25         | 25     |
+| 1st tri to clip            | 33     | 26         | 26     |
+| Only/2nd tri to backface   | 38     | 31         | 31     |
+| 1st tri to backface        | 39     | 32         | 32     |
+| Only/2nd tri to degenerate | 42     | 33         | 33     |
+| 1st tri to degenerate      | 43     | 34         | 34     |
+| Only/2nd tri to occluded   | Can't  | Can't      | 37     |
+| 1st tri to occluded        | Can't  | Can't      | 38     |
+| Only/2nd tri to draw       | 172    | 151        | 153    |
+| 1st tri to draw            | 173    | 152        | 154    |
 | Tri snake                  | Can't  | *          | *      |
 | Vtx before DMA start       | 16     | 17         | 17     |
 | Vtx pair, no lighting      | 54     | 54         | 70     |

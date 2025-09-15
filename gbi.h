@@ -1258,7 +1258,7 @@ typedef struct {
 } PointLight_t;
 
 /**
- * @copydetails PosLight_t
+ * @copydetails PointLight_t
  */
 typedef struct {
     unsigned char col[3];   /** ambient light color (rgb) */
