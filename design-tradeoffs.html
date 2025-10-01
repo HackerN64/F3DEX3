@@ -111,8 +111,8 @@ Vertex processing RSP time for occlusion plane</h2>
 <p>In the occlusion plane F3DEX3 configuration, vertex processing is slower than in F3DEX2. If using this configuration and there is no occlusion plane or it is occluding almost nothing, the RSP will be slower with no other benefit.</p>
 <p>However, when the occlusion plane is occluding even a few percent of the triangles in the scene, the situation changes. This saves RDP time, and most games are RDP bound, so this trades off RSP time for RDP time and makes the game faster overall. Plus, RSP time is also saved for the tris which are not drawn, which can approximately cancel out the extra RSP time for computing the occlusion plane for all vertices.</p>
 <h2><a class="anchor" id="autotoc_md30"></a>
-Functionality in Overlay 3</h2>
-<p>The following commands are moved to Overlay 3 in F3DEX3 to save IMEM space. This means that code will have to be loaded from DRAM to run them if Overlays 2 or 4 (for lighting) happen to be loaded already.</p><ul>
+Functionality in overlays</h2>
+<p>The following commands are moved to Overlay 2 or 3 in F3DEX3 to save IMEM space. This means that code will have to be loaded from DRAM to run them if a different overlay happens to be loaded already.</p><ul>
 <li>Push and multiply codepaths for <code>SPMatrix</code></li>
 <li><code>SPPopMatrix*</code></li>
 <li><code>SPDma*</code></li>
@@ -121,7 +121,7 @@ Functionality in Overlay 3</h2>
 <p>However:</p><ul>
 <li>Multiplying, pushing, and popping matrices is not recommended for performance or accuracy, and these are not used for most 3D objects in SM64 or OoT.</li>
 <li><code>SPDma*</code> is rarely used except at startup for HLE detection.</li>
-<li><code>SPMemset</code> is a new F3DEX3 command which can improve performance. Plus, it is typically run shortly after render start, when Overlay 3 is already in IMEM.</li>
+<li><code>SPMemset</code> is a new F3DEX3 command which can improve performance. Plus, it is typically run shortly after render start, when Overlay 3 (which contains it) is already in IMEM.</li>
 </ul>
 <p>So there is not a significant practical performance impact from these changes.</p>
 <h2><a class="anchor" id="autotoc_md31"></a>
@@ -147,12 +147,16 @@ Segment 0</h2>
 <p>Segment 0 is now reserved: ensure segment 0 is never set to anything but 0x00000000. In F3DEX2 and prior this was only a good idea (and SM64 and OoT always follow this); in F3DEX3 segmented addresses are now resolved relative to other segments. That is, <code>gsSPSegment(0x08, 0x07001000)</code> sets segment 8 to the base address of segment 7 with an additional offset of 0x1000. So for correct behavior when supplying a direct-mapped or physical address such as 0x80101000, segment 0 must always be 0x00000000 so that this address resolves to e.g. 0x101000 as expected in this example.</p>
 <h2><a class="anchor" id="autotoc_md35"></a>
 Non-textured tris</h2>
-<p>In F3DEX2, the RSP time for drawing non-textured tris was significantly lower than for textured tris, by skipping a chunk of computation for the texture coefficients if they were disabled. In F3DEX3, no computation is skipped when textures are disabled. However, almost all materials use textures, and F3DEX3 is a little faster at drawing textured tris than F3DEX2. Plus, F3DEX3 still does not send the texture cofficients if they are disabled, saving DRAM access time for RSP -&gt; FIFO and FIFO -&gt; RDP. RDP time savings from avoiding loading a texture are unaffected of course.</p>
+<p>In F3DEX2, the RSP time for drawing non-textured tris was significantly lower than for textured tris, by skipping a chunk of computation for the texture coefficients if they were disabled. In F3DEX3, no computation is skipped when textures are disabled. However, practically almost all materials use textures, and F3DEX3 is faster at drawing textured tris than F3DEX2. Plus, F3DEX3 still does not send the texture cofficients if they are disabled, saving DRAM access time for RSP -&gt; FIFO and FIFO -&gt; RDP. RDP time savings from avoiding loading a texture are unaffected of course.</p>
 <h2><a class="anchor" id="autotoc_md36"></a>
+Yield check timing</h2>
+<p>In F3DEX2, the microcode checks whether the CPU has requested that it yield (to run the audio microcode) before running every display list command. F3DEX3 now performs this check every time the input buffer is refilled, which is typically once every 21 commands. The amount by which this delays the start of the audio microcode is typically very small, and worst case during normal conditions would be a few hundred microseconds. However, if the RDP FIFO is full during this time, the microcode will have to wait for the RDP to make progress through its workload to free up space for the outputs of the RSP commands. This will slow down the RSP to the RDP's speed, and since triangles can be arbitrarily large on screen, this can theoretically cause huge stalls. If you ever encounter this in practice, please contact Sauraen.</p>
+<h2><a class="anchor" id="autotoc_md37"></a>
 Obscure semantic differences from F3DEX2 that should never matter in practice</h2>
 <ul>
 <li>Changing fog settings&ndash;i.e. enabling or disabling <code>G_FOG</code> in the geometry mode or executing <code>SPFogFactor</code> or <code>SPFogPosition</code>&ndash;between loading verts and drawing tris with those verts will lead to incorrect fog values for those tris. In F3DEX2, the fog settings at vertex load time would always be used, even if they were changed before drawing tris.</li>
-<li>Drawing tris overwrites the 4 bytes stored with <code>G_RDPHALF_1</code>, which is used to hold state during some display list macros which are actually two 8-byte commands. This change is not noticeable when using standard GBI commands, only if something highly custom has been set up. </li>
+<li>Drawing tris overwrites the 4 bytes stored with <code>G_RDPHALF_1</code>, which is used to hold state during some display list macros which are actually two 8-byte commands. This change is not noticeable when using standard GBI commands, only if something highly custom has been set up.</li>
+<li><code>SPTexture</code> and <code>SPFogFactor</code> state is corrupted when loading and returning from another microcode (S2DEX). In F3DEX2, it would be reinitialized to default values; in F3DEX3, it is left as garbage values. </li>
 </ul>
 </div></div><!-- contents -->
 </div><!-- PageDoc -->

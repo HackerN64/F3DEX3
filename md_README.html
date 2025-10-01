@@ -145,7 +145,7 @@ Performance improvements</h2>
 <li>Segment addresses are now resolved relative to other segments (feature by Tharo). This enables a strategy for <b>skipping repeated material DLs</b>: call a segment to run the material, remap the segment in the material to a display list that immediately returns, and so if the material is called again it won't run.</li>
 <li>New <code>SPMemset</code> command fills a specified RDRAM region with a repeated 16-bit value. This can be used for clearing the Z buffer or filling the framebuffer or the letterbox with a solid color <b>faster than the RDP can in fill mode</b>. Practical performance may vary due to scheduling constraints.</li>
 <li>New <code>SPFlush</code> command can ensure that the RDP starts clearing the framebuffer as soon as possible during the frame, instead of waiting a short time for further RSP processing.</li>
-<li>The key codepaths for command dispatch, triangle draw, and vertex processing (assuming lighting enabled and the occlusion plane disabled with the <code>NOC</code> configuration) are <b>slightly faster than in F3DEX2</b>.</li>
+<li>The key codepaths for command dispatch, triangle draw, and vertex processing (assuming lighting enabled and the occlusion plane disabled with the <code>NOC</code> configuration) are <b>faster than in F3DEX2</b>, sometimes <a href="https://hackern64.github.io/F3DEX3/performance.html">much faster</a>.</li>
 </ul>
 <h2><a class="anchor" id="autotoc_md9"></a>
 Miscellaneous</h2>

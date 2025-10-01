@@ -24,41 +24,37 @@ var md_docs_2documentation =
     [ "Design Tradeoffs", "design-tradeoffs.html", [
       [ "What are the tradeoffs for all these new features?", "design-tradeoffs.html#autotoc_md28", [
         [ "Vertex processing RSP time for occlusion plane", "design-tradeoffs.html#autotoc_md29", null ],
-        [ "Functionality in Overlay 3", "design-tradeoffs.html#autotoc_md30", null ],
+        [ "Functionality in overlays", "design-tradeoffs.html#autotoc_md30", null ],
         [ "Far clipping removal", "design-tradeoffs.html#autotoc_md31", null ],
         [ "Removal of scaled vertex normals", "design-tradeoffs.html#autotoc_md32", null ],
         [ "RDP temporary buffers shrinking", "design-tradeoffs.html#autotoc_md33", null ],
         [ "Segment 0", "design-tradeoffs.html#autotoc_md34", null ],
         [ "Non-textured tris", "design-tradeoffs.html#autotoc_md35", null ],
-        [ "Obscure semantic differences from F3DEX2 that should never matter in practice", "design-tradeoffs.html#autotoc_md36", null ]
+        [ "Yield check timing", "design-tradeoffs.html#autotoc_md36", null ],
+        [ "Obscure semantic differences from F3DEX2 that should never matter in practice", "design-tradeoffs.html#autotoc_md37", null ]
       ] ]
     ] ],
     [ "Removed Features", "removed.html", [
-      [ "Removed Features", "removed.html#autotoc_md49", [
-        [ "Legacy Vertex Pipeline (LVP) Configuration", "removed.html#autotoc_md50", null ],
-        [ "Octahedral Encoding for Packed Normals", "removed.html#autotoc_md51", null ],
-        [ "Clipping minimal scanlines algorithm", "removed.html#autotoc_md52", null ],
-        [ "Z attribute offsets", "removed.html#autotoc_md53", null ],
-        [ "SPTriStrip and SPTriFan", "removed.html#autotoc_md54", null ]
+      [ "Removed Features", "removed.html#autotoc_md46", [
+        [ "Legacy Vertex Pipeline (LVP) Configuration", "removed.html#autotoc_md47", null ],
+        [ "Octahedral Encoding for Packed Normals", "removed.html#autotoc_md48", null ],
+        [ "Clipping minimal scanlines algorithm", "removed.html#autotoc_md49", null ],
+        [ "Z attribute offsets", "removed.html#autotoc_md50", null ],
+        [ "SPTriStrip and SPTriFan", "removed.html#autotoc_md51", null ]
       ] ]
     ] ],
     [ "Performance Results", "performance.html", [
-      [ "Performance Results", "performance.html#autotoc_md37", [
-        [ "Cycle Counts", "performance.html#autotoc_md38", null ],
-        [ "Triangle Snake Cycle Counts", "performance.html#autotoc_md39", [
-          [ "Very Long Snakes", "performance.html#autotoc_md40", null ],
-          [ "Starting a Snake", "performance.html#autotoc_md41", null ],
-          [ "Ending a Snake", "performance.html#autotoc_md42", null ],
-          [ "Example", "performance.html#autotoc_md43", null ]
-        ] ]
+      [ "Performance Results", "performance.html#autotoc_md38", [
+        [ "Cycle Counts", "performance.html#autotoc_md39", null ],
+        [ "Triangle Snake Cycle Counts", "performance.html#autotoc_md40", null ]
       ] ]
     ] ],
     [ "Porting Your Romhack Codebase to F3DEX3", "porting.html", [
-      [ "Porting Your Romhack Codebase to F3DEX3", "porting.html#autotoc_md44", [
-        [ "Required Changes", "porting.html#autotoc_md45", null ],
-        [ "Recommended Changes (Non-Lighting)", "porting.html#autotoc_md46", null ],
-        [ "Recommended Changes (Lighting)", "porting.html#autotoc_md47", null ],
-        [ "Changes Required for New Features", "porting.html#autotoc_md48", null ]
+      [ "Porting Your Romhack Codebase to F3DEX3", "porting.html#autotoc_md41", [
+        [ "Required Changes", "porting.html#autotoc_md42", null ],
+        [ "Recommended Changes (Non-Lighting)", "porting.html#autotoc_md43", null ],
+        [ "Recommended Changes (Lighting)", "porting.html#autotoc_md44", null ],
+        [ "Changes Required for New Features", "porting.html#autotoc_md45", null ]
       ] ]
     ] ],
     [ "Triangle Snake", "snake.html", null ]
