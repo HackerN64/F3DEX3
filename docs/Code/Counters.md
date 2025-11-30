@@ -38,7 +38,7 @@ typedef struct {  /* Default performance counters, if no CFG_PROFILING_* is enab
     u16 rdpOutTriCount;
     /* Number of tris which processing started on the RSP (before clipping / culling) */
     u32 rspInTriCount:18;
-    /* Number of fill rects and tex rects drawn */
+    /* Number of tex rects drawn */
     u32 rectCount:14;
     /* Number of cycles the RSP was stalled because the RDP FIFO was full */
     u32 stallRDPFifoFullCycles;
