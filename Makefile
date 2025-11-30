@@ -73,7 +73,6 @@ else
 	mkdir -p $@
 endif
 ALL_UCODES :=
-ALL_UCODES_WITH_MD5S :=
 ALL_OUTPUT_DIRS :=
 
 ifneq (, $(AS))
@@ -83,12 +82,10 @@ endif
 
 define reset_vars
   NAME := 
+  BASE_FILE := 
   DESCRIPTION := 
   ID_STR := 
-  MD5_CODE := 
-  MD5_DATA := 
   OPTIONS := 
-  EXTRA_DEPS := 
 endef
 
 define ucode_rule
@@ -107,9 +104,6 @@ define ucode_rule
   OS_FILE   := $$(UCODE_OUTPUT_DIR)/gsp$(NAME).o.s
   O_FILE    := $$(UCODE_OUTPUT_DIR)/gsp$(NAME).o
   ALL_UCODES += $(NAME)
-  ifneq ($(MD5_CODE),)
-   ALL_UCODES_WITH_MD5S += $(NAME)
-  endif
   ALL_OUTPUT_DIRS += $$(UCODE_OUTPUT_DIR)
   OFF_OPTIONS := $(filter-out $(OPTIONS),$(ALL_OPTIONS))
   OPTIONS_EQU := 
@@ -121,7 +115,7 @@ define ucode_rule
    -strequ DATA_FILE $$(DATA_FILE) \
    $$(OPTIONS_EQU) \
    $$(OFF_OPTIONS_EQU) \
-   ./rsp/main/f3dex3.s \
+   $(BASE_FILE) \
    -sym2 $$(SYM_FILE) \
    -temp $$(TEMP_FILE)
   # Microcode target
@@ -154,13 +148,9 @@ define ucode_rule
   $$(OS_FILE): OS_FILE:=$$(OS_FILE)
   $$(OS_FILE): NAME:=$$(NAME)
   # Target recipe
-  $$(CODE_FILE): ./rsp/main/f3dex3.s ./rsp/* $(EXTRA_DEPS) | $$(UCODE_OUTPUT_DIR)
+  $$(CODE_FILE): $(BASE_FILE) ./rsp/* | $$(UCODE_OUTPUT_DIR)
 	@printf "$(INFO)Building microcode: $(NAME): $(DESCRIPTION)$(NO_COL)\n"
 	@$(ARMIPS) -strequ ID_STR "$(ID_STR)" $$(ARMIPS_CMDLINE)
-  ifneq ($(MD5_CODE),)
-	@(printf "$(MD5_CODE) *$$(CODE_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) code matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) code differs$(NO_COL)\n"
-	@(printf "$(MD5_DATA) *$$(DATA_FILE)" | md5sum --status -c -) && printf "  $(SUCCESS)$(NAME) data matches$(NO_COL)\n" || printf "  $(FAILURE)$(NAME) data differs$(NO_COL)\n"
-  endif
   ifneq (, $(AS))
   $$(OS_FILE): $$(CODE_FILE)
 	@sed "s|XXX|$(NAME)|g" ./template.o.s > $$(OS_FILE)
@@ -174,6 +164,7 @@ define rule_builder_final
   NAME := F3DEX3$(NAME_FINAL)
   DESCRIPTION := Will make you want to finally ditch HLE ($(OPTIONS_FINAL))
   ID_STR := F3DEX3$(NAME_FINAL)$(VERSION) by Sauraen & Yoshitaka Yasumoto/Nintendo
+  BASE_FILE := rsp/main/f3dex3.s
   OPTIONS := $(OPTIONS_FINAL)
   $$(eval $$(call ucode_rule))
 endef
@@ -219,6 +210,13 @@ endef
 NAME_BR := 
 OPTIONS_BR := 
 $(eval $(call rule_builder_br))
+
+NAME := ZSOEX3
+DESCRIPTION := Good luck with that HLE lmao
+ID_STR := ZSOEX3 by Sauraen & Yoshitaka Yasumoto/Nintendo
+BASE_FILE := rsp/main/zsoex3.s
+OPTIONS := 
+$(eval $(call ucode_rule))
 
 .PHONY: default ok all clean
 

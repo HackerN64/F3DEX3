@@ -4,7 +4,7 @@
 
 .include "rsp/include/cfg_f3dex3.inc"
 
-.include "rsp/dmem/f3dex3.s"
+.include "rsp/dmem/zsoex3.s"
 
 /*
 Scalar regs:
@@ -72,12 +72,16 @@ $ra   return address, command handler address, sometimes sign bit is flag ------
 
 .include "rsp/tri/decal_fix.s"
 
-clip_triangle equ ovl234_clipmisc_entrypoint
+clip_triangle equ return_and_end_mat
 .include "rsp/tri/main.s"
 
-.include "rsp/lighting/vtx_select_lighting.s"
+.include "rsp/lighting/ltbasic_regs.inc"
 
-.include "rsp/main/ovl3_f3dex3.s"
+vtx_select_lighting:
+    lbu     ambLight, numLightsxSize
+    lb      viLtFlag, dirLightsXfrmValid
+    addi    ambLight, ambLight, altBase    // Point to ambient light; stored through vtx proc
+.include "rsp/lighting/ltbasic.s"
 
 .include "rsp/tri/alpha_cull_end.s"
 
@@ -102,9 +106,5 @@ clip_triangle equ ovl234_clipmisc_entrypoint
 .include "rsp/sys/ovl0_f3d.s"
 
 .include "rsp/main/ovl1_f3dex3.s"
-
-.include "rsp/main/ovl2_f3dex3.s"
-
-.include "rsp/main/ovl4_f3dex3.s"
 
 .close // CODE_FILE
