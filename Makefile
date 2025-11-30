@@ -121,7 +121,7 @@ define ucode_rule
    -strequ DATA_FILE $$(DATA_FILE) \
    $$(OPTIONS_EQU) \
    $$(OFF_OPTIONS_EQU) \
-   f3dex3.s \
+   ./rsp/main/f3dex3.s \
    -sym2 $$(SYM_FILE) \
    -temp $$(TEMP_FILE)
   # Microcode target
@@ -154,7 +154,7 @@ define ucode_rule
   $$(OS_FILE): OS_FILE:=$$(OS_FILE)
   $$(OS_FILE): NAME:=$$(NAME)
   # Target recipe
-  $$(CODE_FILE): ./f3dex3.s ./rsp/* $(EXTRA_DEPS) | $$(UCODE_OUTPUT_DIR)
+  $$(CODE_FILE): ./rsp/main/f3dex3.s ./rsp/* $(EXTRA_DEPS) | $$(UCODE_OUTPUT_DIR)
 	@printf "$(INFO)Building microcode: $(NAME): $(DESCRIPTION)$(NO_COL)\n"
 	@$(ARMIPS) -strequ ID_STR "$(ID_STR)" $$(ARMIPS_CMDLINE)
   ifneq ($(MD5_CODE),)

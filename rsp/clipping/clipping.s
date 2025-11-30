@@ -1,3 +1,5 @@
+.include "rsp/clipping/clipping_regs.inc"
+
 // Each clip condition (clipping plane bit being checked) has three phases that
 // occur in this order: find an onscreen vertex, then find the transition from an
 // onscreen to offscreen vertex, then find the transition from an offscreen to an
@@ -101,24 +103,6 @@ clip_do_subdivision:
     lhu     clipVOffsc, (CLIP_PTR_OFFSCR - 2 * CLIP_PTR_COUNT)(clipPtrs)
     // Interpolate between clipVOffsc and clipVOns; create a new vertex which is on the
     // clipping boundary (e.g. at the screen edge)
-cPosOnOfF equ vpClpF
-cPosOnOfI equ vpClpI
-cPosOfF   equ vpScrF
-cPosOfI   equ vpScrI
-cRGBAOf   equ vpLtTot
-cRGBAOn   equ vpRGBA
-cSTOf     equ vpST
-cSTOn     equ sSTS // Intentionally overwriting this kept reg. Vtx scales ST again, need to re-store unscaled value.
-// Also uses sRTF, sRTI = vTemp1, vTemp2, and vtx_final_setup_for_clip sets sOPM = vKept2
-cTemp     equ vpMdl
-cBaseF    equ vpNrmlX
-cBaseI    equ vpNrmlY
-cDiffF    equ $v2
-cDiffI    equ $v3
-cRRF      equ $v4  // Range Reduction frac
-cRRI      equ $v5  // Range Reduction int
-cFadeOf   equ $v4
-cFadeOn   equ $v5
     /*
     Five clip conditions (these are in a different order from vanilla):
            cBaseI/cBaseF[3]       cDiffI/cDiffF[3]

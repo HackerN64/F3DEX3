@@ -1,4 +1,3 @@
-
 // Global scalar regs:
 vGeomMid       equ $5    // Middle two bytes of geometry mode in lower 16 bits
 perfCounterD   equ $12   // Performance counter D (functions depend on config)
@@ -18,6 +17,10 @@ dmemAddr       equ $20   // DMA address in DMEM or IMEM. Also = rdpCmdBufPtr - r
 ovlInitClock   equ $21   // Temp for profiling. Share register with values not kept across ovl load.
 cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
 cmd_w0         equ $25   // DL command word 0, also holds next tris info
+
+// Tri write scalar regs:
+origV1Addr     equ $4    // Original / current vertex 1 address
+flatV1Offset   equ $16   // Offset +'d to vtx 1 addr for flat shading. 0 except in clipping.
 
 // Global vector regs:
 // TODO can maybe get rid of vZero

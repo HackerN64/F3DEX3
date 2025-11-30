@@ -1,3 +1,5 @@
+.include "rsp/lighting/ltadv_regs.inc"
+
 ltadv_spec_fres_setup: // Odd instruction
     // Get aDIR = normalize(camera - vertex), aDOT = (vpWNrm dot aDIR)
     ldv     aDPosI[0], (cameraWorldPos - altBase)(altBaseReg) // Camera world pos

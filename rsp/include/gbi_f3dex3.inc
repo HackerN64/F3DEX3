@@ -1,5 +1,5 @@
-.include "rsp/gbi_f3d.inc"
-.include "rsp/gbi_clipping.inc"
+.include "rsp/include/gbi_f3d.inc"
+.include "rsp/include/gbi_clipping.inc"
 
 // GBI commands
 G_TRISNAKE          equ 0x08

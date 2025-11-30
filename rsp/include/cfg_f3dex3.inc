@@ -1,4 +1,3 @@
-
 //
 // Profiling configurations. To make space for the profiling features, if any of
 // the profiling configurations are enabled, G_LIGHTTORDP and !G_SHADING_SMOOTH

@@ -31,4 +31,4 @@ ovl234_clipmisc_entrypoint_ovl4ver:        // same IMEM address as ovl234_clipmi
     jal     load_overlays_2_3_4            // Not a call; returns to $ra-8 = here
      li     cmd_w1_dram, orga(ovl3_start)  // set up a load for overlay 3
 
-#include "rsp/ltadv.s"
+.include "rsp/lighting/ltadv.s"

@@ -1,4 +1,3 @@
-
 // RSP Vertex structure offsets
 vtxSize equ 0x26
 

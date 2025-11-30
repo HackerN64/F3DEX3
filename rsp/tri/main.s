@@ -49,6 +49,7 @@ tri_from_clip:
     lhu     $24, activeClipPlanes
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
     sll     $20, vGeomMid, 29 // Original bit 10 (now bit 2) in the sign bit, for facing cull
+// tLPos <- $v10
     vmrg    tLPos, $v6, $v4   // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
     or      $10, $6, $7
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
@@ -63,25 +64,29 @@ tri_from_clip:
      srl    $11, $9, 31       // = 0 if x prod positive (back facing), 1 if x prod negative (front facing)
     vmudh   $v3, vOne, $v31[5] // 0x4000; some rounding factor
     sllv    $11, $20, $11     // Sign bit = bit 10 of geom mode if back facing, bit 9 if front facing
+// tMPos <- $v2
     vmrg    tMPos, $v4, tLPos // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     bltz    $11, return_and_end_mat // Cull if bit is set (culled based on facing)
      // 27 cycles
      vmrg   tLPos, tLPos, $v4 // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
-tSubPxHF equ $v4
+// tSubPxHF <- $v4
     vmudn   tSubPxHF, tHPos, $v31[5] // 0x4000
     beqz    $9, return_and_end_mat  // If cross product is 0, tri is degenerate (zero area), cull.
      // 29 cycles
 .if !CFG_NO_OCCLUSION_PLANE
      and    $6, $6, $7
 .endif
+// tPosMmH <- $v6
      vsub   tPosMmH, tMPos, tHPos
 .if !CFG_NO_OCCLUSION_PLANE
     and     $6, $6, $8
 .endif
+// tPosLmH <- $v8
     vsub    tPosLmH, tLPos, tHPos
 .if !CFG_NO_OCCLUSION_PLANE
     andi    $6, $6, CLIP_OCCLUDED
 .endif
+// tPosHmM <- $v11
     vsub    tPosHmM, tHPos, tMPos
 .if !CFG_NO_OCCLUSION_PLANE
     bnez    $6, tri_culled_by_occlusion_plane // Cull if all verts occluded
@@ -89,8 +94,7 @@ tSubPxHF equ $v4
 .endif
      mfc2   $1, tHPos[4]     // tHPos = lowest Y value = highest on screen (x, y, addr)
     // 32 cycles if NOC (34 if occlusion plane)
-tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
-    vsub    tPosCatI, tLPos, tMPos
+    vsub    tPosCatI, tLPos, tMPos // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
     mfc2    $2, tMPos[4]     // tMPos = mid vertex (x, y, addr)
     vmov    tPosCatI[2], tPosMmH[0]
 .if !ENABLE_PROFILING
@@ -98,12 +102,9 @@ tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
 .endif
     vmudh   $v29, tPosMmH, tPosLmH[0]
     li      $20, -8       // 0xFFF8; constant for some mask below
-t1WI equ $v13 // elems 0, 4, 6
     vmadh   $v29, tPosLmH, tPosHmM[0]
     mfc2    $3, tLPos[4]     // tLPos = highest Y value = lowest on screen (x, y, addr)
-tXPF equ $v16 // Triangle cross product
-tXPI equ $v17
-    vreadacc tXPI, ACC_UPPER
+    vreadacc tXPI, ACC_UPPER  // Triangle cross product
     add     $19, origV1Addr, flatV1Offset
     vreadacc tXPF, ACC_MIDDLE
     lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
@@ -115,17 +116,16 @@ tXPI equ $v17
 .if !ENABLE_PROFILING
     lpv     $v25[0], VTX_COLOR_VEC($19) // Load RGB from orig vtx 1 for flat shading
 .endif
-tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
-tXPRcpI equ $v24
-    vrcpl   tXPRcpF[1], tXPF[1]
+    vrcpl   tXPRcpF[1], tXPF[1] // Reciprocal of cross product (becomes that * 4)
 .if !ENABLE_PROFILING
     beqz    $11, tri_flat_shading  // Branch if G_SHADING_SMOOTH is clear
 .endif
-     vrcph  tXPRcpI[1], $v31[2]            // 0
-tri_return_from_flat_shading:
+     vrcph  tXPRcpI[1], $v31[2] // 0
+tri_return_from_flat_shading: // Uses $v25
     // 43 cycles
     vrcp    $v20[2], tPosMmH[1]
     ssv     tPosMmH[2], 0x0030(rdpCmdBufPtr) // MmHY -> first short (temp mem)
+// t1WI <- $v13 // elems 0, 4, 6
     vrcph   $v22[2], tPosMmH[1]
     llv     t1WI[0], VTX_INV_W_VEC($1)
     vrcp    $v20[3], tPosLmH[1]
@@ -146,14 +146,14 @@ tri_return_from_flat_shading:
 // $v6 <- tPosMmH; $v6 clobbered in alpha compare cull
 tri_return_from_alpha_compare_cull: // Uses $v25, $v26
     // 53 cycles
-tPosCatF equ $v25
+// tPosCatF <- $v25
     vmudm   tPosCatF, tPosCatI, vTRC_1000
     mtc2    $20, tMPos[14] // 0xFFF8; only elem 0, 1, 2 of this reg used now
     vmadn   tPosCatI, $v31, $v31[2] // 0
     sub     $11, $6, $7  // Four instr: $6 = max($6, $7)
     vsubc   tSubPxHF, vZero, tSubPxHF
     sra     $10, $11, 31
-tSubPxHI equ $v26
+// tSubPxHI <- $v26
     vsub    tSubPxHI, vZero, vZero
     and     $11, $11, $10
     vmudm   $v29, tPosCatF, $v20
@@ -182,7 +182,7 @@ tSubPxHI equ $v26
     or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
     vmadh   tXPI, tXPI, $v31[0] // -4
     sw      $6, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W (upper) to temp mem
-tMx1W equ $v25 // <- tPosCatF
+// tMx1W <- tPosCatF
     vmudn   $v29, $v3, tHPos[0]
     llv     tMx1W[0], 0x0010(rdpCmdBufPtr) // Load max of three verts' 1/W
     vmadl   $v29, $v22, tSubPxHF[1]
@@ -196,16 +196,16 @@ tMx1W equ $v25 // <- tPosCatF
     lsv     tLAtF[14], VTX_SCR_Z_FRAC($3)
     vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
     ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
-tMnWF equ $v10 // <- tLPos
+// tMnWF <- tLPos
     vrcpl   tMnWF[0], tMx1W[1]
     lbu     $10, textureSettings1 + 2  // Level and tile
-t1WF equ $v14 // <- tHPos
+// t1WF <- tHPos
     vmudh   t1WF, vOne, t1WI[1q]
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
-tMnWI equ $v25 // <- tMx1W
+// tMnWI <- tMx1W
     vrcph   tMnWI[0], $v31[2]     // 0
     lw      $19, otherMode1
-tSTWHMI equ $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
+// tSTWHMI <- $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
     vmudh   tSTWHMI, vOne, $v31[7]  // 0x7FFF
     sb      $zero, materialCullMode // Covers tri write (non early exit)
     vmudm   $v29, t1WI, tMnWF[0] // 1/W each vtx * min W = 1 for one of the verts, < 1 for others
@@ -216,8 +216,7 @@ tSTWHMI equ $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
     llv     tSTWHMI[8], VTX_TC_VEC($2)
     vmadh   t1WI, t1WI, tMnWI[0]
     ssv     tPosHmM[0], 0x0034(rdpCmdBufPtr) // HmMX -> third short (temp mem)
-tSTWLI equ $v10 // L = elems 4-6; init W = 7FFF
-tSTWLF equ $v13
+// tSTWLI <- tMnWF // L = elems 4-6; init W = 7FFF
     vmudh   tSTWLI, vOne, $v31[7]  // 0x7FFF
     andi    $19, $19, ZMODE_DEC    // Mask to two Z mode bits
     set_vcc_11110001                // select RGBA___Z or ____STW_
@@ -226,19 +225,19 @@ tSTWLF equ $v13
     addi    $19, $19, -ZMODE_DEC  // Check if equal to decal mode
     vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
     ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
-tSTWHMF equ $v25 // <- tMnWI
+// tSTWHMF <- tMnWI
     vmadn   tSTWHMF, $v31, $v31[2]  // 0
     andi    $7, $7, 0x0080 // Extract the left major flag from $7
     vmudm   $v29, tSTWLI, t1WF[6]  // (S, T, 7FFF) * (1 or <1) for L
     or      $7, $7, $10 // Combine the left major flag with the level and tile from the texture settings
     vmadh   tSTWLI, tSTWLI, t1WI[6]
     sb      $7, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
+// tSTWLF <- t1WI
     vmadn   tSTWLF, $v31, $v31[2]  // 0
     sdv     tSTWHMI[0], 0x0020(rdpCmdBufPtr) // Move S, T, W Hi Int to temp mem
     vmrg    tMAtI, tMAtI, tSTWHMI // Merge S, T, W Mid into elems 4-6
     sdv     tSTWHMF[0], 0x0028(rdpCmdBufPtr) // Move S, T, W Hi Frac to temp mem
     vmrg    tMAtF, tMAtF, tSTWHMF // Merge S, T, W Mid into elems 4-6
-// $v25 <- tSTWHMF
     ldv     tHAtI[8], 0x0020(rdpCmdBufPtr) // Move S, T, W Hi Int from temp mem
     vmrg    tLAtI, tLAtI, tSTWLI // Merge S, T, W Low into elems 4-6
     ldv     tHAtF[8], 0x0028(rdpCmdBufPtr) // Move S, T, W Hi Frac from temp mem
@@ -257,21 +256,19 @@ tSTWHMF equ $v25 // <- tMnWI
     addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
     vmudh   tPosLmH, tPosLmH, $v31[0h] // e1 LmHY * -4 = 4*HmLY; e456 MmHY,LmHX,HmMX *= 4
     andi    $3, $14, G_SHADE
-tAtLmHF equ $v10
-tAtLmHI equ $v9
-tAtMmHF equ $v13
-tAtMmHI equ $v27
+// tAtLmHF <- tSTWLI
     vsubc   tAtLmHF, tLAtF, tHAtF
     sll     $1, $1, 14
+// tAtLmHI <- tLAtF
     vsub    tAtLmHI, tLAtI, tHAtI
     sb      $zero, materialCullMode // This covers tri write out
+// tAtMmHF <- tSTWLF
     vsubc   tAtMmHF, tMAtF, tHAtF
     sw      $1, 0x0008(rdpCmdBufPtr)         // Store XL edge coefficient
+// tAtMmHI <- tMAtF
     vsub    tAtMmHI, tMAtI, tHAtI
     ssv     $v3[6], 0x0010(rdpCmdBufPtr)     // Store XH edge coefficient (integer part)
 // DaDx = (v3 - v1) * factor + (v2 - v1) * factor
-tDaDxF equ $v2
-tDaDxI equ $v3
     vmudn   $v29, tAtLmHF, tPosLmH[4] // MmHY * 4
     ssv     $v2[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
     vmadh   $v29, tAtLmHI, tPosLmH[4] // MmHY * 4
@@ -280,13 +277,13 @@ tDaDxI equ $v3
     ssv     $v2[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
     vmadh   $v29, tAtMmHI, tPosLmH[1] // LmHY * -4 = HmLY * 4
     ssv     tPosCatI[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
+// tDaDxF <- $v2
     vreadacc tDaDxF, ACC_MIDDLE
     ssv     $v20[0], 0x000E(rdpCmdBufPtr)    // Store DxLDy edge coefficient (fractional part)
+// tDaDxI <- $v3
     vreadacc tDaDxI, ACC_UPPER
     ssv     tPosCatI[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
 // DaDy = (v2 - v1) * factor + (v3 - v1) * factor
-tDaDyF equ $v6
-// tDaDyI <- $v27
     vmudn   $v29, tAtMmHF, tPosLmH[5] // LmHX * 4
     ssv     $v20[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
     vmadh   $v29, tAtMmHI, tPosLmH[5] // LmHX * 4
@@ -295,8 +292,10 @@ tDaDyF equ $v6
     ssv     $v20[4], 0x001E(rdpCmdBufPtr)    // Store DxMDy edge coefficient (fractional part)
     vmadh   $v29, tAtLmHI, tPosLmH[6] // HmMX * 4
     sll     $11, $3, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
+// tDaDyF <- $v6
     vreadacc tDaDyF, ACC_MIDDLE
     add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
+// tDaDyI <- tAtMmHI
     vreadacc tDaDyI, ACC_UPPER
     sll     $11, $9, 5              // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
 // DaDx, DaDy *= more factors
@@ -317,15 +316,15 @@ tDaDyF equ $v6
     vmadh   tDaDyI, tDaDyI, tXPRcpI[1]
     sdv     tDaDxI[0], 0x0008($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (integer)
 // DaDe = DaDx * factor
-tDaDeF equ $v8
-tDaDeI equ $v9
     // 125 cycles
     vmadl   $v29, tDaDxF, $v20[3]
     sdv     tDaDxF[8], 0x0018($1)   // Store DsDx, DtDx, DwDx texture coefficients (fractional)
     vmadm   $v29, tDaDxI, $v20[3]
     sdv     tDaDxI[8], 0x0008($1)   // Store DsDx, DtDx, DwDx texture coefficients (integer)
+// tDaDeF <- tPosLmH
     vmadn   tDaDeF, tDaDxF, tPosCatI[3]
     sdv     tDaDyF[0], 0x0038($2)   // Store DrDy, DgDy, DbDy, DaDy shade coefficients (fractional)
+// tDaDeI <- tAtLmHI
     vmadh   tDaDeI, tDaDxI, tPosCatI[3]
     sdv     tDaDyI[0], 0x0028($2)   // Store DrDy, DgDy, DbDy, DaDy shade coefficients (integer)
 // Base value += DaDe * factor
@@ -351,6 +350,7 @@ tDaDeI equ $v9
 tri_return_from_decal_fix_z:
     vmrg    tDaDeI, tDaDeF, tDaDeI[7] // Elems 6-7: DzDeI:F
     sdv     tHAtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
+// $v10 <- tAtLmHF
     vmrg    $v10, tHAtF, tHAtI[7]  // Elems 6-7: ZI:F
     sdv     tHAtI[0], 0x0000($2)   // Store RGBA shade color (integer)
     tri_v1_move                    // From return_and_end_mat, we didn't go there
@@ -360,6 +360,6 @@ tri_return_from_decal_fix_z:
     slv     tDaDxI[12], 0x04($10)  // DzDxI:F
     slv     tDaDeI[12], 0x08($10)  // DzDeI:F
     bltz    dmemAddr, return_and_end_mat     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
-     slv    $v10[12], 0x00($10)   // ZI:F
+     slv    $v10[12], 0x00($10)    // ZI:F
      // 146 cycles
-.include "rsp/flush_rdp_buffer.s"
+.include "rsp/sys/flush_rdp_buffer.s"

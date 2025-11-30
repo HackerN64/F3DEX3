@@ -1,4 +1,4 @@
-.include "rsp/gbi.inc"
+.include "rsp/include/gbi.inc"
 
 // GBI commands
 G_CULLDL            equ 0x03

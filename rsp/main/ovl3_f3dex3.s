@@ -37,12 +37,12 @@ ovl234_clipmisc_entrypoint:
     li      $3, -0x100 | G_DMA_IO
     beq     $3, $7, g_dma_io_ovl3
 g_memset_ovl3: // otherwise
-.include "rsp/memset.s"
+.include "rsp/handlers/memset.s"
     
 g_dma_io_ovl3:
-.include "rsp/dma_io.s"
+.include "rsp/handlers/dma_io.s"
 
-.include "rsp/clipping.s"
+.include "rsp/clipping/clipping.s"
 
 ovl3_end:
 .align 8

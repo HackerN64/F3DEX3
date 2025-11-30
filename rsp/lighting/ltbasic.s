@@ -1,5 +1,3 @@
-
-
 ltbasic_continue_setup:
     bltz    $7, ltbasic_command_handlers   // $7 < 0: cmd byte. >= 0: mtx valid (0 or 0x18)
      addi   ambLight, ambLight, altBase    // Point to ambient light; stored through vtx proc

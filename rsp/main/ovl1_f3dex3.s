@@ -16,7 +16,7 @@ ovl1_start:
 
 .include "rsp/handlers/g_vtx_g_setothermode.s"
 
-.include "rsp/handlers/g_modify_vtx.s"
+.include "rsp/handlers/g_modifyvtx.s"
 
 displaylist_dma_from_yield: // 2
     j       displaylist_dma_goto_next_ra
