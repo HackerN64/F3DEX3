@@ -314,8 +314,8 @@ numLightsxSize:
 // RDP/Immediate Command Mini Table
 // 1 byte per entry, after << 2 points to an addr in first 1/4 of IMEM
 miniTableEntry G_FLUSH_handler
-miniTableEntry G_MEMSET_handler
-miniTableEntry G_DMA_IO_handler
+miniTableEntry G_SPNOOP_handler // G_MEMSET
+miniTableEntry G_SPNOOP_handler
 miniTableEntry G_TEXTURE_handler
 miniTableEntry G_POPMTX_handler
 miniTableEntry G_GEOMETRYMODE_handler
@@ -360,12 +360,12 @@ miniTableEntry G_SETxIMG_handler // G_SETCIMG
 cmdMiniTable:
 miniTableEntry G_RDP_handler // G_NOOP
 miniTableEntry G_VTX_handler
-miniTableEntry G_MODIFYVTX_handler
-miniTableEntry G_CULLDL_handler
-miniTableEntry G_BRANCH_WZ_handler
+miniTableEntry G_SPNOOP_handler // G_MODIFYVTX
+miniTableEntry G_SPNOOP_handler // G_CULLDL
+miniTableEntry G_SPNOOP_handler // G_BRANCH_WZ
 miniTableEntry G_TRI1_handler
 miniTableEntry G_TRI2_handler
-miniTableEntry G_QUAD_handler
+miniTableEntry G_SPNOOP_handler // G_QUAD
 miniTableEntry G_SPNOOP_handler // formerly snake
 miniTableEntry G_SPNOOP_handler // no command mapped to 0x09
 miniTableEntry G_LIGHTTORDP_handler
@@ -715,13 +715,6 @@ start_padded_end:
 .orga max(orga(), max(ovl0_padded_end - ovl0_start, ovl1_padded_end - ovl1_start))
 ovl01_end:
 
-G_BRANCH_WZ_handler:
-    mfc2    $10, $v7[6]                 // Vertex addr (index was byte 3)
-    li      $10, 0 // TODO
-    sub     $2, $10, cmd_w1_dram        // subtract the w/z value being tested
-    bgez    $2, run_next_DL_command     // if vtx.w/z >= cmd w/z, continue running this DL
-     lw     cmd_w1_dram, rdpHalf1Val    // load the RDPHALF1 value as the location to branch to
-    li      cmd_w0, -0x8000             // Bit 16 set (via negative) = nopush, bits 3-7 = 0 for hint
 G_DL_handler:
     sll     $2, cmd_w0, 15                  // Shifts the push/nopush value to the sign bit
     lbu     $7, displayListStackLength      // Get the DL stack length
@@ -810,7 +803,6 @@ check_rdp_buffer_full_and_run_next_cmd:
     bgezal  dmemAddr, flush_rdp_buffer
      // $7 on next instr survives flush_rdp_buffer
 tris_end:
-G_MEMSET_handler:
 G_SPNOOP_handler:
 run_next_DL_command:
      lb     $7, (inputBufferEnd)(inputBufferPos)        // Command byte
@@ -861,16 +853,6 @@ G_LIGHTTORDP_handler: // 9
     sll     $3, $3, 8                    // Shift light RGB to upper 3 bytes and clear alpha byte
     j       send_w1_to_rdp               // Write word w1 to RDP
      or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
-
-G_DMA_IO_handler:
-    jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
-     lh     dmemAddr, (inputBufferEnd - 0x07)(inputBufferPos) // Get the 16 bits in the middle of the command word (since inputBufferPos was already incremented for the next command)
-    andi    dmaLen, cmd_w0, 0x0FF8 // Mask out any bits in the length to ensure 8-byte alignment
-    li      nextRA, run_next_DL_command
-    j       dma_and_wait_goto_next_ra  // Trigger a DMA read or write, depending on the G_DMA_IO flag (which will occupy the sign bit of dmemAddr)
-     // At this point, dmemAddr's highest bit is the flag, it's next 13 bits are the DMEM address, and then it's last two bits are the upper 2 of size
-     // So an arithmetic shift right 2 will preserve the flag as being the sign bit and get rid of the 2 size bits, shifting the DMEM address to start at the LSbit
-     sra    dmemAddr, dmemAddr, 2
 
 G_POPMTX_handler:
     lw      $11, matrixStackPtr             // Current matrix stack pointer
@@ -975,11 +957,6 @@ G_SETOTHERMODE_L_handler:
     j       G_RDP_handler
      lpv    $v4[0], (otherMode0)($zero)
 
-G_MODIFYVTX_handler: // 3
-    mfc2    $10, $v7[6]  // Byte 3 = vtx being modified
-    j       do_moveword  // Moveword adds cmd_w0 to $10 for final addr
-     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx, bit 15 clear
-
 // Converts the segmented address in cmd_w1_dram to the corresponding physical address
 segmented_to_physical: // 8
     srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
@@ -1005,14 +982,6 @@ tPosMmH equ $v6
 tPosLmH equ $v8
 tPosHmM equ $v11
 tDaDyI equ $v27
-
-tri_decal_fix_z:
-    // Valid range of tHAtI = 0 to 7FFF, but most of the scene is large values
-    vmudh   $v29, vOne, vTRC_DO  // accum all elems = -DM/2
-    vmadm   $v25, tHAtI, vTRC_DM // elem 7 = (0 to DM/2-1) - DM/2 = -DM/2 to -1
-    vcr     tDaDyI, tDaDyI, $v25[7] // Clamp DzDyI (6) to <= -val or >= val; clobbers DzDyF (7)
-    j       tri_return_from_decal_fix_z
-     set_vcc_11110001 // Clobbered by vcr
 
 align_with_warning 8, "One instruction of padding before tris"
 
@@ -1070,7 +1039,7 @@ G_TRI1_handler: // Whether we get here from cmd handler or prev tri, $ra == G_TR
     vmrg    tHPos, $v8, tHPos // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
     andi    $10, $10, CLIP_SCAL_NPXY | CLIP_CAMPLANE
     vlt     $v29, $v6, $v2    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
-    bnez    $10, return_and_end_mat
+    bnez    $10, return_and_end_mat // Reject (instead of clipping)
      // 24 cycles
      srl    $11, $9, 31       // = 0 if x prod positive (back facing), 1 if x prod negative (front facing)
     vmudh   $v3, vOne, $v31[5] // 0x4000; some rounding factor
@@ -1165,9 +1134,9 @@ tSubPxHI equ $v26
     vmadh   tXPI, tXPRcpI, tXPI
     lbu     $9, textureSettings1 + 3 // Texture enabled = 0x2
     vand    $v22, $v20, tMPos[7] // 0xFFF8
-    lsv     tMAtI[14], VTX_SCR_Z($2)
+    // nop
     vcr     tPosCatI, tPosCatI, vTRC_0100
-    lsv     tLAtI[14], VTX_SCR_Z($3)
+    // nop
     vmudh   $v29, vOne, $v31[4] // 4
     ori     $11, $14, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
     vmadn   tXPF, tXPF, $v31[0] // -4
@@ -1180,12 +1149,12 @@ tMx1W equ $v25 // <- tPosCatF
     vmadl   $v29, $v22, tSubPxHF[1]
     ssv     tMPos[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
     vmadm   $v29, tPosCatI, tSubPxHF[1]
-    lsv     tMAtF[14], VTX_SCR_Z_FRAC($2)
+    // nop
 // $v2 <- tMPos
     vmadn   $v2, $v22, tSubPxHI[1]
     ssv     tLPos[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
     vmadh   $v3, tPosCatI, tSubPxHI[1]
-    lsv     tLAtF[14], VTX_SCR_Z_FRAC($3)
+    // nop
     vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
     ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
 tMnWF equ $v10 // <- tLPos
@@ -1196,7 +1165,7 @@ t1WF equ $v14 // <- tHPos
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
 tMnWI equ $v25 // <- tMx1W
     vrcph   tMnWI[0], $v31[2]     // 0
-    lw      $19, otherMode1
+    // nop
 tSTWHMI equ $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
     vmudh   tSTWHMI, vOne, $v31[7]  // 0x7FFF
     sb      $zero, materialCullMode // Covers tri write (non early exit)
@@ -1211,11 +1180,11 @@ tSTWHMI equ $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
 tSTWLI equ $v10 // L = elems 4-6; init W = 7FFF
 tSTWLF equ $v13
     vmudh   tSTWLI, vOne, $v31[7]  // 0x7FFF
-    andi    $19, $19, ZMODE_DEC    // Mask to two Z mode bits
+    // nop
     set_vcc_11110001                // select RGBA___Z or ____STW_
     llv     tSTWLI[8], VTX_TC_VEC($3)
     vmudm   $v29, tSTWHMI, t1WF[0h] // (S, T, 7FFF) * (1 or <1) for H and M
-    addi    $19, $19, -ZMODE_DEC  // Check if equal to decal mode
+    // nop
     vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
     ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
 tSTWHMF equ $v25 // <- tMnWI
@@ -1238,9 +1207,9 @@ tSTWHMF equ $v25 // <- tMnWI
     addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
     // 96 cycles
     vmudl   $v29, tXPF, tXPRcpF
-    lsv     tHAtF[14], VTX_SCR_Z_FRAC($1)
+    // nop
     vmadm   $v29, tXPI, tXPRcpF
-    lsv     tHAtI[14], VTX_SCR_Z($1) // contains R, G, B, A, S, T, W, Z
+    // nop
     vmadn   tXPRcpF, tXPF, tXPRcpI
     lh      $1, VTX_SCR_VEC($2)
     vmadh   tXPRcpI, tXPI, tXPRcpI
@@ -1293,13 +1262,13 @@ tDaDyF equ $v6
     vmudl   $v29, tDaDxF, tXPRcpF[1]
     add     rdpCmdBufPtr, $1, $11   // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
     vmadm   $v29, tDaDxI, tXPRcpF[1]
-    andi    $14, $14, G_ZBUFFER     // Get the value of G_ZBUFFER from the current geometry mode
+    // nop
     vmadn   tDaDxF, tDaDxF, tXPRcpI[1]
-    sll     $11, $14, 4             // Shift (geometry mode & G_ZBUFFER) by 4 to get 0x10 if G_ZBUFFER is set
+    // nop
     vmadh   tDaDxI, tDaDxI, tXPRcpI[1]
-    move    $10, rdpCmdBufPtr       // Write Z here
+    // nop
     vmudl   $v29, tDaDyF, tXPRcpF[1]
-    add     rdpCmdBufPtr, rdpCmdBufPtr, $11  // Increment the triangle pointer by 0x10 bytes (depth coefficients) if G_ZBUFFER is set
+    // nop
     vmadm   $v29, tDaDyI, tXPRcpF[1]
     sub     dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
     vmadn   tDaDyF, tDaDyF, tXPRcpI[1]
@@ -1331,26 +1300,12 @@ tDaDeI equ $v9
     sdv     tDaDeF[8], 0x0030($1)   // Store DsDe, DtDe, DwDe texture coefficients (fractional)
     vmadh   tHAtI, tDaDeI, tSubPxHI[1]
     sdv     tDaDeI[8], 0x0020($1)   // Store DsDe, DtDe, DwDe texture coefficients (integer)
-    // All values start in element 7. "a", attribute, is Z. Need
-    // tHAtI, tHAtF, tDaDxI, tDaDxF, tDaDeI, tDaDeF, tDaDyI, tDaDyF
-    // VCC is still 11110001
-    // 135 cycles
-    vmrg    tDaDyI, tDaDyF, tDaDyI[7] // Elems 6-7: DzDyI:F
-    beqz    $19, tri_decal_fix_z
-     vmrg   tDaDxI, tDaDxF, tDaDxI[7] // Elems 6-7: DzDxI:F
-tri_return_from_decal_fix_z:
-    vmrg    tDaDeI, tDaDeF, tDaDeI[7] // Elems 6-7: DzDeI:F
     sdv     tHAtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
-    vmrg    $v10, tHAtF, tHAtI[7]  // Elems 6-7: ZI:F
     sdv     tHAtI[0], 0x0000($2)   // Store RGBA shade color (integer)
     tri_v1_move                    // From return_and_end_mat, we didn't go there
     sdv     tHAtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
-    sdv     tHAtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
-    slv     tDaDyI[12], 0x0C($10)  // DzDyI:F
-    slv     tDaDxI[12], 0x04($10)  // DzDxI:F
-    slv     tDaDeI[12], 0x08($10)  // DzDeI:F
     bltz    dmemAddr, return_and_end_mat     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
-     slv    $v10[12], 0x00($10)   // ZI:F
+     sdv    tHAtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
      // 146 cycles
 flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAddr = large neg num -> only wait and set DPC_END
     mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
@@ -1838,7 +1793,6 @@ vtx_loop_no_lighting:
     addi    vtxLeft, vtxLeft, -2*inputVtxSize // Decrement vertex count by 2
 vtx_return_from_lighting:
 vtx_return_from_texgen:
-vtx_store_for_clip:
     vmudl   $v29, vpClpF, $v30[3]       // Persp norm
     sub     $11, outVtx2, fogFlag       // Points 8 before outVtx2 if fog, else 0
 // s1WI <- vpNrmlX
@@ -2043,27 +1997,6 @@ ovl0_padded_end:
 
 ovl1_start:
 
-G_CULLDL_handler: // 15
-    mfc2    $10, $v7[6]                     // Start vtx addr (index was byte 3)
-    mfc2    $3, $v7[14]                     // End vertex addr (index was byte 7)
-    /*
-    CLIP_OCCLUDED can't be included here because: Suppose the list consists of N-1
-    verts which are behind the occlusion plane, and 1 vert which is behind the camera
-    plane and therefore randomly erroneously also set as behind the occlusion plane.
-    However, the convex hull of all the verts goes through visible area. This will be
-    incorrectly culled here. We can't afford the extra few instructions to disable
-    the occlusion plane if the vert is behind the camera, because this only matters for
-    G_CULLDL and not for tris.
-    */
-    li      $1, (CLIP_SCRN_NPXY | CLIP_CAMPLANE)
-    lhu     $11, VTX_CLIP($10)
-culldl_loop:
-    and     $1, $1, $11
-    beqz    $1, run_next_DL_command         // Some vertex is on the screen-side of all clipping planes; have to render
-     lhu    $11, (vtxSize + VTX_CLIP)($10)  // next vertex clip flags
-    bne     $10, $3, culldl_loop            // loop until reaching the last vertex
-     addi   $10, $10, vtxSize               // advance to the next vertex
-    li      cmd_w0, 0                       // Clear count of DL cmds to skip loading
 G_ENDDL_handler:
     lbu     $7, displayListStackLength      // Load the DL stack index; if end stack,
     beqz    $7, load_overlay_0_and_enter    // load overlay 0; $7 == -4 signals end
