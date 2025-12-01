@@ -3,15 +3,7 @@
 .include "rsp/gbi_common.inc"
 .include "rsp/gbi_zsoex3.inc"
 
-CFG_G_BRANCH_W equ 1
-CFG_NO_OCCLUSION_PLANE equ 1
-CFG_PROFILING_A equ 0
-CFG_PROFILING_B equ 0
-CFG_PROFILING_C equ 0
-ENABLE_PROFILING equ 0
-COUNTER_A_UPPER_VERTEX_COUNT equ 1
-COUNTER_C_FIFO_FULL equ 1
-CFG_DEBUG_NORMALS equ 0
+ENABLE_PROFILING equ 0 // For setup.inc
 
 ////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////// DMEM //////////////////////////////////////
@@ -58,8 +50,8 @@ textureSettings2:
 fogFactor:
     .dw 0x00000000
 
-yieldOrigV1Addr:
-    .skip 2  // Needs to be saved over yield
+unused4:
+    .skip 2
     
 // displaylist stack length
 displayListStackLength:
@@ -130,8 +122,8 @@ for subpixels, so it's 16 and -16.
 
 cameraWorldPos:
     .skip 6
-tempTriRA:
-    .skip 2 // Overwritten as part of camera world position, used as temp
+unused3:
+    .skip 2
 lightBufferLookat:
     .skip 8 // s8 X0, Y0, Z0, dummy, X1, Y1, Z1, dummy
 lightBufferMain:
@@ -374,7 +366,7 @@ miniTableEntry G_BRANCH_WZ_handler
 miniTableEntry G_TRI1_handler
 miniTableEntry G_TRI2_handler
 miniTableEntry G_QUAD_handler
-miniTableEntry G_TRISNAKE_handler
+miniTableEntry G_SPNOOP_handler // formerly snake
 miniTableEntry G_SPNOOP_handler // no command mapped to 0x09
 miniTableEntry G_LIGHTTORDP_handler
 miniTableEntry G_RELSEGMENT_handler
@@ -385,7 +377,7 @@ tempMatrix:
     .skip 0x40
 
 texrectState:
-    .skip 8  // Only needs to be saved over texrect, half1, half2; but yield can happen
+    .skip 8  // Only needs to be saved over texrect, half1, half2
 
 
 VERTEX_BUFFER_SIZE_BYTES equ (G_MAX_VERTS * vtxSize)
@@ -453,8 +445,6 @@ OSTask:
 // See rsp_defs.inc about why these are not used and we can reuse them.
 startCounterTime equ (OSTask + OSTask_ucode_size)
 xfrmLookatDirs equ -(0x1000 - (OSTask + OSTask_ucode_data)) // and OSTask_ucode_data_size
-dumpDmemBuffer equ (OSTask + OSTask_yield_data_size) // CFG_PROFILING_B only
-startFifoStallTime equ dumpDmemBuffer // CFG_PROFILING_A only
 
 memsetBufferStart equ ((vertexBuffer + 0xF) & 0xFF0)
 memsetBufferMaxEnd equ (rdpCmdBuffer1 & 0xFF0)
@@ -472,7 +462,7 @@ $zero ---------------------------------- Hardwired zero ------------------------
 $1    v1 texptr    clipIdx    <------------- vtxLeft ------------------------------>  temp, init 0
 $2    v2 shdptr   <---------- clipAlloc -------> <----- lbPostAo   laPtr                  temp
 $3    v3 shdflg   clipTempVtx <------------- vLoopRet --------->  laVtxLeft               temp
-$4    <--------------- origV1Addr -------------> <----- lbFakeAmb laSpecFres
+$4                                               <----- lbFakeAmb laSpecFres
 $5    ------------------------------------- vGeomMid ---------------------------------------------
 $6    v1flag temp <---------- clipPtrs --------> <-- lbTexgenOrRet laSTKept
 $7    v2flag tile clipWalkCount <----------- fogFlag ---------->  laPacked  mtx valid   cmd byte
@@ -484,7 +474,7 @@ $12   ----------------------------------- perfCounterD -------------------------
 $13   ------------------------------------ altBaseReg --------------------------------------------
 $14   geom mode   <-------------------------- inVtx ------------------------------->
 $15                           <------------ outVtxBase ---------------------------->
-$16   ----------------------------------- flatV1Offset -------------------------------------------
+$16
 $17   
 $18   
 $19      temp     clipCurVtx  <------------- outVtx1 ---------->   laL2A    <---------   dmaLen
@@ -513,10 +503,6 @@ inputBufferPos equ $27   // DMEM position within display list input buffer, rela
 perfCounterA   equ $28   // Performance counter A (functions depend on config)
 perfCounterB   equ $29   // Performance counter B (functions depend on config)
 perfCounterC   equ $30   // Performance counter C (functions depend on config)
-
-// Tri write:
-origV1Addr     equ $4    // Original / current vertex 1 address
-flatV1Offset   equ $16   // Offset +'d to vtx 1 addr for flat shading. 0 except in clipping.
 
 // Vertex init:
 viLtFlag       equ $9    // Holds pointLightFlag or dirLightsXfrmValid
@@ -554,7 +540,6 @@ laTexgen       equ $20   // Nonzero if texgen enabled
 nextRA         equ $10   // Address to return to after overlay load
 dmaLen         equ $19   // DMA length in bytes minus 1
 dmemAddr       equ $20   // DMA address in DMEM or IMEM. Also = rdpCmdBufPtr - rdpCmdBufEndP1 for flush_rdp_buffer
-ovlInitClock   equ $21   // Temp for profiling. Share register with values not kept across ovl load.
 cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
 cmd_w0         equ $25   // DL command word 0, also holds next tris info
 
@@ -564,7 +549,7 @@ vZero equ $v0  // All elements = 0; NOT global, only in tri write and clip. Mtx 
 vTRC  equ $v1  // Triangle Constants; NOT global, only in tri write and clip. Mtx in vtx.
 vOne  equ $v28 // All elements = 1; global
 // $v29: permanent temp register, also write results here to discard
-// $v30: vtx / lt = sSTO + persp norm + more lighting params; tri write = snake saved index
+// $v30: vtx / lt = sSTO + persp norm + more lighting params
 // $v31: Global constant vector register
 
 // Vertex / lighting vector regs:
@@ -603,27 +588,16 @@ vPerm4   equ $v27
 
 // Lighting temporaries. Lighting also modifies vpNrmlX:Y:Z, vpLtTot, vpRGBA, and
 // in texgen vpST. Only the two regs in the comments below and vKept1 are kept.
-.if CFG_NO_OCCLUSION_PLANE
 // vpClpI:F are kept, vpMdl is free to use as temp
 lDOT equ vpMdl  // lighting DOT product
 lCOL equ vKept2 // lighting total light COLor
-.else
-// vpMdl is kept, these are free to use as temps
-lDOT equ vpClpF
-lCOL equ vpClpI
-.endif
 lDTC equ vTemp1  // lighting DoT Clamped
 lVCI equ vTemp2  // lighting Vertex Color In
 lDIR equ vpRGBA  // lighting transformed light DIRection
 
 // Kept
-.if CFG_NO_OCCLUSION_PLANE
 sCLZ equ vKept1 // vtx_store Clamped Z. Does have to be kept even though in instan_lt_vs_45 b/c need rest of lt temps at start of texgen (and advanced lighting).
 sOCS equ $v29   // Does not exist
-.else
-sOCS equ vKept1 // vtx_store Occlusion State
-sCLZ equ vpClpF // Not a kept in this config
-.endif
 
 // Common vertex temporaries
 sRTF equ vTemp1  // vtx_store Reciprocal Temp Frac
@@ -631,31 +605,17 @@ sRTI equ vTemp2  // vtx_store Reciprocal Temp Int
 sFOG equ lCOL // lCOL -> sFOG in lt epilogue with NOC, else sFOG -> lCOL in lt prologue
 
 // Misc temps used by both
-.if CFG_NO_OCCLUSION_PLANE
 s1WI equ vpNrmlX // vtx_store 1/W Int
 s1WF equ vpLtTot // vtx_store 1/W Frac
 sSCI equ sFOG    // vtx_store Scaled Clipping Int
 sSCF equ vpMdl   // vtx_store Scaled Clipping Frac
 sTCL equ sCLZ    // vtx_store Temp CoLor
-.else
-s1WI equ vpMdl
-s1WF equ vpNrmlX
-sSCI equ vpScrI
-sSCF equ vpScrF
-sTCL equ vpLtTot
-.endif
 
 // Misc temps used by only one
-.if CFG_NO_OCCLUSION_PLANE
 sST2 equ vpScrI  // vtx_store ST coordinates copy 2
 sOTM equ $v29    // Does not exist
-.else
-sST2 equ $v29    // Does not exist
-sOTM equ vpRGBA  // vtx_store Occlusion Temporary
-.endif
 
 // Permanently kept through vertex/lighting
-.if CFG_NO_OCCLUSION_PLANE
 sVPS equ vPerm1 // vtx_store ViewPort Scale
 sVPO equ vPerm2 // vtx_store ViewPort Offset
 sFGM equ vPerm3 // vtx_store FoG Mask
@@ -663,16 +623,6 @@ sO03 equ $v29   // Does not exist
 sO47 equ $v29
 sOCM equ $v29
 sOPM equ $v29
-.else
-// These are temps, not permanents, on this codepath
-sVPS equ vpScrI // Temp, not permament, on this codepath
-sVPO equ vpScrF // Temp, not permament, on this codepath
-sFGM equ $v29   // Does not exist
-sO03 equ vPerm1 // vtx_store Occlusion plane edge coefficients 0-3
-sO47 equ vPerm2 // vtx_store Occlusion plane edge coefficients 4-7
-sOCM equ vPerm3 // vtx_store Occlusion plane Mid coefficients
-sOPM equ vKept2 // vtx_store Occlusion Plus Minus. Loaded in vtx_after_lt_setup not vtx_constants_for_clip b/c clobbered by lighting.
-.endif
 sSTS equ vPerm4
 
 // ltadv:
@@ -730,96 +680,31 @@ tempPrevInvalVtxEnd   equ (tempPrevInvalVtx + vtxSize)      // 0x6C; rest of vtx
 ////////////////////////////////////////////////////////////////////////////////
 
 // RSP IMEM
-.create CODE_FILE, 0x00001080
+.create CODE_FILE, 0x00001000
 
 // Initialization routines
 // Everything up until ovl01_end will get overwritten by ovl1
-start: // This is at IMEM 0x1080, not the start of IMEM
-    vnop    // Return to here from S2DEX overlay 0 G_LOAD_UCODE jumps to start+4!
+start:
+    lw      $2, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
+    li      perfCounterA, 0
+    li      perfCounterB, 0
+    mtc0    $2, DPC_START                 // Set RDP start addr to end of FIFO
+    mtc0    $2, DPC_END                   // Set RDP end addr to end of FIFO
+    li      perfCounterC, 0
+    li      perfCounterD, 0
+    sw      $2, rdpFifoPos                // Set FIFO position to end of FIFO or RDP end
     lqv     $v31[0], (v31Value)($zero)      // Actual start is here
     vadd    $v29, $v29, $v29 // Consume VCO (carry) value possibly set by the previous ucode
     lqv     vTRC, (vTRCValue)($zero)        // Always as this value except vtx_store
     li      altBaseReg, altBase
     li      rdpCmdBufPtr, rdpCmdBuffer1
-    vclr    vOne
     li      rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word
-    li      nextRA, displaylist_dma
-    lw      $11, rdpFifoPos
-    lw      $2, OSTask + OSTask_flags
-    li      $1, SP_CLR_SIG2 | SP_CLR_SIG1   // Clear task done and yielded signals
-    vsub    vOne, vOne, $v31[1]             // 1 = 0 - -1
-    beqz    $11, initialize_rdp             // If RDP FIFO not set up yet, starting ucode from scratch
-     mtc0   $1, SP_STATUS
-    andi    $2, $2, OS_TASK_YIELDED         // Resumed from yield or came from called ucode?
-    beqz    $2, continue_from_os_task       // If latter, load DL (task data) pointer from OSTask
-     // Otherwise continuing from yield; perf counters saved here at yield
-     lw     perfCounterA, yieldDataFooter + YDF_OFFSET_PERFCOUNTERA
-    lw      perfCounterB, yieldDataFooter + YDF_OFFSET_PERFCOUNTERB
-    lw      perfCounterC, yieldDataFooter + YDF_OFFSET_PERFCOUNTERC
-    lw      perfCounterD, yieldDataFooter + YDF_OFFSET_PERFCOUNTERD
-.if CFG_PROFILING_A
-    mfc0    $10, DPC_CLOCK // Start tri profiling again in case we came from snake
-    sw      perfCounterC, startFifoStallTime   // Save initial FIFO stall time
-    sw      $10, startCounterTime
-.endif
-    lw      taskDataPtr, yieldDataFooter + YDF_OFFSET_TASKDATAPTR
-    lh      origV1Addr, yieldOrigV1Addr
-    j       finish_setup
-     li     nextRA, displaylist_dma_from_yield
-
-initialize_rdp:
-    mfc0    $11, DPC_STATUS               // Read RDP status
-    andi    $11, $11, DPC_STATUS_XBUS_DMA // Look at XBUS enabled bit
-    bnez    $11, @@start_new_buf          // If XBUS is enabled, start new buffer
-     mfc0   $2, DPC_END                   // Load RDP end pointer
-    lw      $3, OSTask + OSTask_output_buff // Load start of FIFO
-    sub     $11, $3, $2                   // If start of FIFO > RDP end,
-    bgtz    $11, @@start_new_buf          // start new buffer
-     mfc0   $1, DPC_CURRENT               // Load RDP current pointer
-    lw      $3, OSTask + OSTask_output_buff_size // Load end of FIFO
-    beqz    $1, @@start_new_buf           // If RDP current pointer is 0, start new buffer
-     sub    $11, $1, $3                   // If RDP current > end of fifo,
-    bgez    $11, @@start_new_buf          // start new buffer
-     nop
-    bne     $1, $2, @@continue_buffer     // If RDP current != RDP end, keep current buffer
-@@start_new_buf:
-    // There may be one buffer executing in the RDP, and another queued in the
-    // double-buffered start/end regs. Wait for the latter to be available
-    // (i.e. possibly one buffer executing, none waiting).
-     mfc0   $11, DPC_STATUS               // Read RDP status
-    andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
-    bnez    $11, @@start_new_buf          // Wait until double buffered start/end available
-     li     $11, DPC_STATUS_CLR_XBUS      // Bit to disable XBUS mode
-    mtc0    $11, DPC_STATUS               // Set bit, disable XBUS
-    lw      $2, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
-    // Set up the next buffer for the RDP to be zero size and at the end of the FIFO.
-    mtc0    $2, DPC_START                 // Set RDP start addr to end of FIFO
-    mtc0    $2, DPC_END                   // Set RDP end addr to end of FIFO
-@@continue_buffer:
-    // If we jumped here, the RDP is currently executing from the middle of the FIFO.
-    // So we can just append commands to there and move the end pointer.
-    sw      $2, rdpFifoPos                // Set FIFO position to end of FIFO or RDP end
-    lw      $11, matrixStackPtr           // Initialize matrix stack pointer from OSTask
-    bnez    $11, continue_from_os_task    // if not yet initialized
-     lw     $11, OSTask + OSTask_dram_stack
-    sw      $11, matrixStackPtr
-continue_from_os_task:
-    // Counters stored here if jumped to different ucode
-    // If starting from scratch, these are zero
-    lw      perfCounterA, mvpMatrix + YDF_OFFSET_PERFCOUNTERA
-    lw      perfCounterB, mvpMatrix + YDF_OFFSET_PERFCOUNTERB
-    lw      perfCounterC, mvpMatrix + YDF_OFFSET_PERFCOUNTERC
-    lw      perfCounterD, mvpMatrix + YDF_OFFSET_PERFCOUNTERD
+    vclr    vOne
     lw      taskDataPtr, OSTask + OSTask_data_ptr
-finish_setup:
-.if CFG_PROFILING_C
-    mfc0    $11, DPC_CLOCK
-    sw      $11, startCounterTime
-.endif
-    sh      $zero, mvpValid  // and dirLightsXfrmValid
     lhu     vGeomMid, geometryModeLabel + 1
-    li      flatV1Offset, 0
     li      inputBufferPos, 0
+    li      nextRA, displaylist_dma
+    vsub    vOne, vOne, $v31[1]             // 1 = 0 - -1
     j       load_overlays_0_1
      li     cmd_w1_dram, orga(ovl1_start)
 
@@ -827,7 +712,7 @@ start_end:
 .align 8
 start_padded_end:
 
-.orga max(orga(), max(ovl0_padded_end - ovl0_start, ovl1_padded_end - ovl1_start) - 0x80)
+.orga max(orga(), max(ovl0_padded_end - ovl0_start, ovl1_padded_end - ovl1_start))
 ovl01_end:
 
 G_BRANCH_WZ_handler:
@@ -859,23 +744,19 @@ displaylist_dma_goto_next_ra:
     move    cmd_w1_dram, taskDataPtr                   // set up the DRAM address to read from
     jal     dma_read_write
      addi   dmemAddr, inputBufferPos, inputBufferEnd   // set the address to DMA read to
-    mfc0    $7, SP_STATUS                              // load the status word into register $1
-    sub     taskDataPtr, taskDataPtr, inputBufferPos   // increment the DRAM address to read from next time
-.if CFG_PROFILING_A
-    sll     $11, inputBufferPos, 16 - 3                // Divide by 8 for num cmds to load, then move to upper 16
-    sub     perfCounterB, perfCounterB, $11            // Negative so subtract
-.endif
-    andi    $7, $7, SP_STATUS_SIG0                     // check if the task should yield
-    beqz    $7, wait_goto_next_ra                      // if not, continue normal processing
-     sh     nextRA, tempTriRA                          // Save address to come back to after yield
+    j       wait_goto_next_ra                      // if not, continue normal processing
+     sub    taskDataPtr, taskDataPtr, inputBufferPos   // increment the DRAM address to read from next time
+     
 G_LOAD_UCODE_handler: // If jumped here, $7 = G_LOAD_UCODE
 load_overlay_0_and_enter:
     li      nextRA, 0x1000                  // Sets up return address
     li      cmd_w1_dram, orga(ovl0_start)   // Sets up ovl0 table address
 load_overlays_0_1:
+    lw      $11, OSTask + OSTask_ucode
     li      dmaLen, ovl01_end - 0x1000 - 1
-    j       load_overlay_inner
-     li     dmemAddr, 0x1000
+    li      dmemAddr, 0x1000
+    j       dma_and_wait_goto_next_ra
+     add    cmd_w1_dram, cmd_w1_dram, $11
 
 G_GEOMETRYMODE_handler: // 6
     lw      $11, geometryModeLabel        // load the geometry mode value
@@ -895,9 +776,7 @@ G_RDPHALF_2_handler: // 8; should be after the handlers with alignment needs
     sb      $zero, materialCullMode         // This covers tex and fill rects
     lw      cmd_w0, rdpHalf1Val             // load the RDPHALF1 value into w0
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
-.if !ENABLE_PROFILING
     addi    perfCounterB, perfCounterB, 1   // Increment number of tex/fill rects
-.endif
     j       send_w0_w1_to_rdp               // w1 is from the current command
      sdv    $v29[0], -8(rdpCmdBufPtr)
 
@@ -924,20 +803,13 @@ load_cmds_handler:
 G_RDP_handler:
      spv    $v4[0], 0(rdpCmdBufPtr)     // Whole command
 commit_small_rdp_command:
-.if CFG_PROFILING_C
-    addi    perfCounterC, perfCounterC, 0x4000 // Increment small RDP command count
-.endif
+    addi    perfCounterD, perfCounterD, 0x4000 // Increment small RDP command count
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8    // Increment the next RDP command pointer by 2 words
 check_rdp_buffer_full_and_run_next_cmd:
     sub     dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1
     bgezal  dmemAddr, flush_rdp_buffer
      // $7 on next instr survives flush_rdp_buffer
-.if !CFG_PROFILING_A
 tris_end:
-.endif
-.if ENABLE_PROFILING
-G_LIGHTTORDP_handler:
-.endif
 G_MEMSET_handler:
 G_SPNOOP_handler:
 run_next_DL_command:
@@ -950,22 +822,8 @@ run_next_DL_command:
     lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // Word 0
     vmudl   $v5, $v4, vTRC_VS                           // Vtx indices times length
     lw      cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // Word 1
-.if CFG_PROFILING_C
-    mfc0    $10, DPC_STATUS
-.endif
     vmadn   $v7, vOne, vTRC_VB                          // Plus address of vertex buffer
     sll     $ra, $ra, 2                                 // Convert to a number of instructions
-.if CFG_PROFILING_C
-    addi    perfCounterB, perfCounterB, 1               // Count commands
-    andi    $10, $10, DPC_STATUS_GCLK_ALIVE             // Sample whether GCLK is active now
-    sll     $10, $10, 16 - 3                            // move from bit 3 to bit 16
-    add     perfCounterB, perfCounterB, $10             // Add to the perf counter
-.elseif CFG_PROFILING_A
-    mfc0    $10, DPC_CLOCK
-    sw      perfCounterC, startFifoStallTime            // Save initial FIFO stall time
-    addi    perfCounterB, perfCounterB, 1               // Count commands
-    sw      $10, startCounterTime
-.endif
     vmadl   $v6, $v31, $v31[2]                          // 0; copy in v6
     jr      $ra                                         // Jump to handler
      addi   inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
@@ -973,9 +831,6 @@ run_next_DL_command:
     // $ra must contain the handler called for several handlers
 
 G_MTX_handler: // 12
-.if CFG_PROFILING_C
-    addi    perfCounterC, perfCounterC, 1  // Increment matrix count
-.endif
     andi    $11, cmd_w0, G_MTX_VP_M | G_MTX_NOPUSH_PUSH
     beqz    $11, G_MTX_PUSH_handler   // Model and push: go to push
      sh     $zero, mvpValid                  // Also zeroes dirLightsXfrmValid
@@ -996,7 +851,6 @@ dma_and_wait_goto_next_ra:
     j       dma_read_write
      li     $ra, wait_goto_next_ra
 
-.if !ENABLE_PROFILING
 G_LIGHTTORDP_handler: // 9
     sw      cmd_w1_dram, 0(rdpCmdBufPtr) // Store second word as first (cmd byte, prim level)
     lbu     $11, numLightsxSize          // Ambient light
@@ -1007,7 +861,6 @@ G_LIGHTTORDP_handler: // 9
     sll     $3, $3, 8                    // Shift light RGB to upper 3 bytes and clear alpha byte
     j       send_w1_to_rdp               // Write word w1 to RDP
      or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
-.endif
 
 G_DMA_IO_handler:
     jal     segmented_to_physical // Convert the provided segmented address (in cmd_w1_dram) to a virtual one
@@ -1042,47 +895,101 @@ G_MTX_PUSH_handler:
     j       load_mtx
      lw     cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Load command word 1 again
 
-align_with_warning 8, "One instruction of padding before tri snake"
 
-.macro snake_c_to_v30
-    lpv     $v30[1], (inputBufferEndSgn)(inputBufferPos) // c (pos+1) to elem 2
-.endmacro
+G_FLUSH_handler: // 32
+    jal     flush_rdp_buffer        // Flush once to push partial DMEM buf to FIFO
+     sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Prereq; offset buffer fullness
+    // If the DMEM buffer was empty, dmemAddr will be unchanged and valid for this next
+    // jump. Otherwise, running the DMA write will cause dmemAddr to get set to a large
+    // negative number. Then for this second jump, the same codepath will be triggered as
+    // if the buffer was empty. The result is it will wait for the DMA to finish, set
+    // DPC_END, and return to $ra. This is why the dmemAddr register (as opposed to,
+    // for example, dmaLen) is used as the DMEM buf fullness.
+    j       flush_rdp_buffer
+G_MTX_multiply_end:
+     li     $ra, run_next_DL_command // Dual use for above and below
+    lhu     $3, (movememTable - G_MV_TEMPMTX0)($3) // $3=2->0=M; $3=6->4=VP
+    move    $2, $3 // Input 0 = output
+mtx_multiply:
+    // $2 and dmemAddr are input matrices; $3 is output matrix
+    addi    $10, dmemAddr, 0x0018
+@@loop:
+    vmadn   $v7, $v31, $v31[2]  // 0
+    addi    $11, dmemAddr, 0x0008
+    vmadh   $v6, $v31, $v31[2]  // 0
+    addi    $2, $2, -0x0020
+    vmudh   $v29, $v31, $v31[2] // 0
+@@innerloop:
+    ldv     $v3[0], 0x0040($2)
+    ldv     $v3[8], 0x0040($2)
+    lqv     vTemp2[0], 0x0020(dmemAddr) // Input 1
+    ldv     $v2[0], 0x0020($2)
+    ldv     $v2[8], 0x0020($2)
+    lqv     vTemp1[0], 0x0000(dmemAddr) // Input 1
+    vmadl   $v29, $v3, vTemp2[0h]
+    addi    dmemAddr, dmemAddr, 0x0002
+    vmadm   $v29, $v2, vTemp2[0h]
+    addi    $2, $2, 0x0008 // Increment input 0 pointer
+    vmadn   $v5, $v3, vTemp1[0h]
+    bne     dmemAddr, $11, @@innerloop
+     vmadh  $v4, $v2, vTemp1[0h]
+    bne     dmemAddr, $10, @@loop
+     addi   dmemAddr, dmemAddr, 0x0008
+    sqv     $v7[0], (0x0020)($3)
+    sqv     $v6[0], (0x0000)($3)
+    sqv     $v4[0], (0x0010)($3)
+    jr      $ra
+     sqv    $v5[0], (0x0030)($3)
 
-// Index = bits 1-6; direction flag = bit 0; end flag = bit 7
-// CM 02 01 03 04 05 06 07
-//               [bb cc]   Indices b and c
-//                |
-//                inputBufferPos + inputBufferEnd
-tri_snake_ret_from_input_buffer:
-    lpv     $v30[2], (inputBufferEndSgn)(inputBufferPos) // c (pos+0) to elem 2
-    lbu     $3, (inputBufferEnd)(inputBufferPos) // Load c; clear real index b sign bit -> don't exit
-    j       tri_snake_loop_from_input_buffer // inputBufferPos pointing to first byte loaded
-G_TRISNAKE_handler:
-     li     $ra, tri_snake_loop          // For both init and above (clobbered by DMA).
-    lpv     $v30[7], (inputBufferEndSgn - 0x10)(inputBufferPos) // 03 to elem 2; becomes new origV1Addr
-    slv     $v7[4], (rdpHalf1Val - altBase)(altBaseReg) // Store past addrs b, c (01 03)
-    addi    inputBufferPos, inputBufferPos, -6 // Point to byte 2: looks at done flag from 01 and dir flag from 03
-    mfc2    origV1Addr, $v7[2]           // 02; will get stored below as c
-tri_snake_loop:
-    // $v30 elem 2 has new index c, which will become new origV1Addr.
-    // origV1Addr has last one, which gets stored to the V2 or V3 spot.
-    lh      $3, (inputBufferEnd)(inputBufferPos) // Load indices b and c
-    addi    inputBufferPos, inputBufferPos, 1  // Increment indices being read
-tri_snake_loop_from_input_buffer:
-    vand    $v6, $v30, vTRC_7E00         // Mask out dir flag and end flag
-    vmudn   $v29, vOne, vTRC_VB          // Address of vertex buffer
-    beqz    inputBufferPos, tri_snake_over_input_buffer // == 0 at end of input buffer
-     andi   $11, $3, 1                   // Get direction flag from index c
-    sll     $11, $11, 1                  // Halfword address
-    snake_c_to_v30
-    vmadl   $v6, $v6, vTRC_VS            // Plus vtx indices times length
-    sh      origV1Addr, (rdpHalf1Val)($11) // Store old v1 as 2 if dir clear or 3 if set
-    bltz    $3, tri_snake_end            // Upper bit of real index b set = done
-     llv    $v7[4], (rdpHalf1Val - altBase)(altBaseReg) // Load addresses 2, 3 to elem 2, 3
-    mfc2    origV1Addr, $v6[4]           // In elem 2 (not elem 1 like 1tri)
-    j       tri_from_snake          // Repeat next instr so we can skip lbu origV1Addr
-     lh     $2, (rdpHalf1Val + 0)($zero)
-     
+align_with_warning 8, "One instruction of padding before G_VTX_handler"
+
+G_VTX_handler: // 21
+    // Vertex command is 01 0H L0 ee, where n = HL (number of vertices).
+    // $v5[1] = 0H * 13, $v5[2] = L0 * 13.
+    // ($v5[2] >> 10) * 2 = 0L * 26 = $v8[2]
+    // ($v5[1] << 10) * 2 = H0 * 26 = $v9[1]
+    // In segmented_to_physical, add, now $v8[2] = HL * 26 = n * 26.
+    // Currently $v7[3] = end addr = (v0 + n) * 26 + base
+    // Subtract -> $v8[3] = v0 * 26 + base = start addr.
+    vmudl   $v8, $v5, $v3[3]       // 0x2000; elem 2 = low part
+    mfc2    dmemAddr, $v7[6]       // (v0 + n) end address; up to 56 inclusive
+    vmudn   $v9, $v5, vTRC_0020    // 0020; elem 1 = high part
+    jal     segmented_to_physical  // Convert address in cmd_w1_dram to physical
+     lhu    vtxLeft, (inputBufferEnd - 0x07)(inputBufferPos) // vtxLeft = size in bytes = vtx count * 0x10
+    sub     dmemAddr, dmemAddr, vtxLeft  // Start addr = end addr - size. Rounded down to DMA word by H/W
+    li      $ra, vtx_after_dma
+    vsub    $v8, $v7, $v8[2]       // elem 3 = v0 start address
+    j       dma_read_write
+G_SETOTHERMODE_H_handler: // These handler labels must be 4 bytes apart for the code below to work
+     addi   dmaLen, vtxLeft, -1                // Only for above, nop for below
+G_SETOTHERMODE_L_handler:
+    lw      $3, (othermode0 - G_SETOTHERMODE_H_handler)($ra) // resolves to othermode0 or othermode1 based on which handler was jumped to
+    lui     $2, 0x8000
+    srav    $2, $2, cmd_w0
+    srl     $11, cmd_w0, 8
+    srlv    $2, $2, $11
+    nor     $2, $2, $zero
+    and     $3, $3, $2
+    or      $3, $3, cmd_w1_dram
+    sw      $3, (othermode0 - G_SETOTHERMODE_H_handler)($ra)
+    j       G_RDP_handler
+     lpv    $v4[0], (otherMode0)($zero)
+
+G_MODIFYVTX_handler: // 3
+    mfc2    $10, $v7[6]  // Byte 3 = vtx being modified
+    j       do_moveword  // Moveword adds cmd_w0 to $10 for final addr
+     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx, bit 15 clear
+
+// Converts the segmented address in cmd_w1_dram to the corresponding physical address
+segmented_to_physical: // 8
+    srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
+    andi    $11, $11, 0x3C                // Clear the bottom 2 bits that remained during the shift
+    vadd    $v8, $v8, $v9[1]              // elem 2 = vertex count * size
+    lw      $11, (segmentTable)($11)      // Get the current address of the segment
+    sll     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address to the left so that the top 8 bits are shifted out
+    srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
+    jr      $ra
+     add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
 // H = highest on screen = lowest Y value; then M = mid, L = low
 tHAtF equ $v5
@@ -1120,26 +1027,22 @@ G_TRI1_handler: // Whether we get here from cmd handler or prev tri, $ra == G_TR
     // $v6: -- V1 -- -- -- -- -- -- This vertex address 1
     // $v7: -- -- V2 V3 -- N1 N2 N3 This and next vertex addresses
     mfc2    $2, $v7[4]
-    mfc2    origV1Addr, $v6[2] // Can't move this up, $v6 is not ready yet when coming from return_and_end_mat
+    mfc2    $1, $v6[2] // Can't move this up, $v6 is not ready yet when coming from return_and_end_mat
     vmudh   $v6, vOne, $v6[1] // elem 2 of v6 = vertex 1 addr
     addi    $ra, $ra, (tris_end - G_TRI1_handler) // So next go to tris_end
-tri_from_snake:
     vmudh   $v4, vOne, $v7[2] // elem 2 of v4 = vertex 2 addr
-.if !ENABLE_PROFILING
     addi    perfCounterB, perfCounterB, 0x4000  // Increment number of tris requested
-.endif
     vmudh   $v8, vOne, $v7[3] // elem 2 of v8 = vertex 3 addr
     mfc2    $3, $v7[6]
     vmov    $v7[3], $v7[7]    // Move next to cur vertex 3 addr.
-tri_from_clip:
     vnxor   tHAtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
-    llv     $v6[0], VTX_SCR_VEC(origV1Addr) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
+    llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
     vnxor   tMAtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
     llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
     vnxor   tLAtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
     vmov    $v7[2], $v7[6]    // Move next to cur vertex 2 addr.
-    lhu     $6, VTX_CLIP(origV1Addr)
+    lhu     $6, VTX_CLIP($1)
     vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
     lhu     $7, VTX_CLIP($2)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
@@ -1180,31 +1083,16 @@ tSubPxHF equ $v4
     vmudn   tSubPxHF, tHPos, $v31[5] // 0x4000
     beqz    $9, return_and_end_mat  // If cross product is 0, tri is degenerate (zero area), cull.
      // 29 cycles
-.if !CFG_NO_OCCLUSION_PLANE
-     and    $6, $6, $7
-.endif
      vsub   tPosMmH, tMPos, tHPos
-.if !CFG_NO_OCCLUSION_PLANE
-    and     $6, $6, $8
-.endif
     vsub    tPosLmH, tLPos, tHPos
-.if !CFG_NO_OCCLUSION_PLANE
-    andi    $6, $6, CLIP_OCCLUDED
-.endif
     vsub    tPosHmM, tHPos, tMPos
-.if !CFG_NO_OCCLUSION_PLANE
-    bnez    $6, tri_culled_by_occlusion_plane // Cull if all verts occluded
-     // 33 cycles
-.endif
-     mfc2   $1, tHPos[4]     // tHPos = lowest Y value = highest on screen (x, y, addr)
-    // 32 cycles if NOC (34 if occlusion plane)
+    mfc2    $1, tHPos[4]     // tHPos = lowest Y value = highest on screen (x, y, addr)
+    // 32 cycles if NOC
 tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
     vsub    tPosCatI, tLPos, tMPos
     mfc2    $2, tMPos[4]     // tMPos = mid vertex (x, y, addr)
     vmov    tPosCatI[2], tPosMmH[0]
-.if !ENABLE_PROFILING
-    andi    $11, vGeomMid, G_SHADING_SMOOTH >> 8
-.endif
+    // nop
     vmudh   $v29, tPosMmH, tPosLmH[0]
     li      $20, -8       // 0xFFF8; constant for some mask below
 t1WI equ $v13 // elems 0, 4, 6
@@ -1213,7 +1101,7 @@ t1WI equ $v13 // elems 0, 4, 6
 tXPF equ $v16 // Triangle cross product
 tXPI equ $v17
     vreadacc tXPI, ACC_UPPER
-    add     $19, origV1Addr, flatV1Offset
+    // nop
     vreadacc tXPF, ACC_MIDDLE
     lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vrcp    $v20[0], tPosCatI[1]
@@ -1221,17 +1109,12 @@ tXPI equ $v17
     vmov    tPosCatI[3], tPosLmH[0]
     lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
     vrcph   $v22[0], tXPI[1]
-.if !ENABLE_PROFILING
-    lpv     $v25[0], VTX_COLOR_VEC($19) // Load RGB from orig vtx 1 for flat shading
-.endif
+    // nop
 tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
 tXPRcpI equ $v24
     vrcpl   tXPRcpF[1], tXPF[1]
-.if !ENABLE_PROFILING
-    beqz    $11, tri_flat_shading  // Branch if G_SHADING_SMOOTH is clear
-.endif
-     vrcph  tXPRcpI[1], $v31[2]            // 0
-tri_return_from_flat_shading:
+    // nop
+    vrcph   tXPRcpI[1], $v31[2]            // 0
     // 43 cycles
     vrcp    $v20[2], tPosMmH[1]
     ssv     tPosMmH[2], 0x0030(rdpCmdBufPtr) // MmHY -> first short (temp mem)
@@ -1352,9 +1235,7 @@ tSTWHMF equ $v25 // <- tMnWI
     vmrg    tLAtI, tLAtI, tSTWLI // Merge S, T, W Low into elems 4-6
     ldv     tHAtF[8], 0x0028(rdpCmdBufPtr) // Move S, T, W Hi Frac from temp mem
     vmrg    tLAtF, tLAtF, tSTWLF // Merge S, T, W Low into elems 4-6
-.if !ENABLE_PROFILING
     addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
-.endif
     // 96 cycles
     vmudl   $v29, tXPF, tXPRcpF
     lsv     tHAtF[14], VTX_SCR_Z_FRAC($1)
@@ -1475,10 +1356,6 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
     mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
     lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
     lw      $10, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
-.if CFG_PROFILING_C
-    // This is a wait for DMA busy loop, but written inline to avoid overwriting ra.
-    addi    perfCounterD, perfCounterD, 7    // 6 instr + 1 taken branch
-.endif
     bnez    $11, flush_rdp_buffer            // Wait until no DMAs are active
      addi   dmaLen, dmemAddr, RDP_CMD_BUFSIZE + 8  // dmaLen = size of DMEM buffer to copy
     blez    dmaLen, old_return_routine       // Exit if nothing to copy, or if dmemAddr is large negative num from last flush DMA write
@@ -1490,28 +1367,20 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
      mfc0   $11, DPC_STATUS                  // Read RDP status
     andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
     bnez    $11, @@await_rdp_dblbuf_avail    // Wait until double buffered start/end available
-.if COUNTER_C_FIFO_FULL
      addi   perfCounterC, perfCounterC, 7    // 4 instr + 2 after mfc + 1 taken branch
-.endif
-     lw     cmd_w1_dram, OSTask + OSTask_output_buff // Start of FIFO
+    lw      cmd_w1_dram, OSTask + OSTask_output_buff // Start of FIFO
 @@await_past_first_instr:
     mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
     beq     $11, cmd_w1_dram, @@await_past_first_instr // Wait until RDP moved past start
-.if COUNTER_C_FIFO_FULL
      addi   perfCounterC, perfCounterC, 6    // 3 instr + 2 after mfc + 1 taken branch
-.else
-     nop
-.endif
     // Start was previously the start of the FIFO, unless this is the first buffer,
     // in which case it was the end of the FIFO. Normally, when the RDP gets to end, if we
     // have a new end value waiting (END_VALID), it'll load end but leave current. By
     // setting start here, it will also load current with start.
     mtc0    cmd_w1_dram, DPC_START           // Set RDP start to start of FIFO
 @@keep_waiting:
-.if COUNTER_C_FIFO_FULL
     // This is here so we only count it when stalling below or on FIFO end codepath
     addi    perfCounterC, perfCounterC, 10   // 7 instr + 2 after mfc + 1 taken branch
-.endif
 @@has_room:
     mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
     sub     $11, $11, cmd_w1_dram            // Current - current end (rdpFifoPos or start)
@@ -1697,8 +1566,6 @@ xfrm_light_store_lookat:
 
 // Lighting within vertex loop
 
-.if CFG_NO_OCCLUSION_PLANE
-
 .macro instan_lt_vec_1
     vmadh   $v29, vMTX1I, vpMdl[1h]
 .endmacro
@@ -1722,35 +1589,6 @@ xfrm_light_store_lookat:
     vge     sCLZ, vpScrI, $v31[2]              // 0; clamp Z to >= 0
     sh      flagsV1, (VTX_CLIP      )(outVtx1) // Store first vertex flags
 .endmacro
-
-.else
-
-.macro instan_lt_vec_1
-    veq     $v29, $v31, $v31[0q]  // Set VCC to 10101010
-.endmacro
-.macro instan_lt_vec_2
-    vmrg    sOCS, sOCS, sOTM      // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
-.endmacro
-.macro instan_lt_vec_3
-    vmrg    vpScrF, vpScrF, sCLZ[2h]  // Z int elem 2, 6 to elem 1, 5; Z frac in elem 2, 6
-.endmacro
-// lDOT <- sCLZ
-// vpRGBA <- sOTM
-.macro instan_lt_scl_1
-    sub     $11, outVtx1, fogFlag      // Points 8 before outVtx1 if fog, else 0
-.endmacro
-.macro instan_lt_scl_2
-    sbv     sFOG[7],  (VTX_COLOR_A + 8)($11)
-.endmacro
-// lCOL <- sFOG
-.macro instan_lt_vs_45
-    vmudm   $v29, vpST, sSTS   // Scale ST
-    slv     vpScrI[8],  (VTX_SCR_VEC    )(outVtx2)
-    vmadh   vpST, vOne, $v30   // + 1 * ST offset; elems 0, 1, 4, 5
-    addi    outVtxBase, outVtxBase, 2*vtxSize // Points to SECOND output vtx
-.endmacro
-
-.endif
 
 .align 8
 
@@ -1778,19 +1616,6 @@ ltbasic_start_standard:
     vnop
     luv     lVCI[0],    (tempVpRGBA)(rdpCmdBufEndP1) // Load vertex color input
 ltbasic_after_start:
-
-.if CFG_DEBUG_NORMALS
-.warning "Debug normals visualization is enabled"
-    vmudh   vpNrmlX, vOne, vpNrmlX[3h] // Move X to all elements
-    vne     $v29, $v31, $v31[1h] // Set VCC to 10111011
-    vmrg    vpNrmlX, vpNrmlX, vpNrmlY[3h] // X in 0, 4; Y to 1, 5
-    vne     $v29, $v31, $v31[2h] // Set VCC to 11011101
-    vmrg    vpNrmlX, vpNrmlX, vpNrmlZ[3h] // Z to 2, 6
-    vmudh   $v29, vOne, $v31[5] // 0x4000; middle gray
-    j       vtx_return_from_lighting
-     vmacf  vpRGBA, vpNrmlX, $v31[5] // 0x4000; + 0.5 * normal
-.else // CFG_DEBUG_NORMALS
-
     vmulf   $v29,  vpNrmlX, vLTC[4] // Normals X elems 3, 7 * first light dir X
 // lDIR <- (NOC: -, Occ: sOTM)
     lpv     lDIR[0], (ltBufOfs + 8 - 2*lightSize)(ambLight) // Xfrmed dir in elems 4-6; temp reg
@@ -1823,8 +1648,6 @@ ltbasic_post:
     jr      lbAfter
 // vpRGBA <- lDIR
      vmrg   vpRGBA, vpLtTot, lVCI  // RGB = light, A = vtx alpha
-
-.endif // CFG_DEBUG_NORMALS
 
 // lbAfter       = ltbasic_ao if AO else
 // lbPostAo      = ltbasic_l2a if L2A else
@@ -1868,9 +1691,6 @@ lLkDt1 equ lDOT    // lighting Lookat Dot product 1
     vmacf   dot1, vpNrmlZ, lookats[6]  // Normals Z * lookat 1 Z
 .endmacro
     texgen_dots lLkDrs, lLkDt0, lLkDt1
-.if !CFG_NO_OCCLUSION_PLANE
-    addi    outVtxBase, outVtxBase, -2*vtxSize // Undo doing this twice due to repeating ST scale
-.endif
 // In ltbasic, normals are in elems 3, 7; in ltadv, elems 0, 4
     vmudh   lLkDt0, vOne, lLkDt0[3h] // Move dot 0 from elems 3, 7 to 0, 4
 .macro texgen_body, lookats, dot0, dot1, normalselem, branch_no_texgen_linear
@@ -1914,11 +1734,6 @@ tri_alpha_compare_cull:
     sub     $24, $24, $19 // sign bit set if (max/min) < thresh
     xor     $24, $24, $11 // invert sign bit if other cond. Sign bit set -> cull,
     bgez    $24, tri_return_from_alpha_compare_cull // if max < thresh or if min >= thresh.
-tri_culled_by_occlusion_plane:
-.if CFG_PROFILING_B
-     nop
-    addi    perfCounterB, perfCounterB, 0x4000
-.endif
 return_and_end_mat:
      tri_v1_move // overwrites $v6[1]
     jr      $ra
@@ -1927,13 +1742,10 @@ return_and_end_mat:
 vtx_after_dma:
     mfc2    outVtxBase, $v8[6]                 // Address of output start
     andi    inVtx, dmemAddr, 0xFFF8            // Round down input start addr to DMA word
-.if COUNTER_A_UPPER_VERTEX_COUNT
     sll     $11, vtxLeft, 12                   // Vtx count * 0x10000
     add     perfCounterA, perfCounterA, $11    // Add to vertex count
-.endif
     // Sets up constants needed for vertex loop
     // Results fill vPerm1:4. Uses misc temps.
-.if CFG_NO_OCCLUSION_PLANE
     llv     sFOG[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
     ldv     sVPO[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
     veq     $v29, $v31, $v31[3h]                  // VCC = 00010001
@@ -1953,27 +1765,6 @@ vtx_after_dma:
      lbu    $7, mvpValid
     vclr    $v30
 @@keepoffset:
-.else
-    lb      flagsV1, geometryModeLabel + 3    // G_ATTROFFSET_ST_ENABLE in sign bit
-    lw      $11, (fogFactor)($zero)           // Load fog multiplier MSBs and offset LSBs
-    llv     sSTS[0], (textureSettings2)($zero) // Texture ST scale in 0, 1
-    llv     $v30[0], (attrOffsetST - altBase)(altBaseReg)  // Texture ST offset in 0, 1
-    llv     $v30[8], (attrOffsetST - altBase)(altBaseReg)  // Texture ST offset in 4, 5
-    bltz    flagsV1, @@keepoffset
-     srl    $10, $11, 16                      // Fog multiplier to lower bits
-    vclr    $v30
-@@keepoffset:
-    sh      $11, (viewport + 0xE)($zero)      // Store fog offset over vtrans W
-    vmov    sSTS[4], sSTS[0]
-    sh      $10, (viewport + 0x6)($zero)      // Store fog multiplier over vscale W
-    lbu     $7, mvpValid
-    ldv     sO03[0], (occlusionPlaneEdgeCoeffs     - altBase)(altBaseReg) // Load coeffs 0-3
-    ldv     sO03[8], (occlusionPlaneEdgeCoeffs     - altBase)(altBaseReg) // and for vtx 2
-    ldv     sO47[0], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // Load coeffs 4-7
-    ldv     sO47[8], (occlusionPlaneEdgeCoeffs + 8 - altBase)(altBaseReg) // and for vtx 2
-    ldv     sOCM[0], (occlusionPlaneMidCoeffs      - altBase)(altBaseReg) // Load mid coeffs
-    ldv     sOCM[8], (occlusionPlaneMidCoeffs      - altBase)(altBaseReg) // and for vtx 2
-.endif
     vmov    sSTS[5], sSTS[1]
     lsv     $v30[6], (perspNorm - altBase)(altBaseReg) // Perspective norm elem 3
 vtx_after_setup_constants:
@@ -2010,29 +1801,14 @@ vtx_load_mtx:
     ldv     vMTX2I[8],  (0x10)($11)
     ldv     vMTX0F[8],  (0x20)($11)
     ldv     vMTX2F[8],  (0x30)($11)
-.if !CFG_NO_OCCLUSION_PLANE
-    vge     $v29, $v31, $v31[2h] // VCC = 00110011
-.endif
     andi    fogFlag, vGeomMid, G_FOG >> 8  // Can't put before lt b/c fogFlag = mtx valid flag.
-.if !CFG_NO_OCCLUSION_PLANE
-    vmrg    sOPM, vOne, $v31[1] // Signs of sOPM are --++--++
-.endif
     srl     fogFlag, fogFlag, 5            // 8 if G_FOG is set, 0 otherwise
     addi    outVtx1, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
-.if !CFG_NO_OCCLUSION_PLANE
     addi    outVtx2, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
-.endif
-.if CFG_NO_OCCLUSION_PLANE
-     addi   outVtx2, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
-.else
-     vmudh  sOPM, sOPM, $v31[5] // sOPM is 0xC000, 0xC000, 0x4000, 0x4000, repeat
-.endif
     jal     while_wait_dma_busy  // Wait for vertex load to finish
      addi   outVtxBase, outVtxBase, -vtxSize   // Will inc by 2, but need point to 2nd
-.if CFG_NO_OCCLUSION_PLANE  // With occlusion plane, vpMdl loaded at vtx_store_loop_entry
     ldv     vpMdl[0], (VTX_IN_OB + 0 * inputVtxSize)(inVtx) // 1st vec pos
     ldv     vpMdl[8], (VTX_IN_OB + 1 * inputVtxSize)(inVtx) // 2nd vec pos
-.endif
     llv     sTCL[8],  (VTX_IN_CN + 0 * inputVtxSize)(inVtx) // RGBA in 4:5
     llv     sTCL[12], (VTX_IN_CN + 1 * inputVtxSize)(inVtx) // RGBA in 6:7
     llv     vpST[0],  (VTX_IN_TC + 0 * inputVtxSize)(inVtx) // ST in 0:1
@@ -2040,8 +1816,6 @@ vtx_load_mtx:
      llv    vpST[8],  (VTX_IN_TC + 1 * inputVtxSize)(inVtx) // ST in 4:5
      
 align_with_warning 8, "One instruction of padding before vertex loop"
-
-.if CFG_NO_OCCLUSION_PLANE
 
 vtx_loop_no_lighting:
 // lCOL <- sSCI
@@ -2186,267 +1960,10 @@ vtx_epilogue:
     slv     vpScrI[0],  (VTX_SCR_VEC    )(outVtx1)
     ssv     vpScrF[12], (VTX_SCR_Z_FRAC )(outVtx2)
     slv     vpScrF[2],  (VTX_SCR_Z      )(outVtx1)
-    // Fallthrough (across the versions boundary)
-
-.else // not CFG_NO_OCCLUSION_PLANE
-    
-    // 70 cycles, 16 more than NOC
-    // 6 vu cycles for plane, 8 vu cycles for edges, 0 more vnops than NOC,
-    // 1 branch delay slot with SU instr, 1 land-after-branch.
-vtx_loop_no_lighting:
-// lDTC <- sVPS
-// lVCI <- sRTI
-// vpLtTot <- sTCL
-// vpNrmlX <- s1WF
-// lDIR <- sOTM
-    veq     $v29, $v31, $v31[0q]  // Set VCC to 10101010
-    sub     $11, outVtx1, fogFlag      // Points 8 before outVtx1 if fog, else 0
-    vmrg    sOCS, sOCS, sOTM      // Elems 0-3 are results for vtx 0, 4-7 for vtx 1
-    sbv     sFOG[7],  (VTX_COLOR_A + 8)($11) // ...which gets overwritten below
-    vmrg    vpScrF, vpScrF, sCLZ[2h]  // Z int elem 2, 6 to elem 1, 5; Z frac in elem 2, 6
-// vpRGBA <- lDIR
-    luv     vpRGBA[0],    (tempVpRGBA)(rdpCmdBufEndP1) // Vtx pair RGBA
-// lDOT <- sCLZ
-// lCOL <- sFOG
-vtx_return_from_texgen:
-    vmudm   $v29, vpST, sSTS   // Scale ST
-    slv     vpScrI[8],  (VTX_SCR_VEC    )(outVtx2)
-    vmadh   vpST, vOne, $v30   // + 1 * ST offset; elems 0, 1, 4, 5
-    addi    outVtxBase, outVtxBase, 2*vtxSize // Points to SECOND output vtx
-vtx_return_from_lighting:
-    vge     $v29, sOCS, sO47      // Each compare to coeffs 4-7
-    slv     vpScrI[0],  (VTX_SCR_VEC    )(outVtx1)
-    vmudn   $v29, vMTX3F, vOne
-    cfc2    $11, $vcc
-    vmadh   $v29, vMTX3I, vOne
-    slv     vpScrF[10], (VTX_SCR_Z      )(outVtx2)
-    vmadn   $v29, vMTX0F, vpMdl[0h]
-    addi    inVtx, inVtx, (2 * inputVtxSize) // Advance two positions forward in the input vertices
-    vmadh   $v29, vMTX0I, vpMdl[0h]
-    slv     vpScrF[2],  (VTX_SCR_Z      )(outVtx1)
-    vmadn   $v29, vMTX1F, vpMdl[1h]
-    or      $11, $11, $10    // Combine occlusion results. Any set in 0-3, 4-7 = not occluded
-    vmadh   $v29, vMTX1I, vpMdl[1h]
-    andi    $10, $11, 0x000F // Bits 0-3 for vtx 1
-// vpClpF <- lDOT
-    vmadn   vpClpF, vMTX2F, vpMdl[2h]
-    addi    $11, $11, -(0x0010) // If not occluded, atl 1 of 4-7 set, so $11 >= 0x10. Else $11 < 0x10.
-// vpClpI <- lCOL
-    vmadh   vpClpI, vMTX2I, vpMdl[2h]
-    bnez    $10, @@skipv1    // If nonzero, at least one equation false, don't set occluded flag
-     andi   $11, $11, CLIP_OCCLUDED // This is bit 11, = sign bit b/c |$11| <= 0xFF
-    ori     flagsV1, flagsV1, CLIP_OCCLUDED // All equations true, set vtx 1 occluded flag
-@@skipv1:
-    // 16 cycles
-vtx_store_for_clip:
-    vmudl   $v29, vpClpF, $v30[3]       // Persp norm
-    or      flagsV2, flagsV2, $11 // occluded = $11 negative = sign bit set = $11 is flag, else 0
-// s1WI <- vpMdl
-    vmadm   s1WI, vpClpI, $v30[3]       // Persp norm
-    sh      flagsV2,            (VTX_CLIP      )(outVtx2) // Store second vertex clip flags
-// s1WF <- vpNrmlX
-    vmadn   s1WF, $v31, $v31[2]         // 0
-    blez    vtxLeft, vtx_epilogue
-     vmudn  $v29, vpClpF, sOCM          // X * kx, Y * ky, Z * kz
-    vmadh   $v29, vpClpI, sOCM          // Int * int
-    sh      flagsV1,            (VTX_CLIP      )(outVtx1) // Store first vertex flags
-    vrcph   $v29[0], s1WI[3]
-    addi    vtxLeft, vtxLeft, -2*inputVtxSize // Decrement vertex count by 2
-// sRTF <- lDTC
-    vrcpl   sRTF[2], s1WF[3]
-    sra     $11, vtxLeft, 31   // All 1s if on single-vertex last iter
-// sRTI <- lVCI
-    vrcph   sRTI[3], s1WI[7]
-    andi    $11, $11, vtxSize  // vtxSize if on single-vertex last iter, else normally 0
-    vrcpl   sRTF[6], s1WF[7]
-    sub     outVtx2, outVtxBase, $11 // First output vtx on last iter, else second
-    vrcph   sRTI[7], $v31[2] // 0
-    addi    outVtx1, outVtxBase, -vtxSize  // First output vtx always
-    vreadacc sOCS, ACC_UPPER                // Load int * int portion
-    suv     vpRGBA[4],  (VTX_COLOR_VEC )(outVtx2) // Store RGBA for second vtx
-    vch     $v29, vpClpI, vpClpI[3h] // Clip screen high
-    suv     vpRGBA[0],  (VTX_COLOR_VEC )(outVtx1) // Store RGBA for first vtx
-    vmudl   $v29, s1WF, sRTF[2h]
-    // nop
-    vmadm   $v29, s1WI, sRTF[2h]
-    // nop
-    vmadn   s1WF, s1WF, sRTI[3h]
-    // nop
-    vmadh   s1WI, s1WI, sRTI[3h]
-    // nop
-    vcl     $v29, vpClpF, vpClpF[3h] // Clip screen low
-    sqv     vpClpI, (tempVpRGBA)(rdpCmdBufEndP1) // For Z to W manip. RGBA not currently stored here
-    vmudh   $v29, vOne, $v31[4]  // 4
-    cfc2    flagsV1, $vcc                   // Screen clip results
-    vmadn   s1WF, s1WF, $v31[0]  // -4
-    ssv     vpClpI[4],  (tempVpRGBA + 6)(rdpCmdBufEndP1)  // First Z to W
-    vmadh   s1WI, s1WI, $v31[0]  // -4
-// sTCL <- vpLtTot
-    ldv     sTCL[0],   (VTX_IN_TC + 0 * inputVtxSize)(inVtx) // ST in 0:1, RGBA in 2:3
-// sSCF <- vpScrF
-    vmudn   sSCF, vpClpF, $v31[3]       // W * clip ratio for scaled clipping
-    ssv     vpClpI[12], (tempVpRGBA + 14)(rdpCmdBufEndP1) // Second Z to W
-// sSCI <- vpScrI
-    vmadh   sSCI, vpClpI, $v31[3]       // W * clip ratio for scaled clipping
-    // nop
-    vmudl   $v29, s1WF, sRTF[2h]
-    lqv     vpClpI, (tempVpRGBA)(rdpCmdBufEndP1) // Load int part with Z in W
-    vmadm   $v29, s1WI, sRTF[2h]
-    // nop
-    vmadn   s1WF, s1WF, sRTI[3h]
-    ldv     sTCL[8],   (VTX_IN_TC + 1 * inputVtxSize)(inVtx) // ST in 4:5, RGBA in 6:7
-    vmadh   s1WI, s1WI, sRTI[3h]
-    srl     flagsV2, flagsV1, 4            // Shift second vertex screen clipping to first slots
-    vch     $v29, vpClpI, sSCI[3h] // Clip scaled high
-    andi    flagsV2, flagsV2, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
-    vcl     $v29, vpClpF, sSCF[3h] // Clip scaled low
-    slv     vpST[8], (VTX_TC_VEC    )(outVtx2) // Store scaled S, T vertex 2
-    vmudl   $v29, vpClpF, s1WF[3h] // Pos times inv W
-    cfc2    $11, $vcc                   // Scaled clip results
-    vmadm   $v29, vpClpI, s1WF[3h] // Pos times inv W
-    slv     vpST[0], (VTX_TC_VEC    )(outVtx1) // Store scaled S, T vertex 1
-    vmadn   vpClpF, vpClpF, s1WI[3h]
-// sVPO <- sSCF
-    ldv     sVPO[0], (viewport + 8)($zero) // Load viewport offset incl. fog for first vertex
-    vmadh   vpClpI, vpClpI, s1WI[3h] // vpClpI:vpClpF = pos times inv W
-    ssv     s1WF[14],          (VTX_INV_W_FRAC)(outVtx2)
-// sOTM <- vpRGBA
-    vadd    sOTM, sOCS, sOCS[1h] // Add Y to X
-    ldv     sVPO[8], (viewport + 8)($zero) // Load viewport offset incl. fog for second vertex
-    vcopy   vpST, sTCL
-    ssv     s1WF[6],           (VTX_INV_W_FRAC)(outVtx1)
-    vmudl   $v29, vpClpF, $v30[3] // Persp norm
-// sVPS <- sSCI
-    ldv     sVPS[0], (viewport)($zero) // Load viewport scale incl. fog for first vertex
-    vmadm   vpClpI, vpClpI, $v30[3] // Persp norm
-    ssv     s1WI[14],          (VTX_INV_W_INT )(outVtx2)
-    vmadn   vpClpF, $v31, $v31[2] // 0; Now vpClpI:vpClpF = projected position
-    ldv     sVPS[8], (viewport)($zero) // Load viewport scale incl. fog for second vertex
-    vadd    sOCS, sOTM, sOCS[2h] // Add Z to X
-    ssv     s1WI[6],           (VTX_INV_W_INT )(outVtx1)
-    vmov    sTCL[4], vpST[2] // First vtx RG to elem 4
-    andi    flagsV1, flagsV1, CLIP_SCRN_NPXY | CLIP_CAMPLANE // Mask to only screen bits we care about
-    vmudh   $v29, sVPO, vOne // offset * 1
-    sll     $10, $11, 4            // Shift first vertex scaled clipping to second slots
-// vpScrF <- sVPO
-    vmadn   vpScrF, vpClpF, sVPS   // + pos frac * scale
-    andi    $11, $11, CLIP_SCAL_NPXY // Mask to only bits we care about
-// vpScrI <- sVPS
-    vmadh   vpScrI, vpClpI, sVPS   // int part, vpScrI:vpScrF is now screen space pos
-    or      flagsV2, flagsV2, $11            // Combine results for second vertex
-// sFOG <- vpClpI
-    vmadh   sFOG, vOne, $v31[6] // + 0x7F00 in all elements, clamp to 0x7FFF for fog
-    andi    $10, $10, CLIP_SCAL_NPXY // Mask to only bits we care about
-    vlt     $v29, sOCS, sOCM[3h] // Occlusion plane X+Y+Z<C in elems 0, 4
-    or      flagsV1, flagsV1, $10         // Combine results for first vertex
-    vmov    sTCL[5], vpST[3] // First vtx BA to elem 5
-    cfc2    $10, $vcc // Load occlusion plane mid results to bits 3 and 7
-    vmudh   sOTM, vpScrI, $v31[4]   // 4; scale up x and y
-// vpMdl <- s1WI
-vtx_store_loop_entry:
-    ldv     vpMdl[0], (VTX_IN_OB + 0 * inputVtxSize)(inVtx) // Pos of 1st vector for next iteration
-    vge     sFOG, sFOG, $v31[6]   // 0x7F00; clamp fog to >= 0 (want low byte only)   
-    ldv     vpMdl[8], (VTX_IN_OB + 1 * inputVtxSize)(inVtx) // Pos of 2nd vector on next iteration
-    // vnop
-    andi    $10, $10, (1 << 0) | (1 << 4) // Only bits 0, 4 from occlusion
-    vmulf   $v29, sOPM, vpScrI[1h]  // -0x4000*Y1, --, +0x4000*Y1, --, repeat vtx 2
-    sub     $11, outVtx2, fogFlag      // Points 8 before outVtx2 if fog, else 0
-    vmacf   sOCS, sO03, sOTM[0h]  //    4*X1*c0, --,    4*X1*c2, --, repeat vtx 2
-    sdv     sTCL[8],      (tempVpRGBA)(rdpCmdBufEndP1) // Vtx 0 and 1 RGBA in order
-    vmulf   $v29, sOPM, vpScrI[0h]  // --, -0x4000*X1, --, +0x4000*X1, repeat vtx 2
-    sbv     sFOG[15], (VTX_COLOR_A + 8)($11) // In VTX_SCR_Y if fog disabled...
-    vmacf   sOTM, sO03, sOTM[1h]  // --,    4*Y1*c1, --,    4*Y1*c3, repeat vtx 2
-    jr      vLoopRet
-// sCLZ <- vpClpF
-     vge    sCLZ, vpScrI, $v31[2]   // 0; clamp Z to >= 0
-     // vnop in land slot
-     
-vtx_epilogue:
-    // Fallthrough (across the versions boundary)
-     
-.endif
-
     sh      flagsV1, (VTX_CLIP)(outVtx1) // Store first vertex flags
-.if CFG_PROFILING_A
-    li      $ra, 0                           // Flag for coming from vtx
-    lqv     vTRC, (vTRCValue)($zero)         // Restore value overwritten by matrix
-tris_end:
-    mfc0    $11, DPC_CLOCK
-    lw      $10, startCounterTime
-    sub     $11, $11, $10
-    beqz    $ra, run_next_DL_command         // $ra != 0 if from tri cmds
-     add    perfCounterA, perfCounterA, $11  // Add to vert cycles perf counter
-    lw      $2, startFifoStallTime           // From tris
-    sub     perfCounterA, perfCounterA, $11  // Undo add to vert perf counter
-    add     perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
-    sub     $2, perfCounterC, $2             // RDP FIFO stall time elapsed during tri draw
-    j       run_next_DL_command
-     sub    perfCounterD, perfCounterD, $2   // Subtract final RDP FIFO stall time from tri time
-.else
     j       run_next_DL_command
      lqv    vTRC, (vTRCValue)($zero)         // Restore value overwritten by matrix
-.endif
 
-tri_snake_over_input_buffer: // inputBufferPos is now 0; load whole buffer
-    bgez    $3, displaylist_dma_goto_next_ra // If $3 < 0, last tri flag set, proceed to end
-     li     nextRA, -0x8000 | tri_snake_ret_from_input_buffer // Negative is flag for from snake
-tri_snake_end:
-    addi    inputBufferPos, inputBufferPos, 7 // Round up to whole input command
-    addi    $11, $zero, 0xFFFFFFF8            // Sign-extend; andi is zero-extend!
-    j       tris_end
-     and    inputBufferPos, inputBufferPos, $11 // inputBufferPos has to be negative
-
-.if !ENABLE_PROFILING
-tri_flat_shading:
-    vlt     $v29, $v31, $v31[3]       // Set vcc to 11100000
-    vmrg    tHAtI, $v25, tHAtI        // RGB from original vtx 1, alpha from $1
-    vmrg    tMAtI, $v25, tMAtI        // RGB from original vtx 1, alpha from $2
-    j       tri_return_from_flat_shading
-     vmrg   tLAtI, $v25, tLAtI        // RGB from original vtx 1, alpha from $3
-.endif
-
-.if 0
-dump_dmem:
-    jal     segmented_to_physical
-     lw     cmd_w1_dram, dumpDmemBuffer
-    li      dmemAddr, 0x8000 // address 0, negative = write
-    j       dma_and_wait_goto_next_ra
-     li     dmaLen, 0x1000 - 1 // all of DMEM, DMA lengths always minus 1
-.endif
-
-load_overlay_inner:  // dmaLen, dmemAddr, cmd_w1_dram, and nextRA must be set
-    lw      $11, OSTask + OSTask_ucode
-.if CFG_PROFILING_B
-    addi    perfCounterC, perfCounterC, 0x4000  // Increment overlay (all 0-4) load count
-.endif
-.if !CFG_PROFILING_C
-    j       dma_and_wait_goto_next_ra
-     add    cmd_w1_dram, cmd_w1_dram, $11
-.else
-    // According to Tharo's testing, and in contradiction to the manual, almost no
-    // instructions are issued while an IMEM DMA is happening. So we have to time
-    // it using counters.
-    mfc0    ovlInitClock, DPC_CLOCK
-    jal     shared_dma_read_write // The one without perfCounterD
-     add    cmd_w1_dram, cmd_w1_dram, $11
-    mfc0    $11, SP_DMA_BUSY
-@@while_dma_busy:
-    bnez    $11, @@while_dma_busy
-     mfc0   $11, SP_DMA_BUSY
-    mfc0    $11, DPC_CLOCK
-    sub     $11, $11, ovlInitClock
-    jr      nextRA
-     add    perfCounterD, perfCounterD, $11
-
-// Also, normal dma_read_write below can't be changed to insert perfCounterD due to
-// S2DEX constraints. So we have to duplicate that part of it.
-dma_read_write:
-    mfc0    $11, SP_DMA_FULL
-    bnez    $11, dma_read_write
-     addi   perfCounterD, perfCounterD, 6  // 3 instr + 2 after mfc + 1 taken branch
-    j       dma_read_write_not_full
-     nop
-.endif
 
 endFreeImemAddr equ 0x1FC4
 startFreeImem:
@@ -2468,23 +1985,14 @@ wait_goto_next_ra:
 // The code from here to the end is shared with S2DEX, so great care is needed for changes.
 while_wait_dma_busy:
     mfc0    $11, SP_DMA_BUSY    // Load the DMA_BUSY value
-.if CFG_PROFILING_C
-    bnez    $11, while_wait_dma_busy
-     // perfCounterD is $12, which is a temp register in S2DEX, which happens to
-     // never have state carried over while_wait_dma_busy.
-     addi   perfCounterD, perfCounterD, 6  // 3 instr + 2 after mfc + 1 taken branch
-.else
 @@while_dma_busy:
     bnez    $11, @@while_dma_busy // Loop until DMA_BUSY is cleared
      mfc0   $11, SP_DMA_BUSY      // Update DMA_BUSY value
-.endif
 old_return_routine:
     jr      $ra
      // Has mfc0 in branch delay slot, causes a stall if first instr after ret is load
 
-.if !CFG_PROFILING_C
 dma_read_write:
-.endif
 shared_dma_read_write:
      mfc0   $11, SP_DMA_FULL          // load the DMA_FULL value
 @@while_dma_full:
@@ -2506,98 +2014,18 @@ dma_write:
 
 .headersize 0x00001000 - orga()
 
-// Overlay 0 handles three cases of stopping the current microcode.
-// The action here is controlled by $7:
-// - If yielding, $7 == SP_STATUS_SIG0 == 0x0080
-// - If this was G_LOAD_UCODE, $7 == G_LOAD_UCODE == 0xDD (as negative)
-// - If we got to the end of the parent DL, $7 == -4.
 ovl0_start:
     jal     flush_rdp_buffer   // See G_FLUSH_handler for docs on these 3 instructions.
      sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1
     jal     flush_rdp_buffer
      add    taskDataPtr, taskDataPtr, inputBufferPos // inputBufferPos <= 0; taskDataPtr was where in the DL after the current chunk loaded
-.if CFG_PROFILING_C
-    mfc0    $11, DPC_CLOCK
-    lw      $10, startCounterTime
-    sub     $11, $11, $10
-    add     perfCounterA, perfCounterA, $11
-.endif
-    addi    $7, $7, 4 // Now 0 if end, > 0 if yield, < 0 if load ucode
-    bgez    $7, task_done_or_yield  // Continue to load ucode if negative
-load_ucode:
-     lw     cmd_w1_dram, (inputBufferEnd - 0x04)(inputBufferPos) // word 1 = ucode code DRAM addr
-    sw      $zero, OSTask + OSTask_flags    // So next ucode knows it didn't come from yield
-    li      dmemAddr, start         // Beginning of overwritable part of IMEM
-    sw      taskDataPtr, OSTask + OSTask_data_ptr // Store where we are in the DL
-    sw      cmd_w1_dram, OSTask + OSTask_ucode // Store pointer to new ucode about to execute
-    // Store counters in mvpMatrix; first 0x180 of DMEM will be preserved in ucode swap AND
-    // if other ucode yields
-    sw      perfCounterA, mvpMatrix + YDF_OFFSET_PERFCOUNTERA
-    sw      perfCounterB, mvpMatrix + YDF_OFFSET_PERFCOUNTERB
-    sw      perfCounterC, mvpMatrix + YDF_OFFSET_PERFCOUNTERC
-    sw      perfCounterD, mvpMatrix + YDF_OFFSET_PERFCOUNTERD
-    jal     dma_read_write          // DMA DRAM read -> IMEM write
-     li     dmaLen, (while_wait_dma_busy - start) - 1 // End of overwritable part of IMEM
-    lw      cmd_w1_dram, rdpHalf1Val // Get DRAM address of ucode data from rdpHalf1Val
-    li      dmemAddr, endSharedDMEM // DMEM address is endSharedDMEM
-    andi    dmaLen, cmd_w0, 0x0FFF  // Extract DMEM length from command word
-    add     cmd_w1_dram, cmd_w1_dram, dmemAddr // Start overwriting data from endSharedDMEM
-    jal     dma_read_write          // initate DMA read
-     sub    dmaLen, dmaLen, dmemAddr // End that much before the end of DMEM
-    j       while_wait_dma_busy
-    // Jumping to actual start of new ucode, which normally zeros vZero. Not sure why later ucodes
-    // jumped one instruction in.
-     li     $ra, start
-
-.if . > start
-    .error "ovl0_start does not fit within the space before the start of the ucode loaded with G_LOAD_UCODE"
-.endif
-
-task_done_or_yield:
-    sw      perfCounterA, yieldDataFooter + YDF_OFFSET_PERFCOUNTERA
-    sw      perfCounterB, yieldDataFooter + YDF_OFFSET_PERFCOUNTERB
-    sw      perfCounterC, yieldDataFooter + YDF_OFFSET_PERFCOUNTERC
-    beqz    $7, task_done           // see above
-     sw     perfCounterD, yieldDataFooter + YDF_OFFSET_PERFCOUNTERD
-task_yield: // Otherwise CPU requested yield
-    sh      origV1Addr, yieldOrigV1Addr
-.if CFG_PROFILING_A
-    lh      $2, tempTriRA
-.endif
-    lw      $3, OSTask + OSTask_ucode          // Save pointer to current ucode
-    lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
-.if CFG_PROFILING_A
-    bgez    $2, @@not_snake                    // Snake next RA is negative
-.endif
-     li     dmemAddr, -0x8000                  // 0, but negative = write
-.if CFG_PROFILING_A
-    mfc0    $11, DPC_CLOCK                     // Finish tri perf counting
-    lw      $10, startCounterTime
-    lw      $2, startFifoStallTime
-    sub     $11, $11, $10
-    add     perfCounterD, perfCounterD, $11  // Add to tri cycles perf counter
-    sub     $2, perfCounterC, $2             // RDP FIFO stall time elapsed during tri draw
-    sub     perfCounterD, perfCounterD, $2   // Subtract final RDP FIFO stall time from tri time
-    sw      perfCounterD, yieldDataFooter + YDF_OFFSET_PERFCOUNTERD // Was stored above, but have modified
-@@not_snake:
-.endif
-    li      dmaLen, OS_YIELD_DATA_SIZE - 1
-    li      $10, SP_SET_SIG1 | SP_SET_SIG2     // yielded and task done signals
-    sw      taskDataPtr, yieldDataFooter + YDF_OFFSET_TASKDATAPTR // Save pointer to where in DL
-    sw      $3, yieldDataFooter + YDF_OFFSET_UCODE
-    j       dma_read_write
-     li     $ra, set_status_and_break
-
-task_done:
-    // Copy just the yield data footer, which has the perf counters.
-    lw      cmd_w1_dram, OSTask + OSTask_yield_data_ptr
-    addi    cmd_w1_dram, cmd_w1_dram, yieldDataFooter
-    li      dmemAddr, -0x8000 | yieldDataFooter // negative = write
-    jal     dma_read_write
-     li     dmaLen, YIELD_DATA_FOOTER_SIZE - 1
-    jal     while_wait_dma_busy
-     li     $10, SP_SET_SIG2   // task done signal
-set_status_and_break: // $10 is the status to set
+    sw      dmemAddr, OSTask + OSTask_output_buff
+    sw      taskDataPtr, OSTask + OSTask_output_buff
+    sw      perfCounterA, OSTask + 0x0
+    sw      perfCounterB, OSTask + 0x4
+    sw      perfCounterC, OSTask + 0x8
+    sw      perfCounterD, OSTask + 0xC
+    li      $10, SP_SET_SIG2   // task done signal
     mtc0    $10, SP_STATUS
     break   0
     nop
@@ -2685,105 +2113,6 @@ G_TEXTURE_handler: // $ra = .
 .endif
     j       run_next_DL_command
      spv    $v4[0], (textureSettings1 - (G_TEXTURE_handler & 0xFFF))($ra)
-
-G_FLUSH_handler: // 32
-    jal     flush_rdp_buffer        // Flush once to push partial DMEM buf to FIFO
-     sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Prereq; offset buffer fullness
-    // If the DMEM buffer was empty, dmemAddr will be unchanged and valid for this next
-    // jump. Otherwise, running the DMA write will cause dmemAddr to get set to a large
-    // negative number. Then for this second jump, the same codepath will be triggered as
-    // if the buffer was empty. The result is it will wait for the DMA to finish, set
-    // DPC_END, and return to $ra. This is why the dmemAddr register (as opposed to,
-    // for example, dmaLen) is used as the DMEM buf fullness.
-    j       flush_rdp_buffer
-G_MTX_multiply_end:
-     li     $ra, run_next_DL_command // Dual use for above and below
-    lhu     $3, (movememTable - G_MV_TEMPMTX0)($3) // $3=2->0=M; $3=6->4=VP
-    move    $2, $3 // Input 0 = output
-mtx_multiply:
-    // $2 and dmemAddr are input matrices; $3 is output matrix
-    addi    $10, dmemAddr, 0x0018
-@@loop:
-    vmadn   $v7, $v31, $v31[2]  // 0
-    addi    $11, dmemAddr, 0x0008
-    vmadh   $v6, $v31, $v31[2]  // 0
-    addi    $2, $2, -0x0020
-    vmudh   $v29, $v31, $v31[2] // 0
-@@innerloop:
-    ldv     $v3[0], 0x0040($2)
-    ldv     $v3[8], 0x0040($2)
-    lqv     vTemp2[0], 0x0020(dmemAddr) // Input 1
-    ldv     $v2[0], 0x0020($2)
-    ldv     $v2[8], 0x0020($2)
-    lqv     vTemp1[0], 0x0000(dmemAddr) // Input 1
-    vmadl   $v29, $v3, vTemp2[0h]
-    addi    dmemAddr, dmemAddr, 0x0002
-    vmadm   $v29, $v2, vTemp2[0h]
-    addi    $2, $2, 0x0008 // Increment input 0 pointer
-    vmadn   $v5, $v3, vTemp1[0h]
-    bne     dmemAddr, $11, @@innerloop
-     vmadh  $v4, $v2, vTemp1[0h]
-    bne     dmemAddr, $10, @@loop
-     addi   dmemAddr, dmemAddr, 0x0008
-    sqv     $v7[0], (0x0020)($3)
-    sqv     $v6[0], (0x0000)($3)
-    sqv     $v4[0], (0x0010)($3)
-    jr      $ra
-     sqv    $v5[0], (0x0030)($3)
-
-align_with_warning 8, "One instruction of padding before G_VTX_handler"
-
-G_VTX_handler: // 21
-    // Vertex command is 01 0H L0 ee, where n = HL (number of vertices).
-    // $v5[1] = 0H * 13, $v5[2] = L0 * 13.
-    // ($v5[2] >> 10) * 2 = 0L * 26 = $v8[2]
-    // ($v5[1] << 10) * 2 = H0 * 26 = $v9[1]
-    // In segmented_to_physical, add, now $v8[2] = HL * 26 = n * 26.
-    // Currently $v7[3] = end addr = (v0 + n) * 26 + base
-    // Subtract -> $v8[3] = v0 * 26 + base = start addr.
-    vmudl   $v8, $v5, $v3[3]       // 0x2000; elem 2 = low part
-    mfc2    dmemAddr, $v7[6]       // (v0 + n) end address; up to 56 inclusive
-    vmudn   $v9, $v5, vTRC_0020    // 0020; elem 1 = high part
-    jal     segmented_to_physical  // Convert address in cmd_w1_dram to physical
-     lhu    vtxLeft, (inputBufferEnd - 0x07)(inputBufferPos) // vtxLeft = size in bytes = vtx count * 0x10
-    sub     dmemAddr, dmemAddr, vtxLeft  // Start addr = end addr - size. Rounded down to DMA word by H/W
-    li      $ra, vtx_after_dma
-    vsub    $v8, $v7, $v8[2]       // elem 3 = v0 start address
-    j       dma_read_write
-G_SETOTHERMODE_H_handler: // These handler labels must be 4 bytes apart for the code below to work
-     addi   dmaLen, vtxLeft, -1                // Only for above, nop for below
-G_SETOTHERMODE_L_handler:
-    lw      $3, (othermode0 - G_SETOTHERMODE_H_handler)($ra) // resolves to othermode0 or othermode1 based on which handler was jumped to
-    lui     $2, 0x8000
-    srav    $2, $2, cmd_w0
-    srl     $11, cmd_w0, 8
-    srlv    $2, $2, $11
-    nor     $2, $2, $zero
-    and     $3, $3, $2
-    or      $3, $3, cmd_w1_dram
-    sw      $3, (othermode0 - G_SETOTHERMODE_H_handler)($ra)
-    j       G_RDP_handler
-     lpv    $v4[0], (otherMode0)($zero)
-
-G_MODIFYVTX_handler: // 3
-    mfc2    $10, $v7[6]  // Byte 3 = vtx being modified
-    j       do_moveword  // Moveword adds cmd_w0 to $10 for final addr
-     lbu    cmd_w0, (inputBufferEnd - 0x07)(inputBufferPos)  // offset in vtx, bit 15 clear
-
-displaylist_dma_from_yield: // 2
-    j       displaylist_dma_goto_next_ra
-     lh     nextRA, tempTriRA
-
-// Converts the segmented address in cmd_w1_dram to the corresponding physical address
-segmented_to_physical: // 8
-    srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
-    andi    $11, $11, 0x3C                // Clear the bottom 2 bits that remained during the shift
-    vadd    $v8, $v8, $v9[1]              // elem 2 = vertex count * size
-    lw      $11, (segmentTable)($11)      // Get the current address of the segment
-    sll     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address to the left so that the top 8 bits are shifted out
-    srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
-    jr      $ra
-     add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
 ovl1_end:
 align_with_warning 8, "One instruction of padding at end of ovl1"
