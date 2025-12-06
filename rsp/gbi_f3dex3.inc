@@ -1,4 +1,22 @@
 
+G_FLUSH             equ 0xd4
+G_MEMSET            equ 0xd5
+G_DMA_IO            equ 0xd6
+G_TEXTURE           equ 0xd7
+G_POPMTX            equ 0xd8
+G_GEOMETRYMODE      equ 0xd9
+G_MTX               equ 0xda
+G_MOVEWORD          equ 0xdb
+G_MOVEMEM           equ 0xdc
+G_LOAD_UCODE        equ 0xdd
+G_DL                equ 0xde
+G_ENDDL             equ 0xdf
+G_SPNOOP            equ 0xe0
+G_RDPHALF_1         equ 0xe1
+G_SETOTHERMODE_L    equ 0xe2
+G_SETOTHERMODE_H    equ 0xe3
+//
+G_VTX               equ 0x01
 G_MODIFYVTX         equ 0x02
 G_CULLDL            equ 0x03
 G_BRANCH_WZ         equ 0x04

@@ -29,21 +29,19 @@ files, to reduce clutter and for reuse between microcodes. */
 /*
  * GBI commands in order
  */
-#define G_FLUSH             0xDA
-#define G_GEOMETRYMODE      0xDB
-#define G_MOVEWORD          0xDC
-#define G_MOVEMEM           0xDD
-#define G_DL                0xDE
-#define G_ENDDL             0xDF
-#define G_SPNOOP            0xE0
-#define G_RDPHALF_1         0xE1
-#define G_SETOTHERMODE_L    0xE2
-#define G_SETOTHERMODE_H    0xE3
+#define G_RELSEGMENT        0xDB
+#define G_FLUSH             0xDC
+#define G_GEOMETRYMODE      0xDD
+#define G_MOVEWORD          0xDE
+#define G_MOVEMEM           0xDF
+#define G_DL                0xE0
+#define G_ENDDL             0xE1
+#define G_SPNOOP            0xE2
+#define G_RDPHALF_1         0xE3
 /* RDP commands go here */
 #define G_VTX               0x01
-#define G_TRI1              0x05
-#define G_TRI2              0x06
-#define G_RELSEGMENT        0x0B
+#define G_TRI1              0x02
+#define G_TRI2              0x03
 
 /*
  * RSP command argument and misc defines
@@ -77,7 +75,7 @@ files, to reduce clutter and for reuse between microcodes. */
  * Each of these indexes an entry in a dmem table which points to an arbitrarily
  * sized block of dmem in which to store the result of a DMA.
  */
-#define G_MV_CACHE     0
+#define G_MV_CACHEEND  0
 #define G_MV_VIEWPORT  2
 
 /*
@@ -85,8 +83,8 @@ files, to reduce clutter and for reuse between microcodes. */
  * Each of these indexes an entry in a dmem table which points to a word in dmem
  * where an immediate word will be stored.
  */
-#define G_MW_FX             0x00
-#define G_MW_SEGMENT        0x02
+#define G_MW_FX        0
+#define G_MW_SEGMENT   2
 
 
 

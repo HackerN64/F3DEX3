@@ -1,14 +1,18 @@
+G_TEXTURE_ENABLE      equ 0x00000002
 
-G_MODIFYVTX         equ 0x02
-G_CULLDL            equ 0x03
-G_BRANCH_WZ         equ 0x04
-G_TRI1              equ 0x05
-G_TRI2              equ 0x06
-G_QUAD              equ 0x07
-G_TRISNAKE          equ 0x08
-// nothing          equ 0x09
-G_LIGHTTORDP        equ 0x0a
-G_RELSEGMENT        equ 0x0b
+G_RELSEGMENT    equ 0xDB
+G_FLUSH         equ 0xDC
+G_GEOMETRYMODE  equ 0xDD
+G_MOVEWORD      equ 0xDE
+G_MOVEMEM       equ 0xDF
+G_DL            equ 0xE0
+G_ENDDL         equ 0xE1
+G_SPNOOP        equ 0xE2
+G_RDPHALF_1     equ 0xE3
+//
+G_VTX           equ 0x01
+G_TRI1          equ 0x02
+G_TRI2          equ 0x03
 
 G_BRANCH_Z equ G_BRANCH_WZ
 G_BRANCH_W equ G_BRANCH_WZ

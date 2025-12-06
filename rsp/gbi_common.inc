@@ -31,22 +31,6 @@ G_SHADING_SMOOTH        equ 0x00200000
 
 G_TRI_FILL          equ 0xc8 // not a GBI command
 
-G_FLUSH             equ 0xd4
-G_MEMSET            equ 0xd5
-G_DMA_IO            equ 0xd6
-G_TEXTURE           equ 0xd7
-G_POPMTX            equ 0xd8
-G_GEOMETRYMODE      equ 0xd9
-G_MTX               equ 0xda
-G_MOVEWORD          equ 0xdb
-G_MOVEMEM           equ 0xdc
-G_LOAD_UCODE        equ 0xdd
-G_DL                equ 0xde
-G_ENDDL             equ 0xdf
-G_SPNOOP            equ 0xe0
-G_RDPHALF_1         equ 0xe1
-G_SETOTHERMODE_L    equ 0xe2
-G_SETOTHERMODE_H    equ 0xe3
 G_TEXRECT           equ 0xe4
 G_TEXRECTFLIP       equ 0xe5
 G_RDPLOADSYNC       equ 0xe6
@@ -76,7 +60,6 @@ G_SETTIMG           equ 0xfd
 G_SETZIMG           equ 0xfe
 G_SETCIMG           equ 0xff
 G_NOOP              equ 0x00
-G_VTX               equ 0x01
 
 
 // Input Vertex structure offsets, should match Vtx structure in gbi.h

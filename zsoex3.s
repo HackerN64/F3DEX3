@@ -12,87 +12,25 @@ ENABLE_PROFILING equ 0 // For setup.inc
 // RSP DMEM
 .create DATA_FILE, 0x0000
 
-// 0x0000-0x0040: model matrix
-mMatrix:
-    .fill 0x40
+argsAddress:
+    .dh cpuInterface
+cacheSize:
+    .dh (cacheEnd - cacheStart)
 
-// 0x0040-0x0080: view * projection matrix
-vpMatrix:
-    .fill 0x40
+movememTable:
+    .dh cacheEnd      // G_MV_CACHEEND
+    .dh viewport      // G_MV_VIEWPORT
 
-// model * (view * projection) matrix
-mvpMatrix:
-    .fill 0x40
-    
-.if . != 0x00C0
-.error "Scissor and othermode must be at 0x00C0 for S2DEX"
-.endif
-    
-// scissor (four 12-bit values)
-scissorUpLeft: // the command byte is included since the command word is copied verbatim
-    .dw (G_SETSCISSOR << 24) | ((  0 * 4) << 12) | ((  0 * 4) << 0)
-scissorBottomRight:
-    .dw ((320 * 4) << 12) | ((240 * 4) << 0)
+movewordTable:
+    .dh fxParams      // G_MW_FX
+    .dh segmentTable  // G_MW_SEGMENT
 
-// othermode
-otherMode0: // command byte included, same as above
-    .dw (G_RDPSETOTHERMODE << 24) | (0x080CFF)
-otherMode1:
-    .dw 0x00000000
+texgenLinearCoeffs:
+    .dh 0x44D3
+    .dh 0x6CB3
 
-// These two words are texrectState in S2DEX, so it can clobber them.
-textureSettings1:
-    .dw 0x00000000 // first word, has command byte, level, tile, and on
-textureSettings2:
-    .dw 0xFFFFFFFF // second word, has s and t scale
-    
-// This word is rdpHalf1Val in S2DEX, so it can clobber it.
-fogFactor:
-    .dw 0x00000000
-
-unused4:
-    .skip 2
-    
-// displaylist stack length
-displayListStackLength:
-    .db 0x00 // starts at 0, increments by 4 for each "return address" pushed onto the stack
-    
-unused1:
-    .db 0
-
-// viewport
 viewport:
-    .fill 16
-
-// Current RDP fifo output position
-rdpFifoPos:
-    .fill 4
-
-matrixStackPtr:
-    .dw 0x00000000
-
-// segment table
-segmentTable:
-    .fill (4 * 16) // 16 DRAM pointers
-
-// displaylist stack
-displayListStack:
-
-// ucode text (shared with DL stack)
-    .ascii ID_STR, 0x0A
-endIdStr:
-.if endIdStr < 0x180
-    .fill (0x180 - endIdStr)
-.elseif endIdStr > 0x180
-    .error "ID_STR is too long"
-    .align 16  // to suppress subsequent errors 
-.endif
-
-endSharedDMEM:
-.if . != 0x180
-    .error "endSharedDMEM at incorrect address, matters for G_LOAD_UCODE / S2DEX"
-.endif
-
+    // v31Value only used at init, so we can clobber it after that.
 // constants for register $v31
 .if (. & 15) != 0
     .error "Wrong alignment for v31value"
@@ -109,63 +47,6 @@ v31Value:
     .dh 0x7F00 // used in fog
     .dh 0x7FFF // used often
 
-/*
-Quick note on Newton-Raphson:
-https://en.wikipedia.org/wiki/Division_algorithm#Newton%E2%80%93Raphson_division
-Given input D, we want to find the reciprocal R. The base formula for refining
-the estimate of R is R_new = R*(2 - D*R). However, since the RSP reciprocal
-instruction moves the radix point 1 to the left, the result has to be multiplied
-by 2. So it's 2*R*(2 - D*2*R) = R*(4 - 4*D*R) = R*(1*4 + D*R*-4). This is where
-the 4 and -4 come from. For tri write, the result needs to be multiplied by 4
-for subpixels, so it's 16 and -16.
-*/
-
-cameraWorldPos:
-    .skip 6
-unused3:
-    .skip 2
-lightBufferLookat:
-    .skip 8 // s8 X0, Y0, Z0, dummy, X1, Y1, Z1, dummy
-lightBufferMain:
-    .skip (G_MAX_LIGHTS * lightSize)
-lightBufferAmbient:
-    .skip 8 // just colors for ambient light
-ltBufOfs equ (lightBufferMain - altBase)
-
-occlusionPlaneEdgeCoeffs:
-/*
-See cpu/occlusionplane.c for more information.
-Vertex is in occlusion region if all five equations below are true:
-4 * screenX[s13.2] * c0[s0.15] - 0.5 * screenY[s13.2] < c4[s14.1]
-4 * screenY[s13.2] * c1[s0.15] - 0.5 * screenX[s13.2] < c5[s14.1]
-4 * screenX[s13.2] * c2[s0.15] + 0.5 * screenY[s13.2] < c6[s14.1]
-4 * screenY[s13.2] * c3[s0.15] + 0.5 * screenX[s13.2] < c7[s14.1]
-      clamp_to_0.s15(clipX[s15.16] * kx[s0.15])
-    + clamp_to_0.s15(clipY[s15.16] * ky[s0.15])
-    + clamp_to_0.s15(clipZ[s15.16] * kz[s0.15])
-    >= kc[s0.15]
-*/
-    .dh 0x0000 // c0
-    .dh 0x0000 // c1
-    .dh 0x0000 // c2
-    .dh 0x0000 // c3
-    .dh 0x8000 // c4
-    .dh 0x8000 // c5
-    .dh 0x8000 // c6
-    .dh 0x8000 // c7
-occlusionPlaneMidCoeffs:
-    .dh 0x0000 // kx
-    .dh 0x0000 // ky
-    .dh 0x0000 // kz
-    .dh 0x7FFF // kc
-
-// Alternate base address because vector load offsets can't reach all of DMEM.
-// altBaseReg permanently points here.
-.if (. & 15) != 0
-    .error "Wrong alignment for altBase"
-.endif
-altBase:
-
 // constants for register vTRC
 .if (. & 15) != 0
     .error "Wrong alignment for vTRCValue"
@@ -173,8 +54,8 @@ altBase:
 vTRCValue:
 decalFixMult equ 0x0400
 decalFixOff equ (-(decalFixMult / 2))
-vTRCValue0 equ vertexBuffer // around 0x300; for converting vertex index to address
-vTRCValue1 equ vtxSize << 7 // 0x1300; it's not 0x2600 because vertex indices are *2
+vTRCValue0 equ cacheStart // around 0x100; for converting vertex index to address
+vTRCValue1 equ vtxSize << 7 // 0x0B00; it's not 0x1600 because vertex indices are *2
 vTRCValue2 equ 0x7E00 // vertex index mask for snake
 vTRCValue3 equ decalFixMult // defined above
 vTRCValue4 equ decalFixOff  // negative
@@ -212,97 +93,19 @@ vTRC_0100 equ vTRC[6]
 vTRC_1000 equ vTRC[7]
 vTRC_0100_addr equ (vTRCValue + 2 * 6)
 
-.if (. & 15) != 0
-    .error "Wrong alignment for fxParams"
+// displaylist stack
+displayListStack:
+maxDisplayListCalls equ 12
+displayListStackEnd equ ((4 * maxDisplayListCalls) + displayListStack)
+// ucode text (shared with DL stack)
+    .ascii ID_STR, 0x0A
+endIdStr:
+.if endIdStr < displayListStackEnd
+    .fill (displayListStackEnd - endIdStr)
+.elseif endIdStr > displayListStackEnd
+    .error "ID_STR is too long"
+    .align 16  // to suppress subsequent errors 
 .endif
-fxParams:
-// First 8 values here loaded with lqv.
-
-aoAmbientFactor:
-    .dh 0xFFFF
-aoDirectionalFactor:
-    .dh 0xA000
-aoPointFactor:
-    .dh 0x0000
-    
-perspNorm:
-    .dh 0xFFFF
-    
-texgenLinearCoeffs:
-    .dh 0x44D3
-    .dh 0x6CB3
-    
-fresnelScale:
-    .dh 0x0000
-fresnelOffset:
-    .dh 0x0000
-
-attrOffsetST:
-    .dh 0x0100
-    .dh 0xFF00
-    
-alphaCompareCullMode:
-    .db 0x00 // 0 = disabled, 1 = cull if all < thresh, -1 = cull if all >= thresh
-alphaCompareCullThresh:
-    .db 0x00 // Alpha threshold, 00 - FF
-    
-lastMatDLPhyAddr:
-    .dw 0
-
-.if (. - fxParams) != 0x1A
-    .error "Update fxParams MWO in GBI"
-.endif
-
-packedNormalsMaskConstant:
-    .db 0xF8 // When read, materialCullMode has been zeroed, so read as 0xF800
-materialCullMode:
-    .db 0
-    
-geometryModeLabel:
-    .dw 0x00000000
-
-movewordTable:
-    .dh fxParams           // G_MW_FX
-    .dh numLightsxSize - 3 // G_MW_NUMLIGHT; writes numLightsxSize and pointLightFlag, zeroes dirLightsXfrmValid
-packedNormalsConstants:
-.if (. & 3) != 0
-    .error "Alignment broken for packed normals constants in movewordTable"
-.endif
-    .dh 0x2008             // For packed normals; unused in movewordTable
-.if (segmentTable & 0xFF00) != 0
-    .error "Packed normals constants relies on first byte of segmentTable addr being 0"
-.endif
-    .dh segmentTable       // G_MW_SEGMENT
-    .dh fogFactor          // G_MW_FOG
-    .dh lightBufferMain    // G_MW_LIGHTCOL
-
-// First half of RDP value for split commands. Also used as temp storage for
-// tri vertices during tri commands.
-rdpHalf1Val:
-    .fill 4
-
-movememTable:
-    .dh mMatrix         // G_MV_MMTX
-    .dh tempMatrix      // G_MV_TEMPMTX0 multiply temp matrix (model)
-    .dh vpMatrix        // G_MV_VPMTX
-    .dh tempMatrix      // G_MV_TEMPMTX1 multiply temp matrix (view*projection)
-    .dh viewport        // G_MV_VIEWPORT
-    .dh cameraWorldPos  // G_MV_LIGHT
-    
-afterMovememRaTable:
-    .dh run_next_DL_command
-    .dh G_MTX_multiply_end
-    
-mvpValid:
-    .db 0   // Nonzero if the MVP matrix is valid, 0 if it needs to be recomputed.
-dirLightsXfrmValid:
-    .db 0   // Nonzero if transformed directional lights are valid.
-unused2:
-    .db 0
-pointLightFlag:
-    .db 0   // Sign bit set if there are point lights.
-numLightsxSize:
-    .db 0   // lightSize * number of lights
 
 .macro miniTableEntry, addr
     .if addr < 0x1000 || addr >= 0x1400
@@ -313,22 +116,15 @@ numLightsxSize:
 
 // RDP/Immediate Command Mini Table
 // 1 byte per entry, after << 2 points to an addr in first 1/4 of IMEM
+miniTableEntry G_RELSEGMENT_handler
 miniTableEntry G_FLUSH_handler
-miniTableEntry G_SPNOOP_handler // G_MEMSET
-miniTableEntry G_SPNOOP_handler
-miniTableEntry G_TEXTURE_handler
-miniTableEntry G_POPMTX_handler
 miniTableEntry G_GEOMETRYMODE_handler
-miniTableEntry G_MTX_handler
 miniTableEntry G_MOVEWORD_handler
 miniTableEntry G_MOVEMEM_handler
-miniTableEntry G_LOAD_UCODE_handler
 miniTableEntry G_DL_handler
 miniTableEntry G_ENDDL_handler
 miniTableEntry G_SPNOOP_handler
 miniTableEntry G_RDPHALF_1_handler
-miniTableEntry G_SETOTHERMODE_L_handler
-miniTableEntry G_SETOTHERMODE_H_handler
 miniTableEntry G_TEXRECT_handler // G_TEXRECT
 miniTableEntry G_TEXRECT_handler // G_TEXRECTFLIP
 miniTableEntry G_RDP_handler // G_RDPLOADSYNC
@@ -338,14 +134,14 @@ miniTableEntry G_RDP_handler // G_RDPFULLSYNC
 miniTableEntry G_RDP_handler // G_SETKEYGB
 miniTableEntry G_RDP_handler // G_SETKEYR
 miniTableEntry G_RDP_handler // G_SETCONVERT
-miniTableEntry G_SETSCISSOR_handler
+miniTableEntry G_RDP_handler // G_SETSCISSOR
 miniTableEntry G_RDP_handler // G_SETPRIMDEPTH
-miniTableEntry G_RDPSETOTHERMODE_handler
-miniTableEntry load_cmds_handler // G_LOADTLUT
+miniTableEntry G_RDP_handler // G_RDPSETOTHERMODE
+miniTableEntry G_RDP_handler // G_LOADTLUT
 miniTableEntry G_RDPHALF_2_handler
 miniTableEntry G_RDP_handler // G_SETTILESIZE
-miniTableEntry load_cmds_handler // G_LOADBLOCK
-miniTableEntry load_cmds_handler // G_LOADTILE
+miniTableEntry G_RDP_handler // G_LOADBLOCK
+miniTableEntry G_RDP_handler // G_LOADTILE
 miniTableEntry G_RDP_handler // G_SETTILE
 miniTableEntry G_RDP_handler // G_FILLRECT
 miniTableEntry G_RDP_handler // G_SETFILLCOLOR
@@ -354,59 +150,78 @@ miniTableEntry G_RDP_handler // G_SETBLENDCOLOR
 miniTableEntry G_RDP_handler // G_SETPRIMCOLOR
 miniTableEntry G_RDP_handler // G_SETENVCOLOR
 miniTableEntry G_RDP_handler // G_SETCOMBINE
-miniTableEntry G_SETxIMG_handler // G_SETTIMG
-miniTableEntry G_SETxIMG_handler // G_SETZIMG
-miniTableEntry G_SETxIMG_handler // G_SETCIMG
+miniTableEntry G_RDP_handler // G_SETTIMG
+miniTableEntry G_RDP_handler // G_SETZIMG
+miniTableEntry G_RDP_handler // G_SETCIMG
 cmdMiniTable:
 miniTableEntry G_RDP_handler // G_NOOP
 miniTableEntry G_VTX_handler
-miniTableEntry G_SPNOOP_handler // G_MODIFYVTX
-miniTableEntry G_SPNOOP_handler // G_CULLDL
-miniTableEntry G_SPNOOP_handler // G_BRANCH_WZ
 miniTableEntry G_TRI1_handler
 miniTableEntry G_TRI2_handler
-miniTableEntry G_SPNOOP_handler // G_QUAD
-miniTableEntry G_SPNOOP_handler // formerly snake
-miniTableEntry G_SPNOOP_handler // no command mapped to 0x09
-miniTableEntry G_LIGHTTORDP_handler
-miniTableEntry G_RELSEGMENT_handler
 
-.align 16
+endInitializedDmem:
 
-tempMatrix:
-    .skip 0x40
+displayListStackDepth:
+    .skip 1 // starts at 0, increments by 4 for each "return address" pushed onto the stack
+
+    .align 4
+
+altBase: // TODO eliminate or reuse?
+fxParams:
+geometryModeLabel:
+    .skip 4
+alphaCompareCullMode:
+    .skip 1 // 0 = disabled, 1 = cull if all < thresh, -1 = cull if all >= thresh
+alphaCompareCullThresh:
+    .skip 1 // Alpha threshold, 00 - FF
+
+perspNorm:
+    .skip 2
 
 texrectState:
     .skip 8  // Only needs to be saved over texrect, half1, half2
+    // TODO overlap with section tris struct
 
+// First half of RDP value for split commands. Also used as temp storage for
+// tri vertices during tri commands.
+rdpHalf1Val:
+    .skip 4
 
-VERTEX_BUFFER_SIZE_BYTES equ (G_MAX_VERTS * vtxSize)
+.if (. & 3) != 0
+    .error "cpuInterface must be aligned to 4"
+.endif
+cpuInterface:
+ucodeTextStart:
+    .skip 4
+displayListStart:
+rdpFifoPos: // displayListStart only used at init
+    .skip 4
+rdpFifoStart:
+    .skip 4
+rdpFifoEnd:
+    .skip 4
 
-RDP_CMD_BUFSIZE equ 0xB0
-RDP_CMD_BUFSIZE_EXCESS equ 0xB0 // Maximum size of an RDP triangle command
-RDP_CMD_BUFSIZE_TOTAL equ (RDP_CMD_BUFSIZE + RDP_CMD_BUFSIZE_EXCESS)
+segmentTable:
+    .skip (4 * 16) // 16 DRAM pointers
 
+.if (. & 7) != 0
+    .error "cacheStart must be aligned to 8"
+.endif
+cacheStart:
+    
 INPUT_BUFFER_CMDS equ 21
 INPUT_BUFFER_SIZE_BYTES equ (INPUT_BUFFER_CMDS * 8)
 
-OSTASK_ORIG_SIZE equ 0x40
+RDP_TRI_SIZE_NO_ZBUF equ 0xA0
+RDP_CMD_BUFSIZE_TOTAL equ (2 * RDP_TRI_SIZE_NO_ZBUF)
 
-END_VARIABLE_LEN_DMEM equ (0x1000 - OSTASK_ORIG_SIZE - INPUT_BUFFER_SIZE_BYTES - (2 * RDP_CMD_BUFSIZE_TOTAL) - VERTEX_BUFFER_SIZE_BYTES)
+CACHE_END_ADDR equ (0x1000 - INPUT_BUFFER_SIZE_BYTES - (2 * RDP_CMD_BUFSIZE_TOTAL))
+.org CACHE_END_ADDR
+cacheEnd:
 
-startFreeDmem:
-.if . > END_VARIABLE_LEN_DMEM
-    .error "Too much in DMEM"
-.endif
-.org END_VARIABLE_LEN_DMEM
-endFreeDmem:
-
-// Main vertex buffer in RSP internal format
-vertexBuffer:
-    .skip VERTEX_BUFFER_SIZE_BYTES
-    
 // First RDP Command Buffer
 rdpCmdBuffer1:
-    .skip RDP_CMD_BUFSIZE
+    .skip RDP_TRI_SIZE_NO_ZBUF
 .if (. & 8) != 8
     .error "RDP command buffer alignment to 8 assumption broken"
 .endif
@@ -414,42 +229,29 @@ rdpCmdBuffer1End:
     .skip 8
 rdpCmdBuffer1EndPlus1Word:
     // This is so that we can temporarily store vector regs here with lqv/sqv
-    .skip RDP_CMD_BUFSIZE_EXCESS - 8
+    .skip RDP_TRI_SIZE_NO_ZBUF - 8
 // Second RDP Command Buffer
 rdpCmdBuffer2:
-    .skip RDP_CMD_BUFSIZE
+    .skip RDP_TRI_SIZE_NO_ZBUF
 .if (. & 8) != 8
     .error "RDP command buffer alignment to 8 assumption broken"
 .endif
 rdpCmdBuffer2End:
     .skip 8
 rdpCmdBuffer2EndPlus1Word:
-    .skip RDP_CMD_BUFSIZE_EXCESS - 8
+    .skip RDP_TRI_SIZE_NO_ZBUF - 8
 
 // Input buffer. After RDP cmd buffers so it can be vector addressed from end.
 inputBuffer:
     .skip INPUT_BUFFER_SIZE_BYTES
 inputBufferEnd:
 inputBufferEndSgn equ (-(0x1000 - inputBufferEnd)) // Underflow DMEM address
-// 0x0FC0-0x1000: OSTask
-OSTask:
-// rest of OSTask
-    .skip (OSTASK_ORIG_SIZE)
 
 .if . != 0x1000
     .error "DMEM organization incorrect"
 .endif
 
 .close // DATA_FILE
-
-// See rsp_defs.inc about why these are not used and we can reuse them.
-startCounterTime equ (OSTask + OSTask_ucode_size)
-xfrmLookatDirs equ -(0x1000 - (OSTask + OSTask_ucode_data)) // and OSTask_ucode_data_size
-
-memsetBufferStart equ ((vertexBuffer + 0xF) & 0xFF0)
-memsetBufferMaxEnd equ (rdpCmdBuffer1 & 0xFF0)
-memsetBufferMaxSize equ (memsetBufferMaxEnd - memsetBufferStart)
-memsetBufferSize equ (memsetBufferMaxSize > 0x800 ? 0x800 : memsetBufferMaxSize)
 
 ////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////// Register Naming ////////////////////////////////
@@ -666,11 +468,10 @@ tempVpRGBA            equ 0x00        // Only used during loop
 tempXfrmLt            equ tempVpRGBA  // ltbasic only used during init
 tempVtx1ST            equ tempVpRGBA  // ltadv only during init
 tempAmbient           equ 0x10        // ltbasic set during init, used during loop
-tempClipPtrs          equ tempAmbient // set during clipping, kept through vtx write
 tempPrevInvalVtxStart equ 0x20
 tempPrevInvalVtx      equ (tempPrevInvalVtxStart + vtxSize) // 0x46; fog writes here
 tempPrevInvalVtxEnd   equ (tempPrevInvalVtx + vtxSize)      // 0x6C; rest of vtx writes here
-.if tempPrevInvalVtxEnd > (RDP_CMD_BUFSIZE_EXCESS - 8)
+.if tempPrevInvalVtxEnd > (RDP_TRI_SIZE_NO_ZBUF - 8)
     .error "Too much temp storage used!"
 .endif
 
@@ -685,26 +486,26 @@ tempPrevInvalVtxEnd   equ (tempPrevInvalVtx + vtxSize)      // 0x6C; rest of vtx
 // Initialization routines
 // Everything up until ovl01_end will get overwritten by ovl1
 start:
-    lw      $2, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
+    lqv     $v31[0], (v31Value)($zero)
+    lw      $2, rdpFifoEnd                // Load FIFO end addr
+    vadd    $v29, $v29, $v29 // Consume VCO (carry) value possibly set by the previous ucode
     li      perfCounterA, 0
     li      perfCounterB, 0
     mtc0    $2, DPC_START                 // Set RDP start addr to end of FIFO
     mtc0    $2, DPC_END                   // Set RDP end addr to end of FIFO
+    lw      taskDataPtr, displayListStart // Must be before store to rdpFifoPos
     li      perfCounterC, 0
+    vclr    vOne
     li      perfCounterD, 0
-    sw      $2, rdpFifoPos                // Set FIFO position to end of FIFO or RDP end
-    lqv     $v31[0], (v31Value)($zero)      // Actual start is here
-    vadd    $v29, $v29, $v29 // Consume VCO (carry) value possibly set by the previous ucode
-    lqv     vTRC, (vTRCValue)($zero)        // Always as this value except vtx_store
+    sw      $2, rdpFifoPos                // Must be after load from displayListStart
+    lqv     vTRC, (vTRCValue)($zero)      // Always as this value except vtx_store
     li      altBaseReg, altBase
     li      rdpCmdBufPtr, rdpCmdBuffer1
     li      rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word
-    vclr    vOne
-    lw      taskDataPtr, OSTask + OSTask_data_ptr
+    vsub    vOne, vOne, $v31[1]             // 1 = 0 - -1
     lhu     vGeomMid, geometryModeLabel + 1
     li      inputBufferPos, 0
     li      nextRA, displaylist_dma
-    vsub    vOne, vOne, $v31[1]             // 1 = 0 - -1
     j       load_overlays_0_1
      li     cmd_w1_dram, orga(ovl1_start)
 
@@ -717,16 +518,15 @@ ovl01_end:
 
 G_DL_handler:
     sll     $2, cmd_w0, 15                  // Shifts the push/nopush value to the sign bit
-    lbu     $7, displayListStackLength      // Get the DL stack length
+    lbu     $7, displayListStackDepth       // Get the DL stack depth
     jal     segmented_to_physical
      add    $3, taskDataPtr, inputBufferPos // Current DL pos to push on stack
     bltz    $2, call_ret_common             // Nopush = branch = flag is set
      move   taskDataPtr, cmd_w1_dram        // Set the new DL to the target display list
     sw      $3, (displayListStack)($7)
-    addi    $7, $7, 4                       // Increment the DL stack length
+    addi    $7, $7, 4                       // Increment the DL stack depth
 call_ret_common:
-    sb      $zero, materialCullMode         // This covers call, branch, return, and cull and branchZ successes
-    sb      $7, displayListStackLength
+    sb      $7, displayListStackDepth
     andi    inputBufferPos, cmd_w0, 0x00F8  // Byte 3, how many cmds to drop from load (max 0xA0)
 displaylist_dma:
     li      nextRA, run_next_DL_command
@@ -739,13 +539,12 @@ displaylist_dma_goto_next_ra:
      addi   dmemAddr, inputBufferPos, inputBufferEnd   // set the address to DMA read to
     j       wait_goto_next_ra                      // if not, continue normal processing
      sub    taskDataPtr, taskDataPtr, inputBufferPos   // increment the DRAM address to read from next time
-     
-G_LOAD_UCODE_handler: // If jumped here, $7 = G_LOAD_UCODE
+    
 load_overlay_0_and_enter:
     li      nextRA, 0x1000                  // Sets up return address
     li      cmd_w1_dram, orga(ovl0_start)   // Sets up ovl0 table address
 load_overlays_0_1:
-    lw      $11, OSTask + OSTask_ucode
+    lw      $11, ucodeTextStart             // TODO move this to start, move ovl0 stuff here
     li      dmaLen, ovl01_end - 0x1000 - 1
     li      dmemAddr, 0x1000
     j       dma_and_wait_goto_next_ra
@@ -766,33 +565,14 @@ G_RDPHALF_1_handler: // $ra = ., 0x10 ahead of geometry mode
 G_RDPHALF_2_handler: // 8; should be after the handlers with alignment needs
     li      $11, texrectState
     ldv     $v29[0], (0)($11)
-    sb      $zero, materialCullMode         // This covers tex and fill rects
     lw      cmd_w0, rdpHalf1Val             // load the RDPHALF1 value into w0
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
     addi    perfCounterB, perfCounterB, 1   // Increment number of tex/fill rects
-    j       send_w0_w1_to_rdp               // w1 is from the current command
-     sdv    $v29[0], -8(rdpCmdBufPtr)
-
-G_SETxIMG_handler: // 12
-    lb      $3, materialCullMode            // Get current mode
-    jal     segmented_to_physical           // Convert image to physical address
-     lw     $2, lastMatDLPhyAddr            // Get last material physical addr
-    bnez    $3, send_w0_w1_to_rdp           // If not in normal mode (0), exit
-     add    $10, taskDataPtr, inputBufferPos // Current material physical addr
-    beq     $10, $2, @@skip                 // Branch if we are executing the same mat again
-     sw     $10, lastMatDLPhyAddr           // Store material physical addr
-    li      $7, 1                           // > 0: in material first time
-@@skip:                                     // Otherwise $7 was < 0 (SETxIMG command byte): cull mode (in mat second time)
-    sb      $7, materialCullMode
-send_w0_w1_to_rdp:
-    sw      cmd_w0, 0(rdpCmdBufPtr)
-send_w1_to_rdp:
+    sdv     $v29[0], -8(rdpCmdBufPtr)
+    sw      cmd_w0, 0(rdpCmdBufPtr)  // TODO can optimize this with vector ops
     j       commit_small_rdp_command
-     sw     cmd_w1_dram, 4(rdpCmdBufPtr)
+     sw     cmd_w1_dram, 4(rdpCmdBufPtr) // w1 is from the current command
 
-load_cmds_handler:
-     lb     $3, materialCullMode
-    bltz    $3, run_next_DL_command  // If cull mode is < 0, in mat second time, skip the load
 G_RDP_handler:
      spv    $v4[0], 0(rdpCmdBufPtr)     // Whole command
 commit_small_rdp_command:
@@ -822,61 +602,17 @@ run_next_DL_command:
     // $7 must retain the command byte for load_mtx and command dispatch in overlays 2 and 3
     // $ra must contain the handler called for several handlers
 
-G_MTX_handler: // 12
-    andi    $11, cmd_w0, G_MTX_VP_M | G_MTX_NOPUSH_PUSH
-    beqz    $11, G_MTX_PUSH_handler   // Model and push: go to push
-     sh     $zero, mvpValid                  // Also zeroes dirLightsXfrmValid
-load_mtx: // Coming from mtx_push
-    andi    $7, cmd_w0, G_MTX_MUL_LOAD       // Matrix load type: 2 is multiply, 0 is load
-    addi    $7, $7, (-0x100 | G_MOVEMEM)     // As if came from G_MOVEMEM_handler, or +2 for multiply
 G_MOVEMEM_handler: // If called this handler, $7 = (-0x100 | G_MOVEMEM)
     jal     segmented_to_physical   // convert the memory address cmd_w1_dram to a virtual one
-do_movemem: // Coming from popmtx; $7 was set to (-0x100 | G_MOVEMEM)
-     // 0: load M, 2: mul M -> load temp, 4: load VP, 6: mul VP -> load temp
      andi   $3, cmd_w0, 0x00FE            // Movemem table index into $3 (bits 1-7 of the word 0)
     lbu     dmaLen, (inputBufferEnd - 0x07)(inputBufferPos) // Second byte of word 0
-    lhu     dmemAddr, (movememTable)($3)  // $3 reused in G_MTX_multiply_end
+    lhu     dmemAddr, (movememTable)($3)
     srl     $2, cmd_w0, 5                 // ((w0) >> 8) << 3; top 3 bits of idx must be 0; lower 1 bit of len byte must be 0
     add     dmemAddr, dmemAddr, $2
-    lh      nextRA, (afterMovememRaTable - (-0x100 | G_MOVEMEM))($7)
+    li      nextRA, run_next_DL_command
 dma_and_wait_goto_next_ra:
     j       dma_read_write
      li     $ra, wait_goto_next_ra
-
-G_LIGHTTORDP_handler: // 9
-    sw      cmd_w1_dram, 0(rdpCmdBufPtr) // Store second word as first (cmd byte, prim level)
-    lbu     $11, numLightsxSize          // Ambient light
-    lbu     $1, (inputBufferEnd - 0x6)(inputBufferPos) // Byte 2 = light count from end * size
-    andi    $2, cmd_w0, 0x00FF           // Byte 3 = alpha
-    sub     $1, $11, $1                  // Light address; byte 2 counts from end
-    lw      $3, (lightBufferMain-1)($1)  // Load light RGB into lower 3 bytes
-    sll     $3, $3, 8                    // Shift light RGB to upper 3 bytes and clear alpha byte
-    j       send_w1_to_rdp               // Write word w1 to RDP
-     or     cmd_w1_dram, $3, $2          // Combine RGB and alpha in second word
-
-G_POPMTX_handler:
-    lw      $11, matrixStackPtr             // Current matrix stack pointer
-    lw      $2, OSTask + OSTask_dram_stack  // Top of the stack
-    sub     cmd_w1_dram, $11, cmd_w1_dram   // Decrease pointer by amount in command
-    sub     $3, cmd_w1_dram, $2             // Is it still valid / within the stack?
-    bgez    $3, @@skip                      // If so, skip the failsafe
-     sh     $zero, mvpValid                 // and dirLightsXfrmValid; mark both mtx and dir lts invalid
-    move    cmd_w1_dram, $2                 // Use the top of the stack as the new pointer
-@@skip:    
-    sw      cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
-    j       do_movemem
-     li     $7, (-0x100 | G_MOVEMEM)        // As if came from G_MOVEMEM_handler, don't multiply
-
-G_MTX_PUSH_handler:
-    lw      cmd_w1_dram, matrixStackPtr     // Set up the DMA from dmem to rdram at the matrix stack pointer
-    li      dmemAddr, -0x8000 | mMatrix     // mMatrix, negative = write
-    jal     dma_read_write                  // DMA the current matrix from dmem to rdram
-     li     dmaLen, 0x0040 - 1              // Set the DMA length to the size of a matrix (minus 1 because DMA is inclusive)
-    addi    cmd_w1_dram, cmd_w1_dram, 0x40  // Increase the matrix stack pointer by the size of one matrix
-    sw      cmd_w1_dram, matrixStackPtr     // Update the matrix stack pointer
-    j       load_mtx
-     lw     cmd_w1_dram, (inputBufferEnd - 4)(inputBufferPos) // Load command word 1 again
-
 
 G_FLUSH_handler: // 32
     jal     flush_rdp_buffer        // Flush once to push partial DMEM buf to FIFO
@@ -888,40 +624,7 @@ G_FLUSH_handler: // 32
     // DPC_END, and return to $ra. This is why the dmemAddr register (as opposed to,
     // for example, dmaLen) is used as the DMEM buf fullness.
     j       flush_rdp_buffer
-G_MTX_multiply_end:
      li     $ra, run_next_DL_command // Dual use for above and below
-    lhu     $3, (movememTable - G_MV_TEMPMTX0)($3) // $3=2->0=M; $3=6->4=VP
-    move    $2, $3 // Input 0 = output
-mtx_multiply:
-    // $2 and dmemAddr are input matrices; $3 is output matrix
-    addi    $10, dmemAddr, 0x0018
-@@loop:
-    vmadn   $v7, $v31, $v31[2]  // 0
-    addi    $11, dmemAddr, 0x0008
-    vmadh   $v6, $v31, $v31[2]  // 0
-    addi    $2, $2, -0x0020
-    vmudh   $v29, $v31, $v31[2] // 0
-@@innerloop:
-    ldv     $v3[0], 0x0040($2)
-    ldv     $v3[8], 0x0040($2)
-    lqv     vTemp2[0], 0x0020(dmemAddr) // Input 1
-    ldv     $v2[0], 0x0020($2)
-    ldv     $v2[8], 0x0020($2)
-    lqv     vTemp1[0], 0x0000(dmemAddr) // Input 1
-    vmadl   $v29, $v3, vTemp2[0h]
-    addi    dmemAddr, dmemAddr, 0x0002
-    vmadm   $v29, $v2, vTemp2[0h]
-    addi    $2, $2, 0x0008 // Increment input 0 pointer
-    vmadn   $v5, $v3, vTemp1[0h]
-    bne     dmemAddr, $11, @@innerloop
-     vmadh  $v4, $v2, vTemp1[0h]
-    bne     dmemAddr, $10, @@loop
-     addi   dmemAddr, dmemAddr, 0x0008
-    sqv     $v7[0], (0x0020)($3)
-    sqv     $v6[0], (0x0000)($3)
-    sqv     $v4[0], (0x0010)($3)
-    jr      $ra
-     sqv    $v5[0], (0x0030)($3)
 
 align_with_warning 8, "One instruction of padding before G_VTX_handler"
 
@@ -942,20 +645,7 @@ G_VTX_handler: // 21
     li      $ra, vtx_after_dma
     vsub    $v8, $v7, $v8[2]       // elem 3 = v0 start address
     j       dma_read_write
-G_SETOTHERMODE_H_handler: // These handler labels must be 4 bytes apart for the code below to work
-     addi   dmaLen, vtxLeft, -1                // Only for above, nop for below
-G_SETOTHERMODE_L_handler:
-    lw      $3, (othermode0 - G_SETOTHERMODE_H_handler)($ra) // resolves to othermode0 or othermode1 based on which handler was jumped to
-    lui     $2, 0x8000
-    srav    $2, $2, cmd_w0
-    srl     $11, cmd_w0, 8
-    srlv    $2, $2, $11
-    nor     $2, $2, $zero
-    and     $3, $3, $2
-    or      $3, $3, cmd_w1_dram
-    sw      $3, (othermode0 - G_SETOTHERMODE_H_handler)($ra)
-    j       G_RDP_handler
-     lpv    $v4[0], (otherMode0)($zero)
+     addi   dmaLen, vtxLeft, -1
 
 // Converts the segmented address in cmd_w1_dram to the corresponding physical address
 segmented_to_physical: // 8
@@ -1130,9 +820,9 @@ tSubPxHI equ $v26
     vmadm   $v29, tXPRcpI, tXPF
     mfc2    $7, tXPI[1]
     vmadn   tXPF, tXPRcpF, tXPI
-    lbu     $14, geometryModeLabel + 3 // Load lowest byte for G_SHADE, G_ZBUFFER. Also has G_ATTROFFSET_ST_ENABLE, but G_TRI_FILL will get OR'd into it and force that set.
+    lbu     $14, geometryModeLabel + 3 // Load lowest byte for G_SHADE, G_TEXTURE_ENABLE.
     vmadh   tXPI, tXPRcpI, tXPI
-    lbu     $9, textureSettings1 + 3 // Texture enabled = 0x2
+    // nop
     vand    $v22, $v20, tMPos[7] // 0xFFF8
     // nop
     vcr     tPosCatI, tPosCatI, vTRC_0100
@@ -1140,7 +830,7 @@ tSubPxHI equ $v26
     vmudh   $v29, vOne, $v31[4] // 4
     ori     $11, $14, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
     vmadn   tXPF, tXPF, $v31[0] // -4
-    or      $11, $11, $9 // Incorporate whether textures are enabled into the triangle command id
+    andi    $9, $14, G_TEXTURE_ENABLE
     vmadh   tXPI, tXPI, $v31[0] // -4
     sw      $6, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W (upper) to temp mem
 tMx1W equ $v25 // <- tPosCatF
@@ -1159,7 +849,7 @@ tMx1W equ $v25 // <- tPosCatF
     ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
 tMnWF equ $v10 // <- tLPos
     vrcpl   tMnWF[0], tMx1W[1]
-    lbu     $10, textureSettings1 + 2  // Level and tile
+    li      $10, 0  // TODO Level and tile
 t1WF equ $v14 // <- tHPos
     vmudh   t1WF, vOne, t1WI[1q]
     sb      $11, 0x0000(rdpCmdBufPtr) // Store the triangle command id
@@ -1168,7 +858,7 @@ tMnWI equ $v25 // <- tMx1W
     // nop
 tSTWHMI equ $v22 // H = elems 0-2, M = elems 4-6; init W = 7FFF
     vmudh   tSTWHMI, vOne, $v31[7]  // 0x7FFF
-    sb      $zero, materialCullMode // Covers tri write (non early exit)
+    // nop
     vmudm   $v29, t1WI, tMnWF[0] // 1/W each vtx * min W = 1 for one of the verts, < 1 for others
     llv     tSTWHMI[0], VTX_TC_VEC($1)
     vmadl   $v29, t1WF, tMnWF[0]
@@ -1223,7 +913,7 @@ tAtMmHI equ $v27
     vsubc   tAtLmHF, tLAtF, tHAtF
     sll     $1, $1, 14
     vsub    tAtLmHI, tLAtI, tHAtI
-    sb      $zero, materialCullMode // This covers tri write out
+    // nop
     vsubc   tAtMmHF, tMAtF, tHAtF
     sw      $1, 0x0008(rdpCmdBufPtr)         // Store XL edge coefficient
     vsub    tAtMmHI, tMAtI, tHAtI
@@ -1310,9 +1000,9 @@ tDaDeI equ $v9
 flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAddr = large neg num -> only wait and set DPC_END
     mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
     lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
-    lw      $10, OSTask + OSTask_output_buff_size // Load FIFO "size" (actually end addr)
+    lw      $10, rdpFifoEnd                  // Load FIFO end addr
     bnez    $11, flush_rdp_buffer            // Wait until no DMAs are active
-     addi   dmaLen, dmemAddr, RDP_CMD_BUFSIZE + 8  // dmaLen = size of DMEM buffer to copy
+     addi   dmaLen, dmemAddr, RDP_TRI_SIZE_NO_ZBUF + 8  // dmaLen = size of DMEM buffer to copy
     blez    dmaLen, old_return_routine       // Exit if nothing to copy, or if dmemAddr is large negative num from last flush DMA write
      mtc0   cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
     add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
@@ -1323,7 +1013,7 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
     andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
     bnez    $11, @@await_rdp_dblbuf_avail    // Wait until double buffered start/end available
      addi   perfCounterC, perfCounterC, 7    // 4 instr + 2 after mfc + 1 taken branch
-    lw      cmd_w1_dram, OSTask + OSTask_output_buff // Start of FIFO
+    lw      cmd_w1_dram, rdpFifoStart        // Start of FIFO
 @@await_past_first_instr:
     mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
     beq     $11, cmd_w1_dram, @@await_past_first_instr // Wait until RDP moved past start
@@ -1347,10 +1037,12 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
     sw      $11, rdpFifoPos
     // Set up the DMA from DMEM to the RDP fifo in RDRAM
     addi    dmaLen, dmaLen, -1                                  // subtract 1 from the length
-    addi    dmemAddr, rdpCmdBufEndP1, -(0x2000 | (RDP_CMD_BUFSIZE + 8)) // The 0x2000 is meaningless, negative means write
+    addi    dmemAddr, rdpCmdBufEndP1, -(0x2000 | (RDP_TRI_SIZE_NO_ZBUF + 8)) // The 0x2000 is meaningless, negative means write
     xori    rdpCmdBufEndP1, rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word ^ rdpCmdBuffer2EndPlus1Word // Swap between the two RDP command buffers
     j       dma_read_write
-     addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_CMD_BUFSIZE + 8)
+     addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_TRI_SIZE_NO_ZBUF + 8)
+
+/*
 
 vtx_select_lighting:
     lbu     ambLight, numLightsxSize
@@ -1674,6 +1366,7 @@ lLkDt1 equ lDOT    // lighting Lookat Dot product 1
 .endmacro
      texgen_lastinstr lLkDt0, lLkDt1
 
+*/
 
 
 tri_alpha_compare_cull:
@@ -1692,7 +1385,7 @@ tri_alpha_compare_cull:
 return_and_end_mat:
      tri_v1_move // overwrites $v6[1]
     jr      $ra
-     sb     $zero, materialCullMode // This covers all tri early exits
+     nop
 
 vtx_after_dma:
     mfc2    outVtxBase, $v8[6]                 // Address of output start
@@ -1701,44 +1394,23 @@ vtx_after_dma:
     add     perfCounterA, perfCounterA, $11    // Add to vertex count
     // Sets up constants needed for vertex loop
     // Results fill vPerm1:4. Uses misc temps.
-    llv     sFOG[0], (fogFactor)($zero)           // Load fog multiplier 0 and offset 1
+    vclr    sSTS
+    vclr    $v30
     ldv     sVPO[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
     veq     $v29, $v31, $v31[3h]                  // VCC = 00010001
     ldv     sVPO[8], (viewport + 8)($zero)
-    llv     sSTS[0], (textureSettings2)($zero)    // Texture ST scale in 0, 1
     vmrg    sFGM, vOne, $v31[2]                   // sFGM is 0,0,0,1,0,0,0,1
     ldv     sVPS[0], (viewport)($zero)            // Load vscale duplicated in 0-3 and 4-7
-    vne     $v29, $v31, $v31[3h]                  // VCC = 11101110
     ldv     sVPS[8], (viewport)($zero)
-    lb      $11, geometryModeLabel + 3            // G_ATTROFFSET_ST_ENABLE in sign bit
-    vmrg    sVPO, sVPO, sFOG[1]                   // Put fog offset in elements 3,7 of vtrans
-    llv     $v30[0], (attrOffsetST - altBase)(altBaseReg)  // Texture ST offset in 0, 1
-    vmov    sSTS[4], sSTS[0]
-    llv     $v30[8], (attrOffsetST - altBase)(altBaseReg)  // Texture ST offset in 4, 5
-    vmrg    sVPS, sVPS, sFOG[0]                   // Put fog multiplier in elements 3,7 of vscale
-    bltz    $11, @@keepoffset
-     lbu    $7, mvpValid
-    vclr    $v30
-@@keepoffset:
-    vmov    sSTS[5], sSTS[1]
     lsv     $v30[6], (perspNorm - altBase)(altBaseReg) // Perspective norm elem 3
-vtx_after_setup_constants:
-    bnez    $7, @@skip_recalc_mvp
-     lb     viLtFlag, pointLightFlag
-    li      $2, vpMatrix
-    li      dmemAddr, mMatrix
-    jal     mtx_multiply
-     li     $3, mvpMatrix
-    sb      $10, mvpValid  // $10 is nonzero from mtx_multiply, in fact 0x18. Must be >= 0 to distinguish from cmds
 @@skip_recalc_mvp:
-    andi    $11, vGeomMid, G_LIGHTING >> 8
-    bnez    $11, vtx_select_lighting
-     sb     $zero, materialCullMode  // Vtx ends material. Must be before lighting for clever packedNormalsMaskConstant reuse
+    // andi    $11, vGeomMid, G_LIGHTING >> 8
+    // bnez    $11, vtx_select_lighting
+    //  nop
 vtx_setup_no_lighting:
     li      vLoopRet, vtx_loop_no_lighting
 vtx_after_lt_setup:
-    li      $11, mvpMatrix
-vtx_load_mtx:
+    li      $11, cacheEnd - 0x40
     lqv     vMTX0I,     (0x00)($11)  // Load MVP matrix
     lqv     vMTX2I,     (0x10)($11)
     lqv     vMTX0F,     (0x20)($11)
@@ -1973,12 +1645,10 @@ ovl0_start:
      sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1
     jal     flush_rdp_buffer
      add    taskDataPtr, taskDataPtr, inputBufferPos // inputBufferPos <= 0; taskDataPtr was where in the DL after the current chunk loaded
-    sw      dmemAddr, OSTask + OSTask_output_buff
-    sw      taskDataPtr, OSTask + OSTask_output_buff
-    sw      perfCounterA, OSTask + 0x0
-    sw      perfCounterB, OSTask + 0x4
-    sw      perfCounterC, OSTask + 0x8
-    sw      perfCounterD, OSTask + 0xC
+    sw      perfCounterA, cpuInterface + 0x0
+    sw      perfCounterB, cpuInterface + 0x4
+    sw      perfCounterC, cpuInterface + 0x8
+    sw      perfCounterD, cpuInterface + 0xC
     li      $10, SP_SET_SIG2   // task done signal
     mtc0    $10, SP_STATUS
     break   0
@@ -1998,20 +1668,11 @@ ovl0_padded_end:
 ovl1_start:
 
 G_ENDDL_handler:
-    lbu     $7, displayListStackLength      // Load the DL stack index; if end stack,
+    lbu     $7, displayListStackDepth       // Load the DL stack index; if end stack,
     beqz    $7, load_overlay_0_and_enter    // load overlay 0; $7 == -4 signals end
      addi   $7, $7, -4                      // Decrement the DL stack index
     j       call_ret_common                 // has a different version in ovl1
      lw     taskDataPtr, (displayListStack)($7) // Load addr of DL to return to
-
-G_SETSCISSOR_handler: // 3; should be towards the start of ovl1
-    li      $ra, scissorUpLeft - (otherMode0 - (G_RDPSETOTHERMODE_handler & 0xFFF))
-G_RDPSETOTHERMODE_handler: // $ra = .
-.if (. & 7) != 0
-    .error "G_RDPSETOTHERMODE_handler alignment broken"
-.endif
-    j       G_RDP_handler  // Send the command to the RDP
-     spv    $v4[0], (otherMode0 - (G_RDPSETOTHERMODE_handler & 0xFFF))($ra)
 
 /* This is a crazy optimization, and it was completely accidental!
 When G_RELSEGMENT was implemented, we did not notice the G_MOVEWORD behavior of
@@ -2030,7 +1691,6 @@ G_RELSEGMENT_handler: // 9
 G_MOVEWORD_handler:
      srl    $2, cmd_w0, 16           // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
     lhu     $10, (movewordTable - ((G_MOVEWORD & 0xF) << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
-do_moveword:
     sll     $11, cmd_w0, 16          // Sign bit = upper bit of offset
     add     $10, $10, cmd_w0         // Offset + base; only lower 12 bits matter
     bltz    $11, run_next_DL_command // If upper bit of offset is set, exit after halfword
@@ -2039,13 +1699,8 @@ do_moveword:
      sw     cmd_w1_dram, ($10)       // Store value from cmd into word (offset + moveword_table[index])
 
 G_TEXRECT_handler: // 3; should be towards the start of ovl1
-    li      $ra, texrectState - (textureSettings1 - (G_TEXTURE_handler & 0xFFF))
-G_TEXTURE_handler: // $ra = .
-.if (. & 7) != 0
-    .error "G_TEXTURE_handler alignment broken"
-.endif
     j       run_next_DL_command
-     spv    $v4[0], (textureSettings1 - (G_TEXTURE_handler & 0xFFF))($ra)
+     spv    $v4[0], (texrectState)($zero)
 
 ovl1_end:
 align_with_warning 8, "One instruction of padding at end of ovl1"
