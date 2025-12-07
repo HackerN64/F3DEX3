@@ -8,6 +8,7 @@
 
 /* List of options; the documentation for each is where it is used below. */
 /* #define REQUIRE_SEMICOLONS_AFTER_GBI_COMMANDS */ /* recommended */
+/* #define GFX_MODERN */ /* recommended when using modern GCC, see header */
 /* #define NO_SYNCS_IN_TEXTURE_LOADS */ /* see documentation */
 /* #define F3DEX2_SEGMENTS */ /* see documentation */
 /* #define DISABLE_AA */ /* developer taste */
@@ -21,8 +22,13 @@
 files, to reduce clutter and for reuse between microcodes. */
 #include "gbi/rdp_defines.h"
 #include "gbi/rsp_structs.h"
-#include "gbi/gfx_legacy.h" /* Recommend gfx_modern.h instead */
-#include "gbi/light_defs.h"
+#include "gbi/light_structs.h"
+#ifdef GFX_MODERN
+#include "gbi/gfx_modern.h"
+#else
+#include "gbi/gfx_legacy.h"
+#endif
+#include "gbi/gd_macros.h"
 #include "gbi/macro_base.h"
 #include "gbi/macro_rdp.h"
 #include "gbi/rsp_common.h"

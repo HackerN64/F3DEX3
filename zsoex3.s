@@ -18,19 +18,16 @@ cacheSize:
     .dh (cacheEnd - cacheStart)
 
 movememTable:
+    .dh triStateTodo  // G_MV_TRISTATE
     .dh cacheEnd      // G_MV_CACHEEND
     .dh viewport      // G_MV_VIEWPORT
+    .dh lightColors   // G_MV_LIGHTCOLORS
 
 movewordTable:
     .dh fxParams      // G_MW_FX
     .dh segmentTable  // G_MW_SEGMENT
 
-texgenLinearCoeffs:
-    .dh 0x44D3
-    .dh 0x6CB3
-
-viewport:
-    // v31Value only used at init, so we can clobber it after that.
+viewport: // v31Value only used at init, so we can clobber it after that.
 // constants for register $v31
 .if (. & 15) != 0
     .error "Wrong alignment for v31value"
@@ -114,16 +111,20 @@ endIdStr:
     .db (addr - 0x1000) >> 2
 .endmacro
 
+texgenLinearCoeffs:
+    .dh 0x44D3
+    .dh 0x6CB3
+
 // RDP/Immediate Command Mini Table
 // 1 byte per entry, after << 2 points to an addr in first 1/4 of IMEM
-miniTableEntry G_RELSEGMENT_handler
+
 miniTableEntry G_FLUSH_handler
 miniTableEntry G_GEOMETRYMODE_handler
-miniTableEntry G_MOVEWORD_handler
-miniTableEntry G_MOVEMEM_handler
 miniTableEntry G_DL_handler
 miniTableEntry G_ENDDL_handler
 miniTableEntry G_SPNOOP_handler
+miniTableEntry G_MOVEWORD_handler
+miniTableEntry G_MOVEMEM_handler
 miniTableEntry G_RDPHALF_1_handler
 miniTableEntry G_TEXRECT_handler // G_TEXRECT
 miniTableEntry G_TEXRECT_handler // G_TEXRECTFLIP
@@ -155,6 +156,7 @@ miniTableEntry G_RDP_handler // G_SETZIMG
 miniTableEntry G_RDP_handler // G_SETCIMG
 cmdMiniTable:
 miniTableEntry G_RDP_handler // G_NOOP
+miniTableEntry G_RELSEGMENT_handler
 miniTableEntry G_VTX_handler
 miniTableEntry G_TRI1_handler
 miniTableEntry G_TRI2_handler
@@ -187,6 +189,8 @@ texrectState:
 rdpHalf1Val:
     .skip 4
 
+    .align 16 // TODO
+
 .if (. & 3) != 0
     .error "cpuInterface must be aligned to 4"
 .endif
@@ -203,6 +207,15 @@ rdpFifoEnd:
 
 segmentTable:
     .skip (4 * 16) // 16 DRAM pointers
+
+lightColors:
+    .skip 16
+
+.if (. & 15) != 0
+    .error "triStateTodo must be aligned to 16"
+.endif
+triStateTodo:
+    .skip 192
 
 .if (. & 7) != 0
     .error "cacheStart must be aligned to 8"
@@ -550,18 +563,6 @@ load_overlays_0_1:
     j       dma_and_wait_goto_next_ra
      add    cmd_w1_dram, cmd_w1_dram, $11
 
-G_GEOMETRYMODE_handler: // 6
-    lw      $11, geometryModeLabel        // load the geometry mode value
-    and     $11, $11, cmd_w0              // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
-    or      cmd_w1_dram, cmd_w1_dram, $11 // sets the flags in cmd_w1_dram (set in g*SPSetGeometryMode)
-    srl     vGeomMid, cmd_w1_dram, 8      // Middle 2 bytes of geom mode to lower 16 bits. Ordered this way to avoid stalls.
-G_RDPHALF_1_handler: // $ra = ., 0x10 ahead of geometry mode
-.if (G_RDPHALF_1_handler - G_GEOMETRYMODE_handler) != (rdpHalf1Val - geometryModeLabel)
-    .error "G_RDPHALF_1 optimization broken"
-.endif
-    j       run_next_DL_command
-     sw     cmd_w1_dram, (geometryModeLabel - G_GEOMETRYMODE_handler)($ra)
-
 G_RDPHALF_2_handler: // 8; should be after the handlers with alignment needs
     li      $11, texrectState
     ldv     $v29[0], (0)($11)
@@ -604,11 +605,11 @@ run_next_DL_command:
 
 G_MOVEMEM_handler: // If called this handler, $7 = (-0x100 | G_MOVEMEM)
     jal     segmented_to_physical   // convert the memory address cmd_w1_dram to a virtual one
-     andi   $3, cmd_w0, 0x00FE            // Movemem table index into $3 (bits 1-7 of the word 0)
+     andi   $3, cmd_w0, 0x001E            // Movemem table index into $3 (bits 1-4 of the word 0)
     lbu     dmaLen, (inputBufferEnd - 0x07)(inputBufferPos) // Second byte of word 0
     lhu     dmemAddr, (movememTable)($3)
-    srl     $2, cmd_w0, 5                 // ((w0) >> 8) << 3; top 3 bits of idx must be 0; lower 1 bit of len byte must be 0
-    add     dmemAddr, dmemAddr, $2
+    srl     $2, cmd_w0, 5                 // ((w0) >> 8) << 3; top 3 bits of idx must be 0
+    add     dmemAddr, dmemAddr, $2        // This is bits 5-16 inclusive for 12 bit DMEM
     li      nextRA, run_next_DL_command
 dma_and_wait_goto_next_ra:
     j       dma_read_write
@@ -1410,7 +1411,7 @@ vtx_after_dma:
 vtx_setup_no_lighting:
     li      vLoopRet, vtx_loop_no_lighting
 vtx_after_lt_setup:
-    li      $11, cacheEnd - 0x40
+    li      $11, cacheEnd - 0x50
     lqv     vMTX0I,     (0x00)($11)  // Load MVP matrix
     lqv     vMTX2I,     (0x10)($11)
     lqv     vMTX0F,     (0x20)($11)
@@ -1701,6 +1702,18 @@ G_MOVEWORD_handler:
 G_TEXRECT_handler: // 3; should be towards the start of ovl1
     j       run_next_DL_command
      spv    $v4[0], (texrectState)($zero)
+
+G_GEOMETRYMODE_handler: // 6
+    lw      $11, geometryModeLabel        // load the geometry mode value
+    and     $11, $11, cmd_w0              // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
+    or      cmd_w1_dram, cmd_w1_dram, $11 // sets the flags in cmd_w1_dram (set in g*SPSetGeometryMode)
+    srl     vGeomMid, cmd_w1_dram, 8      // Middle 2 bytes of geom mode to lower 16 bits. Ordered this way to avoid stalls.
+G_RDPHALF_1_handler: // $ra = ., 0x10 ahead of geometry mode
+.if (G_RDPHALF_1_handler - G_GEOMETRYMODE_handler) != (rdpHalf1Val - geometryModeLabel)
+    .error "G_RDPHALF_1 optimization broken"
+.endif
+    j       run_next_DL_command
+     sw     cmd_w1_dram, (geometryModeLabel - G_GEOMETRYMODE_handler)($ra)
 
 ovl1_end:
 align_with_warning 8, "One instruction of padding at end of ovl1"

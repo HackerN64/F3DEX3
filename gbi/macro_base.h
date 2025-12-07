@@ -78,8 +78,8 @@ _DW({                                                   \
                                                         \
     _g->words.w0 = (_SHIFTL((c),             24, 8) |   \
                     _SHIFTL(((len) - 1) / 8, 19, 5) |   \
-                    _SHIFTL((ofs) / 8,        8, 8) |   \
-                    _SHIFTL((idx),            0, 8));   \
+                    _SHIFTL((ofs) / 8,        8, 9) |   \
+                    _SHIFTL((idx),            0, 5));   \
     _g->words.w1 = (unsigned int)(adrs);                \
 })
 
@@ -87,8 +87,8 @@ _DW({                                                   \
 {                                       \
    (_SHIFTL((c),             24, 8) |   \
     _SHIFTL(((len) - 1) / 8, 19, 5) |   \
-    _SHIFTL((ofs) / 8,        8, 8) |   \
-    _SHIFTL((idx),            0, 8)),   \
+    _SHIFTL((ofs) / 8,        8, 9) |   \
+    _SHIFTL((idx),            0, 5)),   \
     (unsigned int)(adrs)                \
 }
 

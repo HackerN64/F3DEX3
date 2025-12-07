@@ -1,5 +1,29 @@
-#ifndef GBI_LIGHT_DEFS_H
-#define GBI_LIGHT_DEFS_H
+#ifndef GBI_GD_MACROS_H
+#define GBI_GD_MACROS_H
+
+#define gdSPDefMtx( \
+        xx, xy, xz, xw, \
+        yx, yy, yz, yw, \
+        zx, zy, zz, zw, \
+        wx, wy, wz, ww) \
+    { { \
+        (IPART(xx) << 16) | IPART(yx), \
+        (IPART(zx) << 16) | IPART(wx), \
+        (IPART(xy) << 16) | IPART(yy), \
+        (IPART(zy) << 16) | IPART(wy), \
+        (IPART(xz) << 16) | IPART(yz), \
+        (IPART(zz) << 16) | IPART(wz), \
+        (IPART(xw) << 16) | IPART(yw), \
+        (IPART(zw) << 16) | IPART(ww), \
+        (FPART(xx) << 16) | FPART(yx), \
+        (FPART(zx) << 16) | FPART(wx), \
+        (FPART(xy) << 16) | FPART(yy), \
+        (FPART(zy) << 16) | FPART(wy), \
+        (FPART(xz) << 16) | FPART(yz), \
+        (FPART(zz) << 16) | FPART(wz), \
+        (FPART(xw) << 16) | FPART(yw), \
+        (FPART(zw) << 16) | FPART(ww), \
+    } }
 
 #define gDefAmbient(r, g, b)    \
     {{                          \
@@ -345,4 +369,4 @@
         {{{ upx, upy, upz }, 0 }},                              \
     }
 
-#endif // GBI_LIGHT_DEFS_H
+#endif // GBI_GD_MACROS_H
