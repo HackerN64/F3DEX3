@@ -1395,40 +1395,30 @@ vtx_after_dma:
     add     perfCounterA, perfCounterA, $11    // Add to vertex count
     // Sets up constants needed for vertex loop
     // Results fill vPerm1:4. Uses misc temps.
-    vclr    sSTS
-    vclr    $v30
     ldv     sVPO[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
-    veq     $v29, $v31, $v31[3h]                  // VCC = 00010001
     ldv     sVPO[8], (viewport + 8)($zero)
-    vmrg    sFGM, vOne, $v31[2]                   // sFGM is 0,0,0,1,0,0,0,1
     ldv     sVPS[0], (viewport)($zero)            // Load vscale duplicated in 0-3 and 4-7
     ldv     sVPS[8], (viewport)($zero)
     lsv     $v30[6], (perspNorm - altBase)(altBaseReg) // Perspective norm elem 3
-@@skip_recalc_mvp:
-    // andi    $11, vGeomMid, G_LIGHTING >> 8
-    // bnez    $11, vtx_select_lighting
-    //  nop
-vtx_setup_no_lighting:
     li      vLoopRet, vtx_loop_no_lighting
 vtx_after_lt_setup:
     li      $11, cacheEnd - 0x50
-    lqv     vMTX0I,     (0x00)($11)  // Load MVP matrix
-    lqv     vMTX2I,     (0x10)($11)
-    lqv     vMTX0F,     (0x20)($11)
-    lqv     vMTX2F,     (0x30)($11)
-    // nop TODO
-    vcopy   vMTX1I,  vMTX0I
-    vcopy   vMTX3I,  vMTX2I
+    ldv     vMTX0I[0],  (0x00)($11)  // Load MVP matrix
     ldv     vMTX1I[0],  (0x08)($11)
-    vcopy   vMTX1F,  vMTX0F
+    ldv     vMTX2I[0],  (0x10)($11)
     ldv     vMTX3I[0],  (0x18)($11)
-    vcopy   vMTX3F,  vMTX2F
+    ldv     vMTX0F[0],  (0x20)($11)
     ldv     vMTX1F[0],  (0x28)($11)
+    ldv     vMTX2F[0],  (0x30)($11)
     ldv     vMTX3F[0],  (0x38)($11)
-    ldv     vMTX0I[8],  (0x00)($11)
+    ldv     vMTX0I[8],  (0x00)($11) // TODO other matrix
+    ldv     vMTX1I[8],  (0x08)($11)
     ldv     vMTX2I[8],  (0x10)($11)
+    ldv     vMTX3I[8],  (0x18)($11)
     ldv     vMTX0F[8],  (0x20)($11)
+    ldv     vMTX1F[8],  (0x28)($11)
     ldv     vMTX2F[8],  (0x30)($11)
+    ldv     vMTX3F[8],  (0x38)($11)
     andi    fogFlag, vGeomMid, G_FOG >> 8  // Can't put before lt b/c fogFlag = mtx valid flag.
     srl     fogFlag, fogFlag, 5            // 8 if G_FOG is set, 0 otherwise
     addi    outVtx1, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
@@ -1515,10 +1505,10 @@ vtx_return_from_texgen:
     // nop
     vmadh   s1WI, s1WI, $v31[0]  // -4
     // nop
-    vmudm   $v29, vpST, sSTS       // Scale ST
+    vcopy   sST2, vpST
     ldv     sTCL[8],   (VTX_IN_TC + 3 * inputVtxSize)(inVtx) // ST in 4:5, RGBA in 6:7
 // sST2 <- vpScrI
-    vmadh   sST2, vOne, $v30          // + 1 * ST offset; elems 0, 1, 4, 5
+    // vnop
     suv     vpRGBA[4],  (VTX_COLOR_VEC )(outVtx2) // Store RGBA for second vtx
     vmudl   $v29, s1WF, sRTF[2h]
     // nop
@@ -1555,7 +1545,7 @@ vtx_return_from_texgen:
     slv     sST2[8],           (VTX_TC_VEC    )(outVtx2) // Store scaled S, T vertex 2
     vmudh   $v29, sVPO, vOne // offset * 1
     slv     sST2[0],           (VTX_TC_VEC    )(outVtx1) // Store scaled S, T vertex 1
-    vmadh   $v29, sFGM, $v31[6] // + (0,0,0,1,0,0,0,1) * 0x7F00
+    // vnop
     andi    $11, $11, CLIP_SCAL_NPXY // Mask to only bits we care about
     vmadn   vpScrF, vpClpF, sVPS   // + pos frac * scale
     or      flagsV2, flagsV2, $11    // Combine results for second vertex

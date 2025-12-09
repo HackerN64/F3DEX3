@@ -72,23 +72,27 @@ _DW({                                       \
     (unsigned int)(s)       \
 }
 
+/* The argument encodings here are super subtle. They rely on the lower 3 bits
+of the DMA registers being 0. Also, DMA_SPADDR is 13 bits, not 12 bits--bit 12
+selects DMEM vs. IMEM. That's why ofs, which can be negative, loses 3 bits in
+the right shift, and then has 10 bits encoded, for a total of 13. */
 #define gDma2p(pkt, c, adrs, len, idx, ofs)             \
 _DW({                                                   \
     Gfx *_g = (Gfx *)(pkt);                             \
                                                         \
-    _g->words.w0 = (_SHIFTL((c),             24, 8) |   \
-                    _SHIFTL(((len) - 1) / 8, 19, 5) |   \
-                    _SHIFTL((ofs) / 8,        8, 9) |   \
-                    _SHIFTL((idx),            0, 5));   \
+    _g->words.w0 = (_SHIFTL((c),             24,  8) |  \
+                    _SHIFTL(((len) - 1) / 8, 19,  5) |  \
+                    _SHIFTL((ofs) / 8,        8, 10) |  \
+                    _SHIFTL((idx),            0,  5));  \
     _g->words.w1 = (unsigned int)(adrs);                \
 })
 
 #define gsDma2p(c, adrs, len, idx, ofs) \
 {                                       \
-   (_SHIFTL((c),             24, 8) |   \
-    _SHIFTL(((len) - 1) / 8, 19, 5) |   \
-    _SHIFTL((ofs) / 8,        8, 9) |   \
-    _SHIFTL((idx),            0, 5)),   \
+   (_SHIFTL((c),             24,  8) |  \
+    _SHIFTL(((len) - 1) / 8, 19,  5) |  \
+    _SHIFTL((ofs) / 8,        8, 10) |  \
+    _SHIFTL((idx),            0,  5)),  \
     (unsigned int)(adrs)                \
 }
 

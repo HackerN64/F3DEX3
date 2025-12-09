@@ -162,10 +162,10 @@ typedef struct {
 */
 #define gSPMtxAndLtDirs(pkt, addr, idx) \
     gDma2p((pkt), G_MOVEMEM, (addr), sizeof(MtxAndLtDirs), G_MV_CACHEEND, \
-        -(sizeof(MtxAndLtDirs) * ((idx) + 1)))
+        (-(sizeof(MtxAndLtDirs) * ((idx) + 1))))
 #define gsSPMtxAndLtDirs(addr, idx) \
     gsDma2p(      G_MOVEMEM, (addr), sizeof(MtxAndLtDirs), G_MV_CACHEEND, \
-        -(sizeof(MtxAndLtDirs) * ((idx) + 1)))
+        (-(sizeof(MtxAndLtDirs) * ((idx) + 1))))
 
 /** For now this is the same as F3D family, will change later */
 #define gSPVertex(pkt, v, n, v0)                    \
