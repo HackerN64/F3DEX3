@@ -37,7 +37,7 @@ lightSize equ 0x10
 G_MAX_VERTS equ 104
 
 // RSP Vertex structure offsets
-vtxSize equ 0x16
+vtxSize equ 0x14
 
   VTX_COLOR_VEC equ 0x00
 VTX_COLOR_R     equ 0x00
@@ -51,8 +51,7 @@ VTX_TC_T        equ 0x06
 VTX_SCR_X       equ 0x08
 VTX_SCR_Y       equ 0x0A
 VTX_SCR_Z       equ 0x0C
-VTX_SCR_Z_FRAC  equ 0x0E
+  VTX_CLIP      equ 0x0E
   VTX_INV_W_VEC equ 0x10
 VTX_INV_W_INT   equ 0x10
 VTX_INV_W_FRAC  equ 0x12
-  VTX_CLIP      equ 0x14
