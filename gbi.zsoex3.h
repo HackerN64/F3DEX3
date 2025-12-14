@@ -55,7 +55,7 @@ typedef struct {
  * ```
  * - Set the RSP PC to 0x1000 (start of IMEM) and unhalt it
 */
-typedef struct {
+typedef __attribute__((aligned(8))) struct {
     const void* ucodeTextStart;
     const void* displayListStart;
     void* rdpFifoStart;
@@ -70,7 +70,7 @@ typedef struct {
  * ...
  * ```
 */
-typedef struct {
+typedef __attribute__((aligned(8))) struct {
     uint32_t a, b, c, d;
 } UcodePerfCounters;
 
@@ -106,16 +106,12 @@ typedef struct {
  */
 #define G_TEXTURE_ENABLE        0x00000002
 #define G_SHADE                 0x00000004
-#define G_AMBOCCLUSION          0x00000100  /* ignored, always on */
 #define G_CULL_NEITHER          0x00000000
 #define G_CULL_FRONT            0x00000200
 #define G_CULL_BACK             0x00000400
 #define G_CULL_BOTH             0x00000600  /* useless but supported */
-#define G_LIGHTTOALPHA          0x00001000  /* ignored, always on */
-#define G_LIGHTING              0x00020000  /* ignored, always on */
 #define G_TEXTURE_GEN           0x00040000
 #define G_TEXTURE_GEN_LINEAR    0x00080000
-#define G_SHADING_SMOOTH        0x00200000  /* ignored, always on */
 
 /*
  * MOVEMEM indices
@@ -143,7 +139,7 @@ typedef struct {
  * Holds the MVP matrix and up to two light directions. Each light direction
  * must be in model space, i.e. world space dir transformed by M transpose.
 */
-typedef struct {
+typedef __attribute__((aligned(8))) struct {
     Mtx mtx;
     struct {
         signed char dir[3];
@@ -167,30 +163,41 @@ typedef struct {
     gsDma2p(      G_MOVEMEM, (addr), sizeof(MtxAndLtDirs), G_MV_CACHEEND, \
         (-(sizeof(MtxAndLtDirs) * ((idx) + 1))))
 
-/** For now this is the same as F3D family, will change later */
-#define gSPVertex(pkt, v, n, v0)                    \
+/**
+ * Upload and perform transform and lighting on vertices.
+ * @p addr Segmented address of some Vtx's
+ * @p n Number of vertices to upload
+ * @p v0 Vertex index in the cache to start overwriting
+ * @p mtx1 Matrix index used for vertex weights of 0
+ * @p mtx2 Matrix index used for vertex weights of FFFF
+*/
+#define gSPVertex(pkt, addr, n, v0, mtx1, mtx2)     \
 _DW({                                               \
     Gfx *_g = (Gfx *)(pkt);                         \
                                                     \
     _g->words.w0 = (_SHIFTL(G_VTX,      24, 8) |    \
-                    _SHIFTL((n),        12, 8) |    \
-                    _SHIFTL((v0) + (n),  1, 7));    \
-    _g->words.w1 = (unsigned int)(v);               \
+                    _SHIFTL((mtx1),     20, 4) |    \
+                    _SHIFTL((mtx2),     16, 4) |    \
+                    _SHIFTL((n),         8, 8) |    \
+                    _SHIFTL((v0) + (n),  0, 8));    \
+    _g->words.w1 = (unsigned int)(addr);            \
 })
-#define gsSPVertex(v, n, v0)        \
-{                                   \
-   (_SHIFTL(G_VTX,      24, 8) |    \
-    _SHIFTL((n),        12, 8) |    \
-    _SHIFTL((v0) + (n),  1, 7)),    \
-    (unsigned int)(v)               \
+/** @copydetails gSPVertex */
+#define gsSPVertex(addr, n, v0, mtx1, mtx2) \
+{                                           \
+   (_SHIFTL(G_VTX,      24, 8) |            \
+    _SHIFTL((mtx1),     20, 4) |            \
+    _SHIFTL((mtx2),     16, 4) |            \
+    _SHIFTL((n),         8, 8) |            \
+    _SHIFTL((v0) + (n),  0, 8)),            \
+    (unsigned int)(addr)                    \
 }
 
-/** For now this is the same as F3D family except without flag, will change later */
-#define __gsSP1Triangle_w1(v0, v1, v2)    \
-   (_SHIFTL((v0) * 2, 16, 8) |              \
-    _SHIFTL((v1) * 2,  8, 8) |              \
-    _SHIFTL((v2) * 2,  0, 8))
 
+#define __gsSP1Triangle_w1(v0, v1, v2) \
+   (_SHIFTL((v0), 16, 8) |             \
+    _SHIFTL((v1),  8, 8) |             \
+    _SHIFTL((v2),  0, 8))
 
 /**
  * 1 Triangle

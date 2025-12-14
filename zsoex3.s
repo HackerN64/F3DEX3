@@ -35,30 +35,28 @@ viewport: // v31Value only used at init, so we can clobber it after that.
 v31Value:
 // v31 must go from lowest to highest (signed) values for vcc patterns.
 // Also relies on the fact that $v31[0h] is -4,-4,-4,-4, 4, 4, 4, 4.
-    .dh -4     // used in clipping, vtx write for Newton-Raphson reciprocal
-    .dh -1     // used often
+    .dh -4     // used for Newton-Raphsons
+    .dh -1     // used a couple times
     .dh 0      // used often
-    .dh 2      // used as clip ratio (vtx write, clipping) and in clipping
-    .dh 4      // used for same Newton-Raphsons, occlusion plane scaling
+    .dh 2      // clip ratio in vtx write
+    .dh 4      // used for Newton-Raphsons
     .dh 0x4000 // used in tri write, texgen
-    .dh 0x7F00 // used in fog
-    .dh 0x7FFF // used often
+    .dh 0x7F00 // unused
+    .dh 0x7FFF // used a couple times
 
 // constants for register vTRC
 .if (. & 15) != 0
     .error "Wrong alignment for vTRCValue"
 .endif
 vTRCValue:
-decalFixMult equ 0x0400
-decalFixOff equ (-(decalFixMult / 2))
-vTRCValue0 equ cacheStart // around 0x100; for converting vertex index to address
-vTRCValue1 equ vtxSize << 7 // 0x0B00; it's not 0x1600 because vertex indices are *2
-vTRCValue2 equ 0x7E00 // vertex index mask for snake
-vTRCValue3 equ decalFixMult // defined above
-vTRCValue4 equ decalFixOff  // negative
-vTRCValue5 equ 0x0020 // used in tri write and vtx addr manip
-vTRCValue6 equ 0x0100 // used several times in tri write
-vTRCValue7 equ 0x1000 // some multiplier in tri write, vtx addr manip
+vTRCValue0 equ cacheStart // Currently 0x1D0; for converting vertex index to address
+vTRCValue1 equ cacheEnd   // Currently 0xCD8; for vtx mtx address
+vTRCValue2 equ 0x0100 // used several times in tri write, vtx mtx address
+vTRCValue3 equ 0x1000 // some multiplier in tri write, vtx address
+vTRCValue4 equ 0x0020 // used in tri write
+vTRCValue5 equ 0x0010 // used in vtx mtx address
+vTRCValue6 equ -mtxSize // used in vtx mtx address
+vTRCValue7 equ vtxSize << 8 // Currently 0x1400
     .dh vTRCValue0
     .dh vTRCValue1
     .dh vTRCValue2
@@ -68,27 +66,26 @@ vTRCValue7 equ 0x1000 // some multiplier in tri write, vtx addr manip
     .dh vTRCValue6
     .dh vTRCValue7
 .macro set_vcc_11110001
-    vge    $v29, vTRC, vTRC[0]
+    vge    $v29, vTRC, vTRC[2]
 .endmacro
-.if !( vTRCValue0 >= vTRCValue0  \
-    && vTRCValue1 >= vTRCValue0  \
-    && vTRCValue2 >= vTRCValue0  \
-    && vTRCValue3 >= vTRCValue0  \
-    && vTRCValue4 <  vTRCValue0  \
-    && vTRCValue5 <  vTRCValue0  \
-    && vTRCValue6 <  vTRCValue0  \
-    && vTRCValue7 >= vTRCValue0 )
+.if !( vTRCValue0 >= vTRCValue2  \
+    && vTRCValue1 >= vTRCValue2  \
+    && vTRCValue2 >= vTRCValue2  \
+    && vTRCValue3 >= vTRCValue2  \
+    && vTRCValue4 <  vTRCValue2  \
+    && vTRCValue5 <  vTRCValue2  \
+    && vTRCValue6 <  vTRCValue2  \
+    && vTRCValue7 >= vTRCValue2 )
     .error "VCC pattern for vTRC corrupted"
 .endif
-vTRC_VB   equ vTRC[0] // Vertex Buffer
-vTRC_VS   equ vTRC[1] // Vertex Size
-vTRC_7E00 equ vTRC[2]
-vTRC_DM   equ vTRC[3] // Decal Multiplier
-vTRC_DO   equ vTRC[4] // Decal Offset
-vTRC_0020 equ vTRC[5]
-vTRC_0100 equ vTRC[6]
-vTRC_1000 equ vTRC[7]
-vTRC_0100_addr equ (vTRCValue + 2 * 6)
+vTRC_CCHS equ vTRC[0] // Cache Start
+vTRC_CCHE equ vTRC[1] // Cache End
+vTRC_0100 equ vTRC[2]
+vTRC_1000 equ vTRC[3]
+vTRC_0020 equ vTRC[4]
+vTRC_0010 equ vTRC[5]
+vTRC_M_50 equ vTRC[6] // -0x50
+vTRC_OVSZ equ vTRC[7] // Output Vertex SiZe
 
 // displaylist stack
 displayListStack:
@@ -272,38 +269,38 @@ inputBufferEndSgn equ (-(0x1000 - inputBufferEnd)) // Underflow DMEM address
 
 /*
 Scalar regs:
-      Tri write      Vtx write   V/L init  Cmd dispatch
-$zero ------------Hardwired zero ----------------------
-$1    v1 texptr   <-- vtxLeft ---------->  temp, init 0
-$2    v2 shdptr                                temp
-$3    v3 shdflg                                temp
+      Tri write      Vtx write    Cmd dispatch
+$zero ------------Hardwired zero -------------
+$1    v1 texptr       vtxLeft     temp, init 0
+$2    v2 shdptr       mtx1Addr        temp
+$3    v3 shdflg       mtx2Addr        temp
 $4                        
-$5    -------------- vGeomMid -------------------------
+$5    -------------- vGeomMid ----------------
 $6    v1flag temp
-$7    v2flag tile                            cmd byte
-$8    v3flag      <-- outVtx2 ---------->
+$7    v2flag tile                   cmd byte
+$8    v3flag          outVtx2
 $9    xp texenab
-$10   --------------- temp2 ---------------------------
-$11   ---------------- temp ---------------------------
-$12   ------------ perfCounterD -----------------------
-$13   ------------- altBaseReg ------------------------
-$14   geom mode   <--- inVtx ----------->
-$15               <- outVtxBase -------->
+$10   ---------------- temp2 -----------------
+$11   ---------------- temp ------------------
+$12   ------------ perfCounterD --------------
+$13   ------------- altBaseReg ---------------
+$14   geom mode        inVtx
+$15                  outVtxBase
 $16
 $17   
 $18   
-$19      temp     <-- outVtx1 -> <---------   dmaLen
-$20      temp     <-- flagsV1 -> <---------  dmemAddr
-$21                                        ovlInitClock
-$22   ------------rdpCmdBufEndP1 ----------------------
-$23   ------------ rdpCmdBufPtr -----------------------
-$24      temp      <- flagsV2 -> <--------- cmd_w1_dram
-$25     cmd_w0 --------->        <---------   cmd_w0
-$26   ------------- taskDataPtr -----------------------
-$27   ------------inputBufferPos ----------------------
-$28   ------------ perfCounterA -----------------------
-$29   ------------ perfCounterB -----------------------
-$30   ------------ perfCounterC -----------------------
+$19      temp         outVtx1        dmaLen
+$20      temp         flagsV1       dmemAddr
+$21                               ovlInitClock
+$22   ------------rdpCmdBufEndP1 -------------
+$23   ------------ rdpCmdBufPtr --------------
+$24      temp         flagsV2      cmd_w1_dram
+$25     cmd_w0                       cmd_w0
+$26   ------------- taskDataPtr --------------
+$27   ------------inputBufferPos -------------
+$28   ------------ perfCounterA --------------
+$29   ------------ perfCounterB --------------
+$30   ------------ perfCounterC --------------
 $ra   return address, command handler address, sometimes sign bit is flag
 */
 
@@ -319,11 +316,10 @@ perfCounterA   equ $28   // Performance counter A (functions depend on config)
 perfCounterB   equ $29   // Performance counter B (functions depend on config)
 perfCounterC   equ $30   // Performance counter C (functions depend on config)
 
-// Vertex init:
-viLtFlag       equ $9    // Holds pointLightFlag or dirLightsXfrmValid
-
 // Vertex write:
 vtxLeft        equ $1    // Number of vertices left to process * 0x10
+mtx1Addr       equ $2    // Matrix 1 end address
+mtx2Addr       equ $3    // Matrix 2 end address
 outVtx2        equ $8    // Pointer to second or dummy (= outVtx1) transformed vert
 inVtx          equ $14   // Pointer to loaded vertex to transform; < 0 means from clipping.
 outVtxBase     equ $15   // Pointer to vertex buffer to store transformed verts
@@ -489,7 +485,7 @@ G_RDPHALF_2_handler: // 8; should be after the handlers with alignment needs
      sw     cmd_w1_dram, 4(rdpCmdBufPtr) // w1 is from the current command
 
 G_RDP_handler:
-     spv    $v4[0], 0(rdpCmdBufPtr)     // Whole command
+    spv     $v4[0], 0(rdpCmdBufPtr)     // Whole command
 commit_small_rdp_command:
     addi    perfCounterD, perfCounterD, 0x4000 // Increment small RDP command count
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8    // Increment the next RDP command pointer by 2 words
@@ -505,17 +501,47 @@ run_next_DL_command:
     vclr    vZero
     beqz    inputBufferPos, displaylist_dma             // Check if buffer is empty
      lbu    $ra, (cmdMiniTable)($7)                     // Load mini table entry
-    vmudh   $v3, $v31, vTRC_1000                        // $v3[3] = 2 * 1000 = 2000 for vtx addr manip
+    vmudn   $v29, vOne, vTRC_CCHS                       // Cache start address
     lw      cmd_w0, (inputBufferEnd)(inputBufferPos)    // Word 0
-    vmudl   $v5, $v4, vTRC_VS                           // Vtx indices times length
+    vmadl   $v7, $v4, vTRC_OVSZ                         // Plus vtx indices times output vertex size
     lw      cmd_w1_dram, (inputBufferEnd + 4)(inputBufferPos) // Word 1
-    vmadn   $v7, vOne, vTRC_VB                          // Plus address of vertex buffer
-    sll     $ra, $ra, 2                                 // Convert to a number of instructions
     vmadl   $v6, $v31, $v31[2]                          // 0; copy in v6
+    sll     $ra, $ra, 2                                 // Convert to a number of instructions
+    vmudl   $v8, $v4, vTRC_1000                         // Input vertex size elem 2
     jr      $ra                                         // Jump to handler
      addi   inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
     // $7 must retain the command byte for load_mtx and command dispatch in overlays 2 and 3
     // $ra must contain the handler called for several handlers
+
+align_with_warning 8, "One instruction of padding before G_VTX_handler"
+
+G_VTX_handler: // 21
+    vadd    $v3, $v31, vTRC_0010   // Elem 1 = -1 + 10 = 0x000F
+    jal     segmented_to_physical  // Convert address in cmd_w1_dram to physical
+     mfc2   vtxLeft, $v8[4]        // Input vertices size in bytes
+    mfc2    dmemAddr, $v7[6]       // End address
+    vsub    $v9, $v7, $v5[2]       // Elem 3 = end address - output size = output start addr
+    li      $ra, vtx_after_dma
+    vmudh   $v29, vOne, vTRC_CCHE  // Cache end
+    addi    dmaLen, vtxLeft, -1
+    vmadh   $v2, $v2, vTRC_M_50    // Minus matrix index times size; elems 2=m2, 5=m1
+    j       dma_read_write         // DMA start addr = end addr - input size
+     sub    dmemAddr, dmemAddr, vtxLeft // Rounded down to DMA word by H/W
+
+align_with_warning 8, "One instruction of padding before segmented_to_physical"
+
+// Converts the segmented address in cmd_w1_dram to the corresponding physical address
+segmented_to_physical: // 8
+    vmudl   $v2, vTRC, $v4[1]      // Byte 1 = mtx idxs. Elem 2 bits 3:0 = mtx 2. Elem 5 bits 3:0 = mtx 1.
+    srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
+    vmudl   $v5, $v4, vTRC_OVSZ    // Output vertices size elem 2
+    andi    $11, $11, 0x3C                // Only 4 bits for segment
+    lw      $11, (segmentTable)($11)      // Get the current address of the segment
+    sll     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address to the left so that the top 8 bits are shifted out
+    srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
+    vand    $v2, $v2, $v3[1]       // 0x000F. Elem 2 = mtx 2 idx, elem 5 = mtx 1 idx
+    jr      $ra
+     add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
 
 G_MOVEMEM_handler: // If called this handler, $7 = (-0x100 | G_MOVEMEM)
     jal     segmented_to_physical   // convert the memory address cmd_w1_dram to a virtual one
@@ -539,39 +565,7 @@ G_FLUSH_handler: // 32
     // DPC_END, and return to $ra. This is why the dmemAddr register (as opposed to,
     // for example, dmaLen) is used as the DMEM buf fullness.
     j       flush_rdp_buffer
-     li     $ra, run_next_DL_command // Dual use for above and below
-
-align_with_warning 8, "One instruction of padding before G_VTX_handler"
-
-G_VTX_handler: // 21
-    // Vertex command is 01 0H L0 ee, where n = HL (number of vertices).
-    // $v5[1] = 0H * 13, $v5[2] = L0 * 13.
-    // ($v5[2] >> 10) * 2 = 0L * 26 = $v8[2]
-    // ($v5[1] << 10) * 2 = H0 * 26 = $v9[1]
-    // In segmented_to_physical, add, now $v8[2] = HL * 26 = n * 26.
-    // Currently $v7[3] = end addr = (v0 + n) * 26 + base
-    // Subtract -> $v8[3] = v0 * 26 + base = start addr.
-    vmudl   $v8, $v5, $v3[3]       // 0x2000; elem 2 = low part
-    mfc2    dmemAddr, $v7[6]       // (v0 + n) end address; up to 56 inclusive
-    vmudn   $v9, $v5, vTRC_0020    // 0020; elem 1 = high part
-    jal     segmented_to_physical  // Convert address in cmd_w1_dram to physical
-     lhu    vtxLeft, (inputBufferEnd - 0x07)(inputBufferPos) // vtxLeft = size in bytes = vtx count * 0x10
-    sub     dmemAddr, dmemAddr, vtxLeft  // Start addr = end addr - size. Rounded down to DMA word by H/W
-    li      $ra, vtx_after_dma
-    vsub    $v8, $v7, $v8[2]       // elem 3 = v0 start address
-    j       dma_read_write
-     addi   dmaLen, vtxLeft, -1
-
-// Converts the segmented address in cmd_w1_dram to the corresponding physical address
-segmented_to_physical: // 8
-    srl     $11, cmd_w1_dram, 22          // Copy (segment index << 2) into $11
-    andi    $11, $11, 0x3C                // Clear the bottom 2 bits that remained during the shift
-    vadd    $v8, $v8, $v9[1]              // elem 2 = vertex count * size
-    lw      $11, (segmentTable)($11)      // Get the current address of the segment
-    sll     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address to the left so that the top 8 bits are shifted out
-    srl     cmd_w1_dram, cmd_w1_dram, 8   // Shift the address back to the right, resulting in the original with the top 8 bits cleared
-    jr      $ra
-     add    cmd_w1_dram, cmd_w1_dram, $11 // Add the segment's address to the masked input address, resulting in the virtual address
+     li     $ra, run_next_DL_command
 
 // H = highest on screen = lowest Y value; then M = mid, L = low
 tHAtF equ $v5
@@ -976,38 +970,39 @@ return_and_end_mat:
      nop
 
 vtx_after_dma:
-    mfc2    outVtxBase, $v8[6]                 // Address of output start
     andi    inVtx, dmemAddr, 0xFFF8            // Round down input start addr to DMA word
+    mfc2    mtx1Addr, $v2[10]                  // Elem 5
+    mfc2    mtx2Addr, $v2[4]                   // Elem 2
     sll     $11, vtxLeft, 12                   // Vtx count * 0x10000
     add     perfCounterA, perfCounterA, $11    // Add to vertex count
-    li      $11, cacheEnd - 0x50
-    ldv     vMTX0I[0],  (0x00)($11)  // Load MVP matrix
-    ldv     vMTX1I[0],  (0x08)($11)
-    ldv     vMTX2I[0],  (0x10)($11)
-    ldv     vMTX3I[0],  (0x18)($11)
-    ldv     vMTX0F[0],  (0x20)($11)
-    ldv     vMTX1F[0],  (0x28)($11)
-    ldv     vMTX2F[0],  (0x30)($11)
-    ldv     vMTX3F[0],  (0x38)($11)
-    lpv     ldM1[0],    (0x40)($11)
-    ldv     vMTX0I[8],  (0x00)($11) // TODO other matrix
-    ldv     vMTX1I[8],  (0x08)($11)
-    ldv     vMTX2I[8],  (0x10)($11)
-    ldv     vMTX3I[8],  (0x18)($11)
-    ldv     vMTX0F[8],  (0x20)($11)
-    ldv     vMTX1F[8],  (0x28)($11)
-    ldv     vMTX2F[8],  (0x30)($11)
-    ldv     vMTX3F[8],  (0x38)($11)
-    lpv     ldM2[0],    (0x40)($11)
+    mfc2    outVtxBase, $v9[6]                 // Address of output start
+    addi    outVtx1, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
+    addi    outVtx2, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
+    addi    outVtxBase, outVtxBase, -vtxSize // Will inc by 2, but need point to 2nd
+    ldv     vMTX0I[0],  (0x00 - mtxSize)(mtx1Addr) // MVP matrix 1
+    ldv     vMTX1I[0],  (0x08 - mtxSize)(mtx1Addr)
+    ldv     vMTX2I[0],  (0x10 - mtxSize)(mtx1Addr)
+    ldv     vMTX3I[0],  (0x18 - mtxSize)(mtx1Addr)
+    ldv     vMTX0F[0],  (0x20 - mtxSize)(mtx1Addr)
+    ldv     vMTX1F[0],  (0x28 - mtxSize)(mtx1Addr)
+    ldv     vMTX2F[0],  (0x30 - mtxSize)(mtx1Addr)
+    ldv     vMTX3F[0],  (0x38 - mtxSize)(mtx1Addr)
+    lpv     ldM1[0],    (0x40 - mtxSize)(mtx1Addr) // Light dir 0 from matrix 1
+    ldv     vMTX0I[8],  (0x00 - mtxSize)(mtx2Addr) // MVP matrix 2
+    ldv     vMTX1I[8],  (0x08 - mtxSize)(mtx2Addr)
+    ldv     vMTX2I[8],  (0x10 - mtxSize)(mtx2Addr)
+    ldv     vMTX3I[8],  (0x18 - mtxSize)(mtx2Addr)
+    ldv     vMTX0F[8],  (0x20 - mtxSize)(mtx2Addr)
+    ldv     vMTX1F[8],  (0x28 - mtxSize)(mtx2Addr)
+    ldv     vMTX2F[8],  (0x30 - mtxSize)(mtx2Addr)
+    ldv     vMTX3F[8],  (0x38 - mtxSize)(mtx2Addr)
+    lpv     ldM2[0],    (0x40 - mtxSize)(mtx2Addr) // Light dir 0 from matrix 2
     ldv     sVPS[0], (viewport)($zero)            // Load vscale duplicated in 0-3 and 4-7
     ldv     sVPS[8], (viewport)($zero)
     ldv     sVPO[0], (viewport + 8)($zero)        // Load vtrans duplicated in 0-3 and 4-7
     ldv     sVPO[8], (viewport + 8)($zero)
-    lsv     ldM1[6], (perspNorm - altBase)(altBaseReg) // Perspective norm elem 3
-    addi    outVtx1, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
-    addi    outVtx2, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
     jal     while_wait_dma_busy  // Wait for vertex load to finish
-     addi   outVtxBase, outVtxBase, -vtxSize // Will inc by 2, but need point to 2nd
+     lsv    ldM1[6], (perspNorm - altBase)(altBaseReg) // Perspective norm elem 3
     ldv     vpMdl[0], (VTX_IN_OB + 0 * inputVtxSize)(inVtx) // 1st vec pos
     ldv     vpMdl[8], (VTX_IN_OB + 1 * inputVtxSize)(inVtx) // 2nd vec pos
 align_with_warning 8, "One instruction of padding before vertex loop"

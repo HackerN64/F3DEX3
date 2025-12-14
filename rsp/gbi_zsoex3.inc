@@ -36,6 +36,8 @@ lightSize equ 0x10
 
 G_MAX_VERTS equ 104
 
+mtxSize equ 0x50
+
 // RSP Vertex structure offsets
 vtxSize equ 0x14
 
