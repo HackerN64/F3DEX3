@@ -26,6 +26,8 @@ files, to reduce clutter and for reuse between microcodes. */
 #include "gbi/macro_rdp.h"
 #include "gbi/rsp_common.h"
 
+#define ZSOEX_GBI_1 1
+
 /**
  * Extract these parameters from the start of the microcode data segment (in
  * RDRAM, not from the version in DMEM).
@@ -74,13 +76,10 @@ typedef __attribute__((aligned(8))) struct {
     uint32_t a, b, c, d;
 } UcodePerfCounters;
 
-#define ZSOEX_GBI_1 1
-
 /*
  * GBI commands in order
  */
-#define G_FLUSH             0xDC
-#define G_GEOMETRYMODE      0xDD
+#define G_FLUSH             0xDD
 #define G_DL                0xDE
 #define G_ENDDL             0xDF
 #define G_SPNOOP            0xE0
@@ -102,23 +101,20 @@ typedef __attribute__((aligned(8))) struct {
 
 
 /*
- * flags for G_SETGEOMETRYMODE
+ * flags for SPLoadGeometryMode
  */
-#define G_TEXTURE_ENABLE        0x00000002
-#define G_SHADE                 0x00000004
-#define G_CULL_NEITHER          0x00000000
-#define G_CULL_FRONT            0x00000200
-#define G_CULL_BACK             0x00000400
-#define G_CULL_BOTH             0x00000600  /* useless but supported */
-#define G_TEXTURE_GEN           0x00040000
-#define G_TEXTURE_GEN_LINEAR    0x00080000
+#define G_TEXTURE_ENABLE        0x0002
+#define G_SHADE                 0x0004
+#define G_TEXTURE_GEN           0x2000
+#define G_TEXTURE_GEN_LINEAR    0x4000
+#define G_FACING_INVERT         0x8000
 
 /*
  * MOVEMEM indices
  * Each of these indexes an entry in a dmem table which points to an arbitrarily
  * sized block of dmem in which to store the result of a DMA.
  */
-#define G_MV_TRISTATE    0
+#define G_MV_ZSOSECTION  0
 #define G_MV_CACHEEND    2
 #define G_MV_VIEWPORT    4
 #define G_MV_LIGHTCOLORS 6
@@ -132,8 +128,14 @@ typedef __attribute__((aligned(8))) struct {
 #define G_MW_SEGMENT   2
 
 /* MOVEWORD offsets */
-#define G_MWO_ALPHA_COMPARE_CULL 0x04
-#define G_MWO_PERSPNORM          0x06
+#define G_MWO_GEOM_MODE          0x00
+#define G_MWO_ALPHA_COMPARE_CULL 0x02
+#define G_MWO_PERSPNORM          0x04
+
+#define gSPLoadGeometryMode(pkt, halfword) \
+    gMoveHalfwd(pkt, G_MW_FX, G_MWO_GEOM_MODE, halfword)
+#define gsSPLoadGeometryMode(halfword) \
+    gsMoveHalfwd(G_MW_FX, G_MWO_GEOM_MODE, halfword)
 
 /**
  * Holds the MVP matrix and up to two light directions. Each light direction
@@ -193,6 +195,49 @@ _DW({                                               \
     (unsigned int)(addr)                    \
 }
 
+/**
+ * Defines a Z-sorting "section". All geometry (scene, objects, etc.) is
+ * comprised of sections; the sections are Z-sorted on the CPU. Then each
+ * section is comprised of sub-sections, which are sorted on the RSP by ZSOEX3.
+ * Finally, each subsection contains one or more triangles, which are drawn in
+ * the static order they are specified in the ZSOSection.
+ * 
+ * Formally, each section must have a convex hull which is non-overlapping in
+ * volume (they may share points, lines, or planes) with any other section's
+ * convex hull. And, every subsection must have a convex hull which is non-
+ * overlapping with any other subsection's convex hull from the same section.
+ * Finally, the tris of each subsection must be all convex or all concave, or
+ * close enough to one of these that drawing the tris in an arbitrary order
+ * works regardless of the camera angle.
+ * 
+ * There is an additional constraint: subsections are sorted based on the Z
+ * value of a single reference vertex from each. Practically, this means that
+ * tris must be roughly the same size, or that large tris must be roughly at
+ * least their size away from small tris.
+ * 
+ * Practically, sections are defined by material boundaries, vertex cache
+ * capacity, and what the game guarantees no other objects will intersect. For
+ * example, a character's upper arm and lower arm could be the same section
+ * (if they use the same material), in an RPG where nothing will ever be drawn
+ * in the space between the two when the arm is folded. But in a fighting game,
+ * when limbs of another character could be there, it would have to be one
+ * section per bone.
+ */
+typedef __attribute__((aligned(16))) struct {
+    /** Reference vertex whose Z value the subsections are sorted by. */
+    unsigned char rvtx[32];
+    /** Offset into data for each subsection. */
+    unsigned char offs[32];
+    /**
+     * Data for all subsections concatenated.
+     * The first byte for a subsection is the metadata about the subsection. Its
+     * lower 7 bits are the triangle count in this subsection. Its upper bit is:
+     * 0 = 3 indices per triangle, 1 = 1 index per triangle as a tri strip. In
+     * the latter case it draws indices 0-1-2, 1-2-3 flipped, 2-3-4, 3-4-5
+     * flipped, etc. After the first byte are the triangle indices.
+     */
+    unsigned char data[192];
+} ZSOSection;
 
 #define __gsSP1Triangle_w1(v0, v1, v2) \
    (_SHIFTL((v0), 16, 8) |             \

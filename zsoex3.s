@@ -18,7 +18,7 @@ cacheSize:
     .dh (cacheEnd - cacheStart)
 
 movememTable:
-    .dh triStateTodo  // G_MV_TRISTATE
+    .dh zsoSection    // G_MV_ZSOSECTION
     .dh cacheEnd      // G_MV_CACHEEND
     .dh viewport      // G_MV_VIEWPORT
     .dh lightColors   // G_MV_LIGHTCOLORS
@@ -116,7 +116,6 @@ texgenLinearCoeffs:
 // 1 byte per entry, after << 2 points to an addr in first 1/4 of IMEM
 
 miniTableEntry G_FLUSH_handler
-miniTableEntry G_GEOMETRYMODE_handler
 miniTableEntry G_DL_handler
 miniTableEntry G_ENDDL_handler
 miniTableEntry G_SPNOOP_handler
@@ -168,7 +167,8 @@ displayListStackDepth:
 altBase: // TODO eliminate or reuse?
 fxParams:
 geometryModeLabel:
-    .skip 4
+    .skip 2
+
 alphaCompareCullMode:
     .skip 1 // 0 = disabled, 1 = cull if all < thresh, -1 = cull if all >= thresh
 alphaCompareCullThresh:
@@ -176,10 +176,6 @@ alphaCompareCullThresh:
 
 perspNorm:
     .skip 2
-
-texrectState:
-    .skip 8  // Only needs to be saved over texrect, half1, half2
-    // TODO overlap with section tris struct
 
 // First half of RDP value for split commands. Also used as temp storage for
 // tri vertices during tri commands.
@@ -209,9 +205,19 @@ lightColors:
     .skip 16
 
 .if (. & 15) != 0
-    .error "triStateTodo must be aligned to 16"
+    .error "vertexZs must be aligned to 16"
 .endif
-triStateTodo:
+
+texrectState:  // Only needs to be saved over texrect, half1, half2
+vertexZs:
+    .skip 64
+
+zsoSection:
+zsoRVtx:
+    .skip 32
+zsoOffs:
+    .skip 32
+zsoData:
     .skip 192
 
 .if (. & 7) != 0
@@ -275,7 +281,7 @@ $1    v1 texptr       vtxLeft     temp, init 0
 $2    v2 shdptr       mtx1Addr        temp
 $3    v3 shdflg       mtx2Addr        temp
 $4                        
-$5    -------------- vGeomMid ----------------
+$5    -------------- geomMode ----------------
 $6    v1flag temp
 $7    v2flag tile                   cmd byte
 $8    v3flag          outVtx2
@@ -305,7 +311,7 @@ $ra   return address, command handler address, sometimes sign bit is flag
 */
 
 // Global scalar regs:
-vGeomMid       equ $5    // Middle two bytes of geometry mode in lower 16 bits
+geomMode       equ $5    // Geometry mode; facing flag in sign bit
 perfCounterD   equ $12   // Performance counter D (functions depend on config)
 altBaseReg     equ $13   // Alternate base address register for vector loads
 rdpCmdBufEndP1 equ $22   // Pointer to one command word past "end" (middle) of RDP command buf
@@ -426,7 +432,7 @@ start:
     li      rdpCmdBufPtr, rdpCmdBuffer1
     li      rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word
     vsub    vOne, vOne, $v31[1]             // 1 = 0 - -1
-    lhu     vGeomMid, geometryModeLabel + 1
+    lh      geomMode, geometryModeLabel
     li      inputBufferPos, 0
     li      nextRA, displaylist_dma
     j       load_overlays_0_1
@@ -628,7 +634,7 @@ G_TRI1_handler: // Whether we get here from cmd handler or prev tri, $ra == G_TR
     vmadh   $v26, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
     // nop
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
-    sll     $20, vGeomMid, 29 // Original bit 10 (now bit 2) in the sign bit, for facing cull
+    // nop
     vmrg    tLPos, $v6, $v4   // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
     or      $10, $6, $7
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
@@ -640,11 +646,11 @@ G_TRI1_handler: // Whether we get here from cmd handler or prev tri, $ra == G_TR
     vlt     $v29, $v6, $v2    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
     bnez    $10, return_and_end_mat // Reject (instead of clipping)
      // 24 cycles
-     srl    $11, $9, 31       // = 0 if x prod positive (back facing), 1 if x prod negative (front facing)
+     xor    $11, $9, geomMode // Sign bit clear if x prod positive (back facing), set if x prod negative (front facing)
     vmudh   $v3, vOne, $v31[5] // 0x4000; some rounding factor
-    sllv    $11, $20, $11     // Sign bit = bit 10 of geom mode if back facing, bit 9 if front facing
+    // nop
     vmrg    tMPos, $v4, tLPos // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
-    bltz    $11, return_and_end_mat // Cull if bit is set (culled based on facing)
+    bgez    $11, return_and_end_mat // Cull if bit is clear (culled based on facing)
      // 27 cycles
      vmrg   tLPos, tLPos, $v4 // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
 tSubPxHF equ $v4
@@ -729,7 +735,7 @@ tSubPxHI equ $v26
     vmadm   $v29, tXPRcpI, tXPF
     mfc2    $7, tXPI[1]
     vmadn   tXPF, tXPRcpF, tXPI
-    lbu     $14, geometryModeLabel + 3 // Load lowest byte for G_SHADE, G_TEXTURE_ENABLE.
+    // nop
     vmadh   tXPI, tXPRcpI, tXPI
     // nop
     vand    $v22, $v20, tMPos[7] // 0xFFF8
@@ -737,9 +743,9 @@ tSubPxHI equ $v26
     vcr     tPosCatI, tPosCatI, vTRC_0100
     // nop
     vmudh   $v29, vOne, $v31[4] // 4
-    ori     $11, $14, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
+    ori     $11, geomMode, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
     vmadn   tXPF, tXPF, $v31[0] // -4
-    andi    $9, $14, G_TEXTURE_ENABLE
+    andi    $9, geomMode, G_TEXTURE_ENABLE
     vmadh   tXPI, tXPI, $v31[0] // -4
     sw      $6, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W (upper) to temp mem
 tMx1W equ $v25 // <- tPosCatF
@@ -814,7 +820,7 @@ tSTWHMF equ $v25 // <- tMnWI
     vmadh   tXPRcpI, tXPI, tXPRcpI
     addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
     vmudh   tPosLmH, tPosLmH, $v31[0h] // e1 LmHY * -4 = 4*HmLY; e456 MmHY,LmHX,HmMX *= 4
-    andi    $3, $14, G_SHADE
+    andi    $3, geomMode, G_SHADE
 tAtLmHF equ $v10
 tAtLmHI equ $v9
 tAtMmHF equ $v13
@@ -1272,8 +1278,9 @@ G_MOVEWORD_handler:
     lhu     $10, (movewordTable - ((G_MOVEWORD & 0xF) << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
     sll     $11, cmd_w0, 16          // Sign bit = upper bit of offset
     add     $10, $10, cmd_w0         // Offset + base; only lower 12 bits matter
+    sh      cmd_w1_dram, ($10)       // Store value from cmd into halfword
     bltz    $11, run_next_DL_command // If upper bit of offset is set, exit after halfword
-     sh     cmd_w1_dram, ($10)       // Store value from cmd into halfword
+     lh     geomMode, geometryModeLabel // Might have modified this
     j       run_next_DL_command
      sw     cmd_w1_dram, ($10)       // Store value from cmd into word (offset + moveword_table[index])
 
@@ -1281,17 +1288,9 @@ G_TEXRECT_handler: // 3; should be towards the start of ovl1
     j       run_next_DL_command
      spv    $v4[0], (texrectState)($zero)
 
-G_GEOMETRYMODE_handler: // 6
-    lw      $11, geometryModeLabel        // load the geometry mode value
-    and     $11, $11, cmd_w0              // clears the flags in cmd_w0 (set in g*SPClearGeometryMode)
-    or      cmd_w1_dram, cmd_w1_dram, $11 // sets the flags in cmd_w1_dram (set in g*SPSetGeometryMode)
-    srl     vGeomMid, cmd_w1_dram, 8      // Middle 2 bytes of geom mode to lower 16 bits. Ordered this way to avoid stalls.
-G_RDPHALF_1_handler: // $ra = ., 0x10 ahead of geometry mode
-.if (G_RDPHALF_1_handler - G_GEOMETRYMODE_handler) != (rdpHalf1Val - geometryModeLabel)
-    .error "G_RDPHALF_1 optimization broken"
-.endif
+G_RDPHALF_1_handler:
     j       run_next_DL_command
-     sw     cmd_w1_dram, (geometryModeLabel - G_GEOMETRYMODE_handler)($ra)
+     sw     cmd_w1_dram, rdpHalf1Val
 
 ovl1_end:
 align_with_warning 8, "One instruction of padding at end of ovl1"

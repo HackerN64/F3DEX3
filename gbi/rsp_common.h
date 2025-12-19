@@ -235,38 +235,4 @@ other segments. */
     gsMoveHalfwd(G_MW_FX, G_MWO_ALPHA_COMPARE_CULL, \
         (_SHIFTL((mode), 8, 8) | _SHIFTL((thresh), 0, 8)))
 
-/**
- *  One gSPGeometryMode(pkt,c,s) GBI is equal to these two GBIs.
- *
- *      gSPClearGeometryMode(pkt,c)
- *      gSPSetGeometryMode(pkt,s)
- *
- *  gSPLoadGeometryMode(pkt, word) sets GeometryMode directly.
- */
-#define gSPGeometryMode(pkt, c, s)                      \
-_DW({                                                   \
-    Gfx *_g = (Gfx *)(pkt);                             \
-                                                        \
-    _g->words.w0 = (_SHIFTL(G_GEOMETRYMODE, 24,  8) |   \
-                    _SHIFTL(~(u32)(c),       0, 24));   \
-    _g->words.w1 = (u32)(s);                            \
-})
-
-/**
- * @copydetails gSPGeometryMode
- */
-#define gsSPGeometryMode(c, s)          \
-{                                       \
-   (_SHIFTL(G_GEOMETRYMODE, 24,  8) |   \
-    _SHIFTL(~(u32)(c),       0, 24)),   \
-    (u32)(s)                            \
-}
-
-#define gSPSetGeometryMode(pkt, word)   gSPGeometryMode((pkt), 0, (word))
-#define gsSPSetGeometryMode(word)       gsSPGeometryMode(      0, (word))
-#define gSPClearGeometryMode(pkt, word) gSPGeometryMode((pkt), (word), 0)
-#define gsSPClearGeometryMode(word)     gsSPGeometryMode(      (word), 0)
-#define gSPLoadGeometryMode(pkt, word)  gSPGeometryMode((pkt), -1, (word))
-#define gsSPLoadGeometryMode(word)      gsSPGeometryMode(      -1, (word))
-
 #endif // GBI_RSP_COMMON_H
