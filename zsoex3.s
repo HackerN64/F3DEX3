@@ -101,16 +101,16 @@ endIdStr:
     .align 16  // to suppress subsequent errors 
 .endif
 
+texgenLinearCoeffs:
+    .dh 0x44D3
+    .dh 0x6CB3
+
 .macro miniTableEntry, addr
     .if addr < 0x1000 || addr >= 0x1400
         .error "Handler address out of range!"
     .endif
     .db (addr - 0x1000) >> 2
 .endmacro
-
-texgenLinearCoeffs:
-    .dh 0x44D3
-    .dh 0x6CB3
 
 // RDP/Immediate Command Mini Table
 // 1 byte per entry, after << 2 points to an addr in first 1/4 of IMEM
@@ -154,8 +154,7 @@ cmdMiniTable:
 miniTableEntry G_RDP_handler // G_NOOP
 miniTableEntry G_RELSEGMENT_handler
 miniTableEntry G_VTX_handler
-miniTableEntry G_TRI1_handler
-miniTableEntry G_TRI2_handler
+miniTableEntry G_ZSOSECTION_handler
 
 endInitializedDmem:
 
@@ -210,8 +209,7 @@ lightColors:
 
 texrectState:  // Only needs to be saved over texrect, half1, half2
 vertexZs:
-    .skip 64
-
+    .skip 32 // int16 each; second half overwrites rvtx
 zsoSection:
 zsoRVtx:
     .skip 32
@@ -573,6 +571,216 @@ G_FLUSH_handler: // 32
     j       flush_rdp_buffer
      li     $ra, run_next_DL_command
 
+G_ZSOSECTION_handler:
+    jal     segmented_to_physical
+     lbu    dmaLen, (inputBufferEnd - 0x05)(inputBufferPos)
+    li      dmemAddr, zsoSection
+    j       dma_and_wait_goto_next_ra
+     li     nextRA, zso_after_dma
+
+zso_after_dma:
+    // Convert reference vertices from index -> address -> Z position
+    lpv     $v2, (zsoRVtx + 0x00)($zero)
+    lpv     $v3, (zsoRVtx + 0x08)($zero)
+    lpv     $v4, (zsoRVtx + 0x10)($zero)
+    lpv     $v5, (zsoRVtx + 0x18)($zero)
+    vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
+    lbu     numSubSecs, (inputBufferEnd - 0x07)(inputBufferPos)
+    vmadl   $v2,  $v2,  vTRC_OVSZ  // Plus vtx indices times output vertex size
+    li      $11, 0
+    vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
+    li      $10, 0
+    vmadl   $v3,  $v3,  vTRC_OVSZ  // Plus vtx indices times output vertex size
+    mov     $24, rdpCmdBufEndP1
+    vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
+    sqv     vZero, (vertexZs + 0x00)($zero) // Set invalid vertex Zs to 0 (close to camera)
+    vmadl   $v4,  $v4,  vTRC_OVSZ  // Plus vtx indices times output vertex size
+    sqv     vZero, (vertexZs + 0x10)($zero)
+    vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
+    sqv     vZero, (vertexZs + 0x20)($zero)
+    vmadl   $v5,  $v5,  vTRC_OVSZ  // Plus vtx indices times output vertex size
+    sqv     vZero, (vertexZs + 0x30)($zero)
+    sqv     $v2, (0x00)(rdpCmdBufEndP1)
+    sqv     $v3, (0x10)(rdpCmdBufEndP1)
+    sqv     $v4, (0x20)(rdpCmdBufEndP1)
+    sqv     $v5, (0x30)(rdpCmdBufEndP1)
+@@loop:
+    lhu     $19, (0)($24)
+    addi    $24, $24, 2
+    addi    $11, $11, 2
+    lhu     $19, (VTX_SCR_Z)($19)
+    addi    $10, $10, 1
+    bne     $10, numSubSecs, @@loop
+     sw     $19, (vertexZs - 2)($11)
+    // Create iota (0, 1, ..., 31) in elements of $v21, $v23, $v25, $v27 for indices
+    veq     $v29, $v31, $v31[1q] // VCC = 01010101
+    vmrg    $v11, vZero, vOne    // Ones
+    vge     $v29, $v31, $v31[2h] // VCC = 00110011
+    vmrg    $v12, vZero, $v31[3] // Twos
+    vge     $v14, vZero, $v31[0h] // Fours
+    vmudl   $v18, $v31, vTRC_0020 // Elem 5 = 8
+    lqv     $v20, (vertexZs + 0x00)($zero)
+    vmudh   $v29, vOne, $v11 // Ones
+    lqv     $v22, (vertexZs + 0x10)($zero)
+    vmadh   $v29, vOne, $v12 // + Twos
+    lqv     $v24, (vertexZs + 0x20)($zero)
+    vmadh   $v21, vOne, $v14 // + Fours
+    lqv     $v26, (vertexZs + 0x30)($zero)
+    vmadh   $v23, vOne, $v18[5] // + 8
+    vmadh   $v25, vOne, $v18[5] // + 8
+    vmadh   $v27, vOne, $v18[5] // + 8
+    // Optimal 8 element sorting network from
+    // https://bertdobbelaere.github.io/sorting_networks.html#N8L19D6
+    // Elements 0 and 1 from each of 4 vectors
+.macro sort_swap ozh, oih, ozl, oil, z0, i0, z1, i1
+    vge     ozh, z0, z1
+    vmrg    oih, i0, i1
+    vlt     ozl, z0, z1
+    vmrg    oil, i0, i1
+.endmacro
+.macro sort_swap_toeven ozh, oih, z0, i0
+    vge     ozh, z0, z0[1q]
+    vmrg    oih, i0, i0[1q]
+    vlt     z0, z0, z0[1q]
+    vmrg    i0, i0, i0[1q]
+.endmacro
+    sort_swap $v12, $v13, $v14, $v15, $v20, $v21, $v22, $v23 // swap(a0, b0), swap(a1, b1)
+    sort_swap $v15, $v17, $v18, $v19, $v24, $v25, $v26, $v27 // swap(c0, d0), swap(c1, d1)
+    sort_swap $v20, $v21, $v24, $v25, $v12, $v13, $v16, $v17 // swap(a0, c0), swap(a1, c1)
+    sort_swap $v22, $v23, $v26, $v27, $v14, $v15, $v18, $v19 // swap(b0, d0), swap(b1, d1)
+    sort_swap_toeven $v12, $v13, $v20, $v21 // new a0, new a1
+    sort_swap_toeven $v14, $v15, $v22, $v23 // new b0, new b1
+    sort_swap_toeven $v16, $v17, $v24, $v25 // new c0, new c1
+    sort_swap_toeven $v18, $v19, $v26, $v27 // new d0, new d1
+    sort_swap $v10, $v11, $v16, $v17, $v14, $v15, $v16, $v17 // new b0, c0 = swap(b0, c0)
+    sort_swap $v14, $v15, $v24, $v25, $v22, $v23, $v24, $v25 // new b1, c1 = swap(b1, c1)
+    sort_swap $v22, $v23, $v16, $v17, $v20, $v21, $v16, $v17 // new a1, c0 = swap(a1, c0)
+    sort_swap $v20, $v21, $v18, $v19, $v14, $v15, $v18, $v19 // new b1, d0 = swap(b1, d0)
+    sort_swap $v14, $v15, $v10, $v11, $v22, $v23, $v10, $v11 // new a1, b0 = swap(a1, b0)
+    sort_swap $v22, $v23, $v16, $v17, $v20, $v21, $v16, $v17 // new b1, c0 = swap(b1, c0)
+    sort_swap $v20, $v21, $v18, $v19, $v24, $v25, $v18, $v19 // new c1, d0 = swap(c1, d0)
+    sqv     vZero, (0x80)(rdpCmdBufEndP1) // So when lists run off end, get z = 0
+    // Element 0 of these regs are sorted in order, same for 2, 4, 6
+    // These regs + 1 = indices
+    // $v12, $v14, $v10, $v22, $v16, $v20, $v18, $v26
+    veq     $v29, $v31, $v31[0h] // vcc = 10101010
+    li      $24, 0xFF
+    vmrg    $v12, $v12, $v13[0h] // Interleave Z, index, Z, index, Z, index, Z, index
+    addi    $1, rdpCmdBufEndP1, 0x0
+    vmrg    $v14, $v14, $v15[0h]
+    addi    $2, rdpCmdBufEndP1, 0x4
+    vmrg    $v10, $v10, $v11[0h]
+    addi    $3, rdpCmdBufEndP1, 0x8
+    vmrg    $v22, $v22, $v23[0h]
+    addi    $6, rdpCmdBufEndP1, 0xC
+    vmrg    $v16, $v16, $v17[0h]
+    sqv     $v12, (0x00)(rdpCmdBufEndP1)
+    vmrg    $v20, $v20, $v21[0h]
+    sqv     $v14, (0x10)(rdpCmdBufEndP1)
+    vmrg    $v18, $v18, $v19[0h]
+    sqv     $v10, (0x20)(rdpCmdBufEndP1)
+    vmrg    $v26, $v26, $v27[9h]
+    sqv     $v22, (0x30)(rdpCmdBufEndP1)
+    vmrg    $v12, $v12, $v31[2] // 0; clear indices
+    sqv     $v16, (0x40)(rdpCmdBufEndP1)
+    sqv     $v20, (0x50)(rdpCmdBufEndP1)
+    sqv     $v18, (0x60)(rdpCmdBufEndP1)
+    j       merge_sort_entry
+     sqv    $v26, (0x70)(rdpCmdBufEndP1)
+    
+merge_sort_loop:
+    sh      $11, TODO
+merge_sort_entry:
+    vge     $v29, $v12, $v12[0] // Is the head of list 0 the highest?
+    cfc2    $7, $vcc
+    vge     $v29, $v12, $v12[2] // Or the head of list 2?
+    cfc2    $8, $vcc
+    vge     $v29, $v12, $v12[4] // Or list 4?
+    beq     $7, $24, merge_sort_list_0
+     cfc2   $9, $vcc
+    beq     $8, $24, merge_sort_list_2
+     nop
+    beq     $9, $24, merge_sort_list_4
+     nop
+merge_sort_list_6:
+    lsv     $v12[12], (0x10)($6) // Load next Z value
+    lh      $11, (0x2)($6) // Load index
+    j       merge_sort_loop
+     addi   $6, $6, 0x10
+
+merge_sort_list_4:
+    lsv     $v12[8], (0x10)($3)
+    lh      $11, (0x2)($3)
+    j       merge_sort_loop
+     addi   $3, $3, 0x10
+
+merge_sort_list_2:
+    lsv     $v12[4], (0x10)($2)
+    lh      $11, (0x2)($2)
+    j       merge_sort_loop
+     addi   $2, $2, 0x10
+
+merge_sort_list_0:
+    lsv     $v12[0], (0x10)($1)
+    lh      $11, (0x2)($1)
+    j       merge_sort_loop
+     addi   $1, $1, 0x10
+
+
+
+// Z sort loop. Find the section with the largest Z value.
+zso_subsection_loop:
+    lh      geomMode, geometryModeLabel
+    blez    numSubSecs, run_next_DL_command
+
+    addi    numSubSecs, numSubSecs, -1
+
+    // Find the index with the maximum Z value
+    vge     $v20, $v20, $v22 // Z values
+    lb      $24, alphaCompareCullMode
+    vmrg    $v21, $v21, $v23 // Indices
+    lb      $10, alphaCompareCullThresh
+    vge     $v24, $v24, $v26 // Z values
+    vmrg    $v25, $v25, $v27 // Indices
+    sra     $11, $24, 31 // -1 if ABOVE, else 0
+    vclr    tAlCC
+    add     $10, $10, $11 // thresh - 1 or - 0
+    vge     $v20, $v20, $v24
+    mtc2    $24, tAlCC[6] // 0 = disabled, 0001 cull if all < thresh, FFFF cull if all >= thresh
+    vmrg    $v21, $v21, $v25
+    mtc2    $10, tAlCC[7]
+    vge     $v20, $v20, $v20[1q]
+    vmrg    $v21, $v21, $v21[1q]
+    vge     $v20, $v20, $v20[2h]
+    vmrg    $v21, $v21, $v21[2h]
+    vge     $v20, $v20, $v20[4]
+    li      facingFlip, -0x8000 // Facing is sign bit
+    vmrg    $v21, $v21, $v21[4]
+    mfc2    $11, $v21[0] // Subsection index
+    mfc2    $10, $v20[0] // Z value
+    li      indexBufInc, 1
+    lbu     indexBuf, (zsoOffs)($11) // Offset into data
+    sll     $11, $11, 1 // * 2 for int16
+    sh      $zero, (vertexZs)($11) // Change this Z value to 0 so not selected again
+    addi    indexBuf, indexBuf, zsoData + 1 // Skip metadata byte
+    lb      $24, (-1)(indexBuf) // Metadata byte
+    lpv     $v26[0], (0)(indexBuf) // First tri
+    blez    $10, run_next_DL_command // Highest Z value is <= 0, done
+     andi   indexBufEnd, $24, 0x7F // Tri count
+    bltz    $24, @@skip_not_tri_strip
+     vmudn  $v29, vOne, vTRC_CCHS      // Cache start address
+    li      facingFlip, 0
+    li      indexBufInc, 3
+    sll     $11, indexBufEnd, 1
+    add     indexBufEnd, indexBufEnd, $11 // * 3
+@@skip_not_tri_strip:
+    vmadl   $v7, $v26, vTRC_OVSZ        // Plus vtx indices times output vertex size
+    j       tri_start
+     add    indexBufEnd, indexBufEnd, indexBuf
+
+
+    
+
 // H = highest on screen = lowest Y value; then M = mid, L = low
 tHAtF equ $v5
 tMAtF equ $v27
@@ -587,35 +795,39 @@ tPosMmH equ $v6
 tPosLmH equ $v8
 tPosHmM equ $v11
 tDaDyI equ $v27
+tSubPxHF equ $v4
+tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
+t1WI equ $v13 // elems 0, 4, 6
+tXPF equ $v16 // Triangle cross product
+tXPI equ $v17
 
 align_with_warning 8, "One instruction of padding before tris"
 
-.macro tri_v1_move
-    vmov    $v6[1], $v7[5] // Move next to cur vertex 1 addr. Must be after main tri code cause $v6 not saved.
-.endmacro
 
-G_TRI2_handler: // If we jumped here, want $ra next to be G_TRI1_handler
-G_QUAD_handler:
-    li      $ra, (G_TRI1_handler - (tris_end - G_TRI1_handler))
-G_TRI1_handler: // Whether we get here from cmd handler or prev tri, $ra == G_TRI1_handler
-    // $v6: -- V1 -- -- -- -- -- -- This vertex address 1
-    // $v7: -- -- V2 V3 -- N1 N2 N3 This and next vertex addresses
-    mfc2    $2, $v7[4]
-    mfc2    $1, $v6[2] // Can't move this up, $v6 is not ready yet when coming from return_and_end_mat
-    vmudh   $v6, vOne, $v6[1] // elem 2 of v6 = vertex 1 addr
-    addi    $ra, $ra, (tris_end - G_TRI1_handler) // So next go to tris_end
-    vmudh   $v4, vOne, $v7[2] // elem 2 of v4 = vertex 2 addr
+
+
+tri_end:
+    xor     geomMode, geomMode, facingFlip
+    beq     indexBuf, indexBufEnd, zso_subsection_loop
+     add    indexBuf, indexBuf, indexBufInc
+tri_start:
+    vmudh   $v6, vOne, $v7[0] // elem 2 of v6 = vertex 1 addr
+    mfc2    $1, $v7[0]
+    vmudh   $v4, vOne, $v7[1] // elem 2 of v4 = vertex 2 addr
+    mfc2    $2, $v7[2]
+    vmudh   $v8, vOne, $v7[2] // elem 2 of v8 = vertex 3 addr
     addi    perfCounterB, perfCounterB, 0x4000  // Increment number of tris requested
-    vmudh   $v8, vOne, $v7[3] // elem 2 of v8 = vertex 3 addr
-    mfc2    $3, $v7[6]
-    vmov    $v7[3], $v7[7]    // Move next to cur vertex 3 addr.
     vnxor   tHAtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
-    llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
+    lpv     $v26[0], (0)(indexBuf)
     vnxor   tMAtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
-    llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
+    mfc2    $3, $v7[4]
     vnxor   tLAtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
+    llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
+    vmudh   $v3, vOne, $v31[5] // 0x4000; some rounding factor
+    llv     $v4[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
+    vmudn   $v29, vOne, vTRC_CCHS      // Cache start address
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
-    vmov    $v7[2], $v7[6]    // Move next to cur vertex 2 addr.
+    vmadl   $v7, $v26, vTRC_OVSZ        // Plus vtx indices times output vertex size
     lhu     $6, VTX_CLIP($1)
     vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
     lhu     $7, VTX_CLIP($2)
@@ -624,64 +836,59 @@ G_TRI1_handler: // Whether we get here from cmd handler or prev tri, $ra == G_TR
     vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
     andi    $11, $6, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
     vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
-    and     $11, $11, $7
-    vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
-    and     $11, $11, $8
-    vmrg    tHPos, $v6, $v4   // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
-    bnez    $11, return_and_end_mat // Then the whole tri is offscreen, cull
-     // 16 cycles (for tri2 first tri; tri1/only subtract 1 from counts)
-     vmudh  $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
-    vmadh   $v26, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
-    // nop
-    vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
-    // nop
-    vmrg    tLPos, $v6, $v4   // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
     or      $10, $6, $7
-    vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
+    vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
     or      $10, $10, $8      // $10 = all clip bits which are true for any verts
-    vmrg    $v4, tHPos, $v8   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
-    mfc2    $9, $v26[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
-    vmrg    tHPos, $v8, tHPos // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
+    vmrg    tHPos, $v6, $v4   // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     andi    $10, $10, CLIP_SCAL_NPXY | CLIP_CAMPLANE
+    vmudh   $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
+    bnez    $10, tri_end // Reject (instead of clipping)
+     vmadh  $v26, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
+    vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
+    and     $11, $11, $7
+    vmrg    tLPos, $v6, $v4   // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
+    and     $11, $11, $8
+    vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
+    bnez    $11, tri_end // Then the whole tri is offscreen, cull
+     mfc2   $9, $v26[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
+    vmrg    $v4, tHPos, $v8   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
+    lbv     tAlCC[1], VTX_COLOR_A($1) // Vertex 1 alpha to elem 0
+    vmrg    tHPos, $v8, tHPos // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
+    lbv     tAlCC[3], VTX_COLOR_A($2) // Vertex 2 alpha to elem 1
     vlt     $v29, $v6, $v2    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
-    bnez    $10, return_and_end_mat // Reject (instead of clipping)
-     // 24 cycles
-     xor    $11, $9, geomMode // Sign bit clear if x prod positive (back facing), set if x prod negative (front facing)
-    vmudh   $v3, vOne, $v31[5] // 0x4000; some rounding factor
-    // nop
+    xor     $11, $9, geomMode // Sign bit clear if x prod positive (back facing), set if x prod negative (front facing)
     vmrg    tMPos, $v4, tLPos // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
-    bgez    $11, return_and_end_mat // Cull if bit is clear (culled based on facing)
-     // 27 cycles
-     vmrg   tLPos, tLPos, $v4 // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
-tSubPxHF equ $v4
-    vmudn   tSubPxHF, tHPos, $v31[5] // 0x4000
-    beqz    $9, return_and_end_mat  // If cross product is 0, tri is degenerate (zero area), cull.
-     // 29 cycles
-     vsub   tPosMmH, tMPos, tHPos
-    vsub    tPosLmH, tLPos, tHPos
-    vsub    tPosHmM, tHPos, tMPos
-    mfc2    $1, tHPos[4]     // tHPos = lowest Y value = highest on screen (x, y, addr)
-    // 32 cycles if NOC
-tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
-    vsub    tPosCatI, tLPos, tMPos
+    bgez    $11, tri_end // Cull if bit is clear (culled based on facing)
+     lbv    tAlCC[5], VTX_COLOR_A($3) // Vertex 3 alpha to elem 2
+    vmrg    tLPos, tLPos, $v4 // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
+    beqz    $9, tri_end  // If cross product is 0, tri is degenerate (zero area), cull.
+     mfc2   $1, tHPos[4]     // tHPos = lowest Y value = highest on screen (x, y, addr)
+    vsub    tPosMmH, tMPos, tHPos
     mfc2    $2, tMPos[4]     // tMPos = mid vertex (x, y, addr)
-    vmov    tPosCatI[2], tPosMmH[0]
-    // nop
-    vmudh   $v29, tPosMmH, tPosLmH[0]
+    vmudh   TEMP, tAlCC, tAlCC[6] // Multiply by 0, 1, or -1
     li      $20, -8       // 0xFFF8; constant for some mask below
-t1WI equ $v13 // elems 0, 4, 6
-    vmadh   $v29, tPosLmH, tPosHmM[0]
-    mfc2    $3, tLPos[4]     // tLPos = highest Y value = lowest on screen (x, y, addr)
-tXPF equ $v16 // Triangle cross product
-tXPI equ $v17
-    vreadacc tXPI, ACC_UPPER
-    // nop
-    vreadacc tXPF, ACC_MIDDLE
+    vsub    tPosLmH, tLPos, tHPos
     lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
-    vrcp    $v20[0], tPosCatI[1]
+    vsub    tPosHmM, tHPos, tMPos
+    mfc2    $3, tLPos[4]     // tLPos = highest Y value = lowest on screen (x, y, addr)
+    vsub    tPosCatI, tLPos, tMPos
     lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
-    vmov    tPosCatI[3], tPosLmH[0]
+    vge     $v29, TEMP, TEMP[7] // A1, A2, A3 >= +/- threshold
     lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
+    vmov    tPosCatI[2], tPosMmH[0]
+    cfc2    $11, $vcc
+    vmudh   $v29, tPosMmH, tPosLmH[0]
+    // nop
+    vmadh   $v29, tPosLmH, tPosHmM[0]
+    // nop
+    vreadacc tXPI, ACC_UPPER
+    andi    $11, $11, 7 // Elems 0, 1, 2 only
+    vreadacc tXPF, ACC_MIDDLE
+    beqz    $11, tri_end  // A1, A2, A3 all < threshold
+     vmudn  tSubPxHF, tHPos, $v31[5] // 0x4000
+    vrcp    $v20[0], tPosCatI[1]
+    // bnez    pendingMatAddr, draw_mat
+     vmov   tPosCatI[3], tPosLmH[0]
     vrcph   $v22[0], tXPI[1]
     // nop
 tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
@@ -699,7 +906,7 @@ tXPRcpI equ $v24
     vrcph   $v22[3], tPosLmH[1]
     llv     t1WI[12], VTX_INV_W_VEC($3)
     vmudl   tHAtI, tHAtI, vTRC_0100 // vertex color 1 >>= 8
-    lb      $11, (alphaCompareCullMode)($zero)
+    // nop
     vmudl   tMAtI, tMAtI, vTRC_0100 // vertex color 2 >>= 8
     lw      $6, VTX_INV_W_VEC($1) // $6, $7, $8 = 1/W for H, M, L
     vmudl   tLAtI, tLAtI, vTRC_0100 // vertex color 3 >>= 8
@@ -707,11 +914,9 @@ tXPRcpI equ $v24
     vmudl   $v29, $v20, vTRC_0020
     lw      $8, VTX_INV_W_VEC($3)
     vmadm   $v22, $v22, vTRC_0020
-    bnez    $11, tri_alpha_compare_cull
-     vmadn  $v20, $v31, $v31[2] // 0
-// $v6 <- tPosMmH; $v6 clobbered in alpha compare cull
-tri_return_from_alpha_compare_cull: // Uses $v25, $v26
-    // 53 cycles
+    // nop
+    vmadn   $v20, $v31, $v31[2] // 0
+    // nop
 tPosCatF equ $v25
     vmudm   tPosCatF, tPosCatI, vTRC_1000
     mtc2    $20, tMPos[14] // 0xFFF8; only elem 0, 1, 2 of this reg used now
@@ -907,9 +1112,8 @@ tDaDeI equ $v9
     sdv     tDaDeI[8], 0x0020($1)   // Store DsDe, DtDe, DwDe texture coefficients (integer)
     sdv     tHAtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
     sdv     tHAtI[0], 0x0000($2)   // Store RGBA shade color (integer)
-    tri_v1_move                    // From return_and_end_mat, we didn't go there
     sdv     tHAtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
-    bltz    dmemAddr, return_and_end_mat     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
+    bltz    dmemAddr, tri_end     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
      sdv    tHAtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
      // 146 cycles
 flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAddr = large neg num -> only wait and set DPC_END
@@ -957,23 +1161,6 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
     j       dma_read_write
      addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_TRI_SIZE_NO_ZBUF + 8)
 
-tri_alpha_compare_cull:
-// Alpha compare culling
-    vge     $v26, tHAtI, tMAtI
-    lbu     $19, alphaCompareCullThresh
-    vlt     $v25, tHAtI, tMAtI
-    bgtz    $11, @@skip1
-     vge    $v26, $v26, tLAtI // If alphaCompareCullMode > 0, $v26 = max of 3 verts
-    vlt     $v26, $v25, tLAtI // else if < 0, $v26 = min of 3 verts
-@@skip1: // $v26 elem 3 has max or min alpha value
-    mfc2    $24, $v26[6]
-    sub     $24, $24, $19 // sign bit set if (max/min) < thresh
-    xor     $24, $24, $11 // invert sign bit if other cond. Sign bit set -> cull,
-    bgez    $24, tri_return_from_alpha_compare_cull // if max < thresh or if min >= thresh.
-return_and_end_mat:
-     tri_v1_move // overwrites $v6[1]
-    jr      $ra
-     nop
 
 vtx_after_dma:
     andi    inVtx, dmemAddr, 0xFFF8            // Round down input start addr to DMA word

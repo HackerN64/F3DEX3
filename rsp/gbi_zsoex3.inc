@@ -10,10 +10,11 @@ G_RDPHALF_1         equ 0xE3
 //
 G_RELSEGMENT        equ 0x01
 G_VTX               equ 0x02
-G_TRI1              equ 0x03
-G_TRI2              equ 0x04
+G_ZSOSECTION        equ 0x03
 
 mtxSize equ 0x50
+
+G_ZSOSECTION_MAX_DATA_BYTES equ 192
 
 // RSP Vertex structure offsets
 vtxSize equ 0x14

@@ -89,8 +89,7 @@ typedef __attribute__((aligned(8))) struct {
 /* RDP commands go here */
 #define G_RELSEGMENT        0x01
 #define G_VTX               0x02
-#define G_TRI1              0x03
-#define G_TRI2              0x04
+#define G_ZSOSECTION        0x03
 
 /*
  * RSP command argument and misc defines
@@ -176,7 +175,6 @@ typedef __attribute__((aligned(8))) struct {
 #define gSPVertex(pkt, addr, n, v0, mtx1, mtx2)     \
 _DW({                                               \
     Gfx *_g = (Gfx *)(pkt);                         \
-                                                    \
     _g->words.w0 = (_SHIFTL(G_VTX,      24, 8) |    \
                     _SHIFTL((mtx1),     20, 4) |    \
                     _SHIFTL((mtx2),     16, 4) |    \
@@ -200,7 +198,7 @@ _DW({                                               \
  * comprised of sections; the sections are Z-sorted on the CPU. Then each
  * section is comprised of sub-sections, which are sorted on the RSP by ZSOEX3.
  * Finally, each subsection contains one or more triangles, which are drawn in
- * the static order they are specified in the ZSOSection.
+ * an arbitrary order.
  * 
  * Formally, each section must have a convex hull which is non-overlapping in
  * volume (they may share points, lines, or planes) with any other section's
@@ -229,51 +227,42 @@ typedef __attribute__((aligned(16))) struct {
     /** Offset into data for each subsection. */
     unsigned char offs[32];
     /**
-     * Data for all subsections concatenated.
+     * Data for all subsections concatenated. Maximum size
+     * G_ZSOSECTION_MAX_DATA_BYTES.
      * The first byte for a subsection is the metadata about the subsection. Its
      * lower 7 bits are the triangle count in this subsection. Its upper bit is:
      * 0 = 3 indices per triangle, 1 = 1 index per triangle as a tri strip. In
      * the latter case it draws indices 0-1-2, 1-2-3 flipped, 2-3-4, 3-4-5
      * flipped, etc. After the first byte are the triangle indices.
      */
-    unsigned char data[192];
+    unsigned char data[];
 } ZSOSection;
 
-#define __gsSP1Triangle_w1(v0, v1, v2) \
-   (_SHIFTL((v0), 16, 8) |             \
-    _SHIFTL((v1),  8, 8) |             \
-    _SHIFTL((v2),  0, 8))
+#define G_ZSOSECTION_MAX_DATA_BYTES 192
+
+#define _ZSOSECTION_DMA_LEN(ndata) ((((ndata) + 64 + 7) & 0xF8) - 1)
 
 /**
- * 1 Triangle
- */
-#define gSP1Triangle(pkt, v0, v1, v2) \
-    g1Word(pkt, G_TRI1, __gsSP1Triangle_w1(v0, v1, v2))
-/**
- * @copydetails gSP1Triangle
- */
-#define gsSP1Triangle(v0, v1, v2)     \
-    gs1Word(G_TRI1, __gsSP1Triangle_w1(v0, v1, v2))
-
-/**
- * 2 Triangles
- */
-#define gSP2Triangles(pkt, v00, v01, v02, v10, v11, v12)  \
-_DW({                                                     \
-    Gfx *_g = (Gfx *)(pkt);                               \
-    _g->words.w0 = (_SHIFTL(G_TRI2, 24, 8) |              \
-                    __gsSP1Triangle_w1(v00, v01, v02));   \
-    _g->words.w1 =  __gsSP1Triangle_w1(v10, v11, v12);    \
+ * Upload, Z-sort, and draw the triangles of a section.
+ * @p addr Segmented address of a ZSOSection
+ * @p nss Number of subsections
+ * @p ndata Number of bytes in the data array
+*/
+#define gSPZSOSection(pkt, addr, nss, ndata)                    \
+_DW({                                                           \
+    Gfx *_g = (Gfx *)(pkt);                                     \
+    _g->words.w0 = (_SHIFTL(G_ZSOSECTION,              24, 8) | \
+                    _SHIFTL((nss),                     16, 8) | \
+                    _SHIFTL(_ZSOSECTION_DMA_LEN(ndata), 0, 8)); \
+    _g->words.w1 = (unsigned int)(addr);                        \
 })
-
-/**
- * @copydetails gSP2Triangles
- */
-#define gsSP2Triangles(v00, v01, v02, v10, v11, v12)  \
-{                                                     \
-   (_SHIFTL(G_TRI2, 24, 8) |                          \
-    __gsSP1Triangle_w1(v00, v01, v02)),               \
-    __gsSP1Triangle_w1(v10, v11, v12)                 \
+/** @copydetails gSPZSOSection */
+#define gsSPZSOSection(addr, n, v0, mtx1, mtx2) \
+{                                               \
+   (_SHIFTL(G_ZSOSECTION,              24, 8) | \
+    _SHIFTL((nss),                     16, 8) | \
+    _SHIFTL(_ZSOSECTION_DMA_LEN(ndata), 0, 8)), \
+    (unsigned int)(addr)                        \
 }
 
 
