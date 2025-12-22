@@ -183,6 +183,13 @@ rdpHalf1Val:
 
     .align 16 // TODO
 
+.if (. & 15) != 0
+    .error "zsoSection must be aligned to 16"
+.endif
+texrectState:  // Only needs to be saved over texrect, half1, half2
+zsoSection:
+    .skip 256
+
 .if (. & 3) != 0
     .error "cpuInterface must be aligned to 4"
 .endif
@@ -200,23 +207,11 @@ rdpFifoEnd:
 segmentTable:
     .skip (4 * 16) // 16 DRAM pointers
 
+.if (. & 7) != 0
+    .error "lightColors must be aligned to 16"
+.endif
 lightColors:
     .skip 16
-
-.if (. & 15) != 0
-    .error "vertexZs must be aligned to 16"
-.endif
-
-texrectState:  // Only needs to be saved over texrect, half1, half2
-vertexZs:
-    .skip 32 // int16 each; second half overwrites rvtx
-zsoSection:
-zsoRVtx:
-    .skip 32
-zsoOffs:
-    .skip 32
-zsoData:
-    .skip 192
 
 .if (. & 7) != 0
     .error "cacheStart must be aligned to 8"
@@ -579,56 +574,49 @@ G_ZSOSECTION_handler:
      li     nextRA, zso_after_dma
 
 zso_after_dma:
-    // Convert reference vertices from index -> address -> Z position
+    // Convert reference vertices from index -> address
     lpv     $v2, (zsoRVtx + 0x00)($zero)
     lpv     $v3, (zsoRVtx + 0x08)($zero)
     lpv     $v4, (zsoRVtx + 0x10)($zero)
     lpv     $v5, (zsoRVtx + 0x18)($zero)
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
-    lbu     numSubSecs, (inputBufferEnd - 0x07)(inputBufferPos)
+    lbu     subSecEnd, (inputBufferEnd - 0x07)(inputBufferPos)
     vmadl   $v2,  $v2,  vTRC_OVSZ  // Plus vtx indices times output vertex size
-    li      $11, 0
+    li      subSec, 0
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
-    li      $10, 0
+    li      $6, zsoData
     vmadl   $v3,  $v3,  vTRC_OVSZ  // Plus vtx indices times output vertex size
-    mov     $24, rdpCmdBufEndP1
+    move    $1, rdpCmdBufEndP1
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
-    sqv     vZero, (vertexZs + 0x00)($zero) // Set invalid vertex Zs to 0 (close to camera)
+    sqv     vZero, (0x40)(rdpCmdBufEndP1) // Set invalid vertex Zs to 0 (close to camera)
     vmadl   $v4,  $v4,  vTRC_OVSZ  // Plus vtx indices times output vertex size
-    sqv     vZero, (vertexZs + 0x10)($zero)
+    sqv     vZero, (0x50)(rdpCmdBufEndP1)
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
-    sqv     vZero, (vertexZs + 0x20)($zero)
+    sqv     vZero, (0x60)(rdpCmdBufEndP1)
     vmadl   $v5,  $v5,  vTRC_OVSZ  // Plus vtx indices times output vertex size
-    sqv     vZero, (vertexZs + 0x30)($zero)
+    sqv     vZero, (0x70)(rdpCmdBufEndP1)
     sqv     $v2, (0x00)(rdpCmdBufEndP1)
     sqv     $v3, (0x10)(rdpCmdBufEndP1)
     sqv     $v4, (0x20)(rdpCmdBufEndP1)
     sqv     $v5, (0x30)(rdpCmdBufEndP1)
+    // Convert reference vertices from address -> Z position
 @@loop:
-    lhu     $19, (0)($24)
-    addi    $24, $24, 2
-    addi    $11, $11, 2
-    lhu     $19, (VTX_SCR_Z)($19)
-    addi    $10, $10, 1
-    bne     $10, numSubSecs, @@loop
-     sw     $19, (vertexZs - 2)($11)
-    // Create iota (0, 1, ..., 31) in elements of $v21, $v23, $v25, $v27 for indices
-    veq     $v29, $v31, $v31[1q] // VCC = 01010101
-    vmrg    $v11, vZero, vOne    // Ones
-    vge     $v29, $v31, $v31[2h] // VCC = 00110011
-    vmrg    $v12, vZero, $v31[3] // Twos
-    vge     $v14, vZero, $v31[0h] // Fours
-    vmudl   $v18, $v31, vTRC_0020 // Elem 5 = 8
-    lqv     $v20, (vertexZs + 0x00)($zero)
-    vmudh   $v29, vOne, $v11 // Ones
-    lqv     $v22, (vertexZs + 0x10)($zero)
-    vmadh   $v29, vOne, $v12 // + Twos
-    lqv     $v24, (vertexZs + 0x20)($zero)
-    vmadh   $v21, vOne, $v14 // + Fours
-    lqv     $v26, (vertexZs + 0x30)($zero)
-    vmadh   $v23, vOne, $v18[5] // + 8
-    vmadh   $v25, vOne, $v18[5] // + 8
-    vmadh   $v27, vOne, $v18[5] // + 8
+    lhu     $3, (0)($1)
+    mtc2    $6, $v2[0] // zsoData; it's here cause this was a stall cycle
+    addi    $1, $1, 2
+    lhu     $3, (VTX_SCR_Z)($3)
+    addi    subSec, subSec, 1
+    bne     subSec, subSecEnd, @@loop
+     sw     $3, (0x40 - 2)($1)
+    // Load offsets and Zs
+    lqv     $v20, (0x40)(rdpCmdBufEndP1)
+    lpv     $v21, (zsoOffs + 0x00)($zero)
+    lqv     $v22, (0x50)(rdpCmdBufEndP1)
+    lpv     $v23, (zsoOffs + 0x08)($zero)
+    lqv     $v24, (0x60)(rdpCmdBufEndP1)
+    lpv     $v25, (zsoOffs + 0x10)($zero)
+    lqv     $v26, (0x70)(rdpCmdBufEndP1)
+    lpv     $v27, (zsoOffs + 0x18)($zero)
     // Optimal 8 element sorting network from
     // https://bertdobbelaere.github.io/sorting_networks.html#N8L19D6
     // Elements 0 and 1 from each of 4 vectors
@@ -644,6 +632,17 @@ zso_after_dma:
     vlt     z0, z0, z0[1q]
     vmrg    i0, i0, i0[1q]
 .endmacro
+
+TODO:
+    lb      $24, alphaCompareCullMode
+    lb      $10, alphaCompareCullThresh
+    sra     $11, $24, 31 // -1 if ABOVE, else 0
+    vclr    tAlCC
+    add     $10, $10, $11 // thresh - 1 or - 0
+    mtc2    $24, tAlCC[6] // 0 = disabled, 0001 cull if all < thresh, FFFF cull if all >= thresh
+    mtc2    $10, tAlCC[7]
+    
+
     sort_swap $v12, $v13, $v14, $v15, $v20, $v21, $v22, $v23 // swap(a0, b0), swap(a1, b1)
     sort_swap $v15, $v17, $v18, $v19, $v24, $v25, $v26, $v27 // swap(c0, d0), swap(c1, d1)
     sort_swap $v20, $v21, $v24, $v25, $v12, $v13, $v16, $v17 // swap(a0, c0), swap(a1, c1)
@@ -658,6 +657,7 @@ zso_after_dma:
     sort_swap $v20, $v21, $v18, $v19, $v14, $v15, $v18, $v19 // new b1, d0 = swap(b1, d0)
     sort_swap $v14, $v15, $v10, $v11, $v22, $v23, $v10, $v11 // new a1, b0 = swap(a1, b0)
     sort_swap $v22, $v23, $v16, $v17, $v20, $v21, $v16, $v17 // new b1, c0 = swap(b1, c0)
+    li      subSec, 0
     sort_swap $v20, $v21, $v18, $v19, $v24, $v25, $v18, $v19 // new c1, d0 = swap(c1, d0)
     sqv     vZero, (0x80)(rdpCmdBufEndP1) // So when lists run off end, get z = 0
     // Element 0 of these regs are sorted in order, same for 2, 4, 6
@@ -689,7 +689,10 @@ zso_after_dma:
      sqv    $v26, (0x70)(rdpCmdBufEndP1)
     
 merge_sort_loop:
-    sh      $11, TODO
+    beqz    $10, sort_done
+     addi   subSec, subSec, 1
+    beq     subSec, subSecEnd, sort_done
+     sb     $11, (zsoSection)(subSec)
 merge_sort_entry:
     vge     $v29, $v12, $v12[0] // Is the head of list 0 the highest?
     cfc2    $7, $vcc
@@ -703,83 +706,44 @@ merge_sort_entry:
     beq     $9, $24, merge_sort_list_4
      nop
 merge_sort_list_6:
-    lsv     $v12[12], (0x10)($6) // Load next Z value
-    lh      $11, (0x2)($6) // Load index
+.macro merge_sort_list vbyte, ptr
+    mfc2    $10, $v12[vbyte] // Get selected Z value
+    lsv     $v12[vbyte], (0x10)(ptr) // Load next Z value
+    lbu     $11, (0x2)(ptr) // Load offset
     j       merge_sort_loop
-     addi   $6, $6, 0x10
-
+     addi   ptr, ptr, 0x10
+.endmacro
+    merge_sort_list 12, $6
 merge_sort_list_4:
-    lsv     $v12[8], (0x10)($3)
-    lh      $11, (0x2)($3)
-    j       merge_sort_loop
-     addi   $3, $3, 0x10
-
+    merge_sort_list 8, $3
 merge_sort_list_2:
-    lsv     $v12[4], (0x10)($2)
-    lh      $11, (0x2)($2)
-    j       merge_sort_loop
-     addi   $2, $2, 0x10
-
+    merge_sort_list 4, $2
 merge_sort_list_0:
-    lsv     $v12[0], (0x10)($1)
-    lh      $11, (0x2)($1)
-    j       merge_sort_loop
-     addi   $1, $1, 0x10
+    merge_sort_list 0, $1
 
-
-
-// Z sort loop. Find the section with the largest Z value.
-zso_subsection_loop:
+sort_done:
+    move    subSecEnd, subSec // In case exited loop due to Z=0
+    li      subSec, 0
+subsec_loop:
+    lbu     indexBuf, (zsoSection)(subSec)
     lh      geomMode, geometryModeLabel
-    blez    numSubSecs, run_next_DL_command
-
-    addi    numSubSecs, numSubSecs, -1
-
-    // Find the index with the maximum Z value
-    vge     $v20, $v20, $v22 // Z values
-    lb      $24, alphaCompareCullMode
-    vmrg    $v21, $v21, $v23 // Indices
-    lb      $10, alphaCompareCullThresh
-    vge     $v24, $v24, $v26 // Z values
-    vmrg    $v25, $v25, $v27 // Indices
-    sra     $11, $24, 31 // -1 if ABOVE, else 0
-    vclr    tAlCC
-    add     $10, $10, $11 // thresh - 1 or - 0
-    vge     $v20, $v20, $v24
-    mtc2    $24, tAlCC[6] // 0 = disabled, 0001 cull if all < thresh, FFFF cull if all >= thresh
-    vmrg    $v21, $v21, $v25
-    mtc2    $10, tAlCC[7]
-    vge     $v20, $v20, $v20[1q]
-    vmrg    $v21, $v21, $v21[1q]
-    vge     $v20, $v20, $v20[2h]
-    vmrg    $v21, $v21, $v21[2h]
-    vge     $v20, $v20, $v20[4]
+    beq     subSec, subSecEnd, run_next_DL_command
+     lpv    $v26[0], (zsoSection)(indexBuf) // First tri
+    lb      $24, (zsoSection)(indexBuf)
+    addi    subSec, subSec, 1
     li      facingFlip, -0x8000 // Facing is sign bit
-    vmrg    $v21, $v21, $v21[4]
-    mfc2    $11, $v21[0] // Subsection index
-    mfc2    $10, $v20[0] // Z value
-    li      indexBufInc, 1
-    lbu     indexBuf, (zsoOffs)($11) // Offset into data
-    sll     $11, $11, 1 // * 2 for int16
-    sh      $zero, (vertexZs)($11) // Change this Z value to 0 so not selected again
-    addi    indexBuf, indexBuf, zsoData + 1 // Skip metadata byte
-    lb      $24, (-1)(indexBuf) // Metadata byte
-    lpv     $v26[0], (0)(indexBuf) // First tri
-    blez    $10, run_next_DL_command // Highest Z value is <= 0, done
-     andi   indexBufEnd, $24, 0x7F // Tri count
+    vmudn   $v29, vOne, vTRC_CCHS      // Cache start address
+    andi    indexBufEnd, $24, 0x7F // Tri count
+    vmadl   $v7, $v26, vTRC_OVSZ        // Plus vtx indices times output vertex size
     bltz    $24, @@skip_not_tri_strip
-     vmudn  $v29, vOne, vTRC_CCHS      // Cache start address
+     li     indexBufInc, 1
     li      facingFlip, 0
     li      indexBufInc, 3
     sll     $11, indexBufEnd, 1
     add     indexBufEnd, indexBufEnd, $11 // * 3
 @@skip_not_tri_strip:
-    vmadl   $v7, $v26, vTRC_OVSZ        // Plus vtx indices times output vertex size
     j       tri_start
      add    indexBufEnd, indexBufEnd, indexBuf
-
-
-    
 
 // H = highest on screen = lowest Y value; then M = mid, L = low
 tHAtF equ $v5
@@ -801,14 +765,9 @@ t1WI equ $v13 // elems 0, 4, 6
 tXPF equ $v16 // Triangle cross product
 tXPI equ $v17
 
-align_with_warning 8, "One instruction of padding before tris"
-
-
-
-
 tri_end:
     xor     geomMode, geomMode, facingFlip
-    beq     indexBuf, indexBufEnd, zso_subsection_loop
+    beq     indexBuf, indexBufEnd, subsec_loop
      add    indexBuf, indexBuf, indexBufInc
 tri_start:
     vmudh   $v6, vOne, $v7[0] // elem 2 of v6 = vertex 1 addr
@@ -818,7 +777,7 @@ tri_start:
     vmudh   $v8, vOne, $v7[2] // elem 2 of v8 = vertex 3 addr
     addi    perfCounterB, perfCounterB, 0x4000  // Increment number of tris requested
     vnxor   tHAtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
-    lpv     $v26[0], (0)(indexBuf)
+    lpv     $v26[0], (zsoSection)(indexBuf)
     vnxor   tMAtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
     mfc2    $3, $v7[4]
     vnxor   tLAtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding

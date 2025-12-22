@@ -220,49 +220,64 @@ _DW({                                               \
  * in the space between the two when the arm is folded. But in a fighting game,
  * when limbs of another character could be there, it would have to be one
  * section per bone.
+ * 
+ * A ZSOSection is a u8 array of length 33-256 bytes. Make sure it is declared
+ * as __attribute__((aligned(8))) in your object file, or 16 if it will be
+ * modified by the CPU.
+ * 
+ * At byte 0, the reference vertex indices start. There are up to 32 of these,
+ * one per subsection. These identify which vertex to load the Z value of, to
+ * sort the subsections.
+ * 
+ * At byte 32, the offsets start. There are up to 32 of these, one per
+ * subsection. This is the offset in bytes from the start of the ZSOSection
+ * for this subsection's data.
+ * 
+ * At byte N, where N is the offset of a particular subsection, is 1 byte of
+ * metadata about the subsection. Its lower 7 bits are the triangle count in
+ * this subsection. Its upper bit is: 0 = 3 indices per triangle, 1 = 1 index
+ * per triangle as a tri strip. In the latter case it draws indices 0-1-2, 1-2-3
+ * flipped, 2-3-4, 3-4-5 flipped, etc.
+ *
+ * Starting at byte N+1 are the triangle indices for this subsection. There are
+ * 3 * (metadata & 0x7F) indices if !(metadata & 0x80), else there are 2 +
+ * (metadata & 0x7F) indices.
+ * 
+ * This is organized in this strange way rather than using a typical struct
+ * layout in order to promote packing. If there are fewer subsections, triangle
+ * data can be placed in the upper bytes of the reference indices. For example,
+ * a ZSOSection containing just one subsection can be 33 bytes and contain
+ * 28 triangles: byte 0 is the reference vertex index, byte 1 is the metadata
+ * 0x9C (tri strip + 28 tris), bytes 2 through 31 are the indices, and byte 33
+ * is the offset 1.
  */
-typedef __attribute__((aligned(16))) struct {
-    /** Reference vertex whose Z value the subsections are sorted by. */
-    unsigned char rvtx[32];
-    /** Offset into data for each subsection. */
-    unsigned char offs[32];
-    /**
-     * Data for all subsections concatenated. Maximum size
-     * G_ZSOSECTION_MAX_DATA_BYTES.
-     * The first byte for a subsection is the metadata about the subsection. Its
-     * lower 7 bits are the triangle count in this subsection. Its upper bit is:
-     * 0 = 3 indices per triangle, 1 = 1 index per triangle as a tri strip. In
-     * the latter case it draws indices 0-1-2, 1-2-3 flipped, 2-3-4, 3-4-5
-     * flipped, etc. After the first byte are the triangle indices.
-     */
-    unsigned char data[];
-} ZSOSection;
+typedef unsigned char ZSOSection;
 
-#define G_ZSOSECTION_MAX_DATA_BYTES 192
+#define G_ZSOSECTION_MAX_SIZE 256
 
-#define _ZSOSECTION_DMA_LEN(ndata) ((((ndata) + 64 + 7) & 0xF8) - 1)
+#define _ZSOSECTION_DMA_LEN(sz) ((((sz) + 7) & 0xF8) - 1)
 
 /**
  * Upload, Z-sort, and draw the triangles of a section.
  * @p addr Segmented address of a ZSOSection
  * @p nss Number of subsections
- * @p ndata Number of bytes in the data array
+ * @p sz Size in bytes of the ZSOSection
 */
-#define gSPZSOSection(pkt, addr, nss, ndata)                    \
-_DW({                                                           \
-    Gfx *_g = (Gfx *)(pkt);                                     \
-    _g->words.w0 = (_SHIFTL(G_ZSOSECTION,              24, 8) | \
-                    _SHIFTL((nss),                     16, 8) | \
-                    _SHIFTL(_ZSOSECTION_DMA_LEN(ndata), 0, 8)); \
-    _g->words.w1 = (unsigned int)(addr);                        \
+#define gSPZSOSection(pkt, addr, nss, sz)                    \
+_DW({                                                        \
+    Gfx *_g = (Gfx *)(pkt);                                  \
+    _g->words.w0 = (_SHIFTL(G_ZSOSECTION,           24, 8) | \
+                    _SHIFTL((nss),                  16, 8) | \
+                    _SHIFTL(_ZSOSECTION_DMA_LEN(sz), 0, 8)); \
+    _g->words.w1 = (unsigned int)(addr);                     \
 })
 /** @copydetails gSPZSOSection */
-#define gsSPZSOSection(addr, n, v0, mtx1, mtx2) \
-{                                               \
-   (_SHIFTL(G_ZSOSECTION,              24, 8) | \
-    _SHIFTL((nss),                     16, 8) | \
-    _SHIFTL(_ZSOSECTION_DMA_LEN(ndata), 0, 8)), \
-    (unsigned int)(addr)                        \
+#define gsSPZSOSection(addr, nss, sz)        \
+{                                            \
+   (_SHIFTL(G_ZSOSECTION,           24, 8) | \
+    _SHIFTL((nss),                  16, 8) | \
+    _SHIFTL(_ZSOSECTION_DMA_LEN(sz), 0, 8)), \
+    (unsigned int)(addr)                     \
 }
 
 
