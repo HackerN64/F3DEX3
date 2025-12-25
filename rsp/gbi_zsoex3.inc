@@ -14,8 +14,6 @@ G_ZSOSECTION        equ 0x03
 
 mtxSize equ 0x50
 
-G_ZSOSECTION_MAX_DATA_BYTES equ 192
-
 // RSP Vertex structure offsets
 vtxSize equ 0x14
 

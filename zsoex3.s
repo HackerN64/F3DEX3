@@ -18,7 +18,6 @@ cacheSize:
     .dh (cacheEnd - cacheStart)
 
 movememTable:
-    .dh zsoSection    // G_MV_ZSOSECTION
     .dh cacheEnd      // G_MV_CACHEEND
     .dh viewport      // G_MV_VIEWPORT
     .dh lightColors   // G_MV_LIGHTCOLORS
@@ -26,6 +25,9 @@ movememTable:
 movewordTable:
     .dh fxParams      // G_MW_FX
     .dh segmentTable  // G_MW_SEGMENT
+
+unused1:
+    .dh 0
 
 viewport: // v31Value only used at init, so we can clobber it after that.
 // constants for register $v31
@@ -181,14 +183,10 @@ perspNorm:
 rdpHalf1Val:
     .skip 4
 
-    .align 16 // TODO
+    .align 8 // TODO
 
-.if (. & 15) != 0
-    .error "zsoSection must be aligned to 16"
-.endif
 texrectState:  // Only needs to be saved over texrect, half1, half2
-zsoSection:
-    .skip 256
+    .skip 8 // TODO
 
 .if (. & 3) != 0
     .error "cpuInterface must be aligned to 4"
@@ -272,29 +270,29 @@ Scalar regs:
 $zero ------------Hardwired zero -------------
 $1    v1 texptr       vtxLeft     temp, init 0
 $2    v2 shdptr       mtx1Addr        temp
-$3    v3 shdflg       mtx2Addr        temp
-$4                        
+$3    v3              mtx2Addr        temp
+$4    facingFlip           
 $5    -------------- geomMode ----------------
-$6    v1flag temp
-$7    v2flag tile                   cmd byte
-$8    v3flag          outVtx2
-$9    xp texenab
+$6    indexBuf
+$7        v2f         outVtx2       cmd byte
+$8    indexBufEnd
+$9    indexBufInc
 $10   ---------------- temp2 -----------------
 $11   ---------------- temp ------------------
 $12   ------------ perfCounterD --------------
 $13   ------------- altBaseReg ---------------
-$14   geom mode        inVtx
-$15                  outVtxBase
-$16
-$17   
+$14   subSec           inVtx
+$15   subSecEnd      outVtxBase
+$16   sectionBase
+$17   subSecOfsShf
 $18   
-$19      temp         outVtx1        dmaLen
+$19       v1f         outVtx1        dmaLen
 $20      temp         flagsV1       dmemAddr
-$21                               ovlInitClock
+$21   
 $22   ------------rdpCmdBufEndP1 -------------
 $23   ------------ rdpCmdBufPtr --------------
 $24      temp         flagsV2      cmd_w1_dram
-$25     cmd_w0                       cmd_w0
+$25       v3f                        cmd_w0
 $26   ------------- taskDataPtr --------------
 $27   ------------inputBufferPos -------------
 $28   ------------ perfCounterA --------------
@@ -315,11 +313,24 @@ perfCounterA   equ $28   // Performance counter A (functions depend on config)
 perfCounterB   equ $29   // Performance counter B (functions depend on config)
 perfCounterC   equ $30   // Performance counter C (functions depend on config)
 
+// Tri write:
+v1f            equ $19
+v2f            equ $7
+v3f            equ $25
+facingFlip     equ $4    // 0 or -0x8000, XOR'd into facing every tri for strip
+indexBuf       equ $6    // Draw tri bytes +1, +2, +3 from here
+indexBufEnd    equ $8    // Stop drawing tris when indexBuf reaches here
+indexBufInc    equ $9    // 1 for strip or 3 for full tris
+subSec         equ $14   // Subsection index, 0 to nss-1
+subSecEnd      equ $15   // Number of subsections
+sectionBase    equ $16   // Start address of ZSOSection
+subSecOfsShf   equ $17   // Left shift applied to offsets
+
 // Vertex write:
 vtxLeft        equ $1    // Number of vertices left to process * 0x10
 mtx1Addr       equ $2    // Matrix 1 end address
 mtx2Addr       equ $3    // Matrix 2 end address
-outVtx2        equ $8    // Pointer to second or dummy (= outVtx1) transformed vert
+outVtx2        equ $7    // Pointer to second or dummy (= outVtx1) transformed vert
 inVtx          equ $14   // Pointer to loaded vertex to transform; < 0 means from clipping.
 outVtxBase     equ $15   // Pointer to vertex buffer to store transformed verts
 outVtx1        equ $19   // Pointer to first transformed vert
@@ -486,7 +497,6 @@ G_RDPHALF_2_handler: // 8; should be after the handlers with alignment needs
 G_RDP_handler:
     spv     $v4[0], 0(rdpCmdBufPtr)     // Whole command
 commit_small_rdp_command:
-    addi    perfCounterD, perfCounterD, 0x4000 // Increment small RDP command count
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8    // Increment the next RDP command pointer by 2 words
 check_rdp_buffer_full_and_run_next_cmd:
     sub     dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1
@@ -514,7 +524,7 @@ run_next_DL_command:
 
 align_with_warning 8, "One instruction of padding before G_VTX_handler"
 
-G_VTX_handler: // 21
+G_VTX_handler: // 11
     vadd    $v3, $v31, vTRC_0010   // Elem 1 = -1 + 10 = 0x000F
     jal     segmented_to_physical  // Convert address in cmd_w1_dram to physical
      mfc2   vtxLeft, $v8[4]        // Input vertices size in bytes
@@ -566,27 +576,55 @@ G_FLUSH_handler: // 32
     j       flush_rdp_buffer
      li     $ra, run_next_DL_command
 
+// H = highest on screen = lowest Y value; then M = mid, L = low
+tAlCC equ $v9
+tHAtF equ $v5
+tMAtF equ $v27
+tLAtF equ $v12
+tHAtI equ $v18
+tMAtI equ $v19
+tLAtI equ $v21
+tHPos equ $v14
+tMPos equ $v2
+tLPos equ $v10
+tPosMmH equ $v6
+tPosLmH equ $v8
+tPosHmM equ $v11 // possible
+tDaDyI equ $v27
+tSubPxHF equ $v4
+tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
+t1WI equ $v13 // elems 0, 4, 6
+tXPF equ $v16 // Triangle cross product
+tXPI equ $v17
+
 G_ZSOSECTION_handler:
     jal     segmented_to_physical
-     lbu    dmaLen, (inputBufferEnd - 0x05)(inputBufferPos)
-    li      dmemAddr, zsoSection
-    j       dma_and_wait_goto_next_ra
-     li     nextRA, zso_after_dma
-
-zso_after_dma:
+     srl    dmemAddr, cmd_w0, 7-3 // Bits 3:11 of DMEM address, bit 12 is 0 to select DMEM
+    addi    dmemAddr, dmemAddr, cacheStart // Relative to cache start
+    sll     dmaLen, cmd_w0, 3 // Bits 3:9 of DMA length - 1
+    jal     dma_read_write
+     andi   dmaLen, dmaLen, 0x3F8 // Mask out lower 2 bits of addr
+    andi    sectionBase, dmemAddr, 0xFF8 // Can't leave it in dmemAddr b/c tri write DMA clobbers
+    srl     subSecEnd, cmd_w0, 17 // Subsection count minus 1
+    andi    subSecEnd, subSecEnd, 0x1F
+    addi    subSecEnd, subSecEnd, 1 // Remove the minus 1
+    add     subSecEnd, subSecEnd, sectionBase // End address
+    srl     subSecOfsShf, cmd_w0, 22 // Offsets are left shifted by this much
+    jal     while_wait_dma_busy
+     andi   subSecOfsShf, subSecOfsShf, 3
+    j       sort_done_regular // TODO
+     nop
     // Convert reference vertices from index -> address
-    lpv     $v2, (zsoRVtx + 0x00)($zero)
-    lpv     $v3, (zsoRVtx + 0x08)($zero)
-    lpv     $v4, (zsoRVtx + 0x10)($zero)
-    lpv     $v5, (zsoRVtx + 0x18)($zero)
+    lpv     $v2, (0x20)(sectionBase)
+    lpv     $v3, (0x28)(sectionBase)
+    lpv     $v4, (0x30)(sectionBase)
+    lpv     $v5, (0x38)(sectionBase)
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
-    lbu     subSecEnd, (inputBufferEnd - 0x07)(inputBufferPos)
     vmadl   $v2,  $v2,  vTRC_OVSZ  // Plus vtx indices times output vertex size
-    li      subSec, 0
+    move    subSec, sectionBase
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
-    li      $6, zsoData
-    vmadl   $v3,  $v3,  vTRC_OVSZ  // Plus vtx indices times output vertex size
     move    $1, rdpCmdBufEndP1
+    vmadl   $v3,  $v3,  vTRC_OVSZ  // Plus vtx indices times output vertex size
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
     sqv     vZero, (0x40)(rdpCmdBufEndP1) // Set invalid vertex Zs to 0 (close to camera)
     vmadl   $v4,  $v4,  vTRC_OVSZ  // Plus vtx indices times output vertex size
@@ -602,7 +640,6 @@ zso_after_dma:
     // Convert reference vertices from address -> Z position
 @@loop:
     lhu     $3, (0)($1)
-    mtc2    $6, $v2[0] // zsoData; it's here cause this was a stall cycle
     addi    $1, $1, 2
     lhu     $3, (VTX_SCR_Z)($3)
     addi    subSec, subSec, 1
@@ -610,45 +647,41 @@ zso_after_dma:
      sw     $3, (0x40 - 2)($1)
     // Load offsets and Zs
     lqv     $v20, (0x40)(rdpCmdBufEndP1)
-    lpv     $v21, (zsoOffs + 0x00)($zero)
+    lpv     $v21, (0x00)(sectionBase)
     lqv     $v22, (0x50)(rdpCmdBufEndP1)
-    lpv     $v23, (zsoOffs + 0x08)($zero)
+    lpv     $v23, (0x08)(sectionBase)
     lqv     $v24, (0x60)(rdpCmdBufEndP1)
-    lpv     $v25, (zsoOffs + 0x10)($zero)
+    lpv     $v25, (0x10)(sectionBase)
     lqv     $v26, (0x70)(rdpCmdBufEndP1)
-    lpv     $v27, (zsoOffs + 0x18)($zero)
+    vclr    tAlCC
+    lpv     $v27, (0x18)(sectionBase)
     // Optimal 8 element sorting network from
     // https://bertdobbelaere.github.io/sorting_networks.html#N8L19D6
     // Elements 0 and 1 from each of 4 vectors
-.macro sort_swap ozh, oih, ozl, oil, z0, i0, z1, i1
+.macro sort_swap, ozh, oih, ozl, oil, z0, i0, z1, i1
     vge     ozh, z0, z1
     vmrg    oih, i0, i1
     vlt     ozl, z0, z1
     vmrg    oil, i0, i1
 .endmacro
-.macro sort_swap_toeven ozh, oih, z0, i0
+.macro sort_swap_toeven, ozh, oih, z0, i0
     vge     ozh, z0, z0[1q]
     vmrg    oih, i0, i0[1q]
     vlt     z0, z0, z0[1q]
     vmrg    i0, i0, i0[1q]
 .endmacro
-
-TODO:
-    lb      $24, alphaCompareCullMode
-    lb      $10, alphaCompareCullThresh
-    sra     $11, $24, 31 // -1 if ABOVE, else 0
-    vclr    tAlCC
-    add     $10, $10, $11 // thresh - 1 or - 0
-    mtc2    $24, tAlCC[6] // 0 = disabled, 0001 cull if all < thresh, FFFF cull if all >= thresh
-    mtc2    $10, tAlCC[7]
-    
-
     sort_swap $v12, $v13, $v14, $v15, $v20, $v21, $v22, $v23 // swap(a0, b0), swap(a1, b1)
+    lb      $24, alphaCompareCullMode
     sort_swap $v15, $v17, $v18, $v19, $v24, $v25, $v26, $v27 // swap(c0, d0), swap(c1, d1)
+    lb      $10, alphaCompareCullThresh
     sort_swap $v20, $v21, $v24, $v25, $v12, $v13, $v16, $v17 // swap(a0, c0), swap(a1, c1)
+    sra     $11, $24, 31 // -1 if ABOVE, else 0
     sort_swap $v22, $v23, $v26, $v27, $v14, $v15, $v18, $v19 // swap(b0, d0), swap(b1, d1)
+    add     $10, $10, $11 // thresh - 1 or - 0
     sort_swap_toeven $v12, $v13, $v20, $v21 // new a0, new a1
+    mtc2    $24, tAlCC[6] // 0 = disabled, 0001 cull if all < thresh, FFFF cull if all >= thresh
     sort_swap_toeven $v14, $v15, $v22, $v23 // new b0, new b1
+    mtc2    $10, tAlCC[7]
     sort_swap_toeven $v16, $v17, $v24, $v25 // new c0, new c1
     sort_swap_toeven $v18, $v19, $v26, $v27 // new d0, new d1
     sort_swap $v10, $v11, $v16, $v17, $v14, $v15, $v16, $v17 // new b0, c0 = swap(b0, c0)
@@ -657,7 +690,7 @@ TODO:
     sort_swap $v20, $v21, $v18, $v19, $v14, $v15, $v18, $v19 // new b1, d0 = swap(b1, d0)
     sort_swap $v14, $v15, $v10, $v11, $v22, $v23, $v10, $v11 // new a1, b0 = swap(a1, b0)
     sort_swap $v22, $v23, $v16, $v17, $v20, $v21, $v16, $v17 // new b1, c0 = swap(b1, c0)
-    li      subSec, 0
+    move    subSec, sectionBase
     sort_swap $v20, $v21, $v18, $v19, $v24, $v25, $v18, $v19 // new c1, d0 = swap(c1, d0)
     sqv     vZero, (0x80)(rdpCmdBufEndP1) // So when lists run off end, get z = 0
     // Element 0 of these regs are sorted in order, same for 2, 4, 6
@@ -672,14 +705,14 @@ TODO:
     vmrg    $v10, $v10, $v11[0h]
     addi    $3, rdpCmdBufEndP1, 0x8
     vmrg    $v22, $v22, $v23[0h]
-    addi    $6, rdpCmdBufEndP1, 0xC
+    addi    $4, rdpCmdBufEndP1, 0xC
     vmrg    $v16, $v16, $v17[0h]
     sqv     $v12, (0x00)(rdpCmdBufEndP1)
     vmrg    $v20, $v20, $v21[0h]
     sqv     $v14, (0x10)(rdpCmdBufEndP1)
     vmrg    $v18, $v18, $v19[0h]
     sqv     $v10, (0x20)(rdpCmdBufEndP1)
-    vmrg    $v26, $v26, $v27[9h]
+    vmrg    $v26, $v26, $v27[0h]
     sqv     $v22, (0x30)(rdpCmdBufEndP1)
     vmrg    $v12, $v12, $v31[2] // 0; clear indices
     sqv     $v16, (0x40)(rdpCmdBufEndP1)
@@ -689,31 +722,31 @@ TODO:
      sqv    $v26, (0x70)(rdpCmdBufEndP1)
     
 merge_sort_loop:
-    beqz    $10, sort_done
+    beqz    $10, sort_done_z0 // Z=0, stop early
      addi   subSec, subSec, 1
-    beq     subSec, subSecEnd, sort_done
-     sb     $11, (zsoSection)(subSec)
+    beq     subSec, subSecEnd, sort_done_regular
+     sb     $11, (0)(subSec)
 merge_sort_entry:
     vge     $v29, $v12, $v12[0] // Is the head of list 0 the highest?
-    cfc2    $7, $vcc
+    cfc2    $20, $vcc
     vge     $v29, $v12, $v12[2] // Or the head of list 2?
-    cfc2    $8, $vcc
+    cfc2    $10, $vcc
     vge     $v29, $v12, $v12[4] // Or list 4?
-    beq     $7, $24, merge_sort_list_0
-     cfc2   $9, $vcc
-    beq     $8, $24, merge_sort_list_2
+    beq     $20, $24, merge_sort_list_0
+     cfc2   $11, $vcc
+    beq     $10, $24, merge_sort_list_2
      nop
-    beq     $9, $24, merge_sort_list_4
+    beq     $11, $24, merge_sort_list_4
      nop
 merge_sort_list_6:
-.macro merge_sort_list vbyte, ptr
+.macro merge_sort_list, vbyte, ptr
     mfc2    $10, $v12[vbyte] // Get selected Z value
     lsv     $v12[vbyte], (0x10)(ptr) // Load next Z value
     lbu     $11, (0x2)(ptr) // Load offset
     j       merge_sort_loop
      addi   ptr, ptr, 0x10
 .endmacro
-    merge_sort_list 12, $6
+    merge_sort_list 12, $4
 merge_sort_list_4:
     merge_sort_list 8, $3
 merge_sort_list_2:
@@ -721,65 +754,50 @@ merge_sort_list_2:
 merge_sort_list_0:
     merge_sort_list 0, $1
 
-sort_done:
-    move    subSecEnd, subSec // In case exited loop due to Z=0
-    li      subSec, 0
+sort_done_z0:
+    addi    subSecEnd, subSec, -1  // Just incremented subSec, but it was already one too far
+sort_done_regular:
+    move    subSec, sectionBase
 subsec_loop:
-    lbu     indexBuf, (zsoSection)(subSec)
-    lh      geomMode, geometryModeLabel
+    lbu     indexBuf, (0)(subSec)
+    lh      geomMode, geometryModeLabel // Reset geometry mode modified by facingFlip
     beq     subSec, subSecEnd, run_next_DL_command
-     lpv    $v26[0], (zsoSection)(indexBuf) // First tri
-    lb      $24, (zsoSection)(indexBuf)
+     sllv   indexBuf, indexBuf, subSecOfsShf
+    add     indexBuf, indexBuf, sectionBase
+    lpv     $v26[0], (0)(indexBuf) // First tri indices to elems 1, 2, 3
+    lb      $24, (0)(indexBuf) // Metadata byte
     addi    subSec, subSec, 1
-    li      facingFlip, -0x8000 // Facing is sign bit
-    vmudn   $v29, vOne, vTRC_CCHS      // Cache start address
+    li      facingFlip, -0x8000    // Facing is sign bit
+    vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
     andi    indexBufEnd, $24, 0x7F // Tri count
-    vmadl   $v7, $v26, vTRC_OVSZ        // Plus vtx indices times output vertex size
+    vmadl   $v7, $v26, vTRC_OVSZ   // Plus vtx indices times output vertex size
+    sll     $11, indexBufEnd, 14   // RSP tris counter starts at bit 14
+    add     perfCounterB, perfCounterB, $11
     bltz    $24, @@skip_not_tri_strip
      li     indexBufInc, 1
     li      facingFlip, 0
     li      indexBufInc, 3
     sll     $11, indexBufEnd, 1
-    add     indexBufEnd, indexBufEnd, $11 // * 3
+    add     indexBufEnd, indexBufEnd, $11 // Byte count = tri count * 3
 @@skip_not_tri_strip:
     j       tri_start
-     add    indexBufEnd, indexBufEnd, indexBuf
+     add    indexBufEnd, indexBufEnd, indexBuf // + start addr
 
-// H = highest on screen = lowest Y value; then M = mid, L = low
-tHAtF equ $v5
-tMAtF equ $v27
-tLAtF equ $v9
-tHAtI equ $v18
-tMAtI equ $v19
-tLAtI equ $v21
-tHPos equ $v14
-tMPos equ $v2
-tLPos equ $v10
-tPosMmH equ $v6
-tPosLmH equ $v8
-tPosHmM equ $v11
-tDaDyI equ $v27
-tSubPxHF equ $v4
-tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
-t1WI equ $v13 // elems 0, 4, 6
-tXPF equ $v16 // Triangle cross product
-tXPI equ $v17
+align_with_warning 8, "One instruction of padding before tri_start"
 
 tri_end:
-    xor     geomMode, geomMode, facingFlip
+tri_start: // $v7 elems 1, 2, 3 hold vtx addrs
+    vmudh   $v6, vOne, $v7[1] // elem 2 of v6 = vertex 1 addr
     beq     indexBuf, indexBufEnd, subsec_loop
-     add    indexBuf, indexBuf, indexBufInc
-tri_start:
-    vmudh   $v6, vOne, $v7[0] // elem 2 of v6 = vertex 1 addr
-    mfc2    $1, $v7[0]
-    vmudh   $v4, vOne, $v7[1] // elem 2 of v4 = vertex 2 addr
-    mfc2    $2, $v7[2]
-    vmudh   $v8, vOne, $v7[2] // elem 2 of v8 = vertex 3 addr
-    addi    perfCounterB, perfCounterB, 0x4000  // Increment number of tris requested
+     mfc2   $1, $v7[2]
+    vmudh   $v4, vOne, $v7[2] // elem 2 of v4 = vertex 2 addr
+    mfc2    $2, $v7[4]
+    vmudh   $v8, vOne, $v7[3] // elem 2 of v8 = vertex 3 addr
+    add     indexBuf, indexBuf, indexBufInc
     vnxor   tHAtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
-    lpv     $v26[0], (zsoSection)(indexBuf)
+    lpv     $v26[0], (0)(indexBuf)
     vnxor   tMAtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
-    mfc2    $3, $v7[4]
+    mfc2    $3, $v7[6]
     vnxor   tLAtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
     llv     $v6[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
     vmudh   $v3, vOne, $v31[5] // 0x4000; some rounding factor
@@ -787,44 +805,44 @@ tri_start:
     vmudn   $v29, vOne, vTRC_CCHS      // Cache start address
     llv     $v8[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
     vmadl   $v7, $v26, vTRC_OVSZ        // Plus vtx indices times output vertex size
-    lhu     $6, VTX_CLIP($1)
+    lhu     v1f, VTX_CLIP($1)
     vmudh   $v2, vOne, $v6[1] // v2 all elems = y-coord of vertex 1
-    lhu     $7, VTX_CLIP($2)
+    lhu     v2f, VTX_CLIP($2)
     vsub    $v10, $v6, $v4    // v10 = vertex 1 - vertex 2 (x, y, addr)
-    lhu     $8, VTX_CLIP($3)
-    vsub    $v12, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
-    andi    $11, $6, CLIP_SCRN_NPXY | CLIP_CAMPLANE // All three verts on wrong side of same plane
+    lhu     v3f, VTX_CLIP($3)
+    vsub    $v26, $v6, $v8    // v12 = vertex 1 - vertex 3 (x, y, addr)
+    xor     geomMode, geomMode, facingFlip
     vsub    $v11, $v4, $v6    // v11 = vertex 2 - vertex 1 (x, y, addr)
-    or      $10, $6, $7
+    or      $10, v1f, v2f
     vlt     $v13, $v2, $v4[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
-    or      $10, $10, $8      // $10 = all clip bits which are true for any verts
+    or      $10, $10, v3f     // $10 = all clip bits which are true for any verts
     vmrg    tHPos, $v6, $v4   // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     andi    $10, $10, CLIP_SCAL_NPXY | CLIP_CAMPLANE
-    vmudh   $v29, $v10, $v12[1] // x = (v1 - v2).x * (v1 - v3).y ... 
+    vmudh   $v29, $v10, $v26[1] // x = (v1 - v2).x * (v1 - v3).y ... 
     bnez    $10, tri_end // Reject (instead of clipping)
-     vmadh  $v26, $v12, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
+     vmadh  $v26, $v26, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
     vge     $v2, $v2, $v4[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
-    and     $11, $11, $7
+    and     $11, v1f, v2f
     vmrg    tLPos, $v6, $v4   // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
-    and     $11, $11, $8
+    and     $11, $11, v3f
     vge     $v6, $v13, $v8[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
-    bnez    $11, tri_end // Then the whole tri is offscreen, cull
-     mfc2   $9, $v26[0]       // elem 0 = x = cross product => lower 16 bits, sign extended
+    bnez    $11, tri_end // All three verts on the same side of any plane, exit
+     mfc2   $10, $v26[0]      // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    $v4, tHPos, $v8   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     lbv     tAlCC[1], VTX_COLOR_A($1) // Vertex 1 alpha to elem 0
     vmrg    tHPos, $v8, tHPos // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
     lbv     tAlCC[3], VTX_COLOR_A($2) // Vertex 2 alpha to elem 1
     vlt     $v29, $v6, $v2    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
-    xor     $11, $9, geomMode // Sign bit clear if x prod positive (back facing), set if x prod negative (front facing)
+    xor     $11, $10, geomMode // Sign bit clear if x prod positive (back facing), set if x prod negative (front facing)
     vmrg    tMPos, $v4, tLPos // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     bgez    $11, tri_end // Cull if bit is clear (culled based on facing)
      lbv    tAlCC[5], VTX_COLOR_A($3) // Vertex 3 alpha to elem 2
     vmrg    tLPos, tLPos, $v4 // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
-    beqz    $9, tri_end  // If cross product is 0, tri is degenerate (zero area), cull.
+    beqz    $10, tri_end  // If cross product is 0, tri is degenerate (zero area), cull.
      mfc2   $1, tHPos[4]     // tHPos = lowest Y value = highest on screen (x, y, addr)
     vsub    tPosMmH, tMPos, tHPos
     mfc2    $2, tMPos[4]     // tMPos = mid vertex (x, y, addr)
-    vmudh   TEMP, tAlCC, tAlCC[6] // Multiply by 0, 1, or -1
+    vmudh   $v13, tAlCC, tAlCC[6] // Multiply by 0, 1, or -1
     li      $20, -8       // 0xFFF8; constant for some mask below
     vsub    tPosLmH, tLPos, tHPos
     lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
@@ -832,7 +850,7 @@ tri_start:
     mfc2    $3, tLPos[4]     // tLPos = highest Y value = lowest on screen (x, y, addr)
     vsub    tPosCatI, tLPos, tMPos
     lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
-    vge     $v29, TEMP, TEMP[7] // A1, A2, A3 >= +/- threshold
+    vge     $v29, $v13, $v13[7] // A1, A2, A3 >= +/- threshold
     lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
     vmov    tPosCatI[2], tPosMmH[0]
     cfc2    $11, $vcc
@@ -867,11 +885,11 @@ tXPRcpI equ $v24
     vmudl   tHAtI, tHAtI, vTRC_0100 // vertex color 1 >>= 8
     // nop
     vmudl   tMAtI, tMAtI, vTRC_0100 // vertex color 2 >>= 8
-    lw      $6, VTX_INV_W_VEC($1) // $6, $7, $8 = 1/W for H, M, L
+    lw      v1f, VTX_INV_W_VEC($1) // v1f, v2f, v3f = 1/W for H, M, L
     vmudl   tLAtI, tLAtI, vTRC_0100 // vertex color 3 >>= 8
-    lw      $7, VTX_INV_W_VEC($2)
+    lw      v2f, VTX_INV_W_VEC($2)
     vmudl   $v29, $v20, vTRC_0020
-    lw      $8, VTX_INV_W_VEC($3)
+    lw      v3f, VTX_INV_W_VEC($3)
     vmadm   $v22, $v22, vTRC_0020
     // nop
     vmadn   $v20, $v31, $v31[2] // 0
@@ -880,24 +898,24 @@ tPosCatF equ $v25
     vmudm   tPosCatF, tPosCatI, vTRC_1000
     mtc2    $20, tMPos[14] // 0xFFF8; only elem 0, 1, 2 of this reg used now
     vmadn   tPosCatI, $v31, $v31[2] // 0
-    sub     $11, $6, $7  // Four instr: $6 = max($6, $7)
+    sub     $11, v1f, v2f  // Four instr: v1f = max(v1f, v2f)
     vsubc   tSubPxHF, vZero, tSubPxHF
     sra     $10, $11, 31
 tSubPxHI equ $v26
     vsub    tSubPxHI, vZero, vZero
     and     $11, $11, $10
     vmudm   $v29, tPosCatF, $v20
-    sub     $6, $6, $11
+    sub     v1f, v1f, $11
     vmadl   $v29, tPosCatI, $v20
-    sub     $11, $6, $8  // Four instr: $6 = max($6, $8)
+    sub     $11, v1f, v3f  // Four instr: v1f = max(v1f, v3f)
     vmadn   $v20, tPosCatI, $v22
     sra     $10, $11, 31
     vmadh   tPosCatI, tPosCatF, $v22
     and     $11, $11, $10
     vmudl   $v29, tXPRcpF, tXPF
-    sub     $6, $6, $11
+    sub     v1f, v1f, $11
     vmadm   $v29, tXPRcpI, tXPF
-    mfc2    $7, tXPI[1]
+    mfc2    v2f, tXPI[1]
     vmadn   tXPF, tXPRcpF, tXPI
     // nop
     vmadh   tXPI, tXPRcpI, tXPI
@@ -909,9 +927,9 @@ tSubPxHI equ $v26
     vmudh   $v29, vOne, $v31[4] // 4
     ori     $11, geomMode, G_TRI_FILL // Combine geometry mode (only the low byte will matter) with the base triangle type to make the triangle command id
     vmadn   tXPF, tXPF, $v31[0] // -4
-    andi    $9, geomMode, G_TEXTURE_ENABLE
+    // nop
     vmadh   tXPI, tXPI, $v31[0] // -4
-    sw      $6, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W (upper) to temp mem
+    sw      v1f, 0x0010(rdpCmdBufPtr) // Store max of three verts' 1/W (upper) to temp mem
 tMx1W equ $v25 // <- tPosCatF
     vmudn   $v29, $v3, tHPos[0]
     llv     tMx1W[0], 0x0010(rdpCmdBufPtr) // Load max of three verts' 1/W
@@ -958,11 +976,11 @@ tSTWLF equ $v13
     ldv     tPosLmH[8], 0x0030(rdpCmdBufPtr) // MmHY -> e4, LmHX -> e5, HmMX -> e6
 tSTWHMF equ $v25 // <- tMnWI
     vmadn   tSTWHMF, $v31, $v31[2]  // 0
-    andi    $7, $7, 0x0080 // Extract the left major flag from $7
+    andi    v2f, v2f, 0x0080 // Extract the left major flag from v2f
     vmudm   $v29, tSTWLI, t1WF[6]  // (S, T, 7FFF) * (1 or <1) for L
-    or      $7, $7, $10 // Combine the left major flag with the level and tile from the texture settings
+    or      v2f, v2f, $10 // Combine the left major flag with the level and tile from the texture settings
     vmadh   tSTWLI, tSTWLI, t1WI[6]
-    sb      $7, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
+    sb      v2f, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
     vmadn   tSTWLF, $v31, $v31[2]  // 0
     sdv     tSTWHMI[0], 0x0020(rdpCmdBufPtr) // Move S, T, W Hi Int to temp mem
     vmrg    tMAtI, tMAtI, tSTWHMI // Merge S, T, W Mid into elems 4-6
@@ -986,7 +1004,7 @@ tSTWHMF equ $v25 // <- tMnWI
     vmudh   tPosLmH, tPosLmH, $v31[0h] // e1 LmHY * -4 = 4*HmLY; e456 MmHY,LmHX,HmMX *= 4
     andi    $3, geomMode, G_SHADE
 tAtLmHF equ $v10
-tAtLmHI equ $v9
+tAtLmHI equ $v12
 tAtMmHF equ $v13
 tAtMmHI equ $v27
     vsubc   tAtLmHF, tLAtF, tHAtF
@@ -1026,18 +1044,18 @@ tDaDyF equ $v6
     vreadacc tDaDyF, ACC_MIDDLE
     add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
     vreadacc tDaDyI, ACC_UPPER
-    sll     $11, $9, 5              // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
+    andi    $11, geomMode, G_TEXTURE_ENABLE
 // DaDx, DaDy *= more factors
     vmudl   $v29, tDaDxF, tXPRcpF[1]
-    add     rdpCmdBufPtr, $1, $11   // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
+    sll     $11, $11, 5             // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
     vmadm   $v29, tDaDxI, tXPRcpF[1]
-    // nop
+    add     rdpCmdBufPtr, $1, $11   // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
     vmadn   tDaDxF, tDaDxF, tXPRcpI[1]
     // nop
     vmadh   tDaDxI, tDaDxI, tXPRcpI[1]
     // nop
     vmudl   $v29, tDaDyF, tXPRcpF[1]
-    // nop
+    li      $ra, tri_end
     vmadm   $v29, tDaDyI, tXPRcpF[1]
     sub     dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
     vmadn   tDaDyF, tDaDyF, tXPRcpI[1]
@@ -1046,7 +1064,7 @@ tDaDyF equ $v6
     sdv     tDaDxI[0], 0x0008($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (integer)
 // DaDe = DaDx * factor
 tDaDeF equ $v8
-tDaDeI equ $v9
+tDaDeI equ $v12
     // 125 cycles
     vmadl   $v29, tDaDxF, $v20[3]
     sdv     tDaDxF[8], 0x0018($1)   // Store DsDx, DtDx, DwDx texture coefficients (fractional)
