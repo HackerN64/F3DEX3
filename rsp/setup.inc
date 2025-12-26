@@ -69,3 +69,9 @@ ACC_LOWER equ 2
     .endif
     .align alignment
 .endmacro
+
+.macro assert_alignment, alignment, errtext
+    .if (. & (alignment - 1))
+        .error errtext
+    .endif
+.endmacro

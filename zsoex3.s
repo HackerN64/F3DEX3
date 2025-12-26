@@ -31,9 +31,7 @@ unused1:
 
 viewport: // v31Value only used at init, so we can clobber it after that.
 // constants for register $v31
-.if (. & 15) != 0
-    .error "Wrong alignment for v31value"
-.endif
+assert_alignment 16, "Wrong alignment for v31value"
 v31Value:
 // v31 must go from lowest to highest (signed) values for vcc patterns.
 // Also relies on the fact that $v31[0h] is -4,-4,-4,-4, 4, 4, 4, 4.
@@ -47,9 +45,7 @@ v31Value:
     .dh 0x7FFF // used a couple times
 
 // constants for register vTRC
-.if (. & 15) != 0
-    .error "Wrong alignment for vTRCValue"
-.endif
+assert_alignment 16, "Wrong alignment for vTRCValue"
 vTRCValue:
 vTRCValue0 equ cacheStart // Currently 0x1D0; for converting vertex index to address
 vTRCValue1 equ cacheEnd   // Currently 0xCD8; for vtx mtx address
@@ -178,19 +174,14 @@ alphaCompareCullThresh:
 perspNorm:
     .skip 2
 
+    .align 4 // TODO
+
 // First half of RDP value for split commands. Also used as temp storage for
 // tri vertices during tri commands.
 rdpHalf1Val:
     .skip 4
 
-    .align 8 // TODO
-
-texrectState:  // Only needs to be saved over texrect, half1, half2
-    .skip 8 // TODO
-
-.if (. & 3) != 0
-    .error "cpuInterface must be aligned to 4"
-.endif
+assert_alignment 4, "cpuInterface misaligned"
 cpuInterface:
 ucodeTextStart:
     .skip 4
@@ -201,19 +192,23 @@ rdpFifoStart:
     .skip 4
 rdpFifoEnd:
     .skip 4
+debugBuffer:
+    .skip 4
+
+    .align 8 // TODO
 
 segmentTable:
     .skip (4 * 16) // 16 DRAM pointers
 
-.if (. & 7) != 0
-    .error "lightColors must be aligned to 16"
-.endif
+assert_alignment 8, "texrectState misaligned"
+texrectState:  // Only needs to be saved over texrect, half1, half2
+    .skip 8 // TODO
+
+assert_alignment 8, "lightColors misaligned"
 lightColors:
     .skip 16
 
-.if (. & 7) != 0
-    .error "cacheStart must be aligned to 8"
-.endif
+assert_alignment 8, "cacheStart misaligned"
 cacheStart:
     
 INPUT_BUFFER_CMDS equ 21
@@ -612,8 +607,6 @@ G_ZSOSECTION_handler:
     srl     subSecOfsShf, cmd_w0, 22 // Offsets are left shifted by this much
     jal     while_wait_dma_busy
      andi   subSecOfsShf, subSecOfsShf, 3
-    j       sort_done_regular // TODO
-     nop
     // Convert reference vertices from index -> address
     lpv     $v2, (0x20)(sectionBase)
     lpv     $v3, (0x28)(sectionBase)
@@ -644,7 +637,7 @@ G_ZSOSECTION_handler:
     lhu     $3, (VTX_SCR_Z)($3)
     addi    subSec, subSec, 1
     bne     subSec, subSecEnd, @@loop
-     sw     $3, (0x40 - 2)($1)
+     sh     $3, (0x40 - 2)($1)
     // Load offsets and Zs
     lqv     $v20, (0x40)(rdpCmdBufEndP1)
     lpv     $v21, (0x00)(sectionBase)
@@ -657,7 +650,9 @@ G_ZSOSECTION_handler:
     lpv     $v27, (0x18)(sectionBase)
     // Optimal 8 element sorting network from
     // https://bertdobbelaere.github.io/sorting_networks.html#N8L19D6
-    // Elements 0 and 1 from each of 4 vectors
+    // Elements 0 and 1 from each of 4 vectors (a, b, c, d). 4 groups of these in parallel
+    // E.g. a0 is $v20[0], a1 is $v20[1], b0 is $v22[0], etc.
+    // Then another a0 is $v20[2], and another is $v20[4], and last is $v20[6]
 .macro sort_swap, ozh, oih, ozl, oil, z0, i0, z1, i1
     vge     ozh, z0, z1
     vmrg    oih, i0, i1
@@ -672,7 +667,7 @@ G_ZSOSECTION_handler:
 .endmacro
     sort_swap $v12, $v13, $v14, $v15, $v20, $v21, $v22, $v23 // swap(a0, b0), swap(a1, b1)
     lb      $24, alphaCompareCullMode
-    sort_swap $v15, $v17, $v18, $v19, $v24, $v25, $v26, $v27 // swap(c0, d0), swap(c1, d1)
+    sort_swap $v16, $v17, $v18, $v19, $v24, $v25, $v26, $v27 // swap(c0, d0), swap(c1, d1)
     lb      $10, alphaCompareCullThresh
     sort_swap $v20, $v21, $v24, $v25, $v12, $v13, $v16, $v17 // swap(a0, c0), swap(a1, c1)
     sra     $11, $24, 31 // -1 if ABOVE, else 0
@@ -696,42 +691,46 @@ G_ZSOSECTION_handler:
     // Element 0 of these regs are sorted in order, same for 2, 4, 6
     // These regs + 1 = indices
     // $v12, $v14, $v10, $v22, $v16, $v20, $v18, $v26
-    veq     $v29, $v31, $v31[0h] // vcc = 10101010
+    veq     $v29, $v31, $v31[0q] // vcc = 10101010
     li      $24, 0xFF
-    vmrg    $v12, $v12, $v13[0h] // Interleave Z, index, Z, index, Z, index, Z, index
+    vmrg    $v12, $v12, $v13[0q] // Interleave Z, index, Z, index, Z, index, Z, index
     addi    $1, rdpCmdBufEndP1, 0x0
-    vmrg    $v14, $v14, $v15[0h]
+    vmrg    $v14, $v14, $v15[0q]
     addi    $2, rdpCmdBufEndP1, 0x4
-    vmrg    $v10, $v10, $v11[0h]
+    vmrg    $v10, $v10, $v11[0q]
     addi    $3, rdpCmdBufEndP1, 0x8
-    vmrg    $v22, $v22, $v23[0h]
+    vmrg    $v22, $v22, $v23[0q]
     addi    $4, rdpCmdBufEndP1, 0xC
-    vmrg    $v16, $v16, $v17[0h]
+    vmrg    $v16, $v16, $v17[0q]
     sqv     $v12, (0x00)(rdpCmdBufEndP1)
-    vmrg    $v20, $v20, $v21[0h]
+    vmrg    $v20, $v20, $v21[0q]
     sqv     $v14, (0x10)(rdpCmdBufEndP1)
-    vmrg    $v18, $v18, $v19[0h]
+    vmrg    $v18, $v18, $v19[0q]
     sqv     $v10, (0x20)(rdpCmdBufEndP1)
-    vmrg    $v26, $v26, $v27[0h]
-    sqv     $v22, (0x30)(rdpCmdBufEndP1)
     vmrg    $v12, $v12, $v31[2] // 0; clear indices
+    sqv     $v22, (0x30)(rdpCmdBufEndP1)
+    vmrg    $v26, $v26, $v27[0q]
     sqv     $v16, (0x40)(rdpCmdBufEndP1)
+    vnop
     sqv     $v20, (0x50)(rdpCmdBufEndP1)
+    vnop
     sqv     $v18, (0x60)(rdpCmdBufEndP1)
+    vadd    $v13, $v12, $v31[1] // -1; subtract 1 from Z values
     j       merge_sort_entry
      sqv    $v26, (0x70)(rdpCmdBufEndP1)
-    
+
 merge_sort_loop:
-    beqz    $10, sort_done_z0 // Z=0, stop early
+    vadd    $v13, $v12, $v31[1] // -1; subtract 1 from Z values to turn vlt into vle
+    blez    $10, sort_done_z0 // Z<=0, stop early
      addi   subSec, subSec, 1
     beq     subSec, subSecEnd, sort_done_regular
-     sb     $11, (0)(subSec)
+     sb     $11, (-1)(subSec)
 merge_sort_entry:
-    vge     $v29, $v12, $v12[0] // Is the head of list 0 the highest?
+    vlt     $v29, $v13, $v12[0] // v12-1 < v12[0] :=: v12 <= v12[0] :=: v12[0] >= v12
     cfc2    $20, $vcc
-    vge     $v29, $v12, $v12[2] // Or the head of list 2?
+    vlt     $v29, $v13, $v12[2] // Or the head of list 2?
     cfc2    $10, $vcc
-    vge     $v29, $v12, $v12[4] // Or list 4?
+    vlt     $v29, $v13, $v12[4] // Or list 4?
     beq     $20, $24, merge_sort_list_0
      cfc2   $11, $vcc
     beq     $10, $24, merge_sort_list_2
@@ -1368,7 +1367,6 @@ old_return_routine:
      // Has mfc0 in branch delay slot, causes a stall if first instr after ret is load
 
 dma_read_write:
-shared_dma_read_write:
      mfc0   $11, SP_DMA_FULL          // load the DMA_FULL value
 @@while_dma_full:
     bnez    $11, @@while_dma_full     // Loop until DMA_FULL is cleared

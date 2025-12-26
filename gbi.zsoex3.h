@@ -70,6 +70,7 @@ typedef __attribute__((aligned(8))) struct {
     const void* displayListStart;
     void* rdpFifoStart;
     void* rdpFifoEnd;
+    void* debugBuffer;
 } UcodeArgs;
 
 /**
