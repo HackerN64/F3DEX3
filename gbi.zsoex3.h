@@ -135,9 +135,12 @@ typedef __attribute__((aligned(8))) struct {
 #define G_MW_SEGMENT   2
 
 /* MOVEWORD offsets */
-#define G_MWO_GEOM_MODE          0x00
-#define G_MWO_ALPHA_COMPARE_CULL 0x02
-#define G_MWO_PERSPNORM          0x04
+#define G_MWO_ASO_RGB_OFFSET     0x00
+#define G_MWO_ASO_A_OFFSET       0x01
+#define G_MWO_ASO_SCALE          0x02
+#define G_MWO_ALPHA_COMPARE_CULL 0x04
+#define G_MWO_PERSPNORM          0x06
+#define G_MWO_GEOM_MODE          0x08
 
 #define gSPLoadGeometryMode(pkt, halfword) \
     gMoveHalfwd(pkt, G_MW_FX, G_MWO_GEOM_MODE, halfword)

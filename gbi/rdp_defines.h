@@ -404,17 +404,17 @@ it for antialiasing. */
 #define FORCE_BL        0x4000
 #define TEX_EDGE        0x0000  /* not in HW V2; is 0x8000 in older HW */
 
-#define G_BL_CLR_IN     0
-#define G_BL_CLR_MEM    1
-#define G_BL_CLR_BL     2
-#define G_BL_CLR_FOG    3
-#define G_BL_1MA        0
-#define G_BL_A_MEM      1
-#define G_BL_A_IN       0
-#define G_BL_A_FOG      1
-#define G_BL_A_SHADE    2
-#define G_BL_1          2
-#define G_BL_0          3
+#define G_BL_CLR_IN     0u
+#define G_BL_CLR_MEM    1u
+#define G_BL_CLR_BL     2u
+#define G_BL_CLR_FOG    3u
+#define G_BL_1MA        0u
+#define G_BL_A_MEM      1u
+#define G_BL_A_IN       0u
+#define G_BL_A_FOG      1u
+#define G_BL_A_SHADE    2u
+#define G_BL_1          2u
+#define G_BL_0          3u
 
 #define GBL_c1(m1a, m1b, m2a, m2b)  \
     (m1a) << 30 | (m1b) << 26 | (m2a) << 22 | (m2b) << 18
