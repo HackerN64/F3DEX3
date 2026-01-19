@@ -164,17 +164,12 @@ displayListStackDepth:
 altBase: // TODO eliminate or reuse?
 fxParams:
 
-asoRGBOffset:
-    .db 0 // The RGB value which maps to 0; i.e. cel threshold light level
-asoAOffset:
-    .db 0 // The alpha value which maps to 0; i.e. cel threshold light level
 asoScale:
-    .dh 0x0200 // 0x0200 for normal, 0xFFF0 for ASO enable
-
-alphaCompareCullMode:
-    .skip 1 // 0 = disabled, 1 = cull if all < thresh, -1 = cull if all >= thresh
-alphaCompareCullThresh:
-    .skip 1 // Alpha threshold, 00 - FF
+    .dh 0x0100 // 0x0100 for ASO disable, 0xFF80 for ASO enable
+asoColorOffset:
+    .db 0 // 0 for ASO disable, (0x100 - shade color threshold) / 2 for ASO
+asoAlphaOffset:
+    .db 0 // 0 for ASO disable, (0x100 - shade alpha threshold) / 2 for ASO
 
 perspNorm:
     .skip 2
@@ -580,7 +575,7 @@ G_FLUSH_handler: // 32
      li     $ra, run_next_DL_command
 
 // H = highest on screen = lowest Y value; then M = mid, L = low
-tAlCC equ $v9
+tASO equ $v9
 tHAtF equ $v5
 tMAtF equ $v27
 tLAtF equ $v12
@@ -662,13 +657,13 @@ G_ZSOSECTION_handler:
      sh     $3, (0x40 - 2)($1)
     // Load offsets and Zs
     lqv     $v20, (0x40)(rdpCmdBufEndP1)
+    vclr    tASO
     lpv     $v21, (0x00)(sectionBase)
     lqv     $v22, (0x50)(rdpCmdBufEndP1)
     lpv     $v23, (0x08)(sectionBase)
     lqv     $v24, (0x60)(rdpCmdBufEndP1)
     lpv     $v25, (0x10)(sectionBase)
     lqv     $v26, (0x70)(rdpCmdBufEndP1)
-    vclr    tAlCC
     lpv     $v27, (0x18)(sectionBase)
     // Optimal 8 element sorting network from
     // https://bertdobbelaere.github.io/sorting_networks.html#N8L19D6
@@ -688,18 +683,19 @@ G_ZSOSECTION_handler:
     vmrg    i0, i0, i0[1q]
 .endmacro
     sort_swap $v12, $v13, $v14, $v15, $v20, $v21, $v22, $v23 // swap(a0, b0), swap(a1, b1)
-    lb      $24, alphaCompareCullMode
+    lbv     tASO[1], (asoColorOffset - altBase)(altBaseReg)
     sort_swap $v16, $v17, $v18, $v19, $v24, $v25, $v26, $v27 // swap(c0, d0), swap(c1, d1)
-    lbu     $10, alphaCompareCullThresh
+    lbv     tASO[3], (asoColorOffset - altBase)(altBaseReg)
     sort_swap $v20, $v21, $v24, $v25, $v12, $v13, $v16, $v17 // swap(a0, c0), swap(a1, c1)
-    sra     $11, $24, 31 // -1 if ABOVE, else 0
+    lbv     tASO[5], (asoColorOffset - altBase)(altBaseReg)
     sort_swap $v22, $v23, $v26, $v27, $v14, $v15, $v18, $v19 // swap(b0, d0), swap(b1, d1)
-    add     $10, $10, $11 // thresh - 1 or - 0
+    lbv     tASO[7], (asoAlphaOffset - altBase)(altBaseReg)
     sort_swap_toeven $v12, $v13, $v20, $v21 // new a0, new a1
-    mtc2    $24, tAlCC[12] // 0 = disabled, 0001 cull if all < thresh, FFFF cull if all >= thresh
+    lsv     $v8[8], (asoScale - altBase)(altBaseReg) // elem 4
     sort_swap_toeven $v14, $v15, $v22, $v23 // new b0, new b1
-    mtc2    $10, tAlCC[14]
+    li      $11, -8        // 0xFFF8; constant for some mask in tri write
     sort_swap_toeven $v16, $v17, $v24, $v25 // new c0, new c1
+    mtc2    $11, $v8[10]   // 0xFFF8; elem 5
     sort_swap_toeven $v18, $v19, $v26, $v27 // new d0, new d1
     sort_swap $v10, $v11, $v16, $v17, $v14, $v15, $v16, $v17 // new b0, c0 = swap(b0, c0)
     sort_swap $v14, $v15, $v24, $v25, $v22, $v23, $v24, $v25 // new b1, c1 = swap(b1, c1)
@@ -733,7 +729,7 @@ G_ZSOSECTION_handler:
     sqv     $v22, (0x30)(rdpCmdBufEndP1)
     vmrg    $v26, $v26, $v27[0q]
     sqv     $v16, (0x40)(rdpCmdBufEndP1)
-    vnop
+    vmudh   tASO, tASO, $v31[1] // -1; negate color and alpha offsets in elems 0-3
     sqv     $v20, (0x50)(rdpCmdBufEndP1)
     vnop
     sqv     $v18, (0x60)(rdpCmdBufEndP1)
@@ -778,7 +774,9 @@ merge_sort_list_0:
 sort_done_z0:
     addi    subSecEnd, subSec, -1  // Just incremented subSec, but it was already one too far
 sort_done_regular:
+    vlt     $v29, $v31, $v31[4] // Set vcc to 11110000
     move    subSec, sectionBase
+    vmrg    tASO, tASO, $v8 // Additional constants which were not negated
 subsec_loop:
     lbu     indexBuf, (0)(subSec)
     lh      geomMode, geometryModeLabel // Reset geometry mode modified by facingFlip
@@ -850,20 +848,20 @@ tri_start: // $v7 elems 1, 2, 3 hold vtx addrs
     bnez    $11, tri_end // All three verts on the same side of any plane, exit
      mfc2   $10, $v26[0]      // elem 0 = x = cross product => lower 16 bits, sign extended
     vmrg    $v4, tHPos, $v8   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
-    lbv     tAlCC[1], VTX_COLOR_A($1) // Vertex 1 alpha to elem 0
+    nop // load
     vmrg    tHPos, $v8, tHPos // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
-    lbv     tAlCC[3], VTX_COLOR_A($2) // Vertex 2 alpha to elem 1
+    nop // load
     vlt     $v29, $v6, $v2    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
     xor     $11, $10, geomMode // Sign bit clear if x prod positive (back facing), set if x prod negative (front facing)
     vmrg    tMPos, $v4, tLPos // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     bgez    $11, tri_end // Cull if bit is clear (culled based on facing)
-     lbv    tAlCC[5], VTX_COLOR_A($3) // Vertex 3 alpha to elem 2
+     nop // load
     vmrg    tLPos, tLPos, $v4 // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
     mfc2    $1, tHPos[4]     // tHPos = lowest Y value = highest on screen (x, y, addr)
     vmudn   tSubPxHF, tHPos, $v31[5] // 0x4000
     beqz    $10, tri_end  // If cross product is 0, tri is degenerate (zero area), cull.
      vsub   tPosMmH, tMPos, tHPos
-    vmudh   $v13, tAlCC, tAlCC[6] // Multiply by 0, 1, or -1
+    vnop // TODO
     mfc2    $2, tMPos[4]     // tMPos = mid vertex (x, y, addr)
     vsub    tPosLmH, tLPos, tHPos
     mfc2    $3, tLPos[4]     // tLPos = highest Y value = lowest on screen (x, y, addr)
@@ -871,19 +869,17 @@ tri_start: // $v7 elems 1, 2, 3 hold vtx addrs
     lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vsub    tPosCatI, tLPos, tMPos
     addi    $10, rdpCmdBufEndP1, -2
-    vge     $v29, $v13, $v13[7] // A1, A2, A3 >= +/- threshold
+    vnop // TODO
     lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
     vmudh   $v29, tPosMmH, tPosLmH[0]
-    cfc2    $11, $vcc
+    nop // TODO
     vmadh   $v29, tPosLmH, tPosHmM[0]
     lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
     vreadacc tXPI, ACC_UPPER
     lw      v1c, VTX_INV_W_VEC($1) // v1c, v2c, v3c = 1/W for H, M, L
     vreadacc tXPF, ACC_MIDDLE
-    andi    $11, $11, 0x7 // Elems 0, 1, 2
-    vnop
-    beqz    $11, tri_end  // A1, A2, A3 all < threshold
-     vnop
+    
+   
     slv     tPosMmH[0],  0x0030($10) // MmHX -> 0x2E, MmHY -> first short (temp mem)
     lsv     tPosCatI[4], 0x002E(rdpCmdBufEndP1) // MmHX -> pos cat e2
     ssv     tPosLmH[0],  0x0032(rdpCmdBufEndP1) // LmHX -> second short (temp mem)
@@ -897,22 +893,13 @@ tri_start: // $v7 elems 1, 2, 3 hold vtx addrs
 
     ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
 
-tASOScl equ tLPos
-tASOOfs equ tMPos
-    li      $11, -0x60
-    mtc2    $11, tASOOfs[0]
-    li      $11, -0x80
-    mtc2    $11, tASOScl[0]
-    vmudh   tASOOfs, vOne, tASOOfs[0]
-    li      $11, -0x18
-    mtc2    $11, tASOOfs[6]
 
-    vmudn   $v29, tHAtI, tASOScl[0]
-    vmadh   tHAtI, vOne, tASOOfs
-    vmudn   $v29, tMAtI, tASOScl[0]
-    vmadh   tMAtI, vOne, tASOOfs
-    vmudn   $v29, tLAtI, tASOScl[0]
-    vmadh   tLAtI, vOne, tASOOfs
+    vmudn   $v29, tHAtI, tASO[4] // asoScale
+    vmadh   tHAtI, vOne, tASO // Color and alpha offsets elems 0-3
+    vmudn   $v29, tMAtI, tASO[4] // asoScale
+    vmadh   tMAtI, vOne, tASO // Color and alpha offsets elems 0-3
+    vmudn   $v29, tLAtI, tASO[4] // asoScale
+    vmadh   tLAtI, vOne, tASO // Color and alpha offsets elems 0-3
     
     
     vrcp    tRcpDyF[0], tPosCatI[1]
@@ -937,9 +924,8 @@ tASOOfs equ tMPos
     vmadn   tNewCatF, tPosCatI, tRcpDyI
     vmadh   tPosCatI, tPosCatF, tRcpDyI
 
-    li      $20, -8       // 0xFFF8; constant for some mask below
-    mtc2    $20, tMPos[14] // 0xFFF8; only elem 0, 1, 2 of this reg used now
-    vand    tAndCatF, tNewCatF, tMPos[7] // 0xFFF8
+    
+    vand    tAndCatF, tNewCatF, tASO[5] // 0xFFF8
 
     vcr     tPosCatI, tPosCatI, vTRC_0100
 

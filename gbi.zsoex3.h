@@ -135,17 +135,51 @@ typedef __attribute__((aligned(8))) struct {
 #define G_MW_SEGMENT   2
 
 /* MOVEWORD offsets */
-#define G_MWO_ASO_RGB_OFFSET     0x00
-#define G_MWO_ASO_A_OFFSET       0x01
-#define G_MWO_ASO_SCALE          0x02
-#define G_MWO_ALPHA_COMPARE_CULL 0x04
-#define G_MWO_PERSPNORM          0x06
-#define G_MWO_GEOM_MODE          0x08
+#define G_MWO_ASO_SCALE          0x00
+#define G_MWO_ASO_COLOR_OFFSET   0x02
+#define G_MWO_ASO_ALPHA_OFFSET   0x03
+#define G_MWO_PERSPNORM          0x04
+#define G_MWO_GEOM_MODE          0x06
 
 #define gSPLoadGeometryMode(pkt, halfword) \
     gMoveHalfwd(pkt, G_MW_FX, G_MWO_GEOM_MODE, halfword)
 #define gsSPLoadGeometryMode(halfword) \
     gsMoveHalfwd(G_MW_FX, G_MWO_GEOM_MODE, halfword)
+
+/**
+ * Attribute Stepper Overflow cel shading.
+ * 
+ * Modifies shade color and shade alpha coefficients sent to the RDP so that the
+ * attribute stepper--the hardware unit in the RDP which increments color,
+ * texture, and Z values during rasterization--overflows within the triangle.
+ * The shade color and shade alpha values are close to zero in the dark part
+ * of the triangle, and close to 0xFF in the light portion. The line between
+ * these, where the overflow occurs, forms the cel shading threshold.
+ * 
+ * Shade color (RGB all together) and shade alpha are set up to overflow at
+ * different thresholds, thus creating three differently shaded regions. Use the
+ * 1-cycle CC to apply the shade color threshold and the 1-cycle blender to
+ * apply the shade alpha threshold.
+ * 
+ * Set color and alpha to the darker and lighter lighting thresholds to use
+ * respectively, e.g. 0x40 and 0xD0.
+*/
+#define gSPASOCelEnable(pkt, color, alpha) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_ASO_SCALE, _SPASOCelEnable(color, alpha))
+#define gsSPASOCelEnable(color, alpha) \
+    gsMoveWd(G_MW_FX, G_MWO_ASO_SCALE, _SPASOCelEnable(color, alpha))
+#define gSPASOCelDisable(pkt) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_ASO_SCALE, G_ASO_CEL_SCALE_DISABLE << 16)
+#define gsSPASOCelDisable() \
+    gsMoveWd(G_MW_FX, G_MWO_ASO_SCALE, G_ASO_CEL_SCALE_DISABLE << 16)
+
+#define G_ASO_CEL_SCALE_DISABLE 0x0100
+#define G_ASO_CEL_SCALE_ENABLE  0xFF80
+
+#define _SPASOCelEnable(color, alpha) \
+    _SHIFTL(G_ASO_CEL_SCALE_ENABLE,    16, 16) | \
+    _SHIFTL(((0x100 - (color)) >> 1),  8,  8) | \
+    _SHIFTL(((0x100 - (alpha)) >> 1),  0,  8)
 
 /**
  * Holds the MVP matrix and up to two light directions. Each light direction
