@@ -574,38 +574,40 @@ G_FLUSH_handler: // 32
     j       flush_rdp_buffer
      li     $ra, run_next_DL_command
 
-// H = highest on screen = lowest Y value; then M = mid, L = low
-tASO equ $v9
-tHAtF equ $v5
-tMAtF equ $v27
-tLAtF equ $v12
-tHAtI equ $v18
-tMAtI equ $v19
-tLAtI equ $v21
-tHPos equ $v14
-tMPos equ $v2
-tLPos equ $v10
-tPosHmM equ $v11 // possible
-tPosCatI equ $v15 // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
-t1WI equ $v13 // elems 0, 4, 6
-tXPF equ $v16 // Triangle cross product
-tXPI equ $v17
-
-tRcpDyF equ $v20
-tRcpDyI equ $v22
-tNewCatF equ $v20 // <- tRcpDyF
-tAndCatF equ $v22 // <- tRcpDyI
-
-tXPRcpF equ $v23 // Reciprocal of cross product (becomes that * 4)
-tXPRcpI equ $v24
-tPosCatF equ $v25
-// unused equ $v26
-tSTWHMI equ $v30 // TODO change reg; H = elems 0-2, M = elems 4-6; init W = 7FFF
-
-tXYI1 equ $v6
-tXYI2 equ $v4
-tXYI3 equ $v8
-
+/*
+$v0  = vZero
+$v1  = vTRC
+$v2  = tASO
+$v3  = [tXYI1, tXYITmp1], tPosMmH, unused early
+$v4  = [tXYI2, tXYITmp2] | tSubPxH
+$v5  = tXYI3, tPosLmH (becomes multi)
+$v6  = t2m1, tPosHmM, unused early
+$v7  = next vertex addresses
+$v8  = tXYITmp0, tMPos, tXHMF
+$v9  =                  tXHMI
+$v10 = [tRcpDyI, tAndCatF]
+$v11 = [tRcpDyF, tNewCatF, tDaDeF]
+$v12 = tTemp, [tPosCatI, tDaDeI]
+$v13 = tXPRcpF
+$v14 = tXPRcpI
+$v15 = tXPF
+$v16 = tXPI
+$v17 = tHPos       |          t1WF
+$v18 = tXYITmp3    |         [t1WI, tSTWLF, tDaDxF]
+$v19 = t1m2, tLPos |        [tMnWF, tSTWLI, tDaDxI]
+$v20 = tPosCatF    | [tMx1W, tMnWI, tSTWHMF]
+$v21 =                              tSTWHMI
+$v22 = [tLAtF, tAtLmHF, tDaDyF]
+$v23 = [tLAtI, tAtLmHI, tDaDyI]
+$v24 = [tMAtF, tAtMmHF]
+$v25 = [tMAtI, tAtMmHI]
+$v26 = tHAtF
+$v27 = tHAtI
+$v28 = vOne
+$v29 = discard
+$v30 = unused
+$v31 = constants
+*/
 
 G_ZSOSECTION_handler:
     jal     segmented_to_physical
@@ -655,6 +657,7 @@ G_ZSOSECTION_handler:
      sh     $3, (0x40 - 2)($1)
     // Load offsets and Zs
     lqv     $v20, (0x40)(rdpCmdBufEndP1)
+tASO equ $v2
     vclr    tASO
     lpv     $v21, (0x00)(sectionBase)
     lqv     $v22, (0x50)(rdpCmdBufEndP1)
@@ -781,13 +784,14 @@ subsec_loop:
     beq     subSec, subSecEnd, run_next_DL_command
      sllv   indexBuf, indexBuf, subSecOfsShf
     add     indexBuf, indexBuf, sectionBase
-    lpv     $v26[0], (0)(indexBuf) // First tri indices to elems 1, 2, 3
+tTemp equ $v12
+    lpv     tTemp[0], (0)(indexBuf) // First tri indices to elems 1, 2, 3
     lb      $24, (0)(indexBuf) // Metadata byte
     addi    subSec, subSec, 1
     li      facingFlip, -0x8000    // Facing is sign bit
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
     andi    indexBufEnd, $24, 0x7F // Tri count
-    vmadl   $v7, $v26, vTRC_OVSZ   // Plus vtx indices times output vertex size
+    vmadl   $v7, tTemp, vTRC_OVSZ   // Plus vtx indices times output vertex size
     sll     $11, indexBufEnd, 14   // RSP tris counter starts at bit 14
     add     perfCounterB, perfCounterB, $11
     bltz    $24, @@skip_not_tri_strip
@@ -804,57 +808,71 @@ align_with_warning 8, "One instruction of padding before tri_start"
 
 tri_end:
 tri_start: // $v7 elems 1, 2, 3 hold vtx addrs
+tXYI1 equ $v3
     vmudh   tXYI1, vOne, $v7[1] // elem 2 of v6 = vertex 1 addr
     beq     indexBuf, indexBufEnd, subsec_loop
      mfc2   $1, $v7[2]
+tXYI2 equ $v4
     vmudh   tXYI2, vOne, $v7[2] // elem 2 of v4 = vertex 2 addr
     mfc2    $2, $v7[4]
+tXYI3 equ $v5
     vmudh   tXYI3, vOne, $v7[3] // elem 2 of v8 = vertex 3 addr
     add     indexBuf, indexBuf, indexBufInc
+tHAtF equ $v26
     vnxor   tHAtF, vZero, $v31[7]  // v5 = 0x8000; init frac value for attrs for rounding
-    lpv     $v26[0], (0)(indexBuf)
+    lpv     tTemp[0], (0)(indexBuf)
+tMAtF equ $v24
     vnxor   tMAtF, vZero, $v31[7]  // v7 = 0x8000; init frac value for attrs for rounding
     mfc2    $3, $v7[6]
+tLAtF equ $v22
     vnxor   tLAtF, vZero, $v31[7]  // v9 = 0x8000; init frac value for attrs for rounding
     llv     tXYI1[0], VTX_SCR_VEC($1) // Load pixel coords of vertex 1 into v6 (elems 0, 1 = x, y)
-    vmudh   $v3, vOne, $v31[5] // 0x4000; some rounding factor
+tXHMI equ $v9
+    vmudh   tXHMI, vOne, $v31[5] // 0x4000; some rounding factor
     llv     tXYI2[0], VTX_SCR_VEC($2) // Load pixel coords of vertex 2 into v4
     vmudn   $v29, vOne, vTRC_CCHS      // Cache start address
     llv     tXYI3[0], VTX_SCR_VEC($3) // Load pixel coords of vertex 3 into v8
-    vmadl   $v7, $v26, vTRC_OVSZ        // Plus vtx indices times output vertex size
+    vmadl   $v7, tTemp, vTRC_OVSZ        // Plus vtx indices times output vertex size
     lhu     v1c, VTX_CLIP($1)
-    vmudh   $v2, vOne, tXYI1[1] // v2 all elems = y-coord of vertex 1
+tXYITmp0 equ $v8
+    vmudh   tXYITmp0, vOne, tXYI1[1] // v2 all elems = y-coord of vertex 1
     lhu     v2c, VTX_CLIP($2)
-    vsub    $v10, tXYI1, tXYI2    // v10 = vertex 1 - vertex 2 (x, y, addr)
+t1m2 equ $v19
+    vsub    t1m2, tXYI1, tXYI2    // v10 = vertex 1 - vertex 2 (x, y, addr)
     lhu     v3c, VTX_CLIP($3)
-    vsub    $v26, tXYI1, tXYI3    // v12 = vertex 1 - vertex 3 (x, y, addr)
+    vsub    tTemp, tXYI1, tXYI3    // v12 = vertex 1 - vertex 3 (x, y, addr)
     xor     geomMode, geomMode, facingFlip
-    vsub    $v11, tXYI2, tXYI1    // v11 = vertex 2 - vertex 1 (x, y, addr)
+t2m1 equ $v6
+    vsub    t2m1, tXYI2, tXYI1    // v11 = vertex 2 - vertex 1 (x, y, addr)
     or      $10, v1c, v2c
-    vlt     $v13, $v2, tXYI2[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
+tXYITmp3 equ $v18
+    vlt     tXYITmp3, tXYITmp0, tXYI2[1] // v13 = min(v1.y, v2.y), VCO = v1.y < v2.y
     or      $10, $10, v3c     // $10 = all clip bits which are true for any verts
+tHPos equ $v17
     vmrg    tHPos, tXYI1, tXYI2   // v14 = v1.y < v2.y ? v1 : v2 (lower vertex of v1, v2)
     andi    $10, $10, CLIP_SCAL_NPXY | CLIP_CAMPLANE
-    vmudh   $v29, $v10, $v26[1] // x = (v1 - v2).x * (v1 - v3).y ... 
+    vmudh   $v29, t1m2, tTemp[1] // x = (v1 - v2).x * (v1 - v3).y ... 
     bnez    $10, tri_end // Reject (instead of clipping)
-     vmadh  $v26, $v26, $v11[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
-    vge     $v2, $v2, tXYI2[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
+     vmadh  tTemp, tTemp, t2m1[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
+    vge     tXYITmp0, tXYITmp0, tXYI2[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
     and     $11, v1c, v2c
+tLPos equ t1m2
     vmrg    tLPos, tXYI1, tXYI2   // v10 = vert1.y > vert2.y ? vert1 : vert2 (higher vertex of vert1, vert2)
     and     $11, $11, v3c
 tXYITmp1 equ tXYI1
-    vge     tXYITmp1, $v13, tXYI3[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
+    vge     tXYITmp1, tXYITmp3, tXYI3[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
     bnez    $11, tri_end // All three verts on the same side of any plane, exit
-     mfc2   $10, $v26[0]      // elem 0 = x = cross product => lower 16 bits, sign extended
+     mfc2   $10, tTemp[0]      // elem 0 = x = cross product => lower 16 bits, sign extended
 tXYITmp2 equ tXYI2
     vmrg    tXYITmp2, tHPos, tXYI3   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     ssv     $v31[14], 0x0036(rdpCmdBufEndP1) // 0x7FFF
     vmrg    tHPos, tXYI3, tHPos // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
     ori     v3c, geomMode, G_TRI_FILL // Geom mode low byte -> tri cmd ID
-    vlt     $v29, tXYITmp1, $v2    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
+    vlt     $v29, tXYITmp1, tXYITmp0    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
     xor     $11, $10, geomMode // Sign bit clear if x prod positive (back facing), set if x prod negative (front facing)
     vnop
     bgez    $11, tri_end // Cull if bit is clear (culled based on facing)
+tMPos equ tXYITmp0
      vmrg   tMPos, tXYITmp2, tLPos // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     vmrg    tLPos, tLPos, tXYITmp2 // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
     mfc2    $1, tHPos[4]     // tHPos = lowest Y value = highest on screen (x, y, addr)
@@ -867,33 +885,44 @@ tPosMmH equ tXYITmp1
 tPosLmH equ tXYI3
     vsub    tPosLmH, tLPos, tHPos
     mfc2    $3, tLPos[4]     // tLPos = highest Y value = lowest on screen (x, y, addr)
+tPosHmM equ t2m1
     vsub    tPosHmM, tHPos, tMPos
     addi    $11, rdpCmdBufEndP1, -2 // For MmHX, MmHY
+tPosCatI equ tTemp // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
     vsub    tPosCatI, tLPos, tMPos
+tHAtI equ $v27
     lpv     tHAtI[0], VTX_COLOR_VEC($1) // Load vert color of vertex 1
     vmudh   $v29, tPosMmH, tPosLmH[0]
     sb      v3c, 0x0000(rdpCmdBufPtr) // Store the triangle command id
     vmadh   $v29, tPosLmH, tPosHmM[0]
+tMAtI equ $v25
     lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
+tXPI equ $v16
     vreadacc tXPI, ACC_UPPER
     slv     tPosMmH[0],  0x0030($11) // MmHX -> 0x2E, MmHY -> first short (temp mem)
+tXPF equ $v15
     vreadacc tXPF, ACC_MIDDLE
+tLAtI equ $v23
     lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
     vmudn   $v29, tHAtI, tASO[4] // asoScale
     ssv     tLPos[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
     vmadh   tHAtI, vOne, tASO // Color and alpha offsets elems 0-3
     lw      v1c, VTX_INV_W_VEC($1) // v1c, v2c, v3c = 1/W for H, M, L
+tRcpDyF equ $v11
     vrcp    tRcpDyF[0], tPosCatI[1]
     ssv     tMPos[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
-// $v2 <- tMPos
+tRcpDyI equ $v10
     vrcph   tRcpDyI[0], tXPI[1]
     lsv     tPosCatI[4], 0x002E(rdpCmdBufEndP1) // MmHX -> pos cat e2
+tXPRcpF equ $v13 // Reciprocal of cross product
     vrcpl   tXPRcpF[1], tXPF[1]
     ssv     tPosLmH[0],  0x0032(rdpCmdBufEndP1) // LmHX -> second short (temp mem)
+tXPRcpI equ $v14
     vrcph   tXPRcpI[1], $v31[2] // 0
     lsv     tPosCatI[6], 0x0032(rdpCmdBufEndP1) // LmHX -> pos cat e3
     vrcp    tRcpDyF[2], tPosMmH[1]
     ssv     tPosHmM[0],  0x0034(rdpCmdBufEndP1) // HmMX -> third short (temp mem)
+// unused <- tPosHmM
     vrcph   tRcpDyI[2], tPosMmH[1]
 // unused <- tPosMmH
     lw      v2c, VTX_INV_W_VEC($2)
@@ -901,6 +930,7 @@ tPosLmH equ tXYI3
     ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vrcph   tRcpDyI[3], tPosLmH[1]
     lhu     v3c, 0x0006(rdpCmdBufPtr) // YH
+tPosCatF equ $v20
     vmudm   tPosCatF, tPosCatI, vTRC_1000
     mfc2    $10, tXPI[1]
     vmadn   tPosCatI, $v31, $v31[2] // 0
@@ -943,15 +973,18 @@ tSubPxH equ tXYITmp2
     
     vmudm   $v29, tPosCatF, tRcpDyF
     vmadl   $v29, tPosCatI, tRcpDyF
+tNewCatF equ tRcpDyF
     vmadn   tNewCatF, tPosCatI, tRcpDyI
     vmadh   tPosCatI, tPosCatF, tRcpDyI
+tAndCatF equ tRcpDyI
     vand    tAndCatF, tNewCatF, tASO[5] // 0xFFF8
     vcr     tPosCatI, tPosCatI, vTRC_0100
-    vmudn   $v29, $v3, tHPos[0]
+    vmudn   $v29, tXHMI, tHPos[0]
     vmadl   $v29, tAndCatF, tSubPxH[1]
     vmadm   $v29, tPosCatI, tSubPxH[1]
-    vmadn   $v2, tAndCatF, tSubPxH[0]
-    vmadh   $v3, tPosCatI, tSubPxH[0]
+tXHMF equ tMPos
+    vmadn   tXHMF, tAndCatF, tSubPxH[0]
+    vmadh   tXHMI, tPosCatI, tSubPxH[0]
 
 
 
@@ -978,22 +1011,23 @@ tSubPxH equ tXYITmp2
     
 
 
-tMnWF equ $v10 // <- tLPos
-t1WF equ $v14 // <- tHPos
-tMx1W equ $v25 // <- tPosCatF
-tMnWI equ $v25 // <- tMx1W
+t1WF equ tHPos
+tMx1W equ tPosCatF
 
     
     
     sw      v1c, 0x0038(rdpCmdBufEndP1) // Store max of three verts' 1/W (upper) to temp mem
     llv     tMx1W[0], 0x0038(rdpCmdBufEndP1) // Load max of three verts' 1/W
     vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
+tMnWF equ tLPos
     vrcpl   tMnWF[0], tMx1W[1] // TODO tMnWF and tMnWI can be same reg
+tMnWI equ tMx1W
     vrcph   tMnWI[0], $v31[2]     // 0
+t1WI equ tXYITmp3
     llv     t1WI[0], VTX_INV_W_VEC($1)
     llv     t1WI[8], VTX_INV_W_VEC($2)
     llv     t1WI[12], VTX_INV_W_VEC($3)
-    vmudh   t1WF, vOne, t1WI[1q] // Move frac parts from elem 1,3,5 to 0,2,4
+    vmudh   t1WF, vOne, t1WI[1q] // Move frac parts from elem 1,5,7 to 0,4,6
     vmudm   $v29, t1WI, tMnWF[0] // 1/W each vtx * min W = 1 for one of the verts, < 1 for others
     vmadl   $v29, t1WF, tMnWF[0]
     vmadn   t1WF, t1WF, tMnWI[0]
@@ -1003,21 +1037,24 @@ tMnWI equ $v25 // <- tMx1W
 
     
     
-tSTWLF equ $v13 // <- t1WI
-tSTWLI equ $v10 // <- tMnWF;  L = elems 4-6; init W = 7FFF
-tSTWHMF equ $v25 // <- tMnWI
+
+
     
-    lsv     tSTWHMI[12], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 6 = W
-    lsv     tSTWLI[12], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 2 = W
+tSTWHMI equ $v21 // H = elems 0-2, M = elems 4-6; init W = 7FFF
+tSTWLI equ tMnWF // L = elems 4-6; init W = 7FFF
     lsv     tSTWHMI[4], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 2 = W
+    lsv     tSTWHMI[12], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 6 = W
     llv     tSTWHMI[0], VTX_TC_VEC($1)
     llv     tSTWHMI[8], VTX_TC_VEC($2)
+    lsv     tSTWLI[12], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 2 = W
     llv     tSTWLI[8],  VTX_TC_VEC($3)
     vmudm   $v29,    tSTWHMI, t1WF[0h] // (S, T, 7FFF) * (1 or <1) for H and M
     vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
+tSTWHMF equ tMnWI
     vmadn   tSTWHMF, $v31, $v31[2]  // 0
     vmudm   $v29,   tSTWLI, t1WF[6]  // (S, T, 7FFF) * (1 or <1) for L
     vmadh   tSTWLI, tSTWLI, t1WI[6]
+tSTWLF equ t1WI
     vmadn   tSTWLF, $v31, $v31[2]  // 0
 
     
@@ -1042,21 +1079,19 @@ tAtMmHI equ tMAtI
     vsub    tAtLmHI, tLAtI, tHAtI
     vsubc   tAtMmHF, tMAtF, tHAtF
     vsub    tAtMmHI, tMAtI, tHAtI
-
-    ssv     $v3[6], 0x0010(rdpCmdBufPtr)     // Store XH edge coefficient (integer part)
-    ssv     $v2[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
-    ssv     $v3[4], 0x0018(rdpCmdBufPtr)     // Store XM edge coefficient (integer part)
-    ssv     $v2[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
-
 // DaDx = AtLmH * YMmH - AtMmH * YLmH
-tDaDxF equ $v2
-tDaDxI equ $v3
+tDaDxF equ tSTWLF
+tDaDxI equ tSTWLI
     vmudn   $v29, tAtLmHF, tPosLmH[4] // MmHY * 4
     vmadh   $v29, tAtLmHI, tPosLmH[4] // MmHY * 4
     vmadn   $v29, tAtMmHF, tPosLmH[1] // LmHY * -4 = HmLY * 4
+    ssv     tXHMI[6], 0x0010(rdpCmdBufPtr)     // Store XH edge coefficient (integer part)
     vmadh   $v29, tAtMmHI, tPosLmH[1] // LmHY * -4 = HmLY * 4
+    ssv     tXHMF[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
     vreadacc tDaDxF, ACC_MIDDLE
+    ssv     tXHMI[4], 0x0018(rdpCmdBufPtr)     // Store XM edge coefficient (integer part)
     vreadacc tDaDxI, ACC_UPPER
+    ssv     tXHMF[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
 // DaDy = AtMmH * XLmH - AtLmH * XMmH
 tDaDyF equ tAtLmHF
 tDaDyI equ tAtLmHI
