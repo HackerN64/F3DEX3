@@ -286,7 +286,7 @@ $17   subSecOfsShf
 $18   alccThresh
 $19       v1c         outVtx1        dmaLen
 $20      temp         flagsV1       dmemAddr
-$21   
+$21   ------------ perfCounterE --------------
 $22   ------------rdpCmdBufEndP1 -------------
 $23   ------------ rdpCmdBufPtr --------------
 $24      temp         flagsV2      cmd_w1_dram
@@ -301,15 +301,16 @@ $ra   return address, command handler address, sometimes sign bit is flag
 
 // Global scalar regs:
 geomMode       equ $5    // Geometry mode; facing flag in sign bit
-perfCounterD   equ $12   // Performance counter D (functions depend on config)
+perfCounterD   equ $12   // Currently: cycles spent processing tris
 altBaseReg     equ $13   // Alternate base address register for vector loads
+perfCounterE   equ $21   // Currently: cycles stalled on RDP FIFO
 rdpCmdBufEndP1 equ $22   // Pointer to one command word past "end" (middle) of RDP command buf
 rdpCmdBufPtr   equ $23   // RDP command buffer current DMEM pointer
 taskDataPtr    equ $26   // Task data (display list) DRAM pointer
 inputBufferPos equ $27   // DMEM position within display list input buffer, relative to end
-perfCounterA   equ $28   // Performance counter A (functions depend on config)
-perfCounterB   equ $29   // Performance counter B (functions depend on config)
-perfCounterC   equ $30   // Performance counter C (functions depend on config)
+perfCounterA   equ $28   // Currently: b31-16 num vertices; b15-0 num RDP tris
+perfCounterB   equ $29   // Currently: b31-14 num RSP tris; b13-0 num tex rects
+perfCounterC   equ $30   // Currently: cycles spent processing vertices
 
 // Tri write:
 v1c            equ $19
@@ -428,6 +429,7 @@ start:
     li      perfCounterC, 0
     vclr    vOne
     li      perfCounterD, 0
+    li      perfCounterE, 0
     sw      $2, rdpFifoPos                // Must be after load from displayListStart
     lqv     vTRC, (vTRCValue)($zero)      // Always as this value except vtx_store
     li      altBaseReg, altBase
@@ -616,8 +618,10 @@ G_ZSOSECTION_handler:
     sll     dmaLen, cmd_w0, 3 // Bits 3:9 of DMA length - 1
     jal     dma_read_write
      andi   dmaLen, dmaLen, 0x3F8 // Mask out lower 2 bits of addr
+    mfc0    $11, DPC_CLOCK
     andi    sectionBase, dmemAddr, 0xFF8 // Can't leave it in dmemAddr b/c tri write DMA clobbers
     srl     subSecEnd, cmd_w0, 17 // Subsection count minus 1
+    sub     perfCounterD, perfCounterD, $11 // Start tri timer
     andi    subSecEnd, subSecEnd, 0x1F
     addi    subSecEnd, subSecEnd, 1 // Remove the minus 1
     add     subSecEnd, subSecEnd, sectionBase // End address
@@ -781,7 +785,7 @@ sort_done_regular:
 subsec_loop:
     lbu     indexBuf, (0)(subSec)
     lh      geomMode, geometryModeLabel // Reset geometry mode modified by facingFlip
-    beq     subSec, subSecEnd, run_next_DL_command
+    beq     subSec, subSecEnd, zso_end
      sllv   indexBuf, indexBuf, subSecOfsShf
     add     indexBuf, indexBuf, sectionBase
 tTemp equ $v12
@@ -803,6 +807,11 @@ tTemp equ $v12
 @@skip_not_tri_strip:
     j       tri_start
      add    indexBufEnd, indexBufEnd, indexBuf // + start addr
+
+zso_end:
+    mfc0    $11, DPC_CLOCK
+    j       run_next_DL_command
+     add    perfCounterD, perfCounterD, $11 // End tri timer
 
 align_with_warning 8, "One instruction of padding before tri_start"
 
@@ -853,6 +862,7 @@ tHPos equ $v17
     andi    $10, $10, CLIP_SCAL_NPXY | CLIP_CAMPLANE
     vmudh   $v29, t1m2, tTemp[1] // x = (v1 - v2).x * (v1 - v3).y ... 
     bnez    $10, tri_end // Reject (instead of clipping)
+     // 17 cycles; 19 for rejected tri
      vmadh  tTemp, tTemp, t2m1[1] // ... + (v1 - v3).x * (v2 - v1).y = cross product = dir tri is facing
     vge     tXYITmp0, tXYITmp0, tXYI2[1]  // v2 = max(vert1.y, vert2.y), VCO = vert1.y > vert2.y
     and     $11, v1c, v2c
@@ -862,6 +872,7 @@ tLPos equ t1m2
 tXYITmp1 equ tXYI1
     vge     tXYITmp1, tXYITmp3, tXYI3[1] // v6 = max(max(vert1.y, vert2.y), vert3.y), VCO = max(vert1.y, vert2.y) > vert3.y
     bnez    $11, tri_end // All three verts on the same side of any plane, exit
+     // 21 cycles; 23 for tri offscreen but in clip ratio border
      mfc2   $10, tTemp[0]      // elem 0 = x = cross product => lower 16 bits, sign extended
 tXYITmp2 equ tXYI2
     vmrg    tXYITmp2, tHPos, tXYI3   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
@@ -872,12 +883,14 @@ tXYITmp2 equ tXYI2
     xor     $11, $10, geomMode // Sign bit clear if x prod positive (back facing), set if x prod negative (front facing)
     vnop
     bgez    $11, tri_end // Cull if bit is clear (culled based on facing)
+     // 26 cycles; 28 for backfacing tri
 tMPos equ tXYITmp0
      vmrg   tMPos, tXYITmp2, tLPos // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     vmrg    tLPos, tLPos, tXYITmp2 // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
     mfc2    $1, tHPos[4]     // tHPos = lowest Y value = highest on screen (x, y, addr)
     vnop
     beqz    $10, tri_end  // If cross product is 0, tri is degenerate (zero area), cull.
+     // 29 cycles; 31 for zero area tri
      li     $ra, tri_end // Only matters if we continue to flush_rdp_buffer
 tPosMmH equ tXYITmp1
     vsub    tPosMmH, tMPos, tHPos
@@ -904,17 +917,17 @@ tMAtI equ $v25
 tXPI equ $v16
     vreadacc tXPI, ACC_UPPER
 t1WI equ tXYITmp3
-    llv     t1WI[0], VTX_INV_W_VEC($1)
+    lsv     t1WI[0], VTX_INV_W_INT($1)
 tXPF equ $v15
     vreadacc tXPF, ACC_MIDDLE
     sub     v2c, v1c, v2c  // Four instr: v1c = max(v1c, v2c)
     vmudn   $v29, tMAtI, tASO[4] // asoScale
-    llv     t1WI[8], VTX_INV_W_VEC($2)
+    lsv     t1WI[8], VTX_INV_W_INT($2)
     vmadh   tMAtI, vOne, tASO // Color and alpha offsets elems 0-3
     sb      $24, 0x0000(rdpCmdBufPtr) // Store the triangle command id
 tRcpDyF equ $v11
     vrcp    tRcpDyF[0], tPosCatI[1]
-    llv     t1WI[12], VTX_INV_W_VEC($3)
+    lsv     t1WI[12], VTX_INV_W_INT($3)
 tRcpDyI equ $v10
     vrcph   tRcpDyI[0], tXPI[1]
     slv     tPosMmH[0],  0x0030($11) // MmHX -> 0x2E, MmHY -> first short (temp mem)
@@ -933,6 +946,7 @@ tLAtI equ $v23
     lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
     vrcph   tRcpDyI[3], tPosLmH[1]
     mfc2    $24, tXPI[1]
+    // 50 cycles
 tPosCatF equ $v20
     vmudm   tPosCatF, tPosCatI, vTRC_1000
     sra     $10, v2c, 31
@@ -956,16 +970,18 @@ tMx1W equ tPosHmM
     vmudm   $v29, tPosCatF, tRcpDyF
     ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vmadl   $v29, tPosCatI, tRcpDyF
+t1WF equ tPosMmH
+    lsv     t1WF[0], VTX_INV_W_FRAC($1)
 tNewCatF equ tRcpDyF
     vmadn   tNewCatF, tPosCatI, tRcpDyI
+    lsv     t1WF[8], VTX_INV_W_FRAC($2)
     vmadh   tPosCatI, tPosCatF, tRcpDyI
+    lsv     t1WF[12], VTX_INV_W_FRAC($3)
     vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
 tMnWF equ tXYITmp2
-    vrcpl   tMnWF[0], tMx1W[1] // TODO tMnWF and tMnWI can be same reg
+    vrcpl   tMnWF[0], tMx1W[1]
 tMnWI equ tMx1W
     vrcph   tMnWI[0], $v31[2]     // 0
-t1WF equ tPosMmH
-    vmudh   t1WF, vOne, t1WI[1q] // TODO Move frac parts from elem 1,5,7 to 0,4,6
     vmudn   $v29, tLAtI, tASO[4] // asoScale
     vmadh   tLAtI, vOne, tASO // Color and alpha offsets elems 0-3
 tSTWHMI equ tPosCatF // H = elems 0-2, M = elems 4-6; init W = 7FFF
@@ -1037,6 +1053,7 @@ tAtMmHI equ tMAtI
     andi    $24, $24, 0x0080 // Extract the left major flag from v2c; assume level and tile are 0
     vsub    tAtMmHI, tMAtI, tHAtI
     sb      $24, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
+    // 97 cycles
 // DaDx = AtLmH * YMmH - AtMmH * YLmH
 tDaDxF equ tSTWLF
 tDaDxI equ tSTWLI
@@ -1114,10 +1131,8 @@ tDaDeI equ tPosCatI
     sdv     tHAtI[0], 0x0000($2)   // Store RGBA shade color (integer)
     sdv     tHAtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
     bltz    dmemAddr, tri_end     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
+     // 133 cycles; 135 for drawn and not flushed tri
      sdv    tHAtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
-
-
-     // 146 cycles
 flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAddr = large neg num -> only wait and set DPC_END
     mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
     lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
@@ -1133,12 +1148,12 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
      mfc0   $11, DPC_STATUS                  // Read RDP status
     andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
     bnez    $11, @@await_rdp_dblbuf_avail    // Wait until double buffered start/end available
-     addi   perfCounterC, perfCounterC, 7    // 4 instr + 2 after mfc + 1 taken branch
+     addi   perfCounterE, perfCounterE, 7    // 4 instr + 2 after mfc + 1 taken branch
     lw      cmd_w1_dram, rdpFifoStart        // Start of FIFO
 @@await_past_first_instr:
     mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
     beq     $11, cmd_w1_dram, @@await_past_first_instr // Wait until RDP moved past start
-     addi   perfCounterC, perfCounterC, 6    // 3 instr + 2 after mfc + 1 taken branch
+     addi   perfCounterE, perfCounterE, 6    // 3 instr + 2 after mfc + 1 taken branch
     // Start was previously the start of the FIFO, unless this is the first buffer,
     // in which case it was the end of the FIFO. Normally, when the RDP gets to end, if we
     // have a new end value waiting (END_VALID), it'll load end but leave current. By
@@ -1146,7 +1161,7 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
     mtc0    cmd_w1_dram, DPC_START           // Set RDP start to start of FIFO
 @@keep_waiting:
     // This is here so we only count it when stalling below or on FIFO end codepath
-    addi    perfCounterC, perfCounterC, 10   // 7 instr + 2 after mfc + 1 taken branch
+    addi    perfCounterE, perfCounterE, 10   // 7 instr + 2 after mfc + 1 taken branch
 @@has_room:
     mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
     sub     $11, $11, cmd_w1_dram            // Current - current end (rdpFifoPos or start)
@@ -1174,8 +1189,10 @@ vtx_after_dma:
     addi    outVtx1, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
     addi    outVtx2, rdpCmdBufEndP1, tempPrevInvalVtx // Write prev loop vtx garbage here
     addi    outVtxBase, outVtxBase, -vtxSize // Will inc by 2, but need point to 2nd
+    mfc0    $11, DPC_CLOCK
     ldv     vMTX0I[0],  (0x00 - mtxSize)(mtx1Addr) // MVP matrix 1
     ldv     vMTX1I[0],  (0x08 - mtxSize)(mtx1Addr)
+    sub     perfCounterC, perfCounterC, $11 // Start vtx timer
     ldv     vMTX2I[0],  (0x10 - mtxSize)(mtx1Addr)
     ldv     vMTX3I[0],  (0x18 - mtxSize)(mtx1Addr)
     ldv     vMTX0F[0],  (0x20 - mtxSize)(mtx1Addr)
@@ -1361,9 +1378,11 @@ vtx_epilogue:
     sdv     vpScrI[8], (VTX_SCR_VEC   )(outVtx2) // XYZ and clobbers flags
     sdv     vpScrI[0], (VTX_SCR_VEC   )(outVtx1) // XYZ and clobbers flags
     sh      flagsV2,   (VTX_CLIP      )(outVtx2) // Store second vertex clip flags
+    mfc0    $11, DPC_CLOCK
     sh      flagsV1,   (VTX_CLIP      )(outVtx1) // Store first vertex flags
+    lqv     vTRC, (vTRCValue)($zero)         // Restore value overwritten by matrix
     j       run_next_DL_command
-     lqv    vTRC, (vTRCValue)($zero)         // Restore value overwritten by matrix
+     add    perfCounterC, perfCounterC, $11 // End vtx timer
     
 endFreeImemAddr equ 0x1FC4
 startFreeImem:
@@ -1422,6 +1441,9 @@ ovl0_start:
     sw      perfCounterB, cpuInterface + 0x4
     sw      perfCounterC, cpuInterface + 0x8
     sw      perfCounterD, cpuInterface + 0xC
+    sw      perfCounterE, cpuInterface + 0x10
+    mfc0    $11, DPC_CLOCK
+    sw      $11,          cpuInterface + 0x14
     li      $10, SP_SET_SIG2   // task done signal
     mtc0    $10, SP_STATUS
     break   0

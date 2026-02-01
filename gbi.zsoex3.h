@@ -82,7 +82,7 @@ typedef __attribute__((aligned(8))) struct {
  * ```
 */
 typedef __attribute__((aligned(8))) struct {
-    uint32_t a, b, c, d;
+    uint32_t a, b, c, d, e, endTime;
 } UcodePerfCounters;
 
 /*
