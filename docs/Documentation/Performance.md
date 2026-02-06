@@ -30,22 +30,22 @@ enabled. The reason timings are listed separately for each number of lights is
 because some implementations are pipelined for two lights, so going from an
 even to an odd number of lights adds a different time than vice versa.
 
-|                            | F3DEX2 | F3DEX3_NOC | F3DEX3 | ZSOEX3 |
-|----------------------------|--------|------------|--------|--------|
-| Command dispatch           | 12     | 10         | 10     |        |
-| Small RDP command          | 14     | 4          | 4      |        |
-| Only/2nd tri to offscreen  | 27     | 20         | 20     | 23     |
-| 1st tri to offscreen       | 28     | 21         | 21     | -      |
-| Only/2nd tri to clip       | 32     | 25         | 25     | 19 (reject) |
-| 1st tri to clip            | 33     | 26         | 26     | -      |
-| Only/2nd tri to backface   | 38     | 31         | 31     | 28     |
-| 1st tri to backface        | 39     | 32         | 32     | -      |
-| Only/2nd tri to degenerate | 42     | 33         | 33     | 31     |
-| 1st tri to degenerate      | 43     | 34         | 34     | -      |
-| Only/2nd tri to occluded   | Can't  | Can't      | 37     | Can't  |
-| 1st tri to occluded        | Can't  | Can't      | 38     | -      |
-| Only/2nd tri to draw       | 172    | 149        | 151    | 135    |
-| 1st tri to draw            | 173    | 150        | 152    | -      |
+|                            | F3DEX2 | F3DEX3_NOC | F3DEX3 | ZSOEX3 | RDPQ |
+|----------------------------|--------|------------|--------|--------|------|
+| Command dispatch           | 12     | 10         | 10     |        |      |
+| Small RDP command          | 14     | 4          | 4      |        |      |
+| Only/2nd tri to offscreen  | 27     | 20         | 20     | 23     | 20   |
+| 1st tri to offscreen       | 28     | 21         | 21     | -      | -    |
+| Only/2nd tri to clip       | 32     | 25         | 25     | 19 rej | 28   |
+| 1st tri to clip            | 33     | 26         | 26     | -      | -    |
+| Only/2nd tri to backface   | 38     | 31         | 31     | 28     | 47   |
+| 1st tri to backface        | 39     | 32         | 32     | -      | -    |
+| Only/2nd tri to degenerate | 42     | 33         | 33     | 31     | 47   |
+| 1st tri to degenerate      | 43     | 34         | 34     | -      | -    |
+| Only/2nd tri to occluded   | Can't  | Can't      | 37     | Can't  | Can't |
+| 1st tri to occluded        | Can't  | Can't      | 38     | -      | -    |
+| Only/2nd tri to draw       | 172    | 149        | 151    | 135    | 141  |
+| 1st tri to draw            | 173    | 150        | 152    | -      | -    |
 | Tri snake                  | Can't  | 10/11*     | 10/11* | Can't  |
 | Vtx before DMA start       | 16     | 17         | 17     |        |
 | Vtx pair, no lighting      | 54     | 54         | 70     |        |

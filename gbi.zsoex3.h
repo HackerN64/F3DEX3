@@ -88,7 +88,6 @@ typedef __attribute__((aligned(8))) struct {
 /*
  * GBI commands in order
  */
-#define G_FLUSH             0xDD
 #define G_DL                0xDE
 #define G_ENDDL             0xDF
 #define G_SPNOOP            0xE0
@@ -99,6 +98,7 @@ typedef __attribute__((aligned(8))) struct {
 #define G_RELSEGMENT        0x01
 #define G_VTX               0x02
 #define G_ZSOSECTION        0x03
+#define G_FLUSH             0x04
 
 /*
  * RSP command argument and misc defines

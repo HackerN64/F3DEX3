@@ -113,7 +113,6 @@ texgenLinearCoeffs:
 // RDP/Immediate Command Mini Table
 // 1 byte per entry, after << 2 points to an addr in first 1/4 of IMEM
 
-miniTableEntry G_FLUSH_handler
 miniTableEntry G_DL_handler
 miniTableEntry G_ENDDL_handler
 miniTableEntry G_SPNOOP_handler
@@ -153,6 +152,7 @@ miniTableEntry G_RDP_handler // G_NOOP
 miniTableEntry G_RELSEGMENT_handler
 miniTableEntry G_VTX_handler
 miniTableEntry G_ZSOSECTION_handler
+miniTableEntry G_FLUSH_handler
 
 endInitializedDmem:
 
@@ -337,7 +337,7 @@ flagsV1        equ $20   // Clip flags for vertex 1
 flagsV2        equ $24   // Clip flags for vertex 2
 
 // Misc:
-nextRA         equ $10   // Address to return to after overlay load
+nextRA         equ $10   // Address to return to after wait
 dmaLen         equ $19   // DMA length in bytes minus 1
 dmemAddr       equ $20   // DMA address in DMEM or IMEM. Also = rdpCmdBufPtr - rdpCmdBufEndP1 for flush_rdp_buffer
 cmd_w1_dram    equ $24   // DL command word 1, which is also DMA DRAM addr
@@ -416,7 +416,6 @@ tempEnd                       equ tempPrevInvalVtx + sizePrevInvalVtx
 .create CODE_FILE, 0x00001000
 
 // Initialization routines
-// Everything up until ovl01_end will get overwritten by ovl1
 start:
     lqv     $v31[0], (v31Value)($zero)
     lw      $2, rdpFifoEnd                // Load FIFO end addr
@@ -437,17 +436,48 @@ start:
     li      rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word
     vsub    vOne, vOne, $v31[1]             // 1 = 0 - -1
     lh      geomMode, geometryModeLabel
-    li      inputBufferPos, 0
-    li      nextRA, displaylist_dma
-    j       load_overlays_0_1
-     li     cmd_w1_dram, orga(ovl1_start)
+    j       displaylist_dma
+     li     inputBufferPos, 0
 
-start_end:
-.align 8
-start_padded_end:
+/* This is a crazy optimization, and it was completely accidental!
+When G_RELSEGMENT was implemented, we did not notice the G_MOVEWORD behavior of
+subtracting (G_MOVEWORD << 8) from the movewordTable address in order to remove
+the command byte. Since the command byte is G_RELSEGMENT, not G_MOVEWORD, the
+final address is completely wrong. However, DMEM wraps at 4 KiB--only the lowest
+4 bits of any address are significant. And, G_RELSEGMENT **happened** to end in
+0xB, the same as G_MOVEWORD! So the wrong address aliases to the correct one!
+I only noticed this when I tried to move G_RELSEGMENT to a different command
+byte and got crashes. */
+.if (G_RELSEGMENT & 0xF) != (G_MOVEWORD & 0xF)
+    .error "Crazy relsegment optimization broken, don't change command byte assignments"
+.endif
+G_RELSEGMENT_handler: // 9
+    jal     segmented_to_physical    // Resolve new segment address relative to existing segment
+G_MOVEWORD_handler:
+     srl    $2, cmd_w0, 16           // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
+    lhu     $10, (movewordTable - ((G_MOVEWORD & 0xF) << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
+    sll     $11, cmd_w0, 16          // Sign bit = upper bit of offset
+    add     $10, $10, cmd_w0         // Offset + base; only lower 12 bits matter
+    sh      cmd_w1_dram, ($10)       // Store value from cmd into halfword
+    bltz    $11, run_next_DL_command // If upper bit of offset is set, exit after halfword
+     lh     geomMode, geometryModeLabel // Might have modified this
+    j       run_next_DL_command
+     sw     cmd_w1_dram, ($10)       // Store value from cmd into word (offset + moveword_table[index])
 
-.orga max(orga(), max(ovl0_padded_end - ovl0_start, ovl1_padded_end - ovl1_start))
-ovl01_end:
+G_TEXRECT_handler:
+    j       run_next_DL_command
+     spv    $v4[0], (texrectState)($zero)
+
+G_RDPHALF_1_handler:
+    j       run_next_DL_command
+     sw     cmd_w1_dram, rdpHalf1Val
+
+G_ENDDL_handler:
+    lbu     $7, displayListStackDepth       // Load the DL stack index; if end stack,
+    beqz    $7, exit                        // exit microcode
+     addi   $7, $7, -4                      // Decrement the DL stack index
+    j       call_ret_common
+     lw     taskDataPtr, (displayListStack)($7) // Load addr of DL to return to
 
 G_DL_handler:
     sll     $2, cmd_w0, 15                  // Shifts the push/nopush value to the sign bit
@@ -462,38 +492,36 @@ call_ret_common:
     sb      $7, displayListStackDepth
     andi    inputBufferPos, cmd_w0, 0x00F8  // Byte 3, how many cmds to drop from load (max 0xA0)
 displaylist_dma:
-    li      nextRA, run_next_DL_command
-displaylist_dma_goto_next_ra:
     // Load INPUT_BUFFER_SIZE_BYTES - inputBufferPos cmds (inputBufferPos >= 0, mult of 8)
     addi    inputBufferPos, inputBufferPos, -INPUT_BUFFER_SIZE_BYTES // inputBufferPos = - num cmds
     nor     dmaLen, inputBufferPos, $zero              // DMA length = -inputBufferPos - 1 = ones compliment
     move    cmd_w1_dram, taskDataPtr                   // set up the DRAM address to read from
-    jal     dma_read_write
-     addi   dmemAddr, inputBufferPos, inputBufferEnd   // set the address to DMA read to
-    j       wait_goto_next_ra                      // if not, continue normal processing
-     sub    taskDataPtr, taskDataPtr, inputBufferPos   // increment the DRAM address to read from next time
+    addi    dmemAddr, inputBufferPos, inputBufferEnd   // set the address to DMA read to
+    sub     taskDataPtr, taskDataPtr, inputBufferPos   // increment the DRAM address to read from next time
+dma_read_wait_and_goto_next_dl_command:
+    mfc0    $11, SP_DMA_FULL          // load the DMA_FULL value
+@@while_dma_full:
+    bnez    $11, @@while_dma_full     // Loop until DMA_FULL is cleared
+     mfc0   $11, SP_DMA_FULL          // Update DMA_FULL value
+    mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA to
+    mtc0    cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA from
+    mtc0    dmaLen, SP_RD_LEN         // Initiate a DMA read with a length of dmaLen
+    mfc0    $11, SP_DMA_BUSY    // Load the DMA_BUSY value
+@@while_dma_busy:
+    bnez    $11, @@while_dma_busy // Loop until DMA_BUSY is cleared
+     mfc0   $11, SP_DMA_BUSY      // Update DMA_BUSY value
+    j       run_next_DL_command
+     nop // TODO
     
-load_overlay_0_and_enter:
-    li      nextRA, 0x1000                  // Sets up return address
-    li      cmd_w1_dram, orga(ovl0_start)   // Sets up ovl0 table address
-load_overlays_0_1:
-    lw      $11, ucodeTextStart             // TODO move this to start, move ovl0 stuff here
-    li      dmaLen, ovl01_end - 0x1000 - 1
-    li      dmemAddr, 0x1000
-    j       dma_and_wait_goto_next_ra
-     add    cmd_w1_dram, cmd_w1_dram, $11
-
-G_RDPHALF_2_handler: // 8; should be after the handlers with alignment needs
+G_RDPHALF_2_handler: // 8
+    lw      cmd_w0, rdpHalf1Val             // load the RDPHALF1 value into w0
     li      $11, texrectState
     ldv     $v29[0], (0)($11)
-    lw      cmd_w0, rdpHalf1Val             // load the RDPHALF1 value into w0
+    sw      cmd_w0, (inputBufferEnd - 8)(inputBufferPos) // 1st half of current cmd
+    lpv     $v4[0], (inputBufferEndSgn - 8)(inputBufferPos)
     addi    rdpCmdBufPtr, rdpCmdBufPtr, 8
-    addi    perfCounterB, perfCounterB, 1   // Increment number of tex/fill rects
+    addi    perfCounterB, perfCounterB, 1   // Increment number of tex rects
     sdv     $v29[0], -8(rdpCmdBufPtr)
-    sw      cmd_w0, 0(rdpCmdBufPtr)  // TODO can optimize this with vector ops
-    j       commit_small_rdp_command
-     sw     cmd_w1_dram, 4(rdpCmdBufPtr) // w1 is from the current command
-
 G_RDP_handler:
     spv     $v4[0], 0(rdpCmdBufPtr)     // Whole command
 commit_small_rdp_command:
@@ -519,7 +547,7 @@ run_next_DL_command:
     vmudl   $v8, $v4, vTRC_1000                         // Input vertex size elem 2
     jr      $ra                                         // Jump to handler
      addi   inputBufferPos, inputBufferPos, 0x0008      // increment the DL index by 2 words
-    // $7 must retain the command byte for load_mtx and command dispatch in overlays 2 and 3
+    // $7 must retain the command byte
     // $ra must contain the handler called for several handlers
 
 align_with_warning 8, "One instruction of padding before G_VTX_handler"
@@ -534,7 +562,7 @@ G_VTX_handler: // 11
     vmudh   $v29, vOne, vTRC_CCHE  // Cache end
     addi    dmaLen, vtxLeft, -1
     vmadh   $v2, $v2, vTRC_M_50    // Minus matrix index times size; elems 2=m2, 5=m1
-    j       dma_read_write         // DMA start addr = end addr - input size
+    j       dma_read         // DMA start addr = end addr - input size
      sub    dmemAddr, dmemAddr, vtxLeft // Rounded down to DMA word by H/W
 
 align_with_warning 8, "One instruction of padding before segmented_to_physical"
@@ -558,13 +586,11 @@ G_MOVEMEM_handler: // If called this handler, $7 = (-0x100 | G_MOVEMEM)
     lbu     dmaLen, (inputBufferEnd - 0x07)(inputBufferPos) // Second byte of word 0
     lhu     dmemAddr, (movememTable)($3)
     srl     $2, cmd_w0, 5                 // ((w0) >> 8) << 3; top 3 bits of idx must be 0
-    add     dmemAddr, dmemAddr, $2        // This is bits 5-16 inclusive for 12 bit DMEM
-    li      nextRA, run_next_DL_command
-dma_and_wait_goto_next_ra:
-    j       dma_read_write
-     li     $ra, wait_goto_next_ra
+    j       dma_read_wait_and_goto_next_dl_command
+     add    dmemAddr, dmemAddr, $2        // This is bits 5-16 inclusive for 12 bit DMEM
 
-G_FLUSH_handler: // 32
+G_FLUSH_handler:
+exit:
     jal     flush_rdp_buffer        // Flush once to push partial DMEM buf to FIFO
      sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Prereq; offset buffer fullness
     // If the DMEM buffer was empty, dmemAddr will be unchanged and valid for this next
@@ -573,8 +599,21 @@ G_FLUSH_handler: // 32
     // if the buffer was empty. The result is it will wait for the DMA to finish, set
     // DPC_END, and return to $ra. This is why the dmemAddr register (as opposed to,
     // for example, dmaLen) is used as the DMEM buf fullness.
-    j       flush_rdp_buffer
-     li     $ra, run_next_DL_command
+    jal     flush_rdp_buffer
+     nop
+.if !(G_FLUSH < 0x7F && G_ENDDL >= 0x80)
+    .error "G_FLUSH_handler optimization broken"
+.endif
+    bgtz    $7, run_next_DL_command
+     mfc0   $11, DPC_CLOCK
+    sw      perfCounterA, cpuInterface + 0x0
+    sw      perfCounterB, cpuInterface + 0x4
+    sw      perfCounterC, cpuInterface + 0x8
+    sw      perfCounterD, cpuInterface + 0xC
+    sw      perfCounterE, cpuInterface + 0x10
+    sw      $11,          cpuInterface + 0x14
+    break   0
+    nop // TODO
 
 /*
 $v0  = vZero
@@ -616,7 +655,7 @@ G_ZSOSECTION_handler:
      srl    dmemAddr, cmd_w0, 7-3 // Bits 3:11 of DMEM address, bit 12 is 0 to select DMEM
     addi    dmemAddr, dmemAddr, cacheStart // Relative to cache start
     sll     dmaLen, cmd_w0, 3 // Bits 3:9 of DMA length - 1
-    jal     dma_read_write
+    jal     dma_read
      andi   dmaLen, dmaLen, 0x3F8 // Mask out lower 2 bits of addr
     mfc0    $11, DPC_CLOCK
     andi    sectionBase, dmemAddr, 0xFF8 // Can't leave it in dmemAddr b/c tri write DMA clobbers
@@ -1164,20 +1203,26 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
     addi    perfCounterE, perfCounterE, 10   // 7 instr + 2 after mfc + 1 taken branch
 @@has_room:
     mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
-    sub     $11, $11, cmd_w1_dram            // Current - current end (rdpFifoPos or start)
-    blez    $11, @@copy_buffer               // Current is behind or at current end, can do copy
-     sub    $11, $11, dmaLen                 // If amount current is ahead of current end
+    sub     $11, $11, cmd_w1_dram            // Current - want to write pos
+    blez    $11, @@copy_buffer               // Current is behind or at write pos, can write
+     sub    $11, $11, dmaLen                 // If amount current is ahead of write pos
     blez    $11, @@keep_waiting              // is <= size of buffer to copy, keep waiting
 @@copy_buffer:
-     add    $11, cmd_w1_dram, dmaLen         // New end is current end + buffer size
+     add    $11, cmd_w1_dram, dmaLen         // New end is write pos + buffer size
     sw      $11, rdpFifoPos
     // Set up the DMA from DMEM to the RDP fifo in RDRAM
     addi    dmaLen, dmaLen, -1                                  // subtract 1 from the length
-    addi    dmemAddr, rdpCmdBufEndP1, -(0x2000 | (RDP_TRI_SIZE_NO_ZBUF + 8)) // The 0x2000 is meaningless, negative means write
+    addi    dmemAddr, rdpCmdBufEndP1, -(0x2000 | (RDP_TRI_SIZE_NO_ZBUF + 8)) // Negative no longer needed for write, but needed for flush early exit
     xori    rdpCmdBufEndP1, rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word ^ rdpCmdBuffer2EndPlus1Word // Swap between the two RDP command buffers
-    j       dma_read_write
-     addi   rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_TRI_SIZE_NO_ZBUF + 8)
-
+    addi    rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_TRI_SIZE_NO_ZBUF + 8)
+    mfc0    $11, SP_DMA_FULL          // load the DMA_FULL value
+@@while_dma_full:
+    bnez    $11, @@while_dma_full     // Loop until DMA_FULL is cleared
+     mfc0   $11, SP_DMA_FULL          // Update DMA_FULL value
+    mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from/to
+    mtc0    cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA from/to
+    jr      $ra
+     mtc0   dmaLen, SP_WR_LEN         // Initiate a DMA write with a length of dmaLen
 
 vtx_after_dma:
     andi    inVtx, dmemAddr, 0xFFF8            // Round down input start addr to DMA word
@@ -1384,137 +1429,25 @@ vtx_epilogue:
     j       run_next_DL_command
      add    perfCounterC, perfCounterC, $11 // End vtx timer
     
-endFreeImemAddr equ 0x1FC4
-startFreeImem:
-.if . > endFreeImemAddr
-    .error "Out of IMEM space"
-.endif
-.org endFreeImemAddr
-endFreeImem:
-
-wait_goto_next_ra:
-    move    $ra, nextRA
-    // Fallthrough to while_wait_dma_busy
-    
-.if . != 0x1FC8
-    // This has to be at this address for boot and S2DEX compatibility
-    .error "Error in organization of end of IMEM"
-.endif
-
-// The code from here to the end is shared with S2DEX, so great care is needed for changes.
-while_wait_dma_busy:
+while_wait_dma_busy: // Called from vtx, zsosec
     mfc0    $11, SP_DMA_BUSY    // Load the DMA_BUSY value
 @@while_dma_busy:
     bnez    $11, @@while_dma_busy // Loop until DMA_BUSY is cleared
      mfc0   $11, SP_DMA_BUSY      // Update DMA_BUSY value
-old_return_routine:
+old_return_routine: // Only called from flush_rdp_buffer
     jr      $ra
      // Has mfc0 in branch delay slot, causes a stall if first instr after ret is load
 
-dma_read_write:
+dma_read:
      mfc0   $11, SP_DMA_FULL          // load the DMA_FULL value
 @@while_dma_full:
     bnez    $11, @@while_dma_full     // Loop until DMA_FULL is cleared
      mfc0   $11, SP_DMA_FULL          // Update DMA_FULL value
-dma_read_write_not_full:
-    mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from/to
-    bltz    dmemAddr, dma_write       // If the DMEM address is negative, this is a DMA write, if not read
-     mtc0   cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA from/to
+    mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from
+    mtc0    cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA from
     jr      $ra
      mtc0   dmaLen, SP_RD_LEN         // Initiate a DMA read with a length of dmaLen
-dma_write:
-    jr      $ra
-     mtc0   dmaLen, SP_WR_LEN         // Initiate a DMA write with a length of dmaLen
 
-.if . != 0x00002000
-    .error "Code at end of IMEM shared with other ucodes has been corrupted"
-.endif
-
-.headersize 0x00001000 - orga()
-
-ovl0_start:
-    jal     flush_rdp_buffer   // See G_FLUSH_handler for docs on these 3 instructions.
-     sub    dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1
-    jal     flush_rdp_buffer
-     add    taskDataPtr, taskDataPtr, inputBufferPos // inputBufferPos <= 0; taskDataPtr was where in the DL after the current chunk loaded
-    sw      perfCounterA, cpuInterface + 0x0
-    sw      perfCounterB, cpuInterface + 0x4
-    sw      perfCounterC, cpuInterface + 0x8
-    sw      perfCounterD, cpuInterface + 0xC
-    sw      perfCounterE, cpuInterface + 0x10
-    mfc0    $11, DPC_CLOCK
-    sw      $11,          cpuInterface + 0x14
-    li      $10, SP_SET_SIG2   // task done signal
-    mtc0    $10, SP_STATUS
-    break   0
-    nop
-
-ovl0_end:
-.align 8
-ovl0_padded_end:
-
-.if ovl0_padded_end > ovl01_end
-    .error "Automatic resizing for overlay 0 failed"
-.endif
-
-// overlay 1
-.headersize 0x00001000 - orga()
-
-ovl1_start:
-
-G_ENDDL_handler:
-    lbu     $7, displayListStackDepth       // Load the DL stack index; if end stack,
-    beqz    $7, load_overlay_0_and_enter    // load overlay 0; $7 == -4 signals end
-     addi   $7, $7, -4                      // Decrement the DL stack index
-    j       call_ret_common                 // has a different version in ovl1
-     lw     taskDataPtr, (displayListStack)($7) // Load addr of DL to return to
-
-/* This is a crazy optimization, and it was completely accidental!
-When G_RELSEGMENT was implemented, we did not notice the G_MOVEWORD behavior of
-subtracting (G_MOVEWORD << 8) from the movewordTable address in order to remove
-the command byte. Since the command byte is G_RELSEGMENT, not G_MOVEWORD, the
-final address is completely wrong. However, DMEM wraps at 4 KiB--only the lowest
-4 bits of any address are significant. And, G_RELSEGMENT **happened** to end in
-0xB, the same as G_MOVEWORD! So the wrong address aliases to the correct one!
-I only noticed this when I tried to move G_RELSEGMENT to a different command
-byte and got crashes. */
-.if (G_RELSEGMENT & 0xF) != (G_MOVEWORD & 0xF)
-    .error "Crazy relsegment optimization broken, don't change command byte assignments"
-.endif
-G_RELSEGMENT_handler: // 9
-    jal     segmented_to_physical    // Resolve new segment address relative to existing segment
-G_MOVEWORD_handler:
-     srl    $2, cmd_w0, 16           // load the moveword command and word index into $2 (e.g. 0xDB06 for G_MW_SEGMENT)
-    lhu     $10, (movewordTable - ((G_MOVEWORD & 0xF) << 8))($2) // subtract the moveword label and offset the word table by the word index (e.g. 0xDB06 becomes 0x0304)
-    sll     $11, cmd_w0, 16          // Sign bit = upper bit of offset
-    add     $10, $10, cmd_w0         // Offset + base; only lower 12 bits matter
-    sh      cmd_w1_dram, ($10)       // Store value from cmd into halfword
-    bltz    $11, run_next_DL_command // If upper bit of offset is set, exit after halfword
-     lh     geomMode, geometryModeLabel // Might have modified this
-    j       run_next_DL_command
-     sw     cmd_w1_dram, ($10)       // Store value from cmd into word (offset + moveword_table[index])
-
-G_TEXRECT_handler: // 3; should be towards the start of ovl1
-    j       run_next_DL_command
-     spv    $v4[0], (texrectState)($zero)
-
-G_RDPHALF_1_handler:
-    j       run_next_DL_command
-     sw     cmd_w1_dram, rdpHalf1Val
-
-ovl1_end:
-align_with_warning 8, "One instruction of padding at end of ovl1"
-ovl1_padded_end:
-
-.if ovl1_padded_end > ovl01_end
-    .error "Automatic resizing for overlay 1 failed"
-.endif
-// Currently want exactly 92 instructions (based on current size of start)
-.if ovl1_padded_end > start_padded_end
-    warn_if_base "ovl1 is larger than start, try to move something out"
-.endif
-.if ovl1_padded_end < start_padded_end
-    warn_if_base "ovl1 is smaller than start, wasting space!"
-.endif
+end_imem:
 
 .close // CODE_FILE

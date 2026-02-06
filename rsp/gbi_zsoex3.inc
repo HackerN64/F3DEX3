@@ -1,6 +1,5 @@
 G_TEXTURE_ENABLE      equ 0x00000002
 
-G_FLUSH             equ 0xDD
 G_DL                equ 0xDE
 G_ENDDL             equ 0xDF
 G_SPNOOP            equ 0xE0
@@ -11,6 +10,7 @@ G_RDPHALF_1         equ 0xE3
 G_RELSEGMENT        equ 0x01
 G_VTX               equ 0x02
 G_ZSOSECTION        equ 0x03
+G_FLUSH             equ 0x04
 
 mtxSize equ 0x50
 
