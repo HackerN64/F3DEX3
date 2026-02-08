@@ -1022,7 +1022,9 @@ tMnWF equ tXYITmp2
 tMnWI equ tMx1W
     vrcph   tMnWI[0], $v31[2]     // 0
     vmudn   $v29, tLAtI, tASO[4] // asoScale
+    andi    $24, $24, 0x0080 // Extract the left major flag from v2c; assume level and tile are 0
     vmadh   tLAtI, vOne, tASO // Color and alpha offsets elems 0-3
+    sb      $24, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
 tSTWHMI equ tPosCatF // H = elems 0-2, M = elems 4-6; init W = 7FFF
     vmudm   $v29, t1WI, tMnWF[0] // 1/W each vtx * min W = 1 for one of the verts, < 1 for others
     lsv     tSTWHMI[4], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 2 = W
@@ -1080,66 +1082,89 @@ tXHMF equ tMPos
     ldv     tMAtF[8], 0x0058(rdpCmdBufEndP1) // Move S, T, W Mid Frac from temp mem
     vmadh   tXHMI, tPosCatI, tSubPxH[0]
     ldv     tMAtI[8], 0x0068(rdpCmdBufEndP1) // Move S, T, W Mid Int from temp mem
+
+    lh      $10, VTX_SCR_X($2)                 // Load X of Mid
+    addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
+    sll     $10, $10, 14
+    sw      $10, 0x0008(rdpCmdBufPtr)          // Store X of Mid as XL edge coefficient (yes)
+
 tAtLmHF equ tLAtF
 tAtLmHI equ tLAtI
 tAtMmHF equ tMAtF
 tAtMmHI equ tMAtI
     vsubc   tAtLmHF, tLAtF, tHAtF
-    lh      $10, VTX_SCR_X($2)                 // Load X of Mid
     vsub    tAtLmHI, tLAtI, tHAtI
-    addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
     vsubc   tAtMmHF, tMAtF, tHAtF
-    andi    $24, $24, 0x0080 // Extract the left major flag from v2c; assume level and tile are 0
     vsub    tAtMmHI, tMAtI, tHAtI
-    sb      $24, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
     // 97 cycles
 // DaDx = AtLmH * YMmH - AtMmH * YLmH
 tDaDxF equ tSTWLF
 tDaDxI equ tSTWLI
     vmudn   $v29, tAtLmHF, tPosLmH[4] // MmHY * 4
-    sll     $10, $10, 14
     vmadh   $v29, tAtLmHI, tPosLmH[4] // MmHY * 4
-    sw      $10, 0x0008(rdpCmdBufPtr)          // Store X of Mid as XL edge coefficient (yes)
     vmadn   $v29, tAtMmHF, tPosLmH[1] // LmHY * -4 = HmLY * 4
-    ssv     tXHMI[6], 0x0010(rdpCmdBufPtr)     // Store XH edge coefficient (integer part)
     vmadh   $v29, tAtMmHI, tPosLmH[1] // LmHY * -4 = HmLY * 4
-    ssv     tXHMF[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
     vreadacc tDaDxF, ACC_MIDDLE
-    ssv     tXHMI[4], 0x0018(rdpCmdBufPtr)     // Store XM edge coefficient (integer part)
     vreadacc tDaDxI, ACC_UPPER
-    ssv     tXHMF[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
 // DaDy = AtMmH * XLmH - AtLmH * XMmH
 tDaDyF equ tAtLmHF
 tDaDyI equ tAtLmHI
     vmudn   $v29, tAtMmHF, tPosLmH[5] // LmHX * 4
-    ssv     tPosCatI[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
     vmadh   $v29, tAtMmHI, tPosLmH[5] // LmHX * 4
-    ssv     tNewCatF[0], 0x000E(rdpCmdBufPtr)    // Store DxLDy edge coefficient (fractional part)
     vmadn   $v29, tAtLmHF, tPosLmH[6] // HmMX * 4
-    ssv     tPosCatI[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
     vmadh   $v29, tAtLmHI, tPosLmH[6] // HmMX * 4
-    ssv     tNewCatF[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
     vreadacc tDaDyF, ACC_MIDDLE
-    ssv     tPosCatI[4], 0x001C(rdpCmdBufPtr)    // Store DxMDy edge coefficient (integer part)
+    ssv     tXHMI[6], 0x0010(rdpCmdBufPtr)     // Store XH edge coefficient (integer part)
     vreadacc tDaDyI, ACC_UPPER
-    ssv     tNewCatF[4], 0x001E(rdpCmdBufPtr)    // Store DxMDy edge coefficient (fractional part)
+    ssv     tXHMF[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
 // DaDx, DaDy /= tri area
     vmudl   $v29, tDaDxF, tXPRcpF[1]
-    addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
+    ssv     tXHMI[4], 0x0018(rdpCmdBufPtr)     // Store XM edge coefficient (integer part)
     vmadm   $v29, tDaDxI, tXPRcpF[1]
-    andi    $11, geomMode, G_SHADE
+    ssv     tXHMF[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
     vmadn   tDaDxF, tDaDxF, tXPRcpI[1]
-    sll     $11, $11, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
+    ssv     tPosCatI[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
     vmadh   tDaDxI, tDaDxI, tXPRcpI[1]
-    add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
+    ssv     tNewCatF[0], 0x000E(rdpCmdBufPtr)    // Store DxLDy edge coefficient (fractional part)
     vmudl   $v29, tDaDyF, tXPRcpF[1]
-    andi    $11, geomMode, G_TEXTURE_ENABLE
+    ssv     tPosCatI[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
     vmadm   $v29, tDaDyI, tXPRcpF[1]
-    sll     $11, $11, 5             // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
+    ssv     tNewCatF[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
     vmadn   tDaDyF, tDaDyF, tXPRcpI[1]
-    add     rdpCmdBufPtr, $1, $11   // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
+    ssv     tPosCatI[4], 0x001C(rdpCmdBufPtr)    // Store DxMDy edge coefficient (integer part)
     vmadh   tDaDyI, tDaDyI, tXPRcpI[1]
-    sub     dmemAddr, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
+    ssv     tNewCatF[4], 0x001E(rdpCmdBufPtr)    // Store DxMDy edge coefficient (fractional part)
+
+    addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
+    andi    $11, geomMode, G_SHADE
+    sll     $11, $11, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
+    add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
+    andi    $11, geomMode, G_TEXTURE_ENABLE
+    sll     $11, $11, 5             // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
+    add     rdpCmdBufPtr, $1, $11   // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
+    sub     $3, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
+
+    lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
+
+    lw      $10, rdpFifoEnd                  // Load FIFO end addr
+    addi    dmaLen, $3, RDP_TRI_SIZE_NO_ZBUF + 8  // dmaLen = size of DMEM buffer to copy
+    add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
+    sub     $10, $10, $11                    // $10 = FIFO end addr - future pointer
+    bltz    $10, tri_await_rdp_dblbuf_avail
+tri_flush_continue:
+    // This is here so we only count it when stalling below or on FIFO end codepath
+    // TODO addi    perfCounterE, perfCounterE, 10   // 7 instr + 2 after mfc + 1 taken branch
+     mfc0   $11, DPC_CURRENT                 // Load RDP current pointer
+    sub     $11, $11, cmd_w1_dram            // Current - want to write pos
+    blez    $11, @@copy_buffer               // Current is behind or at write pos, can write
+     sub    $11, $11, dmaLen                 // If amount current is ahead of write pos
+    blez    $11, tri_flush_continue          // is <= size of buffer to copy, keep waiting
+@@copy_buffer:
+     add    $11, cmd_w1_dram, dmaLen         // New end is write pos + buffer size
+    
+    addi    dmaLen, dmaLen, -1                                  // subtract 1 from the length
+    addi    dmemAddr, rdpCmdBufEndP1, -(RDP_TRI_SIZE_NO_ZBUF + 8)
+    
 // DaDe = DaDx * DxHDy
 tDaDeF equ tNewCatF
 tDaDeI equ tPosCatI
@@ -1169,24 +1194,30 @@ tDaDeI equ tPosCatI
     sdv     tHAtF[0], 0x0010($2)   // Store RGBA shade color (fractional)
     sdv     tHAtI[0], 0x0000($2)   // Store RGBA shade color (integer)
     sdv     tHAtF[8], 0x0010($1)   // Store S, T, W texture coefficients (fractional)
-    bltz    dmemAddr, tri_end     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
+    bltz    $3, tri_end     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
      // 133 cycles; 135 for drawn and not flushed tri
      sdv    tHAtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
-flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAddr = large neg num -> only wait and set DPC_END
+
+    sw      $11, rdpFifoPos
+    mtc0    cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA from/to
+    mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from/to
+
+tri_flush_rdp_buffer:
     mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
-    lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
-    lw      $10, rdpFifoEnd                  // Load FIFO end addr
-    bnez    $11, flush_rdp_buffer            // Wait until no DMAs are active
-     addi   dmaLen, dmemAddr, RDP_TRI_SIZE_NO_ZBUF + 8  // dmaLen = size of DMEM buffer to copy
-    blez    dmaLen, old_return_routine       // Exit if nothing to copy, or if dmemAddr is large negative num from last flush DMA write
-     mtc0   cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
-    add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
-    sub     $10, $10, $11                    // $10 = FIFO end addr - future pointer
-    bgez    $10, @@has_room                  // Branch if we can fit this
-@@await_rdp_dblbuf_avail:
+    bnez    $11, tri_flush_rdp_buffer        // Wait until no DMAs are active
+     nop
+    
+    mtc0    cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
+
+    xori    rdpCmdBufEndP1, rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word ^ rdpCmdBuffer2EndPlus1Word // Swap between the two RDP command buffers
+    addi    rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_TRI_SIZE_NO_ZBUF + 8)
+    j       tri_end
+     mtc0   dmaLen, SP_WR_LEN         // Initiate a DMA write with a length of dmaLen
+
+tri_await_rdp_dblbuf_avail:
      mfc0   $11, DPC_STATUS                  // Read RDP status
     andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
-    bnez    $11, @@await_rdp_dblbuf_avail    // Wait until double buffered start/end available
+    bnez    $11, tri_await_rdp_dblbuf_avail  // Wait until double buffered start/end available
      addi   perfCounterE, perfCounterE, 7    // 4 instr + 2 after mfc + 1 taken branch
     lw      cmd_w1_dram, rdpFifoStart        // Start of FIFO
 @@await_past_first_instr:
@@ -1197,16 +1228,28 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
     // in which case it was the end of the FIFO. Normally, when the RDP gets to end, if we
     // have a new end value waiting (END_VALID), it'll load end but leave current. By
     // setting start here, it will also load current with start.
-    mtc0    cmd_w1_dram, DPC_START           // Set RDP start to start of FIFO
-@@keep_waiting:
+    j       tri_flush_continue
+     mtc0   cmd_w1_dram, DPC_START           // Set RDP start to start of FIFO
+
+flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAddr = large neg num -> only wait and set DPC_END
+    mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
+    lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
+    lw      $10, rdpFifoEnd                  // Load FIFO end addr
+    bnez    $11, flush_rdp_buffer            // Wait until no DMAs are active
+     addi   dmaLen, dmemAddr, RDP_TRI_SIZE_NO_ZBUF + 8  // dmaLen = size of DMEM buffer to copy
+    blez    dmaLen, old_return_routine       // Exit if nothing to copy, or if dmemAddr is large negative num from last flush DMA write
+     mtc0   cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
+    add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
+    sub     $10, $10, $11                    // $10 = FIFO end addr - future pointer
+    bltz    $10, await_rdp_dblbuf_avail
+flush_continue:
     // This is here so we only count it when stalling below or on FIFO end codepath
-    addi    perfCounterE, perfCounterE, 10   // 7 instr + 2 after mfc + 1 taken branch
-@@has_room:
-    mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
+    // TODO addi    perfCounterE, perfCounterE, 10   // 7 instr + 2 after mfc + 1 taken branch
+     mfc0   $11, DPC_CURRENT                 // Load RDP current pointer
     sub     $11, $11, cmd_w1_dram            // Current - want to write pos
     blez    $11, @@copy_buffer               // Current is behind or at write pos, can write
      sub    $11, $11, dmaLen                 // If amount current is ahead of write pos
-    blez    $11, @@keep_waiting              // is <= size of buffer to copy, keep waiting
+    blez    $11, flush_continue              // is <= size of buffer to copy, keep waiting
 @@copy_buffer:
      add    $11, cmd_w1_dram, dmaLen         // New end is write pos + buffer size
     sw      $11, rdpFifoPos
@@ -1215,14 +1258,31 @@ flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAd
     addi    dmemAddr, rdpCmdBufEndP1, -(0x2000 | (RDP_TRI_SIZE_NO_ZBUF + 8)) // Negative no longer needed for write, but needed for flush early exit
     xori    rdpCmdBufEndP1, rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word ^ rdpCmdBuffer2EndPlus1Word // Swap between the two RDP command buffers
     addi    rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_TRI_SIZE_NO_ZBUF + 8)
-    mfc0    $11, SP_DMA_FULL          // load the DMA_FULL value
-@@while_dma_full:
-    bnez    $11, @@while_dma_full     // Loop until DMA_FULL is cleared
-     mfc0   $11, SP_DMA_FULL          // Update DMA_FULL value
     mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from/to
     mtc0    cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA from/to
     jr      $ra
      mtc0   dmaLen, SP_WR_LEN         // Initiate a DMA write with a length of dmaLen
+
+await_rdp_dblbuf_avail:
+     mfc0   $11, DPC_STATUS                  // Read RDP status
+    andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
+    bnez    $11, await_rdp_dblbuf_avail      // Wait until double buffered start/end available
+     addi   perfCounterE, perfCounterE, 7    // 4 instr + 2 after mfc + 1 taken branch
+    lw      cmd_w1_dram, rdpFifoStart        // Start of FIFO
+@@await_past_first_instr:
+    mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
+    beq     $11, cmd_w1_dram, @@await_past_first_instr // Wait until RDP moved past start
+     addi   perfCounterE, perfCounterE, 6    // 3 instr + 2 after mfc + 1 taken branch
+    // Start was previously the start of the FIFO, unless this is the first buffer,
+    // in which case it was the end of the FIFO. Normally, when the RDP gets to end, if we
+    // have a new end value waiting (END_VALID), it'll load end but leave current. By
+    // setting start here, it will also load current with start.
+    j       flush_continue
+     mtc0   cmd_w1_dram, DPC_START           // Set RDP start to start of FIFO
+
+// 24.20 ms before
+// 23.89 ms remove extra wait
+// 23.72 ms outline
 
 vtx_after_dma:
     andi    inVtx, dmemAddr, 0xFFF8            // Round down input start addr to DMA word
