@@ -631,13 +631,13 @@ $v11 = [tRcpDyF, tNewCatF, tDaDeF]
 $v12 = tTemp, [tPosCatI, tDaDeI]
 $v13 = tXPRcpF
 $v14 = tXPRcpI
-$v15 = tXPF
-$v16 = tXPI
+$v15 = tXPF, tDaDx2F
+$v16 = tXPI, tDaDx2I
 $v17 = tHPos
 $v18 = tXYITmp3    |       [t1WI, tSTWLF, tDaDxF]
-$v19 = t1m2, tLPos, tSubPxH
+$v19 = t1m2, tLPos, tSubPxHI
 $v20 = tPosCatF,                  tSTWHMI
-$v21 = 
+$v21 = tSubPxHF
 $v22 = [tLAtF, tAtLmHF, tDaDyF]
 $v23 = [tLAtI, tAtLmHI, tDaDyI]
 $v24 = [tMAtF, tAtMmHF]
@@ -927,10 +927,11 @@ tMPos equ tXYITmp0
      vmrg   tMPos, tXYITmp2, tLPos // v2 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2, vert3) ? highest(vert1, vert2)
     vmrg    tLPos, tLPos, tXYITmp2 // v10 = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y) : highest(vert1, vert2) ? highest(vert1, vert2, vert3)
     mfc2    $1, tHPos[4]     // tHPos = lowest Y value = highest on screen (x, y, addr)
-    vnop
+tSubPxHF equ $v21
+    vmudn   tSubPxHF, tHPos, $v31[5] // 0x4000
     beqz    $10, tri_end  // If cross product is 0, tri is degenerate (zero area), cull.
      // 29 cycles; 31 for zero area tri
-     li     $ra, tri_end // Only matters if we continue to flush_rdp_buffer
+     addi   $11, rdpCmdBufEndP1, -2 // For MmHX, MmHY
 tPosMmH equ tXYITmp1
     vsub    tPosMmH, tMPos, tHPos
 tHAtI equ $v27
@@ -940,7 +941,7 @@ tPosLmH equ tXYI3
     mfc2    $2, tMPos[4]     // tMPos = mid vertex (x, y, addr)
 tPosHmM equ t2m1
     vsub    tPosHmM, tHPos, tMPos
-    addi    $11, rdpCmdBufEndP1, -2 // For MmHX, MmHY
+    addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
 tPosCatI equ tTemp // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
     vsub    tPosCatI, tLPos, tMPos
     lw      v1c, VTX_INV_W_VEC($1) // v1c, v2c, v3c = 1/W for H, M, L
@@ -956,17 +957,17 @@ tMAtI equ $v25
 tXPI equ $v16
     vreadacc tXPI, ACC_UPPER
 t1WI equ tXYITmp3
-    lsv     t1WI[0], VTX_INV_W_INT($1)
+    llv     t1WI[0], VTX_INV_W_VEC($1)
 tXPF equ $v15
     vreadacc tXPF, ACC_MIDDLE
     sub     v2c, v1c, v2c  // Four instr: v1c = max(v1c, v2c)
     vmudn   $v29, tMAtI, tASO[4] // asoScale
-    lsv     t1WI[8], VTX_INV_W_INT($2)
+    llv     t1WI[8], VTX_INV_W_VEC($2)
     vmadh   tMAtI, vOne, tASO // Color and alpha offsets elems 0-3
     sb      $24, 0x0000(rdpCmdBufPtr) // Store the triangle command id
 tRcpDyF equ $v11
     vrcp    tRcpDyF[0], tPosCatI[1]
-    lsv     t1WI[12], VTX_INV_W_INT($3)
+    llv     t1WI[12], VTX_INV_W_VEC($3)
 tRcpDyI equ $v10
     vrcph   tRcpDyI[0], tXPI[1]
     slv     tPosMmH[0],  0x0030($11) // MmHX -> 0x2E, MmHY -> first short (temp mem)
@@ -1009,185 +1010,184 @@ tMx1W equ tPosHmM
     vmudm   $v29, tPosCatF, tRcpDyF
     ssv     tHPos[2], 0x0006(rdpCmdBufPtr) // Store YH edge coefficient
     vmadl   $v29, tPosCatI, tRcpDyF
-t1WF equ tPosMmH
-    lsv     t1WF[0], VTX_INV_W_FRAC($1)
+    lh      $10, VTX_SCR_X($2)                 // Load X of Mid
 tNewCatF equ tRcpDyF
     vmadn   tNewCatF, tPosCatI, tRcpDyI
-    lsv     t1WF[8], VTX_INV_W_FRAC($2)
+    ssv     tLPos[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
     vmadh   tPosCatI, tPosCatF, tRcpDyI
-    lsv     t1WF[12], VTX_INV_W_FRAC($3)
+    andi    $24, $24, 0x0080 // Extract the left major flag from v2c; assume level and tile are 0
+t1WF equ tPosMmH
+    vmudh   t1WF, vOne, t1WI[1q] // Move frac parts e1,5,7 to e0,4,6
+    sb      $24, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
     vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
+    sll     $10, $10, 14
+tSTWHMI equ tPosCatF // H = elems 0-2, M = elems 4-6; init W = 7FFF
+// $1: tex coeff ptr <- VH ptr
 tMnWF equ tXYITmp2
     vrcpl   tMnWF[0], tMx1W[1]
+    sw      $10, 0x0008(rdpCmdBufPtr)          // Store X of Mid as XL edge coefficient (yes)
+// $2: shade coeff ptr <- VM ptr
 tMnWI equ tMx1W
     vrcph   tMnWI[0], $v31[2]     // 0
-    vmudn   $v29, tLAtI, tASO[4] // asoScale
-    andi    $24, $24, 0x0080 // Extract the left major flag from v2c; assume level and tile are 0
-    vmadh   tLAtI, vOne, tASO // Color and alpha offsets elems 0-3
-    sb      $24, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
-tSTWHMI equ tPosCatF // H = elems 0-2, M = elems 4-6; init W = 7FFF
-    vmudm   $v29, t1WI, tMnWF[0] // 1/W each vtx * min W = 1 for one of the verts, < 1 for others
-    lsv     tSTWHMI[4], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 2 = W
-    vmadl   $v29, t1WF, tMnWF[0]
-    lsv     tSTWHMI[12], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 6 = W
-    vmadn   t1WF, t1WF, tMnWI[0]
     llv     tSTWHMI[0], VTX_TC_VEC($1)
-    vmadh   t1WI, t1WI, tMnWI[0]
+    vmudn   $v29, tLAtI, tASO[4] // asoScale
     llv     tSTWHMI[8], VTX_TC_VEC($2)
-    vmudh   $v29, vOne, $v31[4] // 4
-    lhu     v3c, 0x0006(rdpCmdBufPtr) // YH
+    vmadh   tLAtI, vOne, tASO // Color and alpha offsets elems 0-3
+    lsv     tSTWHMI[4], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 2 = W
+    vmudm   $v29, t1WI, tMnWF[0] // 1/W each vtx * min W = 1 for one of the verts, < 1 for others
+    lsv     tSTWHMI[12], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 6 = W
+    vmadl   $v29, t1WF, tMnWF[0]
+    addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
+    vmadn   t1WF, t1WF, tMnWI[0]
 tSTWLI equ tMnWF // L = elems 4-6; init W = 7FFF
-    vmadn   tXPF, tXPF, $v31[0] // -4
-    lsv     tSTWLI[12], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 6 = W
-    vmadh   tXPI, tXPI, $v31[0] // -4
     llv     tSTWLI[8],  VTX_TC_VEC($3)
+// $3: RDP buffer fullness <- VL ptr
+    vmadh   t1WI, t1WI, tMnWI[0]
+    ssv     tMPos[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
+    vmudh   $v29, vOne, $v31[4] // 4
+    lsv     tSTWLI[12], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 6 = W
+    vmadn   tXPF, tXPF, $v31[0] // -4
+    ssv     tNewCatF[0], 0x000E(rdpCmdBufPtr)    // Store DxLDy edge coefficient (fractional part)
+    vmadh   tXPI, tXPI, $v31[0] // -4
+    ldv     tPosLmH[8], 0x0030(rdpCmdBufEndP1) // MmHY -> e4, LmHX -> e5, HmMX -> e6
     vmudm   $v29,    tSTWHMI, t1WF[0h] // (S, T, 7FFF) * (1 or <1) for H and M
-    andi    v3c, v3c, 3
+    ssv     tNewCatF[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
     vmadh   tSTWHMI, tSTWHMI, t1WI[0h]
-    sll     v3c, v3c, 14
+    lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
 tSTWHMF equ tMnWI
     vmadn   tSTWHMF, $v31, $v31[2]  // 0
-    sub     v3c, $zero, v3c
+    ssv     tNewCatF[4], 0x001E(rdpCmdBufPtr)    // Store DxMDy edge coefficient (fractional part)
     vmudm   $v29,   tSTWLI, t1WF[6]  // (S, T, 7FFF) * (1 or <1) for L
-    ssv     tMPos[2], 0x0004(rdpCmdBufPtr) // Store YM edge coefficient
+    andi    $11, geomMode, G_SHADE
     vmadh   tSTWLI, tSTWLI, t1WI[6]
-    ssv     tLPos[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
+    lw      $10, rdpFifoEnd                  // Load FIFO end addr
 tSTWLF equ t1WI
     vmadn   tSTWLF, $v31, $v31[2]  // 0
-    ldv     tPosLmH[8], 0x0030(rdpCmdBufEndP1) // MmHY -> e4, LmHX -> e5, HmMX -> e6
+    sqv     tSTWHMI, 0x0060(rdpCmdBufEndP1) // Move S, T, W Hi and Mid Int to temp mem
     vmudl   $v29, tXPF, tXPRcpF
-    sw      v3c, 0x003C(rdpCmdBufEndP1)
+    ldv     tHAtI[8], 0x0060(rdpCmdBufEndP1) // Move S, T, W Hi Int from temp mem
     vmadm   $v29, tXPI, tXPRcpF
-tSubPxH equ tLPos
-    llv     tSubPxH[0], 0x003C(rdpCmdBufEndP1) // int elem 0, frac elem 1
-    vmadn   tXPRcpF, tXPF, tXPRcpI
     sqv     tSTWHMF, 0x0050(rdpCmdBufEndP1) // Move S, T, W Hi and Mid Frac to temp mem
-    vmadh   tXPRcpI, tXPI, tXPRcpI
+    vmadn   tXPRcpF, tXPF, tXPRcpI
     ldv     tHAtF[8], 0x0050(rdpCmdBufEndP1) // Move S, T, W Hi Frac from temp mem
+    vmadh   tXPRcpI, tXPI, tXPRcpI
+    sdv     tSTWLF[8], 0x0040(rdpCmdBufEndP1) // Move S, T, W Lo Int to temp mem
 tAndCatF equ tRcpDyI
     vand    tAndCatF, tNewCatF, tASO[5] // 0xFFF8
-    sqv     tSTWHMI, 0x0060(rdpCmdBufEndP1) // Move S, T, W Hi and Mid Int to temp mem
-    vcr     tPosCatI, tPosCatI, vTRC_0100
-    ldv     tHAtI[8], 0x0060(rdpCmdBufEndP1) // Move S, T, W Hi Int from temp mem
-    vmudh   tPosLmH, tPosLmH, $v31[0h] // e1 LmHY * -4 = 4*HmLY; e456 MmHY,LmHX,HmMX *= 4
-    sdv     tSTWLF[8], 0x0040(rdpCmdBufEndP1) // Move S, T, W Lo Int to temp mem
-    vmudn   $v29, tXHMI, tHPos[0]
     ldv     tLAtF[8], 0x0040(rdpCmdBufEndP1) // Move S, T, W Lo Frac from temp mem
-    vmadl   $v29, tAndCatF, tSubPxH[1]
+    vcr     tPosCatI, tPosCatI, vTRC_0100
     sdv     tSTWLI[8], 0x0048(rdpCmdBufEndP1) // Move S, T, W Lo Int to temp mem
-    vmadm   $v29, tPosCatI, tSubPxH[1]
+    vsubc   tSubPxHF, vZero, tSubPxHF
     ldv     tLAtI[8], 0x0048(rdpCmdBufEndP1) // Move S, T, W Lo Int from temp mem
-tXHMF equ tMPos
-    vmadn   tXHMF, tAndCatF, tSubPxH[0]
+tSubPxHI equ tLPos
+    vsub    tSubPxHI, vZero, vZero
+    sll     $11, $11, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
+    vmudh   tPosLmH, tPosLmH, $v31[0h] // e1 LmHY * -4 = 4*HmLY; e456 MmHY,LmHX,HmMX *= 4
     ldv     tMAtF[8], 0x0058(rdpCmdBufEndP1) // Move S, T, W Mid Frac from temp mem
-    vmadh   tXHMI, tPosCatI, tSubPxH[0]
+    vmudn   $v29, tXHMI, tHPos[0]
+    ssv     tPosCatI[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
+    vmadl   $v29, tAndCatF, tSubPxHF[1]
     ldv     tMAtI[8], 0x0068(rdpCmdBufEndP1) // Move S, T, W Mid Int from temp mem
-
-    lh      $10, VTX_SCR_X($2)                 // Load X of Mid
-    addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
-    sll     $10, $10, 14
-    sw      $10, 0x0008(rdpCmdBufPtr)          // Store X of Mid as XL edge coefficient (yes)
-
+    vmadm   $v29, tPosCatI, tSubPxHF[1]
+    ssv     tPosCatI[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
+tXHMF equ tMPos
+    vmadn   tXHMF, tAndCatF, tSubPxHI[1]
+    add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
+    vmadh   tXHMI, tPosCatI, tSubPxHI[1]
+    ssv     tPosCatI[4], 0x001C(rdpCmdBufPtr)    // Store DxMDy edge coefficient (integer part)
 tAtLmHF equ tLAtF
 tAtLmHI equ tLAtI
 tAtMmHF equ tMAtF
 tAtMmHI equ tMAtI
     vsubc   tAtLmHF, tLAtF, tHAtF
+    andi    $11, geomMode, G_TEXTURE_ENABLE
     vsub    tAtLmHI, tLAtI, tHAtI
+    sll     $11, $11, 5             // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
     vsubc   tAtMmHF, tMAtF, tHAtF
+    ssv     tXHMF[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
     vsub    tAtMmHI, tMAtI, tHAtI
+    ssv     tXHMF[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
     // 97 cycles
 // DaDx = AtLmH * YMmH - AtMmH * YLmH
 tDaDxF equ tSTWLF
 tDaDxI equ tSTWLI
     vmudn   $v29, tAtLmHF, tPosLmH[4] // MmHY * 4
+    ssv     tXHMI[6], 0x0010(rdpCmdBufPtr)     // Store XH edge coefficient (integer part)
     vmadh   $v29, tAtLmHI, tPosLmH[4] // MmHY * 4
+    ssv     tXHMI[4], 0x0018(rdpCmdBufPtr)     // Store XM edge coefficient (integer part)
     vmadn   $v29, tAtMmHF, tPosLmH[1] // LmHY * -4 = HmLY * 4
+    add     rdpCmdBufPtr, $1, $11   // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
     vmadh   $v29, tAtMmHI, tPosLmH[1] // LmHY * -4 = HmLY * 4
+    sub     $3, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
     vreadacc tDaDxF, ACC_MIDDLE
-    vreadacc tDaDxI, ACC_UPPER
+    bltz    $3, tri_skip_commitlast
+     vreadacc tDaDxI, ACC_UPPER
+    mfc0    $11, SP_DMA_BUSY                 // Wait until the previous tri write DMA is done
+tri_flush_wait_dma_done:
+    bnez    $11, tri_flush_wait_dma_done
+     mfc0   $11, SP_DMA_BUSY
+    mtc0    cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
+align_with_warning 8, "tri_skip_commitlast not aligned"
+tri_skip_commitlast:
 // DaDy = AtMmH * XLmH - AtLmH * XMmH
 tDaDyF equ tAtLmHF
 tDaDyI equ tAtLmHI
     vmudn   $v29, tAtMmHF, tPosLmH[5] // LmHX * 4
-    vmadh   $v29, tAtMmHI, tPosLmH[5] // LmHX * 4
-    vmadn   $v29, tAtLmHF, tPosLmH[6] // HmMX * 4
-    vmadh   $v29, tAtLmHI, tPosLmH[6] // HmMX * 4
-    vreadacc tDaDyF, ACC_MIDDLE
-    ssv     tXHMI[6], 0x0010(rdpCmdBufPtr)     // Store XH edge coefficient (integer part)
-    vreadacc tDaDyI, ACC_UPPER
-    ssv     tXHMF[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
-// DaDx, DaDy /= tri area
-    vmudl   $v29, tDaDxF, tXPRcpF[1]
-    ssv     tXHMI[4], 0x0018(rdpCmdBufPtr)     // Store XM edge coefficient (integer part)
-    vmadm   $v29, tDaDxI, tXPRcpF[1]
-    ssv     tXHMF[4], 0x001A(rdpCmdBufPtr)     // Store XM edge coefficient (fractional part)
-    vmadn   tDaDxF, tDaDxF, tXPRcpI[1]
-    ssv     tPosCatI[0], 0x000C(rdpCmdBufPtr)    // Store DxLDy edge coefficient (integer part)
-    vmadh   tDaDxI, tDaDxI, tXPRcpI[1]
-    ssv     tNewCatF[0], 0x000E(rdpCmdBufPtr)    // Store DxLDy edge coefficient (fractional part)
-    vmudl   $v29, tDaDyF, tXPRcpF[1]
-    ssv     tPosCatI[6], 0x0014(rdpCmdBufPtr)    // Store DxHDy edge coefficient (integer part)
-    vmadm   $v29, tDaDyI, tXPRcpF[1]
-    ssv     tNewCatF[6], 0x0016(rdpCmdBufPtr)    // Store DxHDy edge coefficient (fractional part)
-    vmadn   tDaDyF, tDaDyF, tXPRcpI[1]
-    ssv     tPosCatI[4], 0x001C(rdpCmdBufPtr)    // Store DxMDy edge coefficient (integer part)
-    vmadh   tDaDyI, tDaDyI, tXPRcpI[1]
-    ssv     tNewCatF[4], 0x001E(rdpCmdBufPtr)    // Store DxMDy edge coefficient (fractional part)
-
-    addi    $2, rdpCmdBufPtr, 0x20 // Increment the triangle pointer by 0x20 bytes (edge coefficients)
-    andi    $11, geomMode, G_SHADE
-    sll     $11, $11, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
-    add     $1, $2, $11             // Increment the triangle pointer by 0x40 bytes (shade coefficients) if G_SHADE is set
-    andi    $11, geomMode, G_TEXTURE_ENABLE
-    sll     $11, $11, 5             // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
-    add     rdpCmdBufPtr, $1, $11   // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
-    sub     $3, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
-
-    lw      cmd_w1_dram, rdpFifoPos          // FIFO pointer = end of RDP read, start of RSP write
-
-    lw      $10, rdpFifoEnd                  // Load FIFO end addr
     addi    dmaLen, $3, RDP_TRI_SIZE_NO_ZBUF + 8  // dmaLen = size of DMEM buffer to copy
+    vmadh   $v29, tAtMmHI, tPosLmH[5] // LmHX * 4
     add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
+    vmadn   $v29, tAtLmHF, tPosLmH[6] // HmMX * 4
+    mfc0    dmemAddr, DPC_CURRENT            // Load RDP current pointer
+    vmadh   $v29, tAtLmHI, tPosLmH[6] // HmMX * 4
     sub     $10, $10, $11                    // $10 = FIFO end addr - future pointer
+    vreadacc tDaDyF, ACC_MIDDLE
     bltz    $10, tri_await_rdp_dblbuf_avail
-tri_flush_continue:
-    // This is here so we only count it when stalling below or on FIFO end codepath
-    // TODO addi    perfCounterE, perfCounterE, 10   // 7 instr + 2 after mfc + 1 taken branch
-     mfc0   $11, DPC_CURRENT                 // Load RDP current pointer
-    sub     $11, $11, cmd_w1_dram            // Current - want to write pos
-    blez    $11, @@copy_buffer               // Current is behind or at write pos, can write
+     vreadacc tDaDyI, ACC_UPPER
+tri_continue_from_dblbuf:
+// DaDx, DaDy /= tri area
+tDaDx2F equ tXPF // "2" because we will repeat the computation while waiting
+tDaDx2I equ tXPI
+tri_wait_for_space:
+    vmudl   $v29, tDaDxF, tXPRcpF[1]
+    vmadm   $v29, tDaDxI, tXPRcpF[1]
+    sub     $11, dmemAddr, cmd_w1_dram       // Current - want to write pos
+    vmadn   tDaDx2F, tDaDxF, tXPRcpI[1]
+    blez    $11, tri_write_ready             // Current is behind or at write pos, can write
+     vmadh  tDaDx2I, tDaDxI, tXPRcpI[1]
      sub    $11, $11, dmaLen                 // If amount current is ahead of write pos
-    blez    $11, tri_flush_continue          // is <= size of buffer to copy, keep waiting
-@@copy_buffer:
-     add    $11, cmd_w1_dram, dmaLen         // New end is write pos + buffer size
-    
+    blez    $11, tri_wait_for_space          // is <= size of buffer to copy, keep waiting
+     mfc0   dmemAddr, DPC_CURRENT            // Reload RDP current pointer
+tri_write_ready:
+    vmudl   $v29, tDaDyF, tXPRcpF[1]
+    vmadm   $v29, tDaDyI, tXPRcpF[1]
+    add     $11, cmd_w1_dram, dmaLen         // New end is write pos + buffer size
+    vmadn   tDaDyF, tDaDyF, tXPRcpI[1]
     addi    dmaLen, dmaLen, -1                                  // subtract 1 from the length
+    vmadh   tDaDyI, tDaDyI, tXPRcpI[1]
     addi    dmemAddr, rdpCmdBufEndP1, -(RDP_TRI_SIZE_NO_ZBUF + 8)
-    
 // DaDe = DaDx * DxHDy
 tDaDeF equ tNewCatF
 tDaDeI equ tPosCatI
-    vmadl   $v29, tDaDxF, tNewCatF[3]
-    sdv     tDaDxF[0], 0x0018($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
-    vmadm   $v29, tDaDxI, tNewCatF[3]
-    sdv     tDaDxI[0], 0x0008($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (integer)
-    vmadn   tDaDeF, tDaDxF, tPosCatI[3]
-    sdv     tDaDxF[8], 0x0018($1)   // Store DsDx, DtDx, DwDx texture coefficients (fractional)
-    vmadh   tDaDeI, tDaDxI, tPosCatI[3]
-    sdv     tDaDxI[8], 0x0008($1)   // Store DsDx, DtDx, DwDx texture coefficients (integer)
+    vmadl   $v29, tDaDx2F, tNewCatF[3]
+    sdv     tDaDx2F[0], 0x0018($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (fractional)
+    vmadm   $v29, tDaDx2I, tNewCatF[3]
+    sdv     tDaDx2I[0], 0x0008($2)   // Store DrDx, DgDx, DbDx, DaDx shade coefficients (integer)
+    vmadn   tDaDeF, tDaDx2F, tPosCatI[3]
+    sdv     tDaDx2F[8], 0x0018($1)   // Store DsDx, DtDx, DwDx texture coefficients (fractional)
+    vmadh   tDaDeI, tDaDx2I, tPosCatI[3]
+    sdv     tDaDx2I[8], 0x0008($1)   // Store DsDx, DtDx, DwDx texture coefficients (integer)
 // Base attribute = high attribute - DaDe * subpixel
     vmudn   $v29, tHAtF, vOne[0]
     sdv     tDaDyF[0], 0x0038($2)   // Store DrDy, DgDy, DbDy, DaDy shade coefficients (fractional)
     vmadh   $v29, tHAtI, vOne[0]
     sdv     tDaDyI[0], 0x0028($2)   // Store DrDy, DgDy, DbDy, DaDy shade coefficients (integer)
-    vmadl   $v29, tDaDeF, tSubPxH[1]
+    vmadl   $v29, tDaDeF, tSubPxHF[1]
     sdv     tDaDyF[8], 0x0038($1)   // Store DsDy, DtDy, DwDy texture coefficients (fractional)
-    vmadm   $v29, tDaDeI, tSubPxH[1]
+    vmadm   $v29, tDaDeI, tSubPxHF[1]
     sdv     tDaDyI[8], 0x0028($1)   // Store DsDy, DtDy, DwDy texture coefficients (integer)
-    vmadn   tHAtF, tDaDeF, tSubPxH[0]
+    vmadn   tHAtF, tDaDeF, tSubPxHI[1]
     sdv     tDaDeF[0], 0x0030($2)   // Store DrDe, DgDe, DbDe, DaDe shade coefficients (fractional)
-    vmadh   tHAtI, tDaDeI, tSubPxH[0]
+    vmadh   tHAtI, tDaDeI, tSubPxHI[1]
     sdv     tDaDeI[0], 0x0020($2)   // Store DrDe, DgDe, DbDe, DaDe shade coefficients (integer)
     sdv     tDaDeF[8], 0x0030($1)   // Store DsDe, DtDe, DwDe texture coefficients (fractional)
     sdv     tDaDeI[8], 0x0020($1)   // Store DsDe, DtDe, DwDe texture coefficients (integer)
@@ -1197,18 +1197,9 @@ tDaDeI equ tPosCatI
     bltz    $3, tri_end     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
      // 133 cycles; 135 for drawn and not flushed tri
      sdv    tHAtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
-
     sw      $11, rdpFifoPos
-    mtc0    cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA from/to
-    mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from/to
-
-tri_flush_rdp_buffer:
-    mfc0    $11, SP_DMA_BUSY                 // Check if any DMA is in flight
-    bnez    $11, tri_flush_rdp_buffer        // Wait until no DMAs are active
-     nop
-    
-    mtc0    cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
-
+    mtc0    cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA to
+    mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from
     xori    rdpCmdBufEndP1, rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word ^ rdpCmdBuffer2EndPlus1Word // Swap between the two RDP command buffers
     addi    rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_TRI_SIZE_NO_ZBUF + 8)
     j       tri_end
@@ -1221,14 +1212,14 @@ tri_await_rdp_dblbuf_avail:
      addi   perfCounterE, perfCounterE, 7    // 4 instr + 2 after mfc + 1 taken branch
     lw      cmd_w1_dram, rdpFifoStart        // Start of FIFO
 @@await_past_first_instr:
-    mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
-    beq     $11, cmd_w1_dram, @@await_past_first_instr // Wait until RDP moved past start
+    mfc0    dmemAddr, DPC_CURRENT                 // Load RDP current pointer
+    beq     dmemAddr, cmd_w1_dram, @@await_past_first_instr // Wait until RDP moved past start
      addi   perfCounterE, perfCounterE, 6    // 3 instr + 2 after mfc + 1 taken branch
     // Start was previously the start of the FIFO, unless this is the first buffer,
     // in which case it was the end of the FIFO. Normally, when the RDP gets to end, if we
     // have a new end value waiting (END_VALID), it'll load end but leave current. By
     // setting start here, it will also load current with start.
-    j       tri_flush_continue
+    j       tri_continue_from_dblbuf
      mtc0   cmd_w1_dram, DPC_START           // Set RDP start to start of FIFO
 
 flush_rdp_buffer: // Prereq: dmemAddr = rdpCmdBufPtr - rdpCmdBufEndP1, or dmemAddr = large neg num -> only wait and set DPC_END
@@ -1283,6 +1274,7 @@ await_rdp_dblbuf_avail:
 // 24.20 ms before
 // 23.89 ms remove extra wait
 // 23.72 ms outline
+// 23.64 ms done
 
 vtx_after_dma:
     andi    inVtx, dmemAddr, 0xFFF8            // Round down input start addr to DMA word
