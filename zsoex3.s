@@ -418,7 +418,7 @@ tempEnd                       equ tempPrevInvalVtx + sizePrevInvalVtx
 // Initialization routines
 start:
     lqv     $v31[0], (v31Value)($zero)
-    lw      $2, rdpFifoEnd                // Load FIFO end addr
+    lw      $2, rdpFifoStart              // Load FIFO end addr
     vadd    $v29, $v29, $v29 // Consume VCO (carry) value possibly set by the previous ucode
     li      perfCounterA, 0
     li      perfCounterB, 0
@@ -1118,53 +1118,50 @@ tDaDxI equ tSTWLI
     vmadn   $v29, tAtMmHF, tPosLmH[1] // LmHY * -4 = HmLY * 4
     add     rdpCmdBufPtr, $1, $11   // Increment the triangle pointer by 0x40 bytes (texture coefficients) if textures are on
     vmadh   $v29, tAtMmHI, tPosLmH[1] // LmHY * -4 = HmLY * 4
-    sub     $3, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
-    vreadacc tDaDxF, ACC_MIDDLE
-    bltz    $3, tri_skip_commitlast
-     vreadacc tDaDxI, ACC_UPPER
     mfc0    $11, SP_DMA_BUSY                 // Wait until the previous tri write DMA is done
+    vreadacc tDaDxF, ACC_MIDDLE
+    sub     $3, rdpCmdBufPtr, rdpCmdBufEndP1 // Check if we need to write out to RDP
+    vreadacc tDaDxI, ACC_UPPER
+    bltz    $3, tri_skip_commitlast
+// DaDy = AtMmH * XLmH - AtLmH * XMmH
+tDaDyF equ tAtLmHF
+tDaDyI equ tAtLmHI
+     vmudn  $v29, tAtMmHF, tPosLmH[5] // LmHX * 4
 tri_flush_wait_dma_done:
     bnez    $11, tri_flush_wait_dma_done
      mfc0   $11, SP_DMA_BUSY
     mtc0    cmd_w1_dram, DPC_END             // Set RDP to execute until FIFO end (buf pushed last time)
 align_with_warning 8, "tri_skip_commitlast not aligned"
 tri_skip_commitlast:
-// DaDy = AtMmH * XLmH - AtLmH * XMmH
-tDaDyF equ tAtLmHF
-tDaDyI equ tAtLmHI
-    vmudn   $v29, tAtMmHF, tPosLmH[5] // LmHX * 4
-    addi    dmaLen, $3, RDP_TRI_SIZE_NO_ZBUF + 8  // dmaLen = size of DMEM buffer to copy
     vmadh   $v29, tAtMmHI, tPosLmH[5] // LmHX * 4
-    add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
+    addi    dmaLen, $3, RDP_TRI_SIZE_NO_ZBUF + 8  // dmaLen = size of DMEM buffer to copy
     vmadn   $v29, tAtLmHF, tPosLmH[6] // HmMX * 4
-    mfc0    dmemAddr, DPC_CURRENT            // Load RDP current pointer
+    add     $11, cmd_w1_dram, dmaLen         // $11 = future FIFO pointer if we append this new buffer
     vmadh   $v29, tAtLmHI, tPosLmH[6] // HmMX * 4
-    sub     $10, $10, $11                    // $10 = FIFO end addr - future pointer
+    mfc0    dmemAddr, DPC_CURRENT            // Load RDP current pointer
     vreadacc tDaDyF, ACC_MIDDLE
+    sub     $10, $10, $11                    // $10 = FIFO end addr - future pointer
+    vreadacc tDaDyI, ACC_UPPER
     bltz    $10, tri_await_rdp_dblbuf_avail
-     vreadacc tDaDyI, ACC_UPPER
-tri_continue_from_dblbuf:
 // DaDx, DaDy /= tri area
 tDaDx2F equ tXPF // "2" because we will repeat the computation while waiting
 tDaDx2I equ tXPI
-tri_wait_for_space:
-    vmudl   $v29, tDaDxF, tXPRcpF[1]
+     vmudl  $v29, tDaDxF, tXPRcpF[1]
+tri_continue_from_dblbuf:
     vmadm   $v29, tDaDxI, tXPRcpF[1]
     sub     $11, dmemAddr, cmd_w1_dram       // Current - want to write pos
     vmadn   tDaDx2F, tDaDxF, tXPRcpI[1]
-    blez    $11, tri_write_ready             // Current is behind or at write pos, can write
+    bgtz    $11, tri_behind_rdp              // Current is behind or at write pos, can write
      vmadh  tDaDx2I, tDaDxI, tXPRcpI[1]
-     sub    $11, $11, dmaLen                 // If amount current is ahead of write pos
-    blez    $11, tri_wait_for_space          // is <= size of buffer to copy, keep waiting
-     mfc0   dmemAddr, DPC_CURRENT            // Reload RDP current pointer
 tri_write_ready:
     vmudl   $v29, tDaDyF, tXPRcpF[1]
-    vmadm   $v29, tDaDyI, tXPRcpF[1]
-    add     $11, cmd_w1_dram, dmaLen         // New end is write pos + buffer size
-    vmadn   tDaDyF, tDaDyF, tXPRcpI[1]
-    addi    dmaLen, dmaLen, -1                                  // subtract 1 from the length
-    vmadh   tDaDyI, tDaDyI, tXPRcpI[1]
     addi    dmemAddr, rdpCmdBufEndP1, -(RDP_TRI_SIZE_NO_ZBUF + 8)
+    vmadm   $v29, tDaDyI, tXPRcpF[1]
+    mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from
+    vmadn   tDaDyF, tDaDyF, tXPRcpI[1]
+    add     $11, cmd_w1_dram, dmaLen         // New end is write pos + buffer size
+    vmadh   tDaDyI, tDaDyI, tXPRcpI[1]
+    addi    dmaLen, dmaLen, -1                                  // subtract 1 from the length
 // DaDe = DaDx * DxHDy
 tDaDeF equ tNewCatF
 tDaDeI equ tPosCatI
@@ -1197,28 +1194,31 @@ tDaDeI equ tPosCatI
     bltz    $3, tri_end     // Return if rdpCmdBufPtr < end+1 i.e. ptr <= end
      // 133 cycles; 135 for drawn and not flushed tri
      sdv    tHAtI[8], 0x0000($1)   // Store S, T, W texture coefficients (integer)
-    sw      $11, rdpFifoPos
     mtc0    cmd_w1_dram, SP_DRAM_ADDR // Set the DRAM address to DMA to
-    mtc0    dmemAddr, SP_MEM_ADDR     // Set the DMEM address to DMA from
+    mtc0    dmaLen, SP_WR_LEN         // Initiate a DMA write with a length of dmaLen
     xori    rdpCmdBufEndP1, rdpCmdBufEndP1, rdpCmdBuffer1EndPlus1Word ^ rdpCmdBuffer2EndPlus1Word // Swap between the two RDP command buffers
     addi    rdpCmdBufPtr, rdpCmdBufEndP1, -(RDP_TRI_SIZE_NO_ZBUF + 8)
     j       tri_end
-     mtc0   dmaLen, SP_WR_LEN         // Initiate a DMA write with a length of dmaLen
+     sw     $11, rdpFifoPos
+
+tri_wait_for_space:
+    blez    $11, tri_write_ready             // Current is behind or at write pos, can write
+tri_behind_rdp:
+     sub    $11, $11, dmaLen                 // If amount current is ahead of write pos
+    bgtz    $11, tri_write_ready             // is > size of buffer to copy, go ahead
+     mfc0   dmemAddr, DPC_CURRENT            // Reload RDP current pointer
+    j       tri_wait_for_space
+     sub    $11, dmemAddr, cmd_w1_dram       // Current - want to write pos
 
 tri_await_rdp_dblbuf_avail:
-     mfc0   $11, DPC_STATUS                  // Read RDP status
+    mfc0    $11, DPC_STATUS                  // Read RDP status
+    lw      cmd_w1_dram, rdpFifoStart        // Start of FIFO
     andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
     bnez    $11, tri_await_rdp_dblbuf_avail  // Wait until double buffered start/end available
-     addi   perfCounterE, perfCounterE, 7    // 4 instr + 2 after mfc + 1 taken branch
-    lw      cmd_w1_dram, rdpFifoStart        // Start of FIFO
 @@await_past_first_instr:
-    mfc0    dmemAddr, DPC_CURRENT                 // Load RDP current pointer
+     mfc0   dmemAddr, DPC_CURRENT            // Load RDP current pointer
     beq     dmemAddr, cmd_w1_dram, @@await_past_first_instr // Wait until RDP moved past start
-     addi   perfCounterE, perfCounterE, 6    // 3 instr + 2 after mfc + 1 taken branch
-    // Start was previously the start of the FIFO, unless this is the first buffer,
-    // in which case it was the end of the FIFO. Normally, when the RDP gets to end, if we
-    // have a new end value waiting (END_VALID), it'll load end but leave current. By
-    // setting start here, it will also load current with start.
+     nop
     j       tri_continue_from_dblbuf
      mtc0   cmd_w1_dram, DPC_START           // Set RDP start to start of FIFO
 
@@ -1275,6 +1275,8 @@ await_rdp_dblbuf_avail:
 // 23.89 ms remove extra wait
 // 23.72 ms outline
 // 23.64 ms done
+// 23.28 ms
+// 23.20 ms
 
 vtx_after_dma:
     andi    inVtx, dmemAddr, 0xFFF8            // Round down input start addr to DMA word

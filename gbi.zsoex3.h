@@ -60,16 +60,19 @@ typedef struct {
  * volatile UcodeArgs* args = (volatile UcodeArgs*)(0xA4000000 + build_info.argsAddress);
  * args->ucodeTextStart = gspZSOEX3TextStart;
  * args->displayListStart = ...;
- * args->rdpFifoStart = ...;
- * args->rdpFifoEnd = ...;
+ * // These two args are the only place you need to use physical addresses in ZSOEX3.
+ * // All other places--the args above, DL addrs for vertices, textures, etc.--
+ * // can be virtual addresses (e.g. 0x80123456) (or segmented addresses).
+ * args->rdpFifoStart = (uint32_t)(start address) & 0xFFFFFF;
+ * args->rdpFifoEnd = (uint32_t)(end address) & 0xFFFFFF;
  * ```
  * - Set the RSP PC to 0x1000 (start of IMEM) and unhalt it
 */
 typedef __attribute__((aligned(8))) struct {
     const void* ucodeTextStart;
     const void* displayListStart;
-    void* rdpFifoStart;
-    void* rdpFifoEnd;
+    uint32_t rdpFifoStart;
+    uint32_t rdpFifoEnd;
     void* debugBuffer;
 } UcodeArgs;
 
