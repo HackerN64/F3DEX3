@@ -1212,7 +1212,8 @@ tri_behind_rdp:
 
 tri_await_rdp_dblbuf_avail:
     mfc0    $11, DPC_STATUS                  // Read RDP status
-    lw      cmd_w1_dram, rdpFifoStart        // Start of FIFO
+    bltz    $3, tri_continue_from_dblbuf
+     lw     cmd_w1_dram, rdpFifoStart        // Start of FIFO
     andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
     bnez    $11, tri_await_rdp_dblbuf_avail  // Wait until double buffered start/end available
 @@await_past_first_instr:
@@ -1258,12 +1259,12 @@ await_rdp_dblbuf_avail:
      mfc0   $11, DPC_STATUS                  // Read RDP status
     andi    $11, $11, DPC_STATUS_START_VALID // Start valid = second start addr in dbl buf
     bnez    $11, await_rdp_dblbuf_avail      // Wait until double buffered start/end available
-     addi   perfCounterE, perfCounterE, 7    // 4 instr + 2 after mfc + 1 taken branch
+     nop
     lw      cmd_w1_dram, rdpFifoStart        // Start of FIFO
 @@await_past_first_instr:
     mfc0    $11, DPC_CURRENT                 // Load RDP current pointer
     beq     $11, cmd_w1_dram, @@await_past_first_instr // Wait until RDP moved past start
-     addi   perfCounterE, perfCounterE, 6    // 3 instr + 2 after mfc + 1 taken branch
+     nop
     // Start was previously the start of the FIFO, unless this is the first buffer,
     // in which case it was the end of the FIFO. Normally, when the RDP gets to end, if we
     // have a new end value waiting (END_VALID), it'll load end but leave current. By
