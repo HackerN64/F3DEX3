@@ -77,9 +77,11 @@ typedef __attribute__((aligned(8))) struct {
 } UcodeArgs;
 
 /**
- * The microcode stores the performance counters in DMEM at argsAddress when it's done.
+ * The microcode stores the performance counters in DMEM at argsAddress when
+ * it's done.
  * ```
- * volatile UcodePerfCounters* counters = (volatile UcodePerfCounters*)(0xA4000000 + build_info.argsAddress);
+ * volatile UcodePerfCounters* counters = 
+ *     (volatile UcodePerfCounters*)(0xA4000000 + build_info.argsAddress);
  * ... = counters->a;
  * ...
  * ```
@@ -114,10 +116,8 @@ typedef __attribute__((aligned(8))) struct {
 /*
  * flags for SPLoadGeometryMode
  */
-#define G_TEXTURE_ENABLE        0x0002
-#define G_SHADE                 0x0004
-#define G_TEXTURE_GEN           0x2000
-#define G_TEXTURE_GEN_LINEAR    0x4000
+#define G_TEXTURE_ENABLE        0x0200
+#define G_SHADE                 0x0400
 #define G_FACING_INVERT         0x8000
 
 /*
@@ -199,18 +199,40 @@ typedef __attribute__((aligned(8))) struct {
 } MtxAndLtDirs;
 
 /**
- * Upload a MtxAndLtDirs struct to the specified matrix index. Matrices start
- * at the top of the cache and grow downwards. So for example, idx = 0 starts at
- * cacheEnd - 0x50, idx = 1 starts at cacheEnd - 0xA0, etc. You can trade off
- * how much cache space to spend on cached vertices, display lists, and
- * matrices.
+ * Upload between one and three MtxAndLtDirs structs to the cache.
+ * IMPORTANT: Matrices are indexed in reverse in the cache, but not in DRAM,
+ * making the indexing here strange! This is intentional to let matrix 0 always
+ * occupy the very end of the cache, matrix 1 occupy the space before it, etc.,
+ * but it makes this command confusing for multiple matrices!
+ * NOTE: count must be 1, 2, or 3. The underlying movemem command can only
+ * handle up to 256 bytes, and three MtxAndLtDirs is 240 bytes.
+ * | 0x10 | <- Matrix index 1 start
+ * | 0x10 |    |
+ * | 0x10 |    |
+ * | 0x10 |    |
+ * | 0x10 |    v
+ * | 0x10 | <- Matrix index 0 start
+ * | 0x10 |    |
+ * | 0x10 |    |
+ * | 0x10 |    |
+ * | 0x10 |    v
+ * +------+ <- End of cache
+ * Examples:
+ * gsSPMatrices(my_matrix, 0, 1), // Load 1 matrix to index 0 (last slot)
+ * gsSPMatrices(my_matrix, 1, 1), // Load 1 matrix to index 1 (second to last)
+ * MtxAndLtDirs matrices[3];
+ * gsSPMatrices(matrices, 0, 3), // Load 3 matrices to indices 0, 1, 2, but in
+ *                               // REVERSE ORDER!
+ *                               // matrices[0] -> index 2 (third to last slot)
+ *                               // matrices[1] -> index 1 (second to last slot)
+ *                               // matrices[2] -> index 0 (last slot)
 */
-#define gSPMtxAndLtDirs(pkt, addr, idx) \
-    gDma2p((pkt), G_MOVEMEM, (addr), sizeof(MtxAndLtDirs), G_MV_CACHEEND, \
-        (-(sizeof(MtxAndLtDirs) * ((idx) + 1))))
-#define gsSPMtxAndLtDirs(addr, idx) \
-    gsDma2p(      G_MOVEMEM, (addr), sizeof(MtxAndLtDirs), G_MV_CACHEEND, \
-        (-(sizeof(MtxAndLtDirs) * ((idx) + 1))))
+#define gSPMatrices(pkt, addr, idx, count) \
+    gDma2p((pkt), G_MOVEMEM, (addr), sizeof(MtxAndLtDirs) * (count), G_MV_CACHEEND, \
+        (-(sizeof(MtxAndLtDirs) * ((idx) + (count)))))
+#define gsSPMatrices(addr, idx, count) \
+    gsDma2p(      G_MOVEMEM, (addr), sizeof(MtxAndLtDirs) * (count), G_MV_CACHEEND, \
+        (-(sizeof(MtxAndLtDirs) * ((idx) + (count)))))
 
 /**
  * Upload and perform transform and lighting on vertices.
@@ -269,20 +291,33 @@ _DW({                                               \
  * when limbs of another character could be there, it would have to be one
  * section per bone.
  * 
- * A ZSOSection is a u8 array of 33 or more bytes. Make sure it is declared
- * as __attribute__((aligned(8))) in your object file, or 16 if it will be
- * modified by the CPU.
+ * A ZSOSection is a u8 array. Make sure it is declared as
+ * __attribute__((aligned(8))) in your object file, or 16 if it will be modified
+ * by the CPU. Let NSS = number of subsections.
  * 
  * At byte 0, the offsets start. There are up to 32 of these, one per
- * subsection. This is the offset from the start of the ZSOSection for this
- * subsection's data. It is shifted left by offs_shift and then added to the
- * address of the beginning of the ZSOSection. In other words, if offs_shift is
- * 0, the offsets address up to 256 bytes; if it is 1, they address up to 512
- * bytes but sections have to start on an even byte; and so on.
+ * subsection. Each is the byte offset of this subsection relative to *the
+ * subsection 8 prior*, or for subsections 0-7, relative to byte 2*NSS (the
+ * memory right after the offsets and reference vertex indices). In other words,
+ * the addresses of the subsections are calculated as:
+ * for(int32_t i=0; i<nss; ++i) {
+ *     address[i] = ZSOSection[i] + (i >= 8 ? address[i-8] : &ZSOSection[2*nss]);
+ * }
+ * This strange indexing scheme meets the following constraints better than
+ * other approaches tried:
+ * - Speed of computing the final addresses in the microcode
+ * - Support for larger than 256B ZSOSections (which would be the limit with
+ *   direct byte addressing)
+ * - No padding bytes needed within the ZSOSection
+ * To optimally assign the subsections to these offsets, follow a pattern like
+ * this, where the numbers represent the lengths of each subsection:
+ * [29 26 23 20 17 14 12 10]
+ * [28 25 22 19 16 13 11  9]
+ * [27 24 21 18 15 100]
  * 
- * At byte 32, the reference vertex indices start. There are up to 32 of these,
- * one per subsection. These identify which vertex to load the Z value of, to
- * sort the subsections.
+ * At byte NSS (the number of subsections), the reference vertex indices start.
+ * There are up to 32 of these, one per subsection. These identify which vertex
+ * to load the Z value of, to sort the subsections.
  * 
  * At byte N, where N is the offset of a particular subsection as calculated
  * above, is 1 byte of metadata about the subsection. Its lower 7 bits are the
@@ -293,27 +328,14 @@ _DW({                                               \
  * Starting at byte N+1 are the triangle indices for this subsection. There are
  * 3 * (metadata & 0x7F) indices if !(metadata & 0x80), else there are 2 +
  * (metadata & 0x7F) indices.
- * 
- * This is organized in this strange way rather than using a typical struct
- * layout in order to promote packing. If there are fewer subsections, triangle
- * data can be placed in the upper bytes of the offsets. For example, a
- * ZSOSection containing just one subsection can be 33 bytes and contain 28
- * triangles: byte 0 is the offset 1, byte 1 is the metadata 0x9C (tri strip +
- * 28 tris), bytes 2 through 31 are the indices, and byte 33 is the reference
- * vertex index.
  */
 typedef unsigned char ZSOSection;
 
-#define G_ZSOSECTION_MAX_SIZE 0x180
-
-#define _ZSOSECTION_DMA_LEN(sz) ((((sz) + 7) & 0x1F8) - 1)
-
-#define _SPZSOSectionW0(sz, cache, nss, offs_shift) ( \
-    _SHIFTL(G_ZSOSECTION,          24,  8) |          \
-    _SHIFTL(offs_shift,            22,  2) |          \
-    _SHIFTL((nss) - 1,             17,  5) |          \
-    _SHIFTL(0 /* DMA to DMEM */,   16,  1) |          \
-    _SHIFTL((cache) >> 3,           7,  9) |          \
+#define _SPZSOSectionW0(sz, cache, nss) (    \
+    _SHIFTL(G_ZSOSECTION,          24,  8) | \
+    _SHIFTL((nss) - 1,             17,  5) | \
+    _SHIFTL(0 /* DMA to DMEM */,   16,  1) | \
+    _SHIFTL((cache) >> 3,           7,  9) | \
     _SHIFTL((((sz) + 7) >> 3) - 1,  0,  7) )
 
 /**
@@ -324,22 +346,18 @@ typedef unsigned char ZSOSection;
  * @p cache Cache address to upload the ZSOSection to. In bytes relative to the
  *    start of the cache. Must be a multiple of 8.
  * @p nss Number of subsections
- * @p offs_shift Left shift offset values by this many bits before adding them
- *    to the base address. If the ZSOSection is <= 256 bytes, set this to 0, and
- *    the offsets will be byte offsets. If it is between 257 and 512 bytes, set
- *    this to 1 and sections can start every other byte. Etc.
 */
-#define gSPZSOSection(pkt, addr, sz, cache, nss, offs_shift)    \
-_DW({                                                           \
-    Gfx *_g = (Gfx *)(pkt);                                     \
-    _g->words.w0 = _SPZSOSectionW0(sz, cache, nss, offs_shift); \
-    _g->words.w1 = (unsigned int)(addr);                      \
+#define gSPZSOSection(pkt, addr, sz, cache, nss)    \
+_DW({                                               \
+    Gfx *_g = (Gfx *)(pkt);                         \
+    _g->words.w0 = _SPZSOSectionW0(sz, cache, nss); \
+    _g->words.w1 = (unsigned int)(addr);            \
 })
 /** @copydetails gSPZSOSection */
-#define gsSPZSOSection(addr, sz, cache, nss, offs_shift) \
-{                                                        \
-    _SPZSOSectionW0(sz, cache, nss, offs_shift),         \
-    (unsigned int)(addr)                                 \
+#define gsSPZSOSection(addr, sz, cache, nss) \
+{                                            \
+    _SPZSOSectionW0(sz, cache, nss),         \
+    (unsigned int)(addr)                     \
 }
 
 #endif // ZSOEX3_H

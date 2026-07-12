@@ -144,9 +144,9 @@ miniTableEntry G_RDP_handler // G_SETBLENDCOLOR
 miniTableEntry G_RDP_handler // G_SETPRIMCOLOR
 miniTableEntry G_RDP_handler // G_SETENVCOLOR
 miniTableEntry G_RDP_handler // G_SETCOMBINE
-miniTableEntry G_RDP_handler // G_SETTIMG
-miniTableEntry G_RDP_handler // G_SETZIMG
-miniTableEntry G_RDP_handler // G_SETCIMG
+miniTableEntry G_SETxIMG_handler // G_SETTIMG
+miniTableEntry G_SETxIMG_handler // G_SETZIMG
+miniTableEntry G_SETxIMG_handler // G_SETCIMG
 cmdMiniTable:
 miniTableEntry G_RDP_handler // G_NOOP
 miniTableEntry G_RELSEGMENT_handler
@@ -282,7 +282,7 @@ $13   ------------- altBaseReg ---------------
 $14   subSec           inVtx
 $15   subSecEnd      outVtxBase
 $16   sectionBase
-$17   subSecOfsShf
+$17   
 $18   alccThresh
 $19       v1c         outVtx1        dmaLen
 $20      temp         flagsV1       dmemAddr
@@ -323,7 +323,6 @@ indexBufInc    equ $9    // 1 for strip or 3 for full tris
 subSec         equ $14   // Subsection index, 0 to nss-1
 subSecEnd      equ $15   // Number of subsections
 sectionBase    equ $16   // Start address of ZSOSection
-subSecOfsShf   equ $17   // Left shift applied to offsets
 
 // Vertex write:
 vtxLeft        equ $1    // Number of vertices left to process * 0x10
@@ -512,7 +511,13 @@ dma_read_wait_and_goto_next_dl_command:
      mfc0   $11, SP_DMA_BUSY      // Update DMA_BUSY value
     j       run_next_DL_command
      nop // TODO
-    
+
+G_SETxIMG_handler:
+    jal     segmented_to_physical
+     sw     cmd_w0, 0(rdpCmdBufPtr)
+    j       commit_small_rdp_command
+     sw     cmd_w1_dram, 4(rdpCmdBufPtr)
+
 G_RDPHALF_2_handler: // 8
     lw      cmd_w0, rdpHalf1Val             // load the RDPHALF1 value into w0
     li      $11, texrectState
@@ -663,52 +668,58 @@ G_ZSOSECTION_handler:
     sub     perfCounterD, perfCounterD, $11 // Start tri timer
     andi    subSecEnd, subSecEnd, 0x1F
     addi    subSecEnd, subSecEnd, 1 // Remove the minus 1
-    add     subSecEnd, subSecEnd, sectionBase // End address
-    srl     subSecOfsShf, cmd_w0, 22 // Offsets are left shifted by this much
+    add     subSec, subSecEnd, sectionBase // Address of refs
+    add     subSecEnd, subSecEnd, subSec // End address (after offsets and refs)
     jal     while_wait_dma_busy
-     andi   subSecOfsShf, subSecOfsShf, 3
+     mtc2   subSecEnd, $v12[0] // Where offsets start from
     // Convert reference vertices from index -> address
-    lpv     $v2, (0x20)(sectionBase)
-    lpv     $v3, (0x28)(sectionBase)
-    lpv     $v4, (0x30)(sectionBase)
-    lpv     $v5, (0x38)(sectionBase)
+    lpv     $v2, (0x00)(subSec)
+    lpv     $v3, (0x08)(subSec)
+    lpv     $v4, (0x10)(subSec)
+    lpv     $v5, (0x18)(subSec)
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
+    // Load offsets and convert to addresses
+    lpv     $v21, (0x00)(sectionBase)
     vmadl   $v2,  $v2,  vTRC_OVSZ  // Plus vtx indices times output vertex size
-    move    subSec, sectionBase
+    lpv     $v23, (0x08)(sectionBase)
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
-    move    $1, rdpCmdBufEndP1
+    lpv     $v25, (0x10)(sectionBase)
     vmadl   $v3,  $v3,  vTRC_OVSZ  // Plus vtx indices times output vertex size
+    lpv     $v27, (0x18)(sectionBase)
+    vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
+    move    subSec, sectionBase
+    vmadl   $v4,  $v4,  vTRC_OVSZ  // Plus vtx indices times output vertex size
+    move    $1, rdpCmdBufEndP1
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
     sqv     vZero, (0x40)(rdpCmdBufEndP1) // Set invalid vertex Zs to 0 (close to camera)
-    vmadl   $v4,  $v4,  vTRC_OVSZ  // Plus vtx indices times output vertex size
-    sqv     vZero, (0x50)(rdpCmdBufEndP1)
-    vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
-    sqv     vZero, (0x60)(rdpCmdBufEndP1)
     vmadl   $v5,  $v5,  vTRC_OVSZ  // Plus vtx indices times output vertex size
+    sqv     vZero, (0x50)(rdpCmdBufEndP1)
+    vmudn   $v29, vOne, $v12[0]    // Offset start address (end of refs)
+    sqv     vZero, (0x60)(rdpCmdBufEndP1)
+    vmadl   $v21, $v21, vTRC_0100  // Move offsets to lower bits of each elem and sum
     sqv     vZero, (0x70)(rdpCmdBufEndP1)
+    vmadl   $v23, $v23, vTRC_0100
     sqv     $v2, (0x00)(rdpCmdBufEndP1)
+    vmadl   $v25, $v25, vTRC_0100
     sqv     $v3, (0x10)(rdpCmdBufEndP1)
+    vmadl   $v27, $v27, vTRC_0100
     sqv     $v4, (0x20)(rdpCmdBufEndP1)
     sqv     $v5, (0x30)(rdpCmdBufEndP1)
     // Convert reference vertices from address -> Z position
-@@loop:
+@@loop: // TODO this can be optimized
     lhu     $3, (0)($1)
     addi    $1, $1, 2
     lhu     $3, (VTX_SCR_Z)($3)
-    addi    subSec, subSec, 1
+    addi    subSec, subSec, 2
     bne     subSec, subSecEnd, @@loop
      sh     $3, (0x40 - 2)($1)
-    // Load offsets and Zs
+    // Load Zs. Subsection addrs in in between registers
     lqv     $v20, (0x40)(rdpCmdBufEndP1)
 tASO equ $v2
     vclr    tASO
-    lpv     $v21, (0x00)(sectionBase)
     lqv     $v22, (0x50)(rdpCmdBufEndP1)
-    lpv     $v23, (0x08)(sectionBase)
     lqv     $v24, (0x60)(rdpCmdBufEndP1)
-    lpv     $v25, (0x10)(sectionBase)
     lqv     $v26, (0x70)(rdpCmdBufEndP1)
-    lpv     $v27, (0x18)(sectionBase)
     // Optimal 8 element sorting network from
     // https://bertdobbelaere.github.io/sorting_networks.html#N8L19D6
     // Elements 0 and 1 from each of 4 vectors (a, b, c, d). 4 groups of these in parallel
@@ -751,7 +762,7 @@ tASO equ $v2
     sort_swap $v20, $v21, $v18, $v19, $v24, $v25, $v18, $v19 // new c1, d0 = swap(c1, d0)
     sqv     vZero, (0x80)(rdpCmdBufEndP1) // So when lists run off end, get z = 0
     // Element 0 of these regs are sorted in order, same for 2, 4, 6
-    // These regs + 1 = indices
+    // These regs + 1 = addrs
     // $v12, $v14, $v10, $v22, $v16, $v20, $v18, $v26
     veq     $v29, $v31, $v31[0q] // vcc = 10101010
     li      $24, 0xFF
@@ -769,7 +780,7 @@ tASO equ $v2
     sqv     $v14, (0x10)(rdpCmdBufEndP1)
     vmrg    $v18, $v18, $v19[0q]
     sqv     $v10, (0x20)(rdpCmdBufEndP1)
-    vmrg    $v12, $v12, $v31[2] // 0; clear indices
+    vmrg    $v12, $v12, $v31[2] // 0; replace addrs with fake Z=0
     sqv     $v22, (0x30)(rdpCmdBufEndP1)
     vmrg    $v26, $v26, $v27[0q]
     sqv     $v16, (0x40)(rdpCmdBufEndP1)
@@ -784,9 +795,9 @@ tASO equ $v2
 merge_sort_loop:
     vadd    $v13, $v12, $v31[1] // -1; subtract 1 from Z values to turn vlt into vle
     blez    $10, sort_done_z0 // Z<=0, stop early
-     addi   subSec, subSec, 1
+     addi   subSec, subSec, 2
     beq     subSec, subSecEnd, sort_done_regular
-     sb     $11, (-1)(subSec)
+     sh     $11, (-2)(subSec)
 merge_sort_entry:
     vlt     $v29, $v13, $v12[0] // v12-1 < v12[0] :=: v12 <= v12[0] :=: v12[0] >= v12
     cfc2    $20, $vcc
@@ -803,7 +814,7 @@ merge_sort_list_6:
 .macro merge_sort_list, vbyte, ptr
     mfc2    $10, $v12[vbyte] // Get selected Z value
     lsv     $v12[vbyte], (0x10)(ptr) // Load next Z value
-    lbu     $11, (0x2)(ptr) // Load offset
+    lhu     $11, (0x2)(ptr) // Load offset
     j       merge_sort_loop
      addi   ptr, ptr, 0x10
 .endmacro
@@ -816,21 +827,19 @@ merge_sort_list_0:
     merge_sort_list 0, $1
 
 sort_done_z0:
-    addi    subSecEnd, subSec, -1  // Just incremented subSec, but it was already one too far
+    addi    subSecEnd, subSec, -2  // Just incremented subSec, but it was already one too far
 sort_done_regular:
     vlt     $v29, $v31, $v31[4] // Set vcc to 11110000
     move    subSec, sectionBase
     vmrg    tASO, tASO, $v8 // Additional constants which were not negated
 subsec_loop:
-    lbu     indexBuf, (0)(subSec)
-    lh      geomMode, geometryModeLabel // Reset geometry mode modified by facingFlip
+    lhu     indexBuf, (0)(subSec)
     beq     subSec, subSecEnd, zso_end
-     sllv   indexBuf, indexBuf, subSecOfsShf
-    add     indexBuf, indexBuf, sectionBase
+     lh     geomMode, geometryModeLabel // Reset geometry mode modified by facingFlip
 tTemp equ $v12
     lpv     tTemp[0], (0)(indexBuf) // First tri indices to elems 1, 2, 3
     lb      $24, (0)(indexBuf) // Metadata byte
-    addi    subSec, subSec, 1
+    addi    subSec, subSec, 2
     li      facingFlip, -0x8000    // Facing is sign bit
     vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
     andi    indexBufEnd, $24, 0x7F // Tri count
@@ -917,7 +926,7 @@ tXYITmp2 equ tXYI2
     vmrg    tXYITmp2, tHPos, tXYI3   // v4 = max(vert1.y, vert2.y) > vert3.y : higher(vert1, vert2) ? vert3 (highest vertex of vert1, vert2, vert3)
     ssv     $v31[14], 0x0036(rdpCmdBufEndP1) // 0x7FFF
     vmrg    tHPos, tXYI3, tHPos // v14 = max(vert1.y, vert2.y) > vert3.y : vert3 ? higher(vert1, vert2)
-    ori     $24, geomMode, G_TRI_FILL // Geom mode low byte -> tri cmd ID
+    ori     $24, geomMode, G_TRI_FILL << 8 // Geom mode byte 1 -> tri cmd ID
     vlt     $v29, tXYITmp1, tXYITmp0    // VCO = max(vert1.y, vert2.y, vert3.y) < max(vert1.y, vert2.y)
     xor     $11, $10, geomMode // Sign bit clear if x prod positive (back facing), set if x prod negative (front facing)
     vnop
@@ -964,7 +973,7 @@ tXPF equ $v15
     vmudn   $v29, tMAtI, tASO[4] // asoScale
     llv     t1WI[8], VTX_INV_W_VEC($2)
     vmadh   tMAtI, vOne, tASO // Color and alpha offsets elems 0-3
-    sb      $24, 0x0000(rdpCmdBufPtr) // Store the triangle command id
+    sra     $10, v2c, 31
 tRcpDyF equ $v11
     vrcp    tRcpDyF[0], tPosCatI[1]
     llv     t1WI[12], VTX_INV_W_VEC($3)
@@ -985,25 +994,25 @@ tXPRcpI equ $v14
 tLAtI equ $v23
     lpv     tLAtI[0], VTX_COLOR_VEC($3) // Load vert color of vertex 3
     vrcph   tRcpDyI[3], tPosLmH[1]
-    mfc2    $24, tXPI[1]
+    and     v2c, v2c, $10
     // 50 cycles
 tPosCatF equ $v20
     vmudm   tPosCatF, tPosCatI, vTRC_1000
-    sra     $10, v2c, 31
-    vmadn   tPosCatI, $v31, $v31[2] // 0
-    and     v2c, v2c, $10
-    vmudl   $v29,    tRcpDyF, vTRC_0020
     sub     v1c, v1c, v2c
-    vmadm   tRcpDyI, tRcpDyI, vTRC_0020
+    vmadn   tPosCatI, $v31, $v31[2] // 0
+    mfc2    v2c, tXPI[1]
+    vmudl   $v29,    tRcpDyF, vTRC_0020
     sub     $11, v1c, v3c  // Four instr: v1c = max(v1c, v3c)
-    vmadn   tRcpDyF, $v31, $v31[2] // 0
+    vmadm   tRcpDyI, tRcpDyI, vTRC_0020
     sra     $10, $11, 31
-    vmudl   $v29, tXPRcpF, tXPF
+    vmadn   tRcpDyF, $v31, $v31[2] // 0
     and     $11, $11, $10
-    vmadm   $v29, tXPRcpI, tXPF
+    vmudl   $v29, tXPRcpF, tXPF
     sub     v1c, v1c, $11
-    vmadn   tXPF, tXPRcpF, tXPI
+    vmadm   $v29, tXPRcpI, tXPF
     sw      v1c, 0x0038(rdpCmdBufEndP1) // Store max of three verts' 1/W (upper) to temp mem
+    vmadn   tXPF, tXPRcpF, tXPI
+    andi    v2c, v2c, 0x0080 // Extract the left major flag from v2c
     vmadh   tXPI, tXPRcpI, tXPI
 tMx1W equ tPosHmM
     llv     tMx1W[0], 0x0038(rdpCmdBufEndP1) // Load max of three verts' 1/W
@@ -1015,10 +1024,10 @@ tNewCatF equ tRcpDyF
     vmadn   tNewCatF, tPosCatI, tRcpDyI
     ssv     tLPos[2], 0x0002(rdpCmdBufPtr) // Store YL edge coefficient
     vmadh   tPosCatI, tPosCatF, tRcpDyI
-    andi    $24, $24, 0x0080 // Extract the left major flag from v2c; assume level and tile are 0
+    or      $24, $24, v2c // Combine left major flag with cmd byte and tile
 t1WF equ tPosMmH
     vmudh   t1WF, vOne, t1WI[1q] // Move frac parts e1,5,7 to e0,4,6
-    sb      $24, 0x0001(rdpCmdBufPtr) // Store the left major flag, level, and tile settings
+    sh      $24, 0x0000(rdpCmdBufPtr) // Store cmd byte, left major flag, level, and tile settings
     vrcph   $v29[0], tMx1W[0] // Reciprocal of max 1/W = min W
     sll     $10, $10, 14
 tSTWHMI equ tPosCatF // H = elems 0-2, M = elems 4-6; init W = 7FFF
@@ -1081,7 +1090,7 @@ tAndCatF equ tRcpDyI
     ldv     tLAtI[8], 0x0048(rdpCmdBufEndP1) // Move S, T, W Lo Int from temp mem
 tSubPxHI equ tLPos
     vsub    tSubPxHI, vZero, vZero
-    sll     $11, $11, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
+    srl     $11, $11, 4              // Shift (geometry mode & G_SHADE) by 4 to get 0x40 if G_SHADE is set
     vmudh   tPosLmH, tPosLmH, $v31[0h] // e1 LmHY * -4 = 4*HmLY; e456 MmHY,LmHX,HmMX *= 4
     ldv     tMAtF[8], 0x0058(rdpCmdBufEndP1) // Move S, T, W Mid Frac from temp mem
     vmudn   $v29, tXHMI, tHPos[0]
@@ -1102,7 +1111,7 @@ tAtMmHI equ tMAtI
     vsubc   tAtLmHF, tLAtF, tHAtF
     andi    $11, geomMode, G_TEXTURE_ENABLE
     vsub    tAtLmHI, tLAtI, tHAtI
-    sll     $11, $11, 5             // Shift texture enabled (which is 2 when on) by 5 to get 0x40 if textures are on
+    srl     $11, $11, 3             // Shift texture enabled (which is 0x200 when on) by 3 to get 0x40 if textures are on
     vsubc   tAtMmHF, tMAtF, tHAtF
     ssv     tXHMF[6], 0x0012(rdpCmdBufPtr)     // Store XH edge coefficient (fractional part)
     vsub    tAtMmHI, tMAtI, tHAtI

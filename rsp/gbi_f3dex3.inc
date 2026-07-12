@@ -1,4 +1,33 @@
 
+// Geometry mode flags
+// First byte gets OR'd with G_TRI_FILL (0xC8) to form triangle opcode. Enabling
+// textures is done through SPTexture; G_TEXTURE_ENABLE is defined in the
+// GBI to 0. Binary display lists with this set will likely crash.
+G_ZBUFFER               equ 0x00000001
+//G_TEXTURE_ENABLE      equ 0x00000002
+G_SHADE                 equ 0x00000004
+G_ATTROFFSET_ST_ENABLE  equ 0x00000080
+G_AMBOCCLUSION          equ 0x00000100
+// Bits 9 and 10 (0x0600) determine front/backface culling.
+G_CULL_NEITHER          equ 0x00000000
+G_CULL_FRONT            equ 0x00000200
+G_CULL_BACK             equ 0x00000400
+G_CULL_BOTH             equ 0x00000600
+G_PACKED_NORMALS        equ 0x00000800
+G_LIGHTTOALPHA          equ 0x00001000
+G_LIGHTING_SPECULAR     equ 0x00002000
+G_FRESNEL_COLOR         equ 0x00004000
+G_FRESNEL_ALPHA         equ 0x00008000
+G_FOG                   equ 0x00010000
+G_LIGHTING              equ 0x00020000
+G_TEXTURE_GEN           equ 0x00040000
+G_TEXTURE_GEN_LINEAR    equ 0x00080000
+//G_LOD                 equ 0x00100000 // Ignored by all F3DEX* variants
+G_SHADING_SMOOTH        equ 0x00200000
+//G_LIGHTING_POSITIONAL equ 0x00400000 // In F3DEX3, replaced by ENABLE_POINT_LIGHTS, part of light count
+//G_CLIPPING            equ 0x00800000 // Ignored by all F3DEX* variants
+// The top byte holds the geometry mode opcode.
+
 G_FLUSH             equ 0xd4
 G_MEMSET            equ 0xd5
 G_DMA_IO            equ 0xd6

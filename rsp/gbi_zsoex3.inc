@@ -1,4 +1,5 @@
-G_TEXTURE_ENABLE      equ 0x00000002
+G_TEXTURE_ENABLE      equ 0x00000200
+G_SHADE               equ 0x00000400
 
 G_DL                equ 0xDE
 G_ENDDL             equ 0xDF
