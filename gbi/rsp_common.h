@@ -163,14 +163,16 @@
 /*
  * Moveword commands
  */
+#define gSPAbsoluteSegment(pkt, segment, base)        \
+    gMoveWd(pkt, G_MW_SEGMENT, (segment) * 4, (base))
+#define gsSPAbsoluteSegment(segment, base)            \
+    gsMoveWd(    G_MW_SEGMENT, (segment) * 4, (base))
 #ifdef F3DEX2_SEGMENTS
 /* Use F3DEX2 style segment setup binary encoding. F3DEX3 supports both the
 F3DEX2 encoding and the F3DEX3 encoding, but the former does not have the
 relative segment resolution behavior. */
-#define gSPSegment(pkt, segment, base)              \
-    gMoveWd(pkt, G_MW_SEGMENT, (segment) * 4, (base))
-#define gsSPSegment(segment, base)                  \
-    gsMoveWd(    G_MW_SEGMENT, (segment) * 4, (base))
+#define gSPSegment(pkt, segment, base) gSPAbsoluteSegment(pkt, segment, base)
+#define gsSPSegment(segment, base) gsSPAbsoluteSegment(segment, base)
 #else
 /* F3DEX3 style segment setup, which resolves segment addresses relative to
 other segments. */

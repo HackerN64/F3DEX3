@@ -154,8 +154,6 @@ miniTableEntry G_VTX_handler
 miniTableEntry G_ZSOSECTION_handler
 miniTableEntry G_FLUSH_handler
 
-endInitializedDmem:
-
 displayListStackDepth:
     .skip 1 // starts at 0, increments by 4 for each "return address" pushed onto the stack
 
@@ -164,12 +162,14 @@ displayListStackDepth:
 altBase: // TODO eliminate or reuse?
 fxParams:
 
-asoScale:
-    .dh 0x0100 // 0x0100 for ASO disable, 0xFF80 for ASO enable
+asoColorScale:
+    .dh 0x0100 // 0x0100 for ASO disable
+asoAlphaScale:
+    .dh 0x0100
 asoColorOffset:
-    .db 0 // 0 for ASO disable, (0x100 - shade color threshold) / 2 for ASO
+    .dh 0x0000 // 0 for ASO disable
 asoAlphaOffset:
-    .db 0 // 0 for ASO disable, (0x100 - shade alpha threshold) / 2 for ASO
+    .dh 0x0000
 
 perspNorm:
     .skip 2
@@ -179,8 +179,7 @@ geometryModeLabel:
 
     .align 4 // TODO
 
-// First half of RDP value for split commands. Also used as temp storage for
-// tri vertices during tri commands.
+// First half of RDP value for split commands.
 rdpHalf1Val:
     .skip 4
 
@@ -308,8 +307,8 @@ rdpCmdBufEndP1 equ $22   // Pointer to one command word past "end" (middle) of R
 rdpCmdBufPtr   equ $23   // RDP command buffer current DMEM pointer
 taskDataPtr    equ $26   // Task data (display list) DRAM pointer
 inputBufferPos equ $27   // DMEM position within display list input buffer, relative to end
-perfCounterA   equ $28   // Currently: b31-16 num vertices; b15-0 num RDP tris
-perfCounterB   equ $29   // Currently: b31-14 num RSP tris; b13-0 num tex rects
+perfCounterA   equ $28   // Currently: b31-16 num vertices; b15-0 num RSP tris
+perfCounterB   equ $29   // Currently: b31-14 num RDP tris; b13-0 num tex rects
 perfCounterC   equ $30   // Currently: cycles spent processing vertices
 
 // Tri write:
@@ -348,7 +347,6 @@ vZero equ $v0  // All elements = 0; NOT global, only in tri write and clip. Mtx 
 vTRC  equ $v1  // Triangle Constants; NOT global, only in tri write and clip. Mtx in vtx.
 vOne  equ $v28 // All elements = 1; global
 // $v29: permanent temp register, also write results here to discard
-// $v30: unused now
 // $v31: Global constant vector register
 
 // Vertex / lighting vector regs:
@@ -623,7 +621,7 @@ exit:
 /*
 $v0  = vZero
 $v1  = vTRC
-$v2  = tASO
+$v2  = tASOS
 $v3  = [tXYI1, tXYITmp1], tPosMmH, | t1WF
 $v4  = [tXYI2, tXYITmp2] | [tMnWF, tSTWLI, tDaDxI]
 $v5  = tXYI3, tPosLmH (becomes multi)
@@ -651,7 +649,7 @@ $v26 = tHAtF
 $v27 = tHAtI
 $v28 = vOne
 $v29 = discard
-$v30 = 
+$v30 = tASOO
 $v31 = constants
 */
 
@@ -715,8 +713,6 @@ G_ZSOSECTION_handler:
      sh     $3, (0x40 - 2)($1)
     // Load Zs. Subsection addrs in in between registers
     lqv     $v20, (0x40)(rdpCmdBufEndP1)
-tASO equ $v2
-    vclr    tASO
     lqv     $v22, (0x50)(rdpCmdBufEndP1)
     lqv     $v24, (0x60)(rdpCmdBufEndP1)
     lqv     $v26, (0x70)(rdpCmdBufEndP1)
@@ -738,20 +734,23 @@ tASO equ $v2
     vmrg    i0, i0, i0[1q]
 .endmacro
     sort_swap $v12, $v13, $v14, $v15, $v20, $v21, $v22, $v23 // swap(a0, b0), swap(a1, b1)
-    lbv     tASO[1], (asoColorOffset - altBase)(altBaseReg)
+tASOS equ $v2
+    llv     tASOS[4], (asoColorScale - altBase)(altBaseReg) // Color e2 alpha e3
     sort_swap $v16, $v17, $v18, $v19, $v24, $v25, $v26, $v27 // swap(c0, d0), swap(c1, d1)
-    lbv     tASO[3], (asoColorOffset - altBase)(altBaseReg)
+    lsv     tASOS[2], (asoColorScale - altBase)(altBaseReg) // Color e1
     sort_swap $v20, $v21, $v24, $v25, $v12, $v13, $v16, $v17 // swap(a0, c0), swap(a1, c1)
-    lbv     tASO[5], (asoColorOffset - altBase)(altBaseReg)
+    lsv     tASOS[0], (asoColorScale - altBase)(altBaseReg) // Color e0
     sort_swap $v22, $v23, $v26, $v27, $v14, $v15, $v18, $v19 // swap(b0, d0), swap(b1, d1)
-    lbv     tASO[7], (asoAlphaOffset - altBase)(altBaseReg)
+tASOO equ $v30
+    llv     tASOO[4], (asoColorOffset - altBase)(altBaseReg) // Color e2 alpha e3
     sort_swap_toeven $v12, $v13, $v20, $v21 // new a0, new a1
-    lsv     $v8[8], (asoScale - altBase)(altBaseReg) // elem 4
+    lsv     tASOO[2], (asoColorOffset - altBase)(altBaseReg) // Color e1
     sort_swap_toeven $v14, $v15, $v22, $v23 // new b0, new b1
-    li      $11, -8        // 0xFFF8; constant for some mask in tri write
+    lsv     tASOO[0], (asoColorOffset - altBase)(altBaseReg) // Color e0
     sort_swap_toeven $v16, $v17, $v24, $v25 // new c0, new c1
-    mtc2    $11, $v8[10]   // 0xFFF8; elem 5
+    li      $11, -8        // 0xFFF8; constant for some mask in tri write
     sort_swap_toeven $v18, $v19, $v26, $v27 // new d0, new d1
+    mtc2    $11, tASOS[10] // 0xFFF8; elem 5
     sort_swap $v10, $v11, $v16, $v17, $v14, $v15, $v16, $v17 // new b0, c0 = swap(b0, c0)
     sort_swap $v14, $v15, $v24, $v25, $v22, $v23, $v24, $v25 // new b1, c1 = swap(b1, c1)
     sort_swap $v22, $v23, $v16, $v17, $v20, $v21, $v16, $v17 // new a1, c0 = swap(a1, c0)
@@ -784,7 +783,7 @@ tASO equ $v2
     sqv     $v22, (0x30)(rdpCmdBufEndP1)
     vmrg    $v26, $v26, $v27[0q]
     sqv     $v16, (0x40)(rdpCmdBufEndP1)
-    vmudh   tASO, tASO, $v31[1] // -1; negate color and alpha offsets in elems 0-3
+    vnop
     sqv     $v20, (0x50)(rdpCmdBufEndP1)
     vnop
     sqv     $v18, (0x60)(rdpCmdBufEndP1)
@@ -826,45 +825,48 @@ merge_sort_list_2:
 merge_sort_list_0:
     merge_sort_list 0, $1
 
-sort_done_z0:
-    addi    subSecEnd, subSec, -2  // Just incremented subSec, but it was already one too far
-sort_done_regular:
-    vlt     $v29, $v31, $v31[4] // Set vcc to 11110000
-    move    subSec, sectionBase
-    vmrg    tASO, tASO, $v8 // Additional constants which were not negated
-subsec_loop:
-    lhu     indexBuf, (0)(subSec)
-    beq     subSec, subSecEnd, zso_end
-     lh     geomMode, geometryModeLabel // Reset geometry mode modified by facingFlip
-tTemp equ $v12
-    lpv     tTemp[0], (0)(indexBuf) // First tri indices to elems 1, 2, 3
-    lb      $24, (0)(indexBuf) // Metadata byte
-    addi    subSec, subSec, 2
-    li      facingFlip, -0x8000    // Facing is sign bit
-    vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
-    andi    indexBufEnd, $24, 0x7F // Tri count
-    vmadl   $v7, tTemp, vTRC_OVSZ   // Plus vtx indices times output vertex size
-    sll     $11, indexBufEnd, 14   // RSP tris counter starts at bit 14
-    add     perfCounterB, perfCounterB, $11
-    bltz    $24, @@skip_not_tri_strip
-     li     indexBufInc, 1
-    li      facingFlip, 0
-    li      indexBufInc, 3
-    sll     $11, indexBufEnd, 1
-    add     indexBufEnd, indexBufEnd, $11 // Byte count = tri count * 3
-@@skip_not_tri_strip:
-    j       tri_start
-     add    indexBufEnd, indexBufEnd, indexBuf // + start addr
-
 zso_end:
     mfc0    $11, DPC_CLOCK
     j       run_next_DL_command
      add    perfCounterD, perfCounterD, $11 // End tri timer
 
-align_with_warning 8, "One instruction of padding before tri_start"
+not_tri_strip:
+    andi    $1, $1, 3 // 2 bit tile
+    li      facingFlip, 0
+    li      indexBufInc, 3
+    sll     $11, indexBufEnd, 1
+    j       tri_start
+     add    indexBufEnd, indexBufEnd, $11 // Byte count = tri count * 3
 
-tri_end:
-tri_start: // $v7 elems 1, 2, 3 hold vtx addrs
+sort_done_z0:
+    addi    subSecEnd, subSec, -2  // Just incremented subSec, but it was already one too far
+sort_done_regular:
+    move    subSec, sectionBase
+subsec_loop:
+    lhu     indexBuf, (0)(subSec)
+    beq     subSec, subSecEnd, zso_end
+     lh     geomMode, geometryModeLabel // Reset geometry mode modified by facingFlip
+    lb      $24, (0)(indexBuf) // Metadata byte
+tTemp equ $v12
+    lpv     tTemp[0], (0)(indexBuf) // First tri indices to elems 1, 2, 3
+    addi    subSec, subSec, 2
+    andi    indexBufEnd, $24, 0x1F // Tri count
+    add     perfCounterA, perfCounterA, indexBufEnd // Add to RSP tris counter
+    vmudn   $v29, vOne, vTRC_CCHS  // Cache start address
+    vmadl   $v7, tTemp, vTRC_OVSZ   // Plus vtx indices times output vertex size
+    bgez    $24, not_tri_strip
+     srl    $1, $24, 5 // Will be tile
+    andi    $1, $1, 1 // 1 bit tile
+    andi    $2, $24, 0x40 // Initial flip
+    sll     $2, $2, 31 - 6 // Put in sign bit
+    xor     geomMode, geomMode, $2 // Possibly invert facing
+    li      facingFlip, -0x8000    // Facing is sign bit
+    li      indexBufInc, 1
+tri_start:
+    or      geomMode, geomMode, $1 // Tile into byte after cmd byte
+    add     indexBufEnd, indexBufEnd, indexBuf // + start addr
+align_with_warning 8, "One instruction of padding before tri_end"
+tri_end: // $v7 elems 1, 2, 3 hold vtx addrs
 tXYI1 equ $v3
     vmudh   tXYI1, vOne, $v7[1] // elem 2 of v6 = vertex 1 addr
     beq     indexBuf, indexBufEnd, subsec_loop
@@ -950,13 +952,13 @@ tPosLmH equ tXYI3
     mfc2    $2, tMPos[4]     // tMPos = mid vertex (x, y, addr)
 tPosHmM equ t2m1
     vsub    tPosHmM, tHPos, tMPos
-    addi    perfCounterA, perfCounterA, 1 // Increment number of tris sent to RDP
+    addi    perfCounterB, perfCounterB, 0x4000 // Increment number of tris sent to RDP
 tPosCatI equ tTemp // 0 X L-M; 1 Y L-M; 2 X M-H; 3 X L-H; 4-7 garbage
     vsub    tPosCatI, tLPos, tMPos
     lw      v1c, VTX_INV_W_VEC($1) // v1c, v2c, v3c = 1/W for H, M, L
-    vmudn   $v29, tHAtI, tASO[4] // asoScale
+    vmudn   $v29, tHAtI, tASOS // Color and alpha scale elems 0-3
     mfc2    $3, tLPos[4]     // tLPos = highest Y value = lowest on screen (x, y, addr)
-    vmadh   tHAtI, vOne, tASO // Color and alpha offsets elems 0-3
+    vmadh   tHAtI, vOne, tASOO // Color and alpha offsets elems 0-3
 tMAtI equ $v25
     lpv     tMAtI[0], VTX_COLOR_VEC($2) // Load vert color of vertex 2
     vmudh   $v29, tPosMmH, tPosLmH[0]
@@ -970,9 +972,9 @@ t1WI equ tXYITmp3
 tXPF equ $v15
     vreadacc tXPF, ACC_MIDDLE
     sub     v2c, v1c, v2c  // Four instr: v1c = max(v1c, v2c)
-    vmudn   $v29, tMAtI, tASO[4] // asoScale
+    vmudn   $v29, tMAtI, tASOS // Color and alpha scale elems 0-3
     llv     t1WI[8], VTX_INV_W_VEC($2)
-    vmadh   tMAtI, vOne, tASO // Color and alpha offsets elems 0-3
+    vmadh   tMAtI, vOne, tASOO // Color and alpha offsets elems 0-3
     sra     $10, v2c, 31
 tRcpDyF equ $v11
     vrcp    tRcpDyF[0], tPosCatI[1]
@@ -1039,9 +1041,9 @@ tMnWF equ tXYITmp2
 tMnWI equ tMx1W
     vrcph   tMnWI[0], $v31[2]     // 0
     llv     tSTWHMI[0], VTX_TC_VEC($1)
-    vmudn   $v29, tLAtI, tASO[4] // asoScale
+    vmudn   $v29, tLAtI, tASOS // Color and alpha scale elems 0-3
     llv     tSTWHMI[8], VTX_TC_VEC($2)
-    vmadh   tLAtI, vOne, tASO // Color and alpha offsets elems 0-3
+    vmadh   tLAtI, vOne, tASOO // Color and alpha offsets elems 0-3
     lsv     tSTWHMI[4], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 2 = W
     vmudm   $v29, t1WI, tMnWF[0] // 1/W each vtx * min W = 1 for one of the verts, < 1 for others
     lsv     tSTWHMI[12], 0x0036(rdpCmdBufEndP1) // 0x7FFF; elem 6 = W
@@ -1082,7 +1084,7 @@ tSTWLF equ t1WI
     vmadh   tXPRcpI, tXPI, tXPRcpI
     sdv     tSTWLF[8], 0x0040(rdpCmdBufEndP1) // Move S, T, W Lo Int to temp mem
 tAndCatF equ tRcpDyI
-    vand    tAndCatF, tNewCatF, tASO[5] // 0xFFF8
+    vand    tAndCatF, tNewCatF, tASOS[5] // 0xFFF8
     ldv     tLAtF[8], 0x0040(rdpCmdBufEndP1) // Move S, T, W Lo Frac from temp mem
     vcr     tPosCatI, tPosCatI, vTRC_0100
     sdv     tSTWLI[8], 0x0048(rdpCmdBufEndP1) // Move S, T, W Lo Int to temp mem

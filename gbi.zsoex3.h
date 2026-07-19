@@ -138,11 +138,10 @@ typedef __attribute__((aligned(8))) struct {
 #define G_MW_SEGMENT   2
 
 /* MOVEWORD offsets */
-#define G_MWO_ASO_SCALE          0x00
-#define G_MWO_ASO_COLOR_OFFSET   0x02
-#define G_MWO_ASO_ALPHA_OFFSET   0x03
-#define G_MWO_PERSPNORM          0x04
-#define G_MWO_GEOM_MODE          0x06
+#define G_MWO_ASO_SCALE   0x00
+#define G_MWO_ASO_OFFSET  0x04
+#define G_MWO_PERSPNORM   0x08
+#define G_MWO_GEOM_MODE   0x0A
 
 #define gSPLoadGeometryMode(pkt, halfword) \
     gMoveHalfwd(pkt, G_MW_FX, G_MWO_GEOM_MODE, halfword)
@@ -155,34 +154,44 @@ typedef __attribute__((aligned(8))) struct {
  * Modifies shade color and shade alpha coefficients sent to the RDP so that the
  * attribute stepper--the hardware unit in the RDP which increments color,
  * texture, and Z values during rasterization--overflows within the triangle.
- * The shade color and shade alpha values are close to zero in the dark part
- * of the triangle, and close to 0xFF in the light portion. The line between
- * these, where the overflow occurs, forms the cel shading threshold.
- * 
+ * The shade color and shade alpha values are close to zero in one part (the
+ * light or dark part) of the triangle, and close to 0xFF in the other portion.
+ * The line between these, where the overflow occurs, forms the cel shading
+ * threshold.
+ *  
  * Shade color (RGB all together) and shade alpha are set up to overflow at
  * different thresholds, thus creating three differently shaded regions. Use the
  * 1-cycle CC to apply the shade color threshold and the 1-cycle blender to
  * apply the shade alpha threshold.
  * 
- * Set color and alpha to the darker and lighter lighting thresholds to use
- * respectively, e.g. 0x40 and 0xD0.
+ * Proper selection of the scale and offset parameter is WIP. To disable cel
+ * shading, pass G_ASO_CEL_SCALE_DISABLE for both scales and
+ * G_ASO_CEL_OFFSET_DISABLE for both offsets.
 */
-#define gSPASOCelEnable(pkt, color, alpha) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_ASO_SCALE, _SPASOCelEnable(color, alpha))
-#define gsSPASOCelEnable(color, alpha) \
-    gsMoveWd(G_MW_FX, G_MWO_ASO_SCALE, _SPASOCelEnable(color, alpha))
-#define gSPASOCelDisable(pkt) \
-    gMoveWd(pkt, G_MW_FX, G_MWO_ASO_SCALE, G_ASO_CEL_SCALE_DISABLE << 16)
-#define gsSPASOCelDisable() \
-    gsMoveWd(G_MW_FX, G_MWO_ASO_SCALE, G_ASO_CEL_SCALE_DISABLE << 16)
+#define gSPASOCelScales(pkt, color, alpha) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_ASO_SCALE, _SPASOCel(color, alpha))
+#define gsSPASOCelScales(color, alpha) \
+    gsMoveWd(G_MW_FX, G_MWO_ASO_SCALE, _SPASOCel(color, alpha))
+#define gSPASOCelOffsets(pkt, color, alpha) \
+    gMoveWd(pkt, G_MW_FX, G_MWO_ASO_OFFSET, _SPASOCel(color, alpha))
+#define gsSPASOCelOffsets(color, alpha) \
+    gsMoveWd(G_MW_FX, G_MWO_ASO_OFFSET, _SPASOCel(color, alpha))
+
+#define _SPASOCel(color, alpha) \
+    _SHIFTL((color), 16, 16) | \
+    _SHIFTL((alpha),  0, 16)
 
 #define G_ASO_CEL_SCALE_DISABLE 0x0100
+#define G_ASO_CEL_OFFSET_DISABLE 0x0000
+
+/*
 #define G_ASO_CEL_SCALE_ENABLE  0xFF80
 
 #define _SPASOCelEnable(color, alpha) \
     _SHIFTL(G_ASO_CEL_SCALE_ENABLE,    16, 16) | \
     _SHIFTL(((0x100 - (color)) >> 1),  8,  8) | \
     _SHIFTL(((0x100 - (alpha)) >> 1),  0,  8)
+*/
 
 /**
  * Holds the MVP matrix and up to two light directions. Each light direction
@@ -319,17 +328,53 @@ _DW({                                               \
  * There are up to 32 of these, one per subsection. These identify which vertex
  * to load the Z value of, to sort the subsections.
  * 
- * At byte N, where N is the offset of a particular subsection as calculated
- * above, is 1 byte of metadata about the subsection. Its lower 7 bits are the
- * triangle count in this subsection. Its upper bit is: 0 = 3 indices per
- * triangle, 1 = 1 index per triangle as a tri strip. In the latter case it
- * draws indices 0-1-2 flipped, 1-2-3, 2-3-4 flipped, 3-4-5, etc.
- *
- * Starting at byte N+1 are the triangle indices for this subsection. There are
- * 3 * (metadata & 0x7F) indices if !(metadata & 0x80), else there are 2 +
- * (metadata & 0x7F) indices.
+ * Subsection data starts at byte 2 * NSS. Each subsection's address is computed
+ * as described above. The first byte of each subsection is the subsection's
+ * metadata, see G_TRIS or G_STRIP below. The remaining bytes are the triangle
+ * indices, see each metadata mode below.
  */
 typedef unsigned char ZSOSection;
+
+#define G_MODE_TRIS  0
+#define G_MODE_STRIP 1
+/**
+ * For G_STRIP: Specifies that the first triangle in the strip is drawn
+ * with counterclockwise winding. In other words, the triangles drawn are
+ * 0-1-2 flipped, 1-2-3, 2-3-4 flipped, 3-4-5, etc.
+ */
+#define G_1ST_CCW 0
+/**
+ * For G_STRIP: Specifies that the first triangle in the strip is drawn
+ * with clockwise winding. In other words, the triangles drawn are
+ * 0-1-2, 1-2-3 flipped, 2-3-4, 3-4-5 flipped, etc.
+ */
+#define G_1ST_CW  1
+
+/**
+ * The metadata byte of a ZSOSection subsection which is individual triangles.
+ * @param count The number of triangles, must be between 1 and 31.
+ * @param tile The texture tile to use. Four tiles (0-3) are available.
+ * The metadata byte is followed by 3*count bytes, each a vertex index.
+ * Draws tris 0-1-2, 3-4-5, 6-7-8, each with clockwise winding.
+ */
+#define G_TRIS(count, tile) (    \
+    _SHIFTL(G_MODE_TRIS, 7, 1) | \
+    _SHIFTL(tile,        5, 2) | \
+    _SHIFTL(count,       0, 5) )
+
+/**
+ * The metadata byte of a ZSOSection subsection which is a triangle strip.
+ * @param count The number of triangles, must be between 1 and 31.
+ * @param winding @see G_1ST_CCW or G_1ST_CW.
+ * @param tile The texture tile to use. Only two tiles (0-1) are available.
+ * The metadata byte is followed by count+2 bytes, each a vertex index.
+ * @see G_1ST_CCW and G_1ST_CW for the specific tris drawn.
+ */
+#define G_STRIP(count, winding, tile) ( \
+    _SHIFTL(G_MODE_STRIP, 7, 1) |       \
+    _SHIFTL(winding,      6, 1) |       \
+    _SHIFTL(tile,         5, 1) |       \
+    _SHIFTL(count,        0, 5) )
 
 #define _SPZSOSectionW0(sz, cache, nss) (    \
     _SHIFTL(G_ZSOSECTION,          24,  8) | \
